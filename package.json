@@ -14,6 +14,7 @@
     "db:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://ai_sns:ai_sns@localhost:5433/ai_sns} prisma generate",
     "start": "node --env-file=.env ./node_modules/@nestjs/cli/bin/nest.js start",
     "start:dev": "node --env-file=.env ./node_modules/@nestjs/cli/bin/nest.js start --watch",
+    "start:ui": "node --env-file=.env packages/admin/server.mjs",
     "start:prod": "node dist/src/main.js",
     "test": "jest --watchman=false",
     "test:e2e": "jest --watchman=false --runInBand --config ./test/jest-e2e.json"

@@ -22,3 +22,12 @@ npm run admin:dev
 ```
 
 `opod-service-backend` owns schema changes and `db:push`.
+
+## Production
+
+Run the admin API privately, then expose the UI server:
+
+```bash
+ADMIN_API_PORT=7101 DATABASE_URL='postgresql://postgres:change-me@localhost:5432/postgres?schema=opod' npm run start:prod
+PORT=7100 API_BASE_URL=http://localhost:7101 npm run start:ui
+```

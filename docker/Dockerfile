@@ -28,7 +28,7 @@ FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV ADMIN_API_PORT=3001
+ENV ADMIN_API_PORT=7101
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssl \
@@ -43,6 +43,6 @@ COPY --from=build --chown=app:app /app/prisma ./prisma
 COPY --from=build --chown=app:app /app/prisma.config.ts ./prisma.config.ts
 
 USER app
-EXPOSE 3001
+EXPOSE 7101
 
 CMD ["npm", "run", "start:prod"]
