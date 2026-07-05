@@ -1,0 +1,8 @@
+node_modules/
+dist/
+test/.tmp/
+.idea
+
+.env
+.env.*
+!.env.production.example

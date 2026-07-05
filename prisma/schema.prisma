@@ -1,0 +1,386 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MediaType {
+  image
+  video
+
+  @@map("media_type")
+}
+
+enum MessageSenderType {
+  user
+  character
+
+  @@map("message_sender_type")
+}
+
+enum CreditEntryType {
+  grant
+  debit
+
+  @@map("credit_entry_type")
+}
+
+enum CreditPurchaseStatus {
+  pending
+  paid
+  failed
+  canceled
+  refunded
+
+  @@map("credit_purchase_status")
+}
+
+enum GenerationJobStatus {
+  queued
+  running
+  completed
+
+  @@map("generation_job_status")
+}
+
+enum ReportTargetType {
+  character
+  post
+  message
+
+  @@map("report_target_type")
+}
+
+enum ReportStatus {
+  submitted
+  reviewing
+  resolved
+  rejected
+
+  @@map("report_status")
+}
+
+enum CharacterStatus {
+  active
+  inactive
+
+  @@map("character_status")
+}
+
+model User {
+  id                   String                  @id @default(uuid(7)) @db.Uuid
+  email                String?                 @unique
+  passwordHash         String?                 @map("password_hash")
+  passwordSalt         String?                 @map("password_salt")
+  displayName          String                  @map("display_name")
+  createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  characterFollows     UserCharacterFollow[]
+  creditLedgerEntries  CreditLedgerEntry[]
+  creditPurchases      CreditPurchase[]
+  events               UserEvent[]
+  messageConversations MessageConversation[]
+  notifications        Notification[]
+  refreshTokens        UserRefreshToken[]
+  reports              Report[]
+  hashtagPreferences   UserHashtagPreference[]
+
+  @@map("users")
+}
+
+model UserRefreshToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("user_refresh_tokens")
+}
+
+model Character {
+  id             String                @id @default(uuid(7)) @db.Uuid
+  publicId       String                @unique @map("public_id")
+  displayName    String                @map("display_name")
+  bio            String
+  interests      String[]              @default([])
+  status         CharacterStatus       @default(active)
+  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  actionLogs     CharacterActionLog[]
+  comments       PostComment[]
+  conversations  MessageConversation[]
+  generationJobs GenerationJob[]
+  memories       CharacterMemory[]
+  posts          Post[]
+  reactions      PostReaction[]
+  userFollowers  UserCharacterFollow[]
+
+  @@map("characters")
+}
+
+model UserCharacterFollow {
+  userId      String    @map("user_id") @db.Uuid
+  characterId String    @map("character_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user        User      @relation(fields: [userId], references: [id])
+  character   Character @relation(fields: [characterId], references: [id])
+
+  @@id([userId, characterId])
+  @@map("user_character_follows")
+}
+
+model Media {
+  id              String          @id @default(uuid(7)) @db.Uuid
+  mediaType       MediaType       @map("media_type")
+  url             String
+  storageKey      String?         @unique @map("storage_key")
+  contentType     String?         @map("content_type")
+  byteSize        Int?            @map("byte_size")
+  width           Int?
+  height          Int?
+  durationSeconds Int?            @map("duration_seconds")
+  uploadedAt      DateTime?       @map("uploaded_at") @db.Timestamptz(6)
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  generationJobs  GenerationJob[]
+  postMedia       PostMedia[]
+
+  @@map("media")
+}
+
+model Post {
+  id          String         @id @default(uuid(7)) @db.Uuid
+  characterId String         @map("character_id") @db.Uuid
+  character   Character      @relation(fields: [characterId], references: [id])
+  content     String         @default("")
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  comments    PostComment[]
+  hashtags    PostHashtag[]
+  postMedia   PostMedia[]
+  reactions   PostReaction[]
+
+  @@map("posts")
+}
+
+model Hashtag {
+  id          String                  @id @default(uuid(7)) @db.Uuid
+  name        String                  @unique
+  createdAt   DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  posts       PostHashtag[]
+  preferences UserHashtagPreference[]
+
+  @@map("hashtags")
+}
+
+model PostHashtag {
+  postId    String  @map("post_id") @db.Uuid
+  hashtagId String  @map("hashtag_id") @db.Uuid
+  post      Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  hashtag   Hashtag @relation(fields: [hashtagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, hashtagId])
+  @@index([hashtagId])
+  @@map("post_hashtags")
+}
+
+model PostMedia {
+  postId    String @map("post_id") @db.Uuid
+  mediaId   String @map("media_id") @db.Uuid
+  sortOrder Int    @default(0) @map("sort_order")
+  post      Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  media     Media  @relation(fields: [mediaId], references: [id])
+
+  @@id([postId, mediaId])
+  @@map("post_media")
+}
+
+model PostComment {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  postId      String    @map("post_id") @db.Uuid
+  characterId String    @map("character_id") @db.Uuid
+  body        String
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  character   Character @relation(fields: [characterId], references: [id])
+
+  @@index([postId, createdAt])
+  @@index([characterId, createdAt])
+  @@map("post_comments")
+}
+
+model PostReaction {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  postId       String    @map("post_id") @db.Uuid
+  characterId  String    @map("character_id") @db.Uuid
+  reactionType String    @map("reaction_type")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  post         Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  character    Character @relation(fields: [characterId], references: [id])
+
+  @@index([postId, createdAt])
+  @@index([characterId, createdAt])
+  @@map("post_reactions")
+}
+
+model UserEvent {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  eventType  String   @map("event_type")
+  targetType String   @map("target_type")
+  targetId   String   @map("target_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([targetType, targetId])
+  @@map("user_events")
+}
+
+model UserHashtagPreference {
+  userId    String   @map("user_id") @db.Uuid
+  hashtagId String   @map("hashtag_id") @db.Uuid
+  score     Float    @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  hashtag   Hashtag  @relation(fields: [hashtagId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@id([userId, hashtagId])
+  @@index([hashtagId])
+  @@map("user_hashtag_preferences")
+}
+
+model Notification {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  type       String
+  title      String
+  body       String?
+  targetType String?   @map("target_type")
+  targetId   String?   @map("target_id") @db.Uuid
+  readAt     DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model MessageConversation {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  characterId String    @map("character_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user        User      @relation(fields: [userId], references: [id])
+  character   Character @relation(fields: [characterId], references: [id])
+  messages    Message[]
+
+  @@unique([userId, characterId])
+  @@map("message_conversations")
+}
+
+model Message {
+  id             String              @id @default(uuid(7)) @db.Uuid
+  conversationId String              @map("conversation_id") @db.Uuid
+  senderType     MessageSenderType   @map("sender_type")
+  body           String
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  conversation   MessageConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model CreditLedgerEntry {
+  id                String          @id @default(uuid(7)) @db.Uuid
+  userId            String          @map("user_id") @db.Uuid
+  entryType         CreditEntryType @map("entry_type")
+  amount            Int
+  reason            String
+  externalReference String?         @map("external_reference")
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  user              User            @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("credit_ledger_entries")
+}
+
+model CreditPurchase {
+  id           String               @id @default(uuid(7)) @db.Uuid
+  userId       String               @map("user_id") @db.Uuid
+  provider     String
+  status       CreditPurchaseStatus @default(pending)
+  creditAmount Int                  @map("credit_amount")
+  paidAmount   Int                  @map("paid_amount")
+  currency     String               @default("KRW")
+  createdAt    DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user         User                 @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("credit_purchases")
+}
+
+model GenerationJob {
+  id            String              @id @default(uuid(7)) @db.Uuid
+  characterId   String              @map("character_id") @db.Uuid
+  mediaType     MediaType           @map("media_type")
+  prompt        String
+  status        GenerationJobStatus @default(queued)
+  outputMediaId String?             @map("output_media_id") @db.Uuid
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  character     Character           @relation(fields: [characterId], references: [id])
+  outputMedia   Media?              @relation(fields: [outputMediaId], references: [id])
+
+  @@map("generation_jobs")
+}
+
+model CharacterActionLog {
+  id          BigInt    @id @default(autoincrement())
+  characterId String    @map("character_id") @db.Uuid
+  actionType  String    @map("action_type")
+  targetTable String?   @map("target_table")
+  targetId    String?   @map("target_id") @db.Uuid
+  reason      String
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  character   Character @relation(fields: [characterId], references: [id])
+
+  @@index([characterId, createdAt])
+  @@map("character_action_logs")
+}
+
+model Report {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  reporterUserId String           @map("reporter_user_id") @db.Uuid
+  targetType     ReportTargetType @map("target_type")
+  targetId       String           @map("target_id") @db.Uuid
+  reason         String
+  details        String?
+  resolution     String?
+  status         ReportStatus     @default(submitted)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  reporterUser   User             @relation(fields: [reporterUserId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@map("reports")
+}
+
+model CharacterMemory {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  characterId String    @map("character_id") @db.Uuid
+  content     String
+  reason      String
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([characterId, createdAt])
+  @@map("character_memories")
+}

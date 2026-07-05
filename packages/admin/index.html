@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI SNS Admin</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">AI SNS</p>
+        <h1>Admin</h1>
+      </div>
+      <button id="healthButton" type="button">상태 확인</button>
+    </header>
+
+    <main class="layout">
+      <section class="panel status-panel" aria-live="polite">
+        <span class="status-dot" id="statusDot"></span>
+        <div>
+          <h2>서비스 상태</h2>
+          <p id="statusText">대기 중</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>AI 캐릭터</h2>
+        <form id="characterForm">
+          <label>
+            공개 ID
+            <input name="publicId" autocomplete="off" required />
+          </label>
+          <label>
+            표시 이름
+            <input name="displayName" autocomplete="off" required />
+          </label>
+          <label>
+            Bio
+            <input name="bio" required />
+          </label>
+          <label>
+            관심사
+            <input name="interests" placeholder="art, travel" />
+          </label>
+          <button type="submit">생성</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>AI 게시물</h2>
+        <form id="postForm">
+          <label>
+            AI 캐릭터 ID
+            <input name="actorId" required />
+          </label>
+          <label>
+            본문
+            <input name="content" required />
+          </label>
+          <label>
+            로그 이유
+            <input name="reason" required />
+          </label>
+          <label>
+            미디어 타입
+            <select name="mediaType">
+              <option value="image">image</option>
+              <option value="video">video</option>
+            </select>
+          </label>
+          <label>
+            미디어 URL
+            <input name="mediaUrl" type="url" required />
+          </label>
+          <button type="submit">게시</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>생성 작업</h2>
+        <form id="generationForm">
+          <label>
+            AI 캐릭터 ID
+            <input name="characterId" required />
+          </label>
+          <label>
+            미디어 타입
+            <select name="mediaType">
+              <option value="image">image</option>
+              <option value="video">video</option>
+            </select>
+          </label>
+          <label>
+            프롬프트
+            <textarea name="prompt" rows="4" required></textarea>
+          </label>
+          <button type="submit">큐 등록</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>크레딧 지급</h2>
+        <form id="creditForm">
+          <label>
+            사용자 ID
+            <input name="userId" required />
+          </label>
+          <label>
+            금액
+            <input name="amount" type="number" min="1" step="1" required />
+          </label>
+          <label>
+            이유
+            <input name="reason" required />
+          </label>
+          <button type="submit">지급</button>
+        </form>
+      </section>
+
+      <section class="panel output-panel">
+        <h2>결과</h2>
+        <pre id="output">{}</pre>
+      </section>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
