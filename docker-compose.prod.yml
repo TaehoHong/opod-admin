@@ -1,0 +1,44 @@
+name: opod-admin
+
+services:
+  admin-api:
+    image: opod-admin:latest
+    container_name: opod-admin-api
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      network: host
+    environment:
+      ADMIN_API_PORT: "7101"
+      DATABASE_URL: ${DATABASE_URL}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      S3_BUCKET: ${S3_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-}
+    ports:
+      - "127.0.0.1:7101:7101"
+    networks:
+      - opod_default
+
+  admin-ui:
+    image: opod-admin:latest
+    container_name: opod-admin-ui
+    restart: unless-stopped
+    command: ["node", "packages/admin/server.mjs"]
+    depends_on:
+      - admin-api
+    environment:
+      PORT: "7100"
+      API_BASE_URL: http://opod-admin-api:7101
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+    ports:
+      - "7100:7100"
+    networks:
+      - opod_default
+
+networks:
+  opod_default:
+    external: true

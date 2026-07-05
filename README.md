@@ -28,6 +28,6 @@ npm run admin:dev
 Run the admin API privately, then expose the UI server:
 
 ```bash
-ADMIN_API_PORT=7101 DATABASE_URL='postgresql://postgres:change-me@localhost:5432/postgres?schema=opod' npm run start:prod
+ADMIN_API_PORT=7101 DATABASE_URL='postgresql://opod:change-me@opod-postgres:5432/opod?schema=opod&options=-c%20search_path%3Dopod' npm run start:prod
 PORT=7100 API_BASE_URL=http://localhost:7101 npm run start:ui
 ```
