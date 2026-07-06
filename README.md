@@ -4,7 +4,7 @@ Admin backend and admin UI for OPOD.
 
 ## Structure
 
-- `src/admin`: `/admin/*` NestJS API
+- `src/admin`: `/api/*` NestJS API
 - `src/domain/database`: Prisma database adapter only
 - `packages/admin`: dependency-free admin UI and proxy server
 - `prisma`: schema mirror for Prisma client generation
@@ -25,9 +25,14 @@ npm run admin:dev
 
 ## Production
 
-Run the admin API privately, then expose the UI server:
+The server owns `docker-compose.yml` and `.env`. Do not keep production
+compose files in this repo or overwrite them during deploy.
 
 ```bash
-ADMIN_API_PORT=7101 DATABASE_URL='postgresql://opod:change-me@opod-postgres:5432/opod?schema=opod&options=-c%20search_path%3Dopod' npm run start:prod
-PORT=7100 API_BASE_URL=http://localhost:7101 npm run start:ui
+rsync -a --delete --exclude-from=deploy/rsync-exclude.txt ./ taeho@121.141.156.200:~/opod-admin/
+ssh taeho@121.141.156.200 'cd ~/opod-admin && docker compose build admin && docker compose up -d admin'
 ```
+
+Keep the 7100 listener, TLS certificate paths, database URL, volumes, and
+shared Docker network in the server-local `~/opod-admin/docker-compose.yml`
+and `.env`.

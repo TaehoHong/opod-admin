@@ -16,7 +16,7 @@ describe("generation", () => {
     await app.init();
 
     const character = await request(app.getHttpServer())
-      .post("/admin/characters")
+      .post("/api/characters")
       .set(adminHeaders)
       .send({
         publicId: uniqueHandle("gen"),
@@ -27,7 +27,7 @@ describe("generation", () => {
       .expect(201);
 
     const created = await request(app.getHttpServer())
-      .post("/admin/generation/jobs")
+      .post("/api/generation/jobs")
       .set(adminHeaders)
       .send({
         characterId: character.body.id,
@@ -37,7 +37,7 @@ describe("generation", () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/admin/generation/jobs/${created.body.id}/start`)
+      .post(`/api/generation/jobs/${created.body.id}/start`)
       .set(adminHeaders)
       .expect(201)
       .expect((response) => {
@@ -45,7 +45,7 @@ describe("generation", () => {
       });
 
     await request(app.getHttpServer())
-      .post(`/admin/generation/jobs/${created.body.id}/complete`)
+      .post(`/api/generation/jobs/${created.body.id}/complete`)
       .set(adminHeaders)
       .send({
         url: "https://cdn.local/generated.png",
@@ -61,7 +61,7 @@ describe("generation", () => {
       });
 
     const logs = await request(app.getHttpServer())
-      .get("/admin/character-action-logs")
+      .get("/api/character-action-logs")
       .set(adminHeaders)
       .expect(200);
 
@@ -92,7 +92,7 @@ describe("generation", () => {
     await app.init();
 
     await request(app.getHttpServer())
-      .post("/admin/generation/jobs")
+      .post("/api/generation/jobs")
       .set(adminHeaders)
       .send({
         characterId: "ai-1",
@@ -113,7 +113,7 @@ describe("generation", () => {
     await app.init();
 
     const character = await request(app.getHttpServer())
-      .post("/admin/characters")
+      .post("/api/characters")
       .set(adminHeaders)
       .send({
         publicId: uniqueHandle("gen-media"),
@@ -124,7 +124,7 @@ describe("generation", () => {
       .expect(201);
 
     const job = await request(app.getHttpServer())
-      .post("/admin/generation/jobs")
+      .post("/api/generation/jobs")
       .set(adminHeaders)
       .send({
         characterId: character.body.id,
@@ -134,7 +134,7 @@ describe("generation", () => {
       .expect(201);
 
     const upload = await request(app.getHttpServer())
-      .post("/admin/media/uploads")
+      .post("/api/media/uploads")
       .set(adminHeaders)
       .send({
         mediaType: "image",
@@ -144,17 +144,17 @@ describe("generation", () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/admin/media/${upload.body.media.id}/confirm-upload`)
+      .post(`/api/media/${upload.body.media.id}/confirm-upload`)
       .set(adminHeaders)
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/admin/generation/jobs/${job.body.id}/start`)
+      .post(`/api/generation/jobs/${job.body.id}/start`)
       .set(adminHeaders)
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/admin/generation/jobs/${job.body.id}/complete`)
+      .post(`/api/generation/jobs/${job.body.id}/complete`)
       .set(adminHeaders)
       .send({ mediaId: upload.body.media.id })
       .expect(201)
@@ -175,7 +175,7 @@ describe("generation", () => {
     await app.init();
 
     const character = await request(app.getHttpServer())
-      .post("/admin/characters")
+      .post("/api/characters")
       .set(adminHeaders)
       .send({
         publicId: uniqueHandle("gen-run"),
@@ -185,7 +185,7 @@ describe("generation", () => {
       })
       .expect(201);
     const job = await request(app.getHttpServer())
-      .post("/admin/generation/jobs")
+      .post("/api/generation/jobs")
       .set(adminHeaders)
       .send({
         characterId: character.body.id,
@@ -195,7 +195,7 @@ describe("generation", () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/admin/generation/jobs/${job.body.id}/run`)
+      .post(`/api/generation/jobs/${job.body.id}/run`)
       .set(adminHeaders)
       .send({ provider: "local" })
       .expect(201)
@@ -205,7 +205,7 @@ describe("generation", () => {
       });
 
     const logs = await request(app.getHttpServer())
-      .get("/admin/character-action-logs")
+      .get("/api/character-action-logs")
       .set(adminHeaders)
       .expect(200);
 
@@ -225,7 +225,7 @@ describe("generation", () => {
     await app.init();
 
     const character = await request(app.getHttpServer())
-      .post("/admin/characters")
+      .post("/api/characters")
       .set(adminHeaders)
       .send({
         publicId: uniqueHandle("gen-retry"),
@@ -235,7 +235,7 @@ describe("generation", () => {
       })
       .expect(201);
     const job = await request(app.getHttpServer())
-      .post("/admin/generation/jobs")
+      .post("/api/generation/jobs")
       .set(adminHeaders)
       .send({
         characterId: character.body.id,
@@ -245,7 +245,7 @@ describe("generation", () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/admin/generation/jobs/${job.body.id}/retry`)
+      .post(`/api/generation/jobs/${job.body.id}/retry`)
       .set(adminHeaders)
       .send({ reason: "provider timeout" })
       .expect(201)

@@ -1,0 +1,145 @@
+<h2>AI 캐릭터 중심 운영 콘솔</h2>
+<p class="subtitle">A 방향을 캐릭터 관리 중심으로 재배치했습니다. 신고·생성·결제는 오른쪽 보조 큐로 남깁니다.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Recommended v1: Character Ops Console</div>
+  <div class="mockup-body">
+    <div style="height:560px;background:#f6f8fb;border:1px solid #d8dee8;border-radius:8px;overflow:hidden;color:#243041;font-size:12px">
+      <div style="height:48px;background:#fff;border-bottom:1px solid #d8dee8;display:flex;align-items:center;justify-content:space-between;padding:0 18px">
+        <div style="display:flex;align-items:center;gap:18px">
+          <strong style="font-size:15px">OPOD Admin</strong>
+          <span style="color:#607086">캐릭터 운영</span>
+          <span style="color:#607086">신고</span>
+          <span style="color:#607086">결제</span>
+          <span style="color:#607086">분석</span>
+        </div>
+        <button class="mock-button">상태 확인</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:260px 1fr 300px;height:512px">
+        <aside style="background:#fff;border-right:1px solid #d8dee8;padding:14px;display:grid;grid-template-rows:auto auto 1fr;gap:12px;min-width:0">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <strong>AI 캐릭터</strong>
+            <button class="mock-button">+ 생성</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px">
+            <input class="mock-input" placeholder="이름, public ID" />
+            <select class="mock-input" style="width:76px"><option>active</option></select>
+          </div>
+          <div style="display:grid;gap:8px;align-content:start;overflow:hidden">
+            <div style="border:1px solid #d8dee8;border-radius:7px;padding:10px;background:#eef6ff">
+              <div style="display:flex;justify-content:space-between"><strong>Mina</strong><span style="color:#1f8a4c">active</span></div>
+              <div style="color:#607086;margin-top:3px">@mina_ai · art, travel</div>
+              <div style="margin-top:8px;display:flex;gap:6px;color:#607086"><span>posts 18</span><span>memory 7</span></div>
+            </div>
+            <div style="border:1px solid #d8dee8;border-radius:7px;padding:10px;background:#fff">
+              <div style="display:flex;justify-content:space-between"><strong>June</strong><span style="color:#1f8a4c">active</span></div>
+              <div style="color:#607086;margin-top:3px">@june_food · food</div>
+            </div>
+            <div style="border:1px solid #d8dee8;border-radius:7px;padding:10px;background:#fff">
+              <div style="display:flex;justify-content:space-between"><strong>Seo</strong><span style="color:#b45f06">inactive</span></div>
+              <div style="color:#607086;margin-top:3px">@seo_run · fitness</div>
+            </div>
+          </div>
+        </aside>
+
+        <main style="padding:14px;display:grid;grid-template-rows:auto auto 1fr;gap:12px;min-width:0">
+          <section style="background:#fff;border:1px solid #d8dee8;border-radius:8px;padding:14px;display:grid;gap:10px">
+            <div style="display:flex;align-items:start;justify-content:space-between;gap:16px">
+              <div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <strong style="font-size:18px">Mina</strong>
+                  <span style="padding:2px 7px;border-radius:999px;background:#e7f7ee;color:#1f7343">active</span>
+                </div>
+                <div style="color:#607086;margin-top:4px">@mina_ai · art, travel · 생성 2026-07-05</div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="mock-button">프로필 저장</button>
+                <button class="mock-button">비활성화</button>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <input class="mock-input" value="Mina" />
+              <input class="mock-input" value="art, travel" />
+            </div>
+            <textarea class="mock-input" style="height:54px;resize:none">Visual artist who posts city walks and calm travel scenes.</textarea>
+          </section>
+
+          <section style="display:flex;gap:6px">
+            <button class="mock-button">메모리</button>
+            <button class="mock-button">게시물</button>
+            <button class="mock-button">생성 작업</button>
+            <button class="mock-button">액션 로그</button>
+          </section>
+
+          <section style="display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:0">
+            <div style="background:#fff;border:1px solid #d8dee8;border-radius:8px;padding:14px;display:grid;grid-template-rows:auto 1fr auto;gap:10px;min-width:0">
+              <div style="display:flex;justify-content:space-between;gap:8px"><strong>메모리</strong><button class="mock-button">+ 추가</button></div>
+              <div style="display:grid;gap:8px;align-content:start;overflow:hidden">
+                <div style="border-top:1px solid #edf1f6;padding-top:8px">도시 야경 촬영 선호 · operator note</div>
+                <div style="border-top:1px solid #edf1f6;padding-top:8px">영상보다 이미지 생성 우선 · content guide</div>
+                <div style="border-top:1px solid #edf1f6;padding-top:8px">여행지는 서울/도쿄 톤 유지</div>
+              </div>
+              <textarea class="mock-input" style="height:52px;resize:none" placeholder="새 메모리와 이유"></textarea>
+            </div>
+            <div style="background:#fff;border:1px solid #d8dee8;border-radius:8px;padding:14px;display:grid;grid-template-rows:auto 1fr auto;gap:10px;min-width:0">
+              <div style="display:flex;justify-content:space-between;gap:8px"><strong>게시/생성</strong><button class="mock-button">AI 게시물 작성</button></div>
+              <div style="display:grid;gap:8px;align-content:start;overflow:hidden">
+                <div style="border:1px solid #edf1f6;border-radius:6px;padding:8px"><b>image job</b><div style="color:#607086">queued · city night prompt</div></div>
+                <div style="border:1px solid #edf1f6;border-radius:6px;padding:8px"><b>post</b><div style="color:#607086">오늘 산책 사진 업로드 완료</div></div>
+                <div style="border:1px solid #edf1f6;border-radius:6px;padding:8px"><b>action</b><div style="color:#607086">CHARACTER_RESTORED · admin reason</div></div>
+              </div>
+              <button class="mock-button">생성 작업 큐 등록</button>
+            </div>
+          </section>
+        </main>
+
+        <aside style="background:#fff;border-left:1px solid #d8dee8;padding:14px;display:grid;grid-template-rows:auto 1fr;gap:12px;min-width:0">
+          <div>
+            <strong>운영 큐</strong>
+            <div style="color:#607086;margin-top:4px">캐릭터와 연결되는 일부터 처리</div>
+          </div>
+          <div style="display:grid;gap:8px;align-content:start;overflow:hidden">
+            <div style="border-left:4px solid #c77a16;background:#fff7ed;border-radius:6px;padding:10px">
+              <strong>신고 4건</strong>
+              <div style="color:#607086;margin-top:3px">Mina 게시물 대상 2건</div>
+            </div>
+            <div style="border-left:4px solid #b42318;background:#fff1f2;border-radius:6px;padding:10px">
+              <strong>생성 실패 3건</strong>
+              <div style="color:#607086;margin-top:3px">재시도 또는 프롬프트 수정</div>
+            </div>
+            <div style="border-left:4px solid #146c94;background:#eef6ff;border-radius:6px;padding:10px">
+              <strong>정산 이슈 1건</strong>
+              <div style="color:#607086;margin-top:3px">캐릭터와 무관한 보조 큐</div>
+            </div>
+            <div style="border:1px solid #d8dee8;border-radius:8px;padding:10px;margin-top:8px">
+              <strong>선택 항목 작업</strong>
+              <div style="display:grid;gap:7px;margin-top:8px">
+                <button class="mock-button">상세 열기</button>
+                <button class="mock-button">처리 완료</button>
+                <button class="mock-button">관련 캐릭터로 이동</button>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="yes" onclick="toggleSelect(this)">
+    <div class="letter">Y</div>
+    <div class="content">
+      <h3>이 방향으로 진행</h3>
+      <p>캐릭터 목록/상세/메모리/게시·생성/운영 큐를 첫 버전 범위로 잡습니다.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="revise" onclick="toggleSelect(this)">
+    <div class="letter">R</div>
+    <div class="content">
+      <h3>수정 필요</h3>
+      <p>캐릭터 관리에서 더 중요한 탭이나 작업이 있으면 범위를 조정합니다.</p>
+    </div>
+  </div>
+</div>

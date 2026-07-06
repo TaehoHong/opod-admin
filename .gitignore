@@ -6,3 +6,7 @@ test/.tmp/
 .env
 .env.*
 !.env.production.example
+
+/docker-compose.yml
+/docker-compose.*.yml
+.gstack/

@@ -26,7 +26,7 @@ RUN npm prune --omit=dev
 
 FROM build AS runtime
 ENV NODE_ENV=production
-ENV ADMIN_API_PORT=7101
-EXPOSE 7101
+ENV ADMIN_API_PORT=7100
+EXPOSE 7100
 
 CMD ["npm", "run", "start:prod"]

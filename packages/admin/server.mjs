@@ -4,8 +4,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
-const defaultApiBaseUrl = process.env.API_BASE_URL ?? "http://localhost:3001";
-const defaultAdminApiKey = process.env.ADMIN_API_KEY;
+const defaultApiBaseUrl = process.env.API_BASE_URL ?? "http://localhost:7100";
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -14,14 +13,13 @@ const contentTypes = {
 
 export function createServer({
   apiBaseUrl = defaultApiBaseUrl,
-  adminApiKey = defaultAdminApiKey,
 } = {}) {
   return createHttpServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://admin.local");
 
       if (url.pathname.startsWith("/api/")) {
-        await proxyApi(request, response, url, apiBaseUrl, adminApiKey);
+        await proxyApi(request, response, url, apiBaseUrl);
         return;
       }
 
@@ -33,19 +31,12 @@ export function createServer({
   });
 }
 
-async function proxyApi(request, response, url, apiBaseUrl, adminApiKey) {
-  const target = new URL(
-    url.pathname.replace(/^\/api/, "") + url.search,
-    apiBaseUrl,
-  );
+async function proxyApi(request, response, url, apiBaseUrl) {
+  const target = new URL(url.pathname + url.search, apiBaseUrl);
   const method = request.method ?? "GET";
   const body =
     method === "GET" || method === "HEAD" ? undefined : await readBody(request);
   const headers = copyHeaders(request.headers);
-
-  if (adminApiKey && target.pathname.startsWith("/admin/")) {
-    headers["x-admin-api-key"] = adminApiKey;
-  }
 
   const upstream = await fetch(target, {
     method,

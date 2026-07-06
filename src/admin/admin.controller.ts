@@ -12,7 +12,7 @@ import { parsePageQuery } from "../domain/database/page";
 import { AdminApiKeyGuard } from "./admin-api-key.guard";
 import { AdminService } from "./admin.service";
 
-@Controller("admin")
+@Controller("api")
 @UseGuards(AdminApiKeyGuard)
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}

@@ -21,7 +21,7 @@ describe("admin authorization", () => {
 
   it("rejects admin routes without the admin API key", async () => {
     await request(app.getHttpServer())
-      .get("/admin/character-action-logs")
+      .get("/api/character-action-logs")
       .expect(401);
   });
 });

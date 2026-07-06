@@ -7,122 +7,60 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">AI SNS</p>
-        <h1>Admin</h1>
-      </div>
-      <button id="healthButton" type="button">상태 확인</button>
-    </header>
-
-    <main class="layout">
-      <section class="panel status-panel" aria-live="polite">
-        <span class="status-dot" id="statusDot"></span>
-        <div>
-          <h2>서비스 상태</h2>
-          <p id="statusText">대기 중</p>
+    <div class="admin-shell">
+      <aside class="sidebar" aria-label="Admin navigation">
+        <div class="brand">
+          <p class="eyebrow">AI SNS</p>
+          <h1>Admin</h1>
         </div>
-      </section>
+        <nav id="sidebarNav" class="sidebar-nav">
+          <button type="button" data-route="dashboard">대시보드</button>
+          <button type="button" data-route="users">사용자</button>
+          <button type="button" data-route="characters">AI 캐릭터</button>
+          <button type="button" data-route="media">콘텐츠 / 미디어</button>
+          <button type="button" data-route="generation">생성 작업</button>
+          <button type="button" data-route="moderation">신고 / 모더레이션</button>
+          <button type="button" data-route="payments">결제 / 정산</button>
+          <button type="button" data-route="analytics">분석 / 로그</button>
+          <button type="button" data-route="settings">설정</button>
+        </nav>
+        <div class="sidebar-status" aria-live="polite">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">대기 중</span>
+        </div>
+      </aside>
 
-      <section class="panel">
-        <h2>AI 캐릭터</h2>
-        <form id="characterForm">
-          <label>
-            공개 ID
-            <input name="publicId" autocomplete="off" required />
-          </label>
-          <label>
-            표시 이름
-            <input name="displayName" autocomplete="off" required />
-          </label>
-          <label>
-            Bio
-            <input name="bio" required />
-          </label>
-          <label>
-            관심사
-            <input name="interests" placeholder="art, travel" />
-          </label>
-          <button type="submit">생성</button>
-        </form>
-      </section>
+      <main class="admin-main">
+        <header class="workspace-header">
+          <div>
+            <p class="eyebrow" id="routeEyebrow">운영 콘솔</p>
+            <h2 id="routeTitle">대시보드</h2>
+          </div>
+          <div class="header-actions">
+            <form id="adminAuthForm" class="auth-form">
+              <label>
+                API key
+                <input
+                  id="adminApiKeyInput"
+                  name="adminApiKey"
+                  type="password"
+                  autocomplete="off"
+                />
+              </label>
+              <button type="submit">저장</button>
+            </form>
+            <button id="healthButton" type="button">상태 확인</button>
+          </div>
+        </header>
 
-      <section class="panel">
-        <h2>AI 게시물</h2>
-        <form id="postForm">
-          <label>
-            AI 캐릭터 ID
-            <input name="actorId" required />
-          </label>
-          <label>
-            본문
-            <input name="content" required />
-          </label>
-          <label>
-            로그 이유
-            <input name="reason" required />
-          </label>
-          <label>
-            미디어 타입
-            <select name="mediaType">
-              <option value="image">image</option>
-              <option value="video">video</option>
-            </select>
-          </label>
-          <label>
-            미디어 URL
-            <input name="mediaUrl" type="url" required />
-          </label>
-          <button type="submit">게시</button>
-        </form>
-      </section>
+        <section id="mainPanel" class="workspace" aria-live="polite"></section>
 
-      <section class="panel">
-        <h2>생성 작업</h2>
-        <form id="generationForm">
-          <label>
-            AI 캐릭터 ID
-            <input name="characterId" required />
-          </label>
-          <label>
-            미디어 타입
-            <select name="mediaType">
-              <option value="image">image</option>
-              <option value="video">video</option>
-            </select>
-          </label>
-          <label>
-            프롬프트
-            <textarea name="prompt" rows="4" required></textarea>
-          </label>
-          <button type="submit">큐 등록</button>
-        </form>
-      </section>
-
-      <section class="panel">
-        <h2>크레딧 지급</h2>
-        <form id="creditForm">
-          <label>
-            사용자 ID
-            <input name="userId" required />
-          </label>
-          <label>
-            금액
-            <input name="amount" type="number" min="1" step="1" required />
-          </label>
-          <label>
-            이유
-            <input name="reason" required />
-          </label>
-          <button type="submit">지급</button>
-        </form>
-      </section>
-
-      <section class="panel output-panel">
-        <h2>결과</h2>
-        <pre id="output">{}</pre>
-      </section>
-    </main>
+        <details class="diagnostics">
+          <summary>API 응답</summary>
+          <pre id="output">{}</pre>
+        </details>
+      </main>
+    </div>
 
     <script type="module" src="./main.js"></script>
   </body>

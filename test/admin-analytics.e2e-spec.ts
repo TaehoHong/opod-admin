@@ -22,7 +22,7 @@ describe("admin analytics", () => {
 
   it("returns analytics metrics for admins", async () => {
     await request(app.getHttpServer())
-      .get("/admin/analytics")
+      .get("/api/analytics")
       .set(adminHeaders)
       .query({ metric: "messages.count" })
       .expect(200)
