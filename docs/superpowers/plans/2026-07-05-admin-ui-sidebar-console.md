@@ -233,7 +233,7 @@ Run:
 
 ```bash
 git add packages/admin/main.js packages/admin/test/main.test.mjs
-git commit -m "Add admin UI helper coverage"
+git commit -m "Add admin UI helper coverage" -- packages/admin/main.js packages/admin/test/main.test.mjs
 ```
 
 ## Task 2: Sidebar Shell
@@ -586,7 +586,7 @@ Run:
 
 ```bash
 git add packages/admin/index.html packages/admin/styles.css packages/admin/main.js packages/admin/test/smoke.test.mjs
-git commit -m "Add admin sidebar shell"
+git commit -m "Add admin sidebar shell" -- packages/admin/index.html packages/admin/styles.css packages/admin/main.js packages/admin/test/smoke.test.mjs
 ```
 
 ## Task 3: Dashboard And Secondary Tabs
@@ -889,7 +889,7 @@ Run:
 
 ```bash
 git add packages/admin/main.js packages/admin/test/main.test.mjs
-git commit -m "Add admin secondary tab renderers"
+git commit -m "Add admin secondary tab renderers" -- packages/admin/main.js packages/admin/test/main.test.mjs
 ```
 
 ## Task 4: AI Character Workspace
@@ -1158,7 +1158,7 @@ Run:
 
 ```bash
 git add packages/admin/main.js packages/admin/test/main.test.mjs
-git commit -m "Add AI character admin workspace"
+git commit -m "Add AI character admin workspace" -- packages/admin/main.js packages/admin/test/main.test.mjs
 ```
 
 ## Task 5: Form Actions And Inline Results
@@ -1389,7 +1389,7 @@ Run:
 
 ```bash
 git add packages/admin/main.js packages/admin/styles.css packages/admin/test/main.test.mjs
-git commit -m "Wire admin sidebar actions"
+git commit -m "Wire admin sidebar actions" -- packages/admin/main.js packages/admin/styles.css packages/admin/test/main.test.mjs
 ```
 
 ## Task 6: Verification And Manual QA
@@ -1448,7 +1448,7 @@ If verification required fixes, run:
 
 ```bash
 git add packages/admin/index.html packages/admin/main.js packages/admin/styles.css packages/admin/test/main.test.mjs packages/admin/test/smoke.test.mjs
-git commit -m "Polish admin sidebar console"
+git commit -m "Polish admin sidebar console" -- packages/admin/index.html packages/admin/main.js packages/admin/styles.css packages/admin/test/main.test.mjs packages/admin/test/smoke.test.mjs
 ```
 
 If no fixes were needed, do not create an empty commit.
