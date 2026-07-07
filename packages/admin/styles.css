@@ -125,14 +125,18 @@ h2 {
 }
 
 .header-actions,
-.auth-form {
+.session-box {
   display: flex;
   align-items: end;
   gap: 8px;
 }
 
-.auth-form label {
-  min-width: 180px;
+.session-box {
+  align-items: center;
+}
+
+.session-box[hidden] {
+  display: none;
 }
 
 .workspace {
@@ -175,12 +179,66 @@ h2 {
   border-radius: 8px;
 }
 
+.login-panel {
+  max-width: 420px;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   justify-content: space-between;
+}
+
+.toolbar-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.detail-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tab,
+.text-link,
+.action-link {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.tab {
+  min-height: 36px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.tab.active {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.action-link {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  padding: 8px 12px;
+  color: #ffffff;
+  background: var(--accent);
+  border-radius: 6px;
 }
 
 .list {
@@ -200,6 +258,25 @@ h2 {
 .list-item.selected {
   border-color: #9bc7dd;
   background: #eef7fb;
+}
+
+.character-list-item {
+  color: inherit;
+  text-decoration: none;
+}
+
+.character-list-item:hover {
+  border-color: #9bc7dd;
+  background: #f4fbfd;
+}
+
+.empty-state {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
 }
 
 .muted {
@@ -323,11 +400,11 @@ pre {
     align-items: end;
   }
 
-  .auth-form {
+  .session-box {
     flex: 1 1 240px;
   }
 
-  .auth-form label {
+  .session-box label {
     flex: 1 1 180px;
     min-width: 0;
   }

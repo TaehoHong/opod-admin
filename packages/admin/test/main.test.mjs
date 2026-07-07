@@ -3,10 +3,15 @@ import test from "node:test";
 import {
   characterCreatePayload,
   characterDetailRequests,
+  characterHref,
+  characterRouteState,
   characterStatusPayload,
   characterUpdatePayload,
+  adminAccountPayload,
+  adminLoginPayload,
   adminRequestOptions,
   creditGrantPayload,
+  currentRouteFromHash,
   dashboardRequests,
   endpoint,
   formActionRequest,
@@ -16,7 +21,9 @@ import {
   itemsFromPage,
   memoryPayload,
   navItems,
+  parseResponseBody,
   paymentDetailRequest,
+  personaPayload,
   postPayload,
   reportUpdatePayload,
   selectedOption,
@@ -147,11 +154,62 @@ test("itemsFromPage accepts page objects and arrays", () => {
   assert.deepEqual(itemsFromPage(null), []);
 });
 
+test("currentRouteFromHash sends anonymous admins to login", () => {
+  assert.equal(currentRouteFromHash("#dashboard", ""), "login");
+  assert.equal(currentRouteFromHash("#characters", ""), "login");
+  assert.equal(currentRouteFromHash("#login", ""), "login");
+  assert.equal(currentRouteFromHash("#login", "token-1"), "dashboard");
+  assert.equal(currentRouteFromHash("#characters?mode=create", "token-1"), "characters");
+});
+
+test("parseResponseBody preserves plain text backend errors", () => {
+  assert.deepEqual(parseResponseBody("Internal server error", { status: 500 }), {
+    error: "Internal server error",
+    status: 500,
+  });
+  assert.deepEqual(parseResponseBody("", { status: 204 }), { status: 204 });
+});
+
 test("characterDetailRequests fetches memory and logs for selected character", () => {
   assert.deepEqual(characterDetailRequests("char-1"), [
+    { key: "character", path: "/api/characters/char-1" },
+    { key: "personas", path: "/api/characters/char-1/personas" },
     { key: "memory", path: "/api/characters/char-1/memory" },
     { key: "logs", path: "/api/character-action-logs" },
   ]);
+});
+
+test("characterRouteState parses list, create, detail, and tab states", () => {
+  assert.deepEqual(characterRouteState("#characters"), {
+    route: "characters",
+    mode: "list",
+    characterId: "",
+    tab: "profile",
+  });
+  assert.deepEqual(characterRouteState("#characters?mode=create"), {
+    route: "characters",
+    mode: "create",
+    characterId: "",
+    tab: "profile",
+  });
+  assert.deepEqual(
+    characterRouteState("#characters?characterId=char-1&tab=memory"),
+    {
+      route: "characters",
+      mode: "detail",
+      characterId: "char-1",
+      tab: "memory",
+    },
+  );
+});
+
+test("characterHref builds character route hashes", () => {
+  assert.equal(characterHref(), "#characters");
+  assert.equal(characterHref({ mode: "create" }), "#characters?mode=create");
+  assert.equal(
+    characterHref({ characterId: "char-1", tab: "persona" }),
+    "#characters?characterId=char-1&tab=persona",
+  );
 });
 
 test("characterCreatePayload builds character create body", () => {
@@ -180,6 +238,17 @@ test("memoryPayload trims content and reason", () => {
   });
 });
 
+test("personaPayload trims title and content", () => {
+  const form = new FormData();
+  form.set("title", " Core ");
+  form.set("content", " speaks warmly ");
+
+  assert.deepEqual(personaPayload(form), {
+    title: "Core",
+    content: "speaks warmly",
+  });
+});
+
 test("generationActionRequest builds existing job action endpoints", () => {
   assert.deepEqual(
     generationActionRequest("job-1", "retry", { reason: "bad" }),
@@ -198,10 +267,32 @@ test("paymentDetailRequest targets payment detail endpoint", () => {
   assert.equal(paymentDetailRequest("pay-1"), "/api/payments/pay-1");
 });
 
-test("adminRequestOptions adds the admin API key header", () => {
+test("adminRequestOptions adds the admin bearer token header", () => {
   assert.deepEqual(adminRequestOptions({ method: "POST" }, " secret "), {
     method: "POST",
-    headers: { "x-admin-api-key": "secret" },
+    headers: { authorization: "Bearer secret" },
+  });
+});
+
+test("adminLoginPayload trims credentials", () => {
+  const form = new FormData();
+  form.set("email", " admin@opod.com ");
+  form.set("password", " qwer1234 ");
+
+  assert.deepEqual(adminLoginPayload(form), {
+    email: "admin@opod.com",
+    password: "qwer1234",
+  });
+});
+
+test("adminAccountPayload trims account fields", () => {
+  const form = new FormData();
+  form.set("email", " next@opod.com ");
+  form.set("password", " next-pass ");
+
+  assert.deepEqual(adminAccountPayload(form), {
+    email: "next@opod.com",
+    password: "next-pass",
   });
 });
 
@@ -315,6 +406,20 @@ test("generationActionBody omits unsupported providers", () => {
 test("formActionRequest maps form actions to existing endpoints", async () => {
   const cases = [
     {
+      action: "admin-login",
+      data: { email: "admin@opod.com", password: "qwer1234" },
+      path: "/api/admin/login",
+      method: "POST",
+      body: { email: "admin@opod.com", password: "qwer1234" },
+    },
+    {
+      action: "admin-create",
+      data: { email: "next@opod.com", password: "next-pass" },
+      path: "/api/admin/accounts",
+      method: "POST",
+      body: { email: "next@opod.com", password: "next-pass" },
+    },
+    {
       action: "character-create",
       data: {
         publicId: "mina_ai",
@@ -348,12 +453,60 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       body: { status: "inactive", reason: "policy" },
     },
     {
+      action: "character-delete",
+      dataset: { characterId: "char-1" },
+      data: { reason: "policy" },
+      path: "/api/characters/char-1",
+      method: "DELETE",
+      body: { reason: "policy" },
+    },
+    {
+      action: "persona-create",
+      dataset: { characterId: "char-1" },
+      data: { title: "Core", content: "warm" },
+      path: "/api/characters/char-1/personas",
+      method: "POST",
+      body: { title: "Core", content: "warm" },
+    },
+    {
+      action: "persona-update",
+      dataset: { characterId: "char-1", personaId: "persona-1" },
+      data: { title: "Core", content: "warmer" },
+      path: "/api/characters/char-1/personas/persona-1",
+      method: "PATCH",
+      body: { title: "Core", content: "warmer" },
+    },
+    {
+      action: "persona-delete",
+      dataset: { characterId: "char-1", personaId: "persona-1" },
+      data: {},
+      path: "/api/characters/char-1/personas/persona-1",
+      method: "DELETE",
+      body: {},
+    },
+    {
       action: "memory-create",
       dataset: { characterId: "char-1" },
       data: { content: "city night", reason: "operator" },
       path: "/api/characters/char-1/memory",
       method: "POST",
       body: { content: "city night", reason: "operator" },
+    },
+    {
+      action: "memory-update",
+      dataset: { characterId: "char-1", memoryId: "memory-1" },
+      data: { content: "city morning", reason: "operator" },
+      path: "/api/characters/char-1/memory/memory-1",
+      method: "PATCH",
+      body: { content: "city morning", reason: "operator" },
+    },
+    {
+      action: "memory-delete",
+      dataset: { characterId: "char-1", memoryId: "memory-1" },
+      data: {},
+      path: "/api/characters/char-1/memory/memory-1",
+      method: "DELETE",
+      body: {},
     },
     {
       action: "credit-grant",

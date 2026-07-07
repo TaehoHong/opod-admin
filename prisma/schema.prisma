@@ -112,6 +112,20 @@ model UserRefreshToken {
   @@schema("opod")
 }
 
+model Admin {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  email     String   @unique
+  password  String
+  isEnabled Boolean  @default(true) @map("is_enabled")
+  isDeleted Boolean  @default(false) @map("is_deleted")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([isEnabled, isDeleted])
+  @@map("admins")
+  @@schema("opod")
+}
+
 model Character {
   id             String                @id @default(uuid(7)) @db.Uuid
   publicId       String                @unique @map("public_id")
@@ -126,6 +140,7 @@ model Character {
   conversations  MessageConversation[]
   generationJobs GenerationJob[]
   memories       CharacterMemory[]
+  personas       CharacterPersona[]
   posts          Post[]
   reactions      PostReaction[]
   userFollowers  UserCharacterFollow[]
@@ -409,9 +424,26 @@ model CharacterMemory {
   content     String
   reason      String
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
   character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
 
-  @@index([characterId, createdAt])
+  @@index([characterId, deletedAt, createdAt])
   @@map("character_memories")
+  @@schema("opod")
+}
+
+model CharacterPersona {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  characterId String    @map("character_id") @db.Uuid
+  title       String
+  content     String
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([characterId, deletedAt, createdAt])
+  @@map("character_personas")
   @@schema("opod")
 }

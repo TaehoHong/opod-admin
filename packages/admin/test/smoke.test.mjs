@@ -31,7 +31,7 @@ test("serves the admin UI shell", async (t) => {
 test("proxies admin API requests to the service backend", async (t) => {
   const backend = http.createServer((request, response) => {
     assert.equal(request.url, "/api/character-action-logs");
-    assert.equal(request.headers["x-admin-api-key"], "secret");
+    assert.equal(request.headers.authorization, "Bearer secret");
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify([]));
   });
@@ -46,27 +46,17 @@ test("proxies admin API requests to the service backend", async (t) => {
 
   const response = await fetch(
     `http://127.0.0.1:${adminPort}/api/character-action-logs`,
-    { headers: { "x-admin-api-key": "secret" } },
+    { headers: { authorization: "Bearer secret" } },
   );
 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), []);
 });
 
-test("does not inject or override the admin API key", async (t) => {
-  const previousAdminApiKey = process.env.ADMIN_API_KEY;
-  process.env.ADMIN_API_KEY = "server-secret";
-  t.after(() => {
-    if (previousAdminApiKey === undefined) {
-      delete process.env.ADMIN_API_KEY;
-    } else {
-      process.env.ADMIN_API_KEY = previousAdminApiKey;
-    }
-  });
-
+test("does not inject or override the admin session token", async (t) => {
   const seenHeaders = [];
   const backend = http.createServer((request, response) => {
-    seenHeaders.push(request.headers["x-admin-api-key"]);
+    seenHeaders.push(request.headers.authorization);
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ ok: true }));
   });
@@ -80,7 +70,7 @@ test("does not inject or override the admin API key", async (t) => {
   t.after(() => admin.close());
 
   const response = await fetch(`http://127.0.0.1:${adminPort}/api/users`, {
-    headers: { "x-admin-api-key": "client-secret" },
+    headers: { authorization: "Bearer client-token" },
   });
 
   assert.equal(response.status, 200);
@@ -92,5 +82,21 @@ test("does not inject or override the admin API key", async (t) => {
 
   assert.equal(responseWithoutHeader.status, 200);
   assert.deepEqual(await responseWithoutHeader.json(), { ok: true });
-  assert.deepEqual(seenHeaders, ["client-secret", undefined]);
+  assert.deepEqual(seenHeaders, ["Bearer client-token", undefined]);
+});
+
+test("returns JSON when the API backend is unavailable", async (t) => {
+  const admin = createServer({
+    apiBaseUrl: "http://127.0.0.1:1",
+  });
+  const adminPort = await listen(admin);
+  t.after(() => admin.close());
+
+  const response = await fetch(`http://127.0.0.1:${adminPort}/api/characters`);
+
+  assert.equal(response.status, 502);
+  assert.match(response.headers.get("content-type") ?? "", /application\/json/);
+  const body = await response.json();
+  assert.equal(body.error, "Admin API backend is unavailable");
+  assert.match(body.detail, /fetch failed|bad port|ECONNREFUSED/i);
 });

@@ -18,13 +18,17 @@ const routeEyebrow = hasDocument
 const sidebarNav = hasDocument
   ? document.querySelector("#sidebarNav")
   : undefined;
-const adminAuthForm = hasDocument
-  ? document.querySelector("#adminAuthForm")
+const adminAuthBox = hasDocument
+  ? document.querySelector("#adminAuthBox")
   : undefined;
-const adminApiKeyInput = hasDocument
-  ? document.querySelector("#adminApiKeyInput")
+const adminAuthEmail = hasDocument
+  ? document.querySelector("#adminAuthEmail")
   : undefined;
-const adminApiKeyStorageKey = "opodAdminApiKey";
+const logoutButton = hasDocument
+  ? document.querySelector("#logoutButton")
+  : undefined;
+const adminTokenStorageKey = "opodAdminToken";
+const adminEmailStorageKey = "opodAdminEmail";
 const pendingForms = new WeakSet();
 
 export const navItems = [
@@ -38,6 +42,20 @@ export const navItems = [
   { id: "analytics", label: "분석 / 로그" },
   { id: "settings", label: "설정" },
 ];
+
+export function currentRouteFromHash(hash = "#dashboard", token = "") {
+  const route = String(hash ?? "")
+    .replace(/^#/, "")
+    .split("?")[0];
+  const hasToken = Boolean(String(token ?? "").trim());
+  if (!hasToken) {
+    return "login";
+  }
+  if (route === "login") {
+    return "dashboard";
+  }
+  return navItems.some((item) => item.id === route) ? route : "dashboard";
+}
 
 export function endpoint(path, params = {}) {
   const url = new URL(path, "http://admin.local");
@@ -81,9 +99,51 @@ export function userDetailRequests(userId) {
 
 export function characterDetailRequests(characterId) {
   return [
+    { key: "character", path: `/api/characters/${characterId}` },
+    { key: "personas", path: `/api/characters/${characterId}/personas` },
     { key: "memory", path: `/api/characters/${characterId}/memory` },
     { key: "logs", path: "/api/character-action-logs" },
   ];
+}
+
+export function characterRouteState(hash = "#characters") {
+  const [routePart, query = ""] = String(hash ?? "")
+    .replace(/^#/, "")
+    .split("?");
+  const params = new URLSearchParams(query);
+  const characterId = String(params.get("characterId") ?? "").trim();
+  const mode =
+    params.get("mode") === "create"
+      ? "create"
+      : characterId
+        ? "detail"
+        : "list";
+  const requestedTab = String(params.get("tab") ?? "profile").trim();
+  const tab = ["profile", "persona", "memory", "logs"].includes(requestedTab)
+    ? requestedTab
+    : "profile";
+
+  return {
+    route: routePart || "characters",
+    mode,
+    characterId,
+    tab,
+  };
+}
+
+export function characterHref(input = {}) {
+  const params = new URLSearchParams();
+  if (input.mode === "create") {
+    params.set("mode", "create");
+  } else if (input.characterId) {
+    params.set("characterId", String(input.characterId));
+    if (input.tab && input.tab !== "profile") {
+      params.set("tab", String(input.tab));
+    }
+  }
+
+  const query = params.toString();
+  return query ? `#characters?${query}` : "#characters";
 }
 
 export function itemsFromPage(value) {
@@ -108,17 +168,31 @@ export function paymentDetailRequest(paymentId) {
   return `/api/payments/${paymentId}`;
 }
 
-export function adminRequestOptions(options = {}, apiKey = "") {
-  const key = String(apiKey ?? "").trim();
-  if (!key) {
+export function adminRequestOptions(options = {}, token = "") {
+  const value = String(token ?? "").trim();
+  if (!value) {
     return options;
   }
   return {
     ...options,
     headers: {
       ...(options.headers ?? {}),
-      "x-admin-api-key": key,
+      authorization: `Bearer ${value}`,
     },
+  };
+}
+
+export function adminLoginPayload(form) {
+  return {
+    email: String(form.get("email") ?? "").trim(),
+    password: String(form.get("password") ?? "").trim(),
+  };
+}
+
+export function adminAccountPayload(form) {
+  return {
+    email: String(form.get("email") ?? "").trim(),
+    password: String(form.get("password") ?? "").trim(),
   };
 }
 
@@ -154,6 +228,13 @@ export function memoryPayload(form) {
   return {
     content: String(form.get("content") ?? "").trim(),
     reason: String(form.get("reason") ?? "").trim(),
+  };
+}
+
+export function personaPayload(form) {
+  return {
+    title: String(form.get("title") ?? "").trim(),
+    content: String(form.get("content") ?? "").trim(),
   };
 }
 
@@ -201,6 +282,12 @@ export function generationActionBody(action, form) {
 export async function formActionRequest(action, form, dataset = {}) {
   const characterId =
     fieldValue(dataset, "characterId") || fieldValue(form, "characterId");
+  if (action === "admin-login") {
+    return jsonRequest("/api/admin/login", "POST", adminLoginPayload(form));
+  }
+  if (action === "admin-create") {
+    return jsonRequest("/api/admin/accounts", "POST", adminAccountPayload(form));
+  }
   if (action === "character-create") {
     return jsonRequest("/api/characters", "POST", characterCreatePayload(form));
   }
@@ -218,11 +305,63 @@ export async function formActionRequest(action, form, dataset = {}) {
       characterStatusPayload(form),
     );
   }
+  if (action === "character-delete") {
+    return jsonRequest(`/api/characters/${characterId}`, "DELETE", {
+      reason: requiredField(form, "reason"),
+    });
+  }
+  if (action === "persona-create") {
+    return jsonRequest(
+      `/api/characters/${characterId}/personas`,
+      "POST",
+      personaPayload(form),
+    );
+  }
+  if (action === "persona-update") {
+    return jsonRequest(
+      `/api/characters/${characterId}/personas/${fieldValue(
+        dataset,
+        "personaId",
+      )}`,
+      "PATCH",
+      personaPayload(form),
+    );
+  }
+  if (action === "persona-delete") {
+    return jsonRequest(
+      `/api/characters/${characterId}/personas/${fieldValue(
+        dataset,
+        "personaId",
+      )}`,
+      "DELETE",
+      {},
+    );
+  }
   if (action === "memory-create") {
     return jsonRequest(
       `/api/characters/${characterId}/memory`,
       "POST",
       memoryPayload(form),
+    );
+  }
+  if (action === "memory-update") {
+    return jsonRequest(
+      `/api/characters/${characterId}/memory/${fieldValue(
+        dataset,
+        "memoryId",
+      )}`,
+      "PATCH",
+      memoryPayload(form),
+    );
+  }
+  if (action === "memory-delete") {
+    return jsonRequest(
+      `/api/characters/${characterId}/memory/${fieldValue(
+        dataset,
+        "memoryId",
+      )}`,
+      "DELETE",
+      {},
     );
   }
   if (action === "credit-grant") {
@@ -258,11 +397,11 @@ export async function formActionRequest(action, form, dataset = {}) {
 }
 
 if (hasDocument) {
-  adminApiKeyInput.value = readAdminApiKey();
-  adminAuthForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    writeAdminApiKey(adminApiKeyInput.value);
-    render({ status: "admin API key saved" });
+  updateSessionUi();
+  logoutButton.addEventListener("click", () => {
+    clearAdminAuth();
+    updateSessionUi();
+    location.hash = "login";
   });
   document
     .querySelector("#healthButton")
@@ -279,14 +418,13 @@ if (hasDocument) {
 }
 
 function currentRoute() {
-  const route = location.hash.replace(/^#/, "");
-  return navItems.some((item) => item.id === route) ? route : "dashboard";
+  return currentRouteFromHash(location.hash, readAdminToken());
 }
 
 function setActiveRoute(route) {
   const item = navItems.find((candidate) => candidate.id === route);
-  routeTitle.textContent = item?.label ?? "대시보드";
-  routeEyebrow.textContent = "운영 콘솔";
+  routeTitle.textContent = route === "login" ? "로그인" : (item?.label ?? "대시보드");
+  routeEyebrow.textContent = route === "login" ? "Admin" : "운영 콘솔";
   for (const button of sidebarNav.querySelectorAll("[data-route]")) {
     const isActive = button.dataset.route === route;
     button.classList.toggle("active", isActive);
@@ -299,7 +437,13 @@ function setActiveRoute(route) {
 }
 
 async function renderCurrentRoute() {
+  const redirect = authRedirectRoute();
+  if (redirect) {
+    location.hash = redirect;
+    return;
+  }
   const route = currentRoute();
+  updateSessionUi();
   setActiveRoute(route);
   mainPanel.innerHTML = `<section class="panel"><p class="muted">불러오는 중</p></section>`;
   mainPanel.innerHTML = await routeHtml(route);
@@ -325,6 +469,16 @@ async function handleFormSubmit(event) {
     const result = await request(requestSpec.path, requestSpec.options);
     render(result.body);
     if (result.ok) {
+      if (form.dataset.action === "admin-login" && result.body?.token) {
+        writeAdminAuth(result.body);
+        updateSessionUi();
+        location.hash = "dashboard";
+        return;
+      }
+      if (form.dataset.action === "character-create" && result.body?.id) {
+        location.hash = characterHref({ characterId: result.body.id });
+        return;
+      }
       await renderCurrentRoute();
     }
   } catch (error) {
@@ -483,98 +637,229 @@ async function analyticsHtml() {
 }
 
 function settingsHtml() {
-  return `<section class="panel"><h3>설정</h3><p class="muted">현재 버전은 운영 상태 확인만 제공합니다. 권한 관리는 백엔드 역할 모델이 생긴 뒤 추가합니다.</p></section>`;
+  return `<div class="two-column">
+    <section class="panel">
+      <h3>관리자 계정 생성</h3>
+      <form data-action="admin-create">
+        <label>이메일<input name="email" type="email" autocomplete="off" required /></label>
+        <label>비밀번호<input name="password" type="password" autocomplete="new-password" required /></label>
+        <button type="submit">관리자 생성</button>
+      </form>
+    </section>
+    <section class="panel">
+      <h3>세션</h3>
+      <p class="muted">${escapeHtml(readAdminEmail() || "로그인 정보 없음")}</p>
+    </section>
+  </div>`;
+}
+
+function loginHtml() {
+  return `<section class="panel login-panel">
+    <h3>Admin 로그인</h3>
+    <form data-action="admin-login">
+      <label>이메일<input name="email" type="email" value="admin@opod.com" autocomplete="username" required /></label>
+      <label>비밀번호<input name="password" type="password" autocomplete="current-password" required /></label>
+      <button type="submit">로그인</button>
+    </form>
+  </section>`;
 }
 
 async function charactersHtml() {
-  const result = await request(endpoint("/api/characters", { limit: 25 }));
-  const characters = itemsFromPage(result.body);
-  const selected = characters[0];
-  const detail = selected
-    ? await loadMany(characterDetailRequests(selected.id))
-    : { memory: { body: { items: [] } }, logs: { body: [] } };
-
-  return `<div class="three-column">
-    <section class="panel">
-      <div class="toolbar">
-        <h3>AI 캐릭터</h3>
-      </div>
-      <div class="list">
-        ${
-          characters.length
-            ? characters
-                .map((character, index) => characterRow(character, index === 0))
-                .join("")
-            : `<p class="muted">캐릭터가 없습니다.</p>`
-        }
-      </div>
-    </section>
-    <section class="panel">
-      ${
-        selected
-          ? characterDetailHtml(selected, detail)
-          : `<h3>캐릭터 상세</h3><p class="muted">캐릭터를 생성하거나 선택하세요.</p>`
-      }
-    </section>
-    <aside class="panel">
-      <h3>AI 캐릭터 생성</h3>
-      ${characterCreateForm()}
-      <h3>운영 큐</h3>
-      <div class="list">
-        <div class="list-item"><strong>신고 / 모더레이션</strong><span class="muted">신고 탭에서 처리</span></div>
-        <div class="list-item"><strong>생성 작업</strong><span class="muted">작업 액션은 생성 작업 탭에서 처리</span></div>
-        <div class="list-item"><strong>결제 / 정산</strong><span class="muted">정산 이슈는 결제 탭에서 처리</span></div>
-      </div>
-    </aside>
-  </div>`;
+  const state = characterRouteState(hasDocument ? location.hash : "#characters");
+  if (state.mode === "create") {
+    return characterCreatePageHtml();
+  }
+  if (state.mode === "detail" && state.characterId) {
+    return characterDetailPageHtml(state);
+  }
+  return characterListPageHtml();
 }
 
-function characterRow(character, selected) {
-  return `<div class="list-item ${selected ? "selected" : ""}">
+async function characterListPageHtml() {
+  const result = await request(endpoint("/api/characters", { limit: 25 }));
+  const characters = itemsFromPage(result.body);
+
+  return `<section class="panel">
+      <div class="toolbar">
+        <h3>AI 캐릭터 목록</h3>
+        <a class="action-link" href="${characterHref({ mode: "create" })}">새 캐릭터</a>
+      </div>
+      ${
+        characters.length
+          ? `<div class="list character-list">${characters
+              .map(characterRow)
+              .join("")}</div>`
+          : `<div class="empty-state"><strong>AI 캐릭터가 없습니다.</strong><a class="action-link" href="${characterHref({ mode: "create" })}">AI 캐릭터 생성</a></div>`
+      }
+    </section>`;
+}
+
+function characterCreatePageHtml() {
+  return `<section class="panel">
+    <div class="toolbar">
+      <h3>AI 캐릭터 생성</h3>
+      <a class="text-link" href="${characterHref()}">목록</a>
+    </div>
+    ${characterCreateForm()}
+  </section>`;
+}
+
+async function characterDetailPageHtml(state) {
+  const detail = await loadMany(characterDetailRequests(state.characterId));
+  const character = detail.character?.body;
+  if (!character?.id) {
+    return `<section class="panel">
+      <div class="toolbar">
+        <h3>캐릭터 상세</h3>
+        <a class="text-link" href="${characterHref()}">목록</a>
+      </div>
+      <p class="muted">캐릭터를 찾을 수 없습니다.</p>
+    </section>`;
+  }
+  return characterDetailHtml(character, detail, state.tab);
+}
+
+function characterRow(character) {
+  return `<a class="list-item character-list-item" href="${escapeHtml(
+    characterHref({ characterId: character.id }),
+  )}">
     <strong>${escapeHtml(character.displayName)}</strong>
     <span class="muted">${escapeHtml(character.publicId)} · ${escapeHtml(character.id)}</span>
     <span class="badge ${character.status === "active" ? "" : "warn"}">${escapeHtml(character.status)}</span>
-  </div>`;
+  </a>`;
 }
 
-function characterDetailHtml(character, detail) {
+function characterDetailHtml(character, detail, activeTab = "profile") {
+  const personas = itemsFromPage(detail.personas.body);
   const memory = itemsFromPage(detail.memory.body);
   const logs = itemsFromPage(detail.logs.body).filter(
     (log) => log.characterId === character.id,
   );
-  return `<div class="toolbar">
-      <div>
-        <h3>${escapeHtml(character.displayName)}</h3>
-        <p class="muted">${escapeHtml(character.publicId)} · ${escapeHtml(character.id)}</p>
+  return `<div class="detail-stack">
+    <section class="panel">
+      <div class="toolbar">
+        <div>
+          <h3>${escapeHtml(character.displayName)}</h3>
+          <p class="muted">${escapeHtml(character.publicId)} · ${escapeHtml(character.id)}</p>
+        </div>
+        <div class="toolbar-actions">
+          <span class="badge ${character.status === "active" ? "" : "warn"}">${escapeHtml(character.status)}</span>
+          <a class="text-link" href="${characterHref()}">목록</a>
+        </div>
       </div>
-      <span class="badge ${character.status === "active" ? "" : "warn"}">${escapeHtml(character.status)}</span>
-    </div>
-    <form data-action="character-update" data-character-id="${escapeHtml(character.id)}">
-      <label>표시 이름<input name="displayName" value="${escapeHtml(character.displayName)}" required /></label>
-      <label>Bio<textarea name="bio" rows="3" required>${escapeHtml(character.bio)}</textarea></label>
-      <label>관심사<input name="interests" value="${escapeHtml((character.interests ?? []).join(", "))}" /></label>
-      <button type="submit">프로필 저장</button>
-    </form>
-    <form data-action="character-status" data-character-id="${escapeHtml(character.id)}">
-      <label>상태<select name="status"><option value="active"${selectedOption(character.status, "active")}>active</option><option value="inactive"${selectedOption(character.status, "inactive")}>inactive</option></select></label>
-      <label>이유<input name="reason" required /></label>
-      <button type="submit">상태 변경</button>
-    </form>
-    <div class="two-column">
-      ${listPanel("메모리", memory, (item) =>
-        simpleRow({ title: item.content, subtitle: item.reason }),
+      ${characterTabsHtml(character.id, activeTab)}
+    </section>
+    ${characterTabHtml(character, personas, memory, logs, activeTab)}
+  </div>`;
+}
+
+function characterTabsHtml(characterId, activeTab) {
+  return `<nav class="tabs" aria-label="캐릭터 상세 탭">
+    ${[
+      ["profile", "프로필"],
+      ["persona", "페르소나"],
+      ["memory", "메모리"],
+      ["logs", "로그"],
+    ]
+      .map(
+        ([tab, label]) =>
+          `<a class="tab ${activeTab === tab ? "active" : ""}" href="${escapeHtml(
+            characterHref({ characterId, tab }),
+          )}">${label}</a>`,
+      )
+      .join("")}
+  </nav>`;
+}
+
+function characterTabHtml(character, personas, memory, logs, activeTab) {
+  if (activeTab === "persona") {
+    return `<div class="two-column">
+      ${listPanel("페르소나", personas, (item) =>
+        personaRow(character.id, item),
       )}
-      ${listPanel("액션 로그", logs, logRow)}
-    </div>
-    <form data-action="memory-create" data-character-id="${escapeHtml(character.id)}">
-      <label>새 메모리<textarea name="content" rows="2" required></textarea></label>
-      <label>이유<input name="reason" required /></label>
-      <button type="submit">메모리 추가</button>
-    </form>
-    <div class="two-column">
-      <section class="panel"><h3>게시물 작성</h3>${postFormHtml()}</section>
-      <section class="panel"><h3>생성 작업</h3>${generationQueueForm(character.id)}</section>
+      <section class="panel">
+        <h3>페르소나 추가</h3>
+        <form data-action="persona-create" data-character-id="${escapeHtml(character.id)}">
+          <label>제목<input name="title" required /></label>
+          <label>내용<textarea name="content" rows="3" required></textarea></label>
+          <button type="submit">페르소나 추가</button>
+        </form>
+      </section>
     </div>`;
+  }
+  if (activeTab === "memory") {
+    return `<div class="two-column">
+      ${listPanel("메모리", memory, (item) => memoryRow(character.id, item))}
+      <section class="panel">
+        <h3>메모리 추가</h3>
+        <form data-action="memory-create" data-character-id="${escapeHtml(character.id)}">
+          <label>내용<textarea name="content" rows="3" required></textarea></label>
+          <label>이유<input name="reason" required /></label>
+          <button type="submit">메모리 추가</button>
+        </form>
+      </section>
+    </div>`;
+  }
+  if (activeTab === "logs") {
+    return `<div class="two-column">
+      ${listPanel("액션 로그", logs, logRow)}
+      <section class="panel"><h3>생성 작업</h3>${generationQueueForm(character.id)}</section>
+      <section class="panel"><h3>게시물 작성</h3>${postFormHtml()}</section>
+    </div>`;
+  }
+  return `<div class="two-column">
+    <section class="panel">
+      <h3>프로필</h3>
+      <form data-action="character-update" data-character-id="${escapeHtml(character.id)}">
+        <label>표시 이름<input name="displayName" value="${escapeHtml(character.displayName)}" required /></label>
+        <label>Bio<textarea name="bio" rows="3" required>${escapeHtml(character.bio)}</textarea></label>
+        <label>관심사<input name="interests" value="${escapeHtml((character.interests ?? []).join(", "))}" /></label>
+        <button type="submit">프로필 저장</button>
+      </form>
+    </section>
+    <section class="panel">
+      <h3>상태 관리</h3>
+      <form data-action="character-status" data-character-id="${escapeHtml(character.id)}">
+        <label>상태<select name="status"><option value="active"${selectedOption(character.status, "active")}>active</option><option value="inactive"${selectedOption(character.status, "inactive")}>inactive</option></select></label>
+        <label>이유<input name="reason" required /></label>
+        <button type="submit">상태 변경</button>
+      </form>
+      <form data-action="character-delete" data-character-id="${escapeHtml(character.id)}">
+        <label>삭제 이유<input name="reason" required /></label>
+        <button type="submit">소프트 삭제</button>
+      </form>
+    </section>
+  </div>`;
+}
+
+function personaRow(characterId, persona) {
+  return `<div class="list-item">
+    <strong>${escapeHtml(persona.title)}</strong>
+    <span class="muted">${escapeHtml(persona.content)}</span>
+    <form data-action="persona-update" data-character-id="${escapeHtml(characterId)}" data-persona-id="${escapeHtml(persona.id)}">
+      <label>제목<input name="title" value="${escapeHtml(persona.title)}" required /></label>
+      <label>내용<textarea name="content" rows="2" required>${escapeHtml(persona.content)}</textarea></label>
+      <button type="submit">저장</button>
+    </form>
+    <form data-action="persona-delete" data-character-id="${escapeHtml(characterId)}" data-persona-id="${escapeHtml(persona.id)}">
+      <button type="submit">삭제</button>
+    </form>
+  </div>`;
+}
+
+function memoryRow(characterId, memory) {
+  return `<div class="list-item">
+    <strong>${escapeHtml(memory.content)}</strong>
+    <span class="muted">${escapeHtml(memory.reason)}</span>
+    <form data-action="memory-update" data-character-id="${escapeHtml(characterId)}" data-memory-id="${escapeHtml(memory.id)}">
+      <label>내용<textarea name="content" rows="2" required>${escapeHtml(memory.content)}</textarea></label>
+      <label>이유<input name="reason" value="${escapeHtml(memory.reason)}" required /></label>
+      <button type="submit">저장</button>
+    </form>
+    <form data-action="memory-delete" data-character-id="${escapeHtml(characterId)}" data-memory-id="${escapeHtml(memory.id)}">
+      <button type="submit">삭제</button>
+    </form>
+  </div>`;
 }
 
 function characterCreateForm() {
@@ -588,6 +873,7 @@ function characterCreateForm() {
 }
 
 async function routeHtml(route) {
+  if (route === "login") return loginHtml();
   if (route === "dashboard") return loadDashboardHtml();
   if (route === "users") return usersHtml();
   if (route === "characters") return charactersHtml();
@@ -679,31 +965,80 @@ async function request(path, options) {
   try {
     const response = await fetch(
       path,
-      adminRequestOptions(options, readAdminApiKey()),
+      adminRequestOptions(options, readAdminToken()),
     );
     const text = await response.text();
-    return {
+    const result = {
       ok: response.ok,
-      body: text ? JSON.parse(text) : { status: response.status },
+      body: parseResponseBody(text, response),
     };
+    if (response.status === 401 && currentRoute() !== "login") {
+      clearAdminAuth();
+      updateSessionUi();
+      location.hash = "login";
+    }
+    return result;
   } catch (error) {
     return { ok: false, body: { error: error.message } };
   }
 }
 
-function readAdminApiKey() {
+export function parseResponseBody(text, response = { status: 0 }) {
+  if (!text) {
+    return { status: response.status };
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      error: text,
+      status: response.status,
+    };
+  }
+}
+
+function readAdminToken() {
   return hasDocument
-    ? (window.sessionStorage.getItem(adminApiKeyStorageKey) ?? "")
+    ? (window.sessionStorage.getItem(adminTokenStorageKey) ?? "")
     : "";
 }
 
-function writeAdminApiKey(value) {
-  const key = String(value ?? "").trim();
-  if (key) {
-    window.sessionStorage.setItem(adminApiKeyStorageKey, key);
+function readAdminEmail() {
+  return hasDocument
+    ? (window.sessionStorage.getItem(adminEmailStorageKey) ?? "")
+    : "";
+}
+
+function writeAdminAuth(body) {
+  const token = String(body?.token ?? "").trim();
+  if (token) {
+    window.sessionStorage.setItem(adminTokenStorageKey, token);
+    window.sessionStorage.setItem(
+      adminEmailStorageKey,
+      String(body?.admin?.email ?? ""),
+    );
   } else {
-    window.sessionStorage.removeItem(adminApiKeyStorageKey);
+    clearAdminAuth();
   }
+}
+
+function clearAdminAuth() {
+  window.sessionStorage.removeItem(adminTokenStorageKey);
+  window.sessionStorage.removeItem(adminEmailStorageKey);
+}
+
+function updateSessionUi() {
+  const email = readAdminEmail();
+  adminAuthEmail.textContent = email;
+  adminAuthBox.hidden = !readAdminToken();
+}
+
+function authRedirectRoute() {
+  const route = location.hash.replace(/^#/, "").split("?")[0];
+  const hasToken = Boolean(readAdminToken());
+  if (!hasToken && route !== "login") return "login";
+  if (hasToken && route === "login") return "dashboard";
+  return "";
 }
 
 export async function postPayload(

@@ -37,18 +37,10 @@
             <h2 id="routeTitle">대시보드</h2>
           </div>
           <div class="header-actions">
-            <form id="adminAuthForm" class="auth-form">
-              <label>
-                API key
-                <input
-                  id="adminApiKeyInput"
-                  name="adminApiKey"
-                  type="password"
-                  autocomplete="off"
-                />
-              </label>
-              <button type="submit">저장</button>
-            </form>
+            <div id="adminAuthBox" class="session-box">
+              <span id="adminAuthEmail" class="muted"></span>
+              <button id="logoutButton" type="button">로그아웃</button>
+            </div>
             <button id="healthButton" type="button">상태 확인</button>
           </div>
         </header>

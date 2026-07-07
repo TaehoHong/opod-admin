@@ -24,9 +24,16 @@ export function createServer({
       }
 
       await serveStatic(url.pathname, response);
-    } catch {
-      response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-      response.end("Internal server error");
+    } catch (error) {
+      response.writeHead(502, {
+        "content-type": "application/json; charset=utf-8",
+      });
+      response.end(
+        JSON.stringify({
+          error: "Admin API backend is unavailable",
+          detail: error instanceof Error ? error.message : String(error),
+        }),
+      );
     }
   });
 }

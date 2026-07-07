@@ -13,7 +13,6 @@ type MediaType = "image" | "video";
 type ActorType = "character" | "user";
 type ReportTargetType = "character" | "post" | "message";
 type ReportStatus = "submitted" | "reviewing" | "resolved" | "rejected";
-type CharacterStatus = "active" | "inactive";
 type GenerationRunProvider = "local";
 type CreditPurchaseStatus =
   "pending" | "paid" | "failed" | "canceled" | "refunded";
@@ -25,36 +24,6 @@ type AnalyticsMetricName =
   | "credits.granted"
   | "credits.debited"
   | "generation_jobs.count";
-
-type AdminCharacter = {
-  id: string;
-  publicId: string;
-  displayName: string;
-  bio: string;
-  interests: string[];
-};
-
-type AdminCharacterListItem = AdminCharacter & {
-  status: CharacterStatus;
-  createdAt: string;
-};
-
-type PrismaCharacterListItem = Omit<AdminCharacterListItem, "createdAt"> & {
-  createdAt: Date;
-};
-
-type CharacterStatusReceipt = {
-  id: string;
-  status: CharacterStatus;
-  updatedAt: string;
-};
-
-type PrismaCharacterStatusReceipt = Omit<
-  CharacterStatusReceipt,
-  "updatedAt"
-> & {
-  updatedAt: Date;
-};
 
 type AdminUser = {
   id: string;
@@ -115,18 +84,6 @@ type PrismaHashtagPreference = Omit<
 > & {
   hashtag: { name: string };
   updatedAt: Date;
-};
-
-type CharacterMemory = {
-  id: string;
-  characterId: string;
-  content: string;
-  reason: string;
-  createdAt: string;
-};
-
-type PrismaCharacterMemory = Omit<CharacterMemory, "createdAt"> & {
-  createdAt: Date;
 };
 
 type DirectMediaInput = {
@@ -300,45 +257,10 @@ type CreatedAtWhere = {
 
 type AdminPrismaClient = {
   character: {
-    create(input: {
-      data: {
-        publicId: string;
-        displayName: string;
-        bio: string;
-        interests: string[];
-      };
-      select: typeof characterFields;
-    }): Promise<AdminCharacter>;
-    update(input: {
-      where: { id: string };
-      data: {
-        displayName?: string;
-        bio?: string;
-        interests?: string[];
-      };
-      select: typeof characterFields;
-    }): Promise<AdminCharacter>;
-    update(input: {
-      where: { id: string };
-      data: { status: CharacterStatus };
-      select: typeof characterStatusFields;
-    }): Promise<PrismaCharacterStatusReceipt>;
     findUnique(input: {
       where: { id: string };
       select: { id: true };
     }): Promise<{ id: string } | null>;
-    findFirst(input: {
-      where: { id: string; status?: CharacterStatus };
-      select: { id: true };
-    }): Promise<{ id: string } | null>;
-    findMany(input: {
-      where: { status?: CharacterStatus };
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }];
-      take: number;
-      cursor?: { id: string };
-      skip?: number;
-      select: typeof characterListFields;
-    }): Promise<PrismaCharacterListItem[]>;
   };
   characterActionLog: {
     create(input: {
@@ -354,19 +276,6 @@ type AdminPrismaClient = {
       orderBy: { createdAt: "desc" };
       take: number;
     }): Promise<PrismaCharacterActionLog[]>;
-  };
-  characterMemory: {
-    create(input: {
-      data: {
-        characterId: string;
-        content: string;
-        reason: string;
-      };
-    }): Promise<PrismaCharacterMemory>;
-    findMany(input: {
-      where: { characterId: string };
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }];
-    }): Promise<PrismaCharacterMemory[]>;
   };
   creditLedgerEntry: {
     create(input: {
@@ -587,26 +496,6 @@ type AdminPrismaClient = {
   };
 };
 
-const characterFields = {
-  id: true,
-  publicId: true,
-  displayName: true,
-  bio: true,
-  interests: true,
-} as const;
-
-const characterListFields = {
-  ...characterFields,
-  status: true,
-  createdAt: true,
-} as const;
-
-const characterStatusFields = {
-  id: true,
-  status: true,
-  updatedAt: true,
-} as const;
-
 const userFields = {
   id: true,
   displayName: true,
@@ -646,181 +535,6 @@ export class AdminService {
     private readonly generationService: GenerationService,
     private readonly mediaService: MediaService,
   ) {}
-
-  async createCharacter(input: {
-    publicId: string;
-    displayName: string;
-    bio: string;
-    interests?: string[];
-  }) {
-    const character = await this.prisma.character.create({
-      data: {
-        publicId: input.publicId,
-        displayName: input.displayName,
-        bio: input.bio,
-        interests: input.interests ?? [],
-      },
-      select: characterFields,
-    });
-    await this.recordCharacterActionLog({
-      characterId: character.id,
-      actionType: "CHARACTER_CREATED",
-      targetTable: "characters",
-      targetId: character.id,
-      reason: "character created",
-    });
-    return character;
-  }
-
-  async updateCharacter(input: {
-    id: string;
-    displayName?: string;
-    bio?: string;
-    interests?: string[];
-  }): Promise<AdminCharacter> {
-    const data: {
-      displayName?: string;
-      bio?: string;
-      interests?: string[];
-    } = {};
-    if (input.displayName !== undefined) {
-      const displayName = input.displayName.trim();
-      if (!displayName) {
-        throw new BadRequestException("character display name is required");
-      }
-      data.displayName = displayName;
-    }
-    if (input.bio !== undefined) {
-      const bio = input.bio.trim();
-      if (!bio) {
-        throw new BadRequestException("character bio is required");
-      }
-      data.bio = bio;
-    }
-    if (input.interests !== undefined) {
-      data.interests = input.interests;
-    }
-    if (Object.keys(data).length === 0) {
-      throw new BadRequestException("character update is empty");
-    }
-    if (!(await this.hasCharacter(input.id))) {
-      throw new BadRequestException("Character not found");
-    }
-
-    return this.prisma.character.update({
-      where: { id: input.id },
-      data,
-      select: characterFields,
-    });
-  }
-
-  async updateCharacterStatus(input: {
-    id: string;
-    status: string;
-    reason: string;
-  }): Promise<CharacterStatusReceipt> {
-    const status = this.parseCharacterStatus(input.status);
-    if (!status) {
-      throw new BadRequestException("character status is required");
-    }
-    const reason = input.reason?.trim();
-    if (!reason) {
-      throw new BadRequestException("character status reason is required");
-    }
-    if (!(await this.hasCharacter(input.id))) {
-      throw new BadRequestException("Character not found");
-    }
-
-    const character = await this.prisma.character.update({
-      where: { id: input.id },
-      data: { status },
-      select: characterStatusFields,
-    });
-    await this.recordCharacterActionLog({
-      characterId: character.id,
-      actionType:
-        character.status === "inactive"
-          ? "CHARACTER_DELETED"
-          : "CHARACTER_RESTORED",
-      targetTable: "characters",
-      targetId: character.id,
-      reason,
-    });
-    return {
-      id: character.id,
-      status: character.status,
-      updatedAt: character.updatedAt.toISOString(),
-    };
-  }
-
-  async listCharacterMemory(
-    characterId: string,
-  ): Promise<{ items: CharacterMemory[] }> {
-    if (!(await this.hasCharacter(characterId))) {
-      throw new BadRequestException("Character not found");
-    }
-    const memories = await this.prisma.characterMemory.findMany({
-      where: { characterId },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    });
-    return { items: memories.map((memory) => this.toCharacterMemory(memory)) };
-  }
-
-  async createCharacterMemory(input: {
-    characterId: string;
-    content: string;
-    reason: string;
-  }): Promise<CharacterMemory> {
-    if (!(await this.hasCharacter(input.characterId))) {
-      throw new BadRequestException("Character not found");
-    }
-    const content = input.content?.trim();
-    const reason = input.reason?.trim();
-    if (!content) {
-      throw new BadRequestException("Character memory content is required");
-    }
-    if (!reason) {
-      throw new BadRequestException("Character memory reason is required");
-    }
-
-    const memory = await this.prisma.characterMemory.create({
-      data: {
-        characterId: input.characterId,
-        content,
-        reason,
-      },
-    });
-    return this.toCharacterMemory(memory);
-  }
-
-  async listCharacters(
-    input: { status?: string } & PageInput,
-  ): Promise<Page<AdminCharacterListItem>> {
-    const status = this.parseCharacterStatus(input.status);
-    const where = status === undefined ? {} : { status };
-    const cursorId = decodeCursor(input.cursor);
-    if (
-      cursorId &&
-      !(await this.prisma.character.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
-    ) {
-      throw new BadRequestException("Invalid cursor");
-    }
-
-    const characters = await this.prisma.character.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
-      select: characterListFields,
-    });
-    return pageFromRows(
-      characters.map((character) => this.toCharacterListItem(character)),
-      input.limit,
-    );
-  }
 
   async listUsers(input: { q?: string } & PageInput): Promise<Page<AdminUser>> {
     const term = input.q?.trim();
@@ -1564,20 +1278,6 @@ export class AdminService {
     };
   }
 
-  private toCharacterListItem(
-    character: PrismaCharacterListItem,
-  ): AdminCharacterListItem {
-    return {
-      id: character.id,
-      publicId: character.publicId,
-      displayName: character.displayName,
-      bio: character.bio,
-      interests: character.interests,
-      status: character.status,
-      createdAt: character.createdAt.toISOString(),
-    };
-  }
-
   private toAdminUser(user: PrismaAdminUser): AdminUser {
     return {
       id: user.id,
@@ -1607,16 +1307,6 @@ export class AdminService {
       hashtag: preference.hashtag.name,
       score: preference.score,
       updatedAt: preference.updatedAt.toISOString(),
-    };
-  }
-
-  private toCharacterMemory(memory: PrismaCharacterMemory): CharacterMemory {
-    return {
-      id: memory.id,
-      characterId: memory.characterId,
-      content: memory.content,
-      reason: memory.reason,
-      createdAt: memory.createdAt.toISOString(),
     };
   }
 
@@ -1721,17 +1411,6 @@ export class AdminService {
       return value;
     }
     throw new BadRequestException("Invalid report status");
-  }
-
-  private parseCharacterStatus(status?: string): CharacterStatus | undefined {
-    const value = status?.trim();
-    if (!value) {
-      return undefined;
-    }
-    if (value === "active" || value === "inactive") {
-      return value;
-    }
-    throw new BadRequestException("Invalid character status");
   }
 
   private parseGenerationRunProvider(provider?: string): GenerationRunProvider {

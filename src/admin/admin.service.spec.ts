@@ -114,50 +114,6 @@ describe("AdminService", () => {
     });
   });
 
-  it("creates character memory without a scope", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const create = jest.fn().mockResolvedValue({
-      id: "memory-1",
-      characterId: "character-1",
-      content: "likes concise status reports",
-      reason: "operator note",
-      createdAt,
-    });
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        character: {
-          findUnique: jest.fn().mockResolvedValue({ id: "character-1" }),
-        },
-        characterMemory: { create },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.createCharacterMemory({
-        characterId: "character-1",
-        content: " likes concise status reports ",
-        reason: " operator note ",
-      }),
-    ).resolves.toEqual({
-      id: "memory-1",
-      characterId: "character-1",
-      content: "likes concise status reports",
-      reason: "operator note",
-      createdAt: createdAt.toISOString(),
-    });
-    expect(create).toHaveBeenCalledWith({
-      data: {
-        characterId: "character-1",
-        content: "likes concise status reports",
-        reason: "operator note",
-      },
-    });
-  });
-
   it("lists reports with status-filtered cursor pagination", async () => {
     const createdAt = new Date("2026-07-02T00:00:00.000Z");
     const newerReport = {

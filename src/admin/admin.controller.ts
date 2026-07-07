@@ -9,79 +9,13 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { parsePageQuery } from "../domain/database/page";
-import { AdminApiKeyGuard } from "./admin-api-key.guard";
+import { AdminJwtGuard } from "./auth/admin-jwt.guard";
 import { AdminService } from "./admin.service";
 
 @Controller("api")
-@UseGuards(AdminApiKeyGuard)
+@UseGuards(AdminJwtGuard)
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
-
-  @Get("characters")
-  listCharacters(
-    @Query("cursor") cursor?: string,
-    @Query("limit") limit?: string,
-    @Query("status") status?: string,
-  ) {
-    return this.adminService.listCharacters({
-      status,
-      ...parsePageQuery(cursor, limit),
-    });
-  }
-
-  @Post("characters")
-  createCharacter(
-    @Body()
-    body: {
-      publicId: string;
-      displayName: string;
-      bio: string;
-      interests?: string[];
-    },
-  ) {
-    return this.adminService.createCharacter(body);
-  }
-
-  @Patch("characters/:id/status")
-  updateCharacterStatus(
-    @Param("id") characterId: string,
-    @Body()
-    body: Omit<Parameters<AdminService["updateCharacterStatus"]>[0], "id">,
-  ) {
-    return this.adminService.updateCharacterStatus({
-      id: characterId,
-      ...body,
-    });
-  }
-
-  @Patch("characters/:id")
-  updateCharacter(
-    @Param("id") characterId: string,
-    @Body()
-    body: Omit<Parameters<AdminService["updateCharacter"]>[0], "id">,
-  ) {
-    return this.adminService.updateCharacter({ id: characterId, ...body });
-  }
-
-  @Get("characters/:id/memory")
-  listCharacterMemory(@Param("id") characterId: string) {
-    return this.adminService.listCharacterMemory(characterId);
-  }
-
-  @Post("characters/:id/memory")
-  createCharacterMemory(
-    @Param("id") characterId: string,
-    @Body()
-    body: Omit<
-      Parameters<AdminService["createCharacterMemory"]>[0],
-      "characterId"
-    >,
-  ) {
-    return this.adminService.createCharacterMemory({
-      characterId,
-      ...body,
-    });
-  }
 
   @Post("posts")
   createPost(

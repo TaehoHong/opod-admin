@@ -1,14 +1,15 @@
 import { Module } from "@nestjs/common";
+import { CharactersModule } from "../characters/characters.module";
 import { PrismaModule } from "../domain/database/prisma.module";
-import { AdminApiKeyGuard } from "./admin-api-key.guard";
+import { AdminAuthModule } from "./auth/admin-auth.module";
 import { AdminController } from "./admin.controller";
 import { AdminService } from "./admin.service";
 import { GenerationService } from "./generation/generation.service";
 import { MediaService } from "./media/media.service";
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, AdminAuthModule, CharactersModule],
   controllers: [AdminController],
-  providers: [AdminApiKeyGuard, AdminService, GenerationService, MediaService],
+  providers: [AdminService, GenerationService, MediaService],
 })
 export class AdminModule {}
