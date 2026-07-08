@@ -9,6 +9,8 @@ import { PrismaService } from "../domain/database/prisma.service";
 import { GenerationService } from "./generation/generation.service";
 import { Media, MediaService } from "./media/media.service";
 
+const freeCreditTtlDays = 30;
+
 type MediaType = "image" | "video";
 type ActorType = "character" | "user";
 type ReportTargetType = "character" | "post" | "message";
@@ -1163,6 +1165,16 @@ export class AdminService {
         userId: input.userId,
         entryType,
         amount: input.amount,
+        // Manual admin grants are free credits: consumable bucket with the
+        // 30-day expiry from docs/credit-policy.md in opod-service-backend.
+        ...(entryType === "grant"
+          ? {
+              remainingAmount: input.amount,
+              expiresAt: new Date(
+                Date.now() + freeCreditTtlDays * 24 * 60 * 60 * 1000,
+              ),
+            }
+          : {}),
         reason: input.reason.trim(),
         externalReference: input.externalReference,
       },

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from "@nestjs/common";
@@ -96,6 +97,36 @@ export class CharactersController {
     });
   }
 
+  @Post(":id/personas/bulk")
+  createCharacterPersonas(
+    @Param("id") characterId: string,
+    @Body()
+    body: Omit<
+      Parameters<CharactersService["createCharacterPersonas"]>[0],
+      "characterId"
+    >,
+  ) {
+    return this.charactersService.createCharacterPersonas({
+      characterId,
+      ...body,
+    });
+  }
+
+  @Put(":id/personas/order")
+  reorderCharacterPersonas(
+    @Param("id") characterId: string,
+    @Body()
+    body: Omit<
+      Parameters<CharactersService["reorderCharacterPersonas"]>[0],
+      "characterId"
+    >,
+  ) {
+    return this.charactersService.reorderCharacterPersonas({
+      characterId,
+      ...body,
+    });
+  }
+
   @Patch(":id/personas/:personaId")
   updateCharacterPersona(
     @Param("id") characterId: string,
@@ -139,6 +170,21 @@ export class CharactersController {
     >,
   ) {
     return this.charactersService.createCharacterMemory({
+      characterId,
+      ...body,
+    });
+  }
+
+  @Post(":id/memory/bulk")
+  createCharacterMemories(
+    @Param("id") characterId: string,
+    @Body()
+    body: Omit<
+      Parameters<CharactersService["createCharacterMemories"]>[0],
+      "characterId"
+    >,
+  ) {
+    return this.charactersService.createCharacterMemories({
       characterId,
       ...body,
     });

@@ -19,11 +19,14 @@ import {
   generationCreatePayload,
   generationActionRequest,
   itemsFromPage,
+  memoryBulkPayload,
   memoryPayload,
   navItems,
   parseResponseBody,
   paymentDetailRequest,
+  personaBulkPayload,
   personaPayload,
+  personaReorderPayload,
   postPayload,
   reportUpdatePayload,
   selectedOption,
@@ -247,6 +250,73 @@ test("personaPayload trims title and content", () => {
     title: "Core",
     content: "speaks warmly",
   });
+});
+
+test("personaPayload includes sortOrder only when the field is filled", () => {
+  const withOrder = new FormData();
+  withOrder.set("title", "Core");
+  withOrder.set("content", "warm");
+  withOrder.set("sortOrder", "20");
+  assert.deepEqual(personaPayload(withOrder), {
+    title: "Core",
+    content: "warm",
+    sortOrder: 20,
+  });
+
+  const withoutOrder = new FormData();
+  withoutOrder.set("title", "Core");
+  withoutOrder.set("content", "warm");
+  withoutOrder.set("sortOrder", "");
+  assert.deepEqual(personaPayload(withoutOrder), {
+    title: "Core",
+    content: "warm",
+  });
+});
+
+test("personaReorderPayload parses a JSON array of persona ids", () => {
+  const form = new FormData();
+  form.set("personaIds", '["p-2","p-1","p-3"]');
+  assert.deepEqual(personaReorderPayload(form), {
+    personaIds: ["p-2", "p-1", "p-3"],
+  });
+
+  const invalid = new FormData();
+  invalid.set("personaIds", "p-1, p-2");
+  assert.throws(() => personaReorderPayload(invalid), /valid JSON/);
+});
+
+test("bulk payloads parse a JSON array from the items field", () => {
+  const personaForm = new FormData();
+  personaForm.set(
+    "items",
+    ' [{"title":"01. Core","content":"Warm"},{"title":"02. Voice","content":"Short"}] ',
+  );
+  assert.deepEqual(personaBulkPayload(personaForm), {
+    items: [
+      { title: "01. Core", content: "Warm" },
+      { title: "02. Voice", content: "Short" },
+    ],
+  });
+
+  const memoryForm = new FormData();
+  memoryForm.set("items", '[{"content":"met fan","reason":"consistency"}]');
+  assert.deepEqual(memoryBulkPayload(memoryForm), {
+    items: [{ content: "met fan", reason: "consistency" }],
+  });
+});
+
+test("bulk payloads reject invalid or non-array JSON", () => {
+  const invalidJson = new FormData();
+  invalidJson.set("items", "not json");
+  assert.throws(() => personaBulkPayload(invalidJson), /valid JSON/);
+
+  const notArray = new FormData();
+  notArray.set("items", '{"title":"Core"}');
+  assert.throws(() => memoryBulkPayload(notArray), /JSON array/);
+
+  const empty = new FormData();
+  empty.set("items", "  ");
+  assert.throws(() => personaBulkPayload(empty), /required/);
 });
 
 test("generationActionRequest builds existing job action endpoints", () => {
@@ -483,6 +553,30 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       path: "/api/characters/char-1/personas/persona-1",
       method: "DELETE",
       body: {},
+    },
+    {
+      action: "persona-bulk-create",
+      dataset: { characterId: "char-1" },
+      data: { items: '[{"title":"Core","content":"warm"}]' },
+      path: "/api/characters/char-1/personas/bulk",
+      method: "POST",
+      body: { items: [{ title: "Core", content: "warm" }] },
+    },
+    {
+      action: "persona-reorder",
+      dataset: { characterId: "char-1" },
+      data: { personaIds: '["persona-2","persona-1"]' },
+      path: "/api/characters/char-1/personas/order",
+      method: "PUT",
+      body: { personaIds: ["persona-2", "persona-1"] },
+    },
+    {
+      action: "memory-bulk-create",
+      dataset: { characterId: "char-1" },
+      data: { items: '[{"content":"city night","reason":"operator"}]' },
+      path: "/api/characters/char-1/memory/bulk",
+      method: "POST",
+      body: { items: [{ content: "city night", reason: "operator" }] },
     },
     {
       action: "memory-create",

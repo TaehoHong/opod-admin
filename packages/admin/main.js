@@ -232,10 +232,27 @@ export function memoryPayload(form) {
 }
 
 export function personaPayload(form) {
-  return {
+  const payload = {
     title: String(form.get("title") ?? "").trim(),
     content: String(form.get("content") ?? "").trim(),
   };
+  const sortOrder = String(form.get("sortOrder") ?? "").trim();
+  if (sortOrder !== "") {
+    payload.sortOrder = Number(sortOrder);
+  }
+  return payload;
+}
+
+export function personaBulkPayload(form) {
+  return { items: parseBulkItems(form.get("items")) };
+}
+
+export function personaReorderPayload(form) {
+  return { personaIds: parseBulkItems(form.get("personaIds")) };
+}
+
+export function memoryBulkPayload(form) {
+  return { items: parseBulkItems(form.get("items")) };
 }
 
 export function reportUpdatePayload(form) {
@@ -327,6 +344,13 @@ export async function formActionRequest(action, form, dataset = {}) {
       personaPayload(form),
     );
   }
+  if (action === "persona-reorder") {
+    return jsonRequest(
+      `/api/characters/${characterId}/personas/order`,
+      "PUT",
+      personaReorderPayload(form),
+    );
+  }
   if (action === "persona-delete") {
     return jsonRequest(
       `/api/characters/${characterId}/personas/${fieldValue(
@@ -337,11 +361,25 @@ export async function formActionRequest(action, form, dataset = {}) {
       {},
     );
   }
+  if (action === "persona-bulk-create") {
+    return jsonRequest(
+      `/api/characters/${characterId}/personas/bulk`,
+      "POST",
+      personaBulkPayload(form),
+    );
+  }
   if (action === "memory-create") {
     return jsonRequest(
       `/api/characters/${characterId}/memory`,
       "POST",
       memoryPayload(form),
+    );
+  }
+  if (action === "memory-bulk-create") {
+    return jsonRequest(
+      `/api/characters/${characterId}/memory/bulk`,
+      "POST",
+      memoryBulkPayload(form),
     );
   }
   if (action === "memory-update") {
@@ -780,9 +818,39 @@ function characterTabHtml(character, personas, memory, logs, activeTab) {
       <section class="panel">
         <h3>페르소나 추가</h3>
         <form data-action="persona-create" data-character-id="${escapeHtml(character.id)}">
-          <label>제목<input name="title" required /></label>
-          <label>내용<textarea name="content" rows="3" required></textarea></label>
+          <label>제목<input name="title" maxlength="200" required /></label>
+          <label>내용<textarea name="content" rows="3" maxlength="8000" required></textarea></label>
           <button type="submit">페르소나 추가</button>
+        </form>
+      </section>
+      <section class="panel">
+        <h3>페르소나 일괄 추가</h3>
+        <form data-action="persona-bulk-create" data-character-id="${escapeHtml(character.id)}">
+          <label>JSON 배열<textarea name="items" rows="6" placeholder='[{"title":"제목","content":"내용"}]' required></textarea></label>
+          <p class="muted">배열 순서대로 정렬 번호가 자동 부여됩니다.</p>
+          <button type="submit">일괄 추가</button>
+        </form>
+      </section>
+      <section class="panel">
+        <h3>순서 일괄 변경</h3>
+        <form data-action="persona-reorder" data-character-id="${escapeHtml(character.id)}">
+          <label>페르소나 ID 배열<textarea name="personaIds" rows="6" required>${escapeHtml(
+            JSON.stringify(
+              personas.map((item) => item.id),
+              null,
+              2,
+            ),
+          )}</textarea></label>
+          <p class="muted">현재 순서로 채워져 있습니다. 줄 순서를 바꿔 저장하면 10, 20, 30… 으로 다시 매겨집니다. 활성 페르소나 전체가 정확히 한 번씩 포함되어야 합니다.</p>
+          ${listPanel(
+            "ID 참조",
+            personas,
+            (item) => `<div class="list-item">
+              <strong>#${escapeHtml(String(item.sortOrder ?? ""))} ${escapeHtml(item.title)}</strong>
+              <span class="muted">${escapeHtml(item.id)}</span>
+            </div>`,
+          )}
+          <button type="submit">순서 저장</button>
         </form>
       </section>
     </div>`;
@@ -793,9 +861,16 @@ function characterTabHtml(character, personas, memory, logs, activeTab) {
       <section class="panel">
         <h3>메모리 추가</h3>
         <form data-action="memory-create" data-character-id="${escapeHtml(character.id)}">
-          <label>내용<textarea name="content" rows="3" required></textarea></label>
-          <label>이유<input name="reason" required /></label>
+          <label>내용<textarea name="content" rows="3" maxlength="8000" required></textarea></label>
+          <label>이유<textarea name="reason" rows="2" maxlength="1000" required></textarea></label>
           <button type="submit">메모리 추가</button>
+        </form>
+      </section>
+      <section class="panel">
+        <h3>메모리 일괄 추가</h3>
+        <form data-action="memory-bulk-create" data-character-id="${escapeHtml(character.id)}">
+          <label>JSON 배열<textarea name="items" rows="6" placeholder='[{"content":"내용","reason":"이유"}]' required></textarea></label>
+          <button type="submit">일괄 추가</button>
         </form>
       </section>
     </div>`;
@@ -834,11 +909,12 @@ function characterTabHtml(character, personas, memory, logs, activeTab) {
 
 function personaRow(characterId, persona) {
   return `<div class="list-item">
-    <strong>${escapeHtml(persona.title)}</strong>
+    <strong>#${escapeHtml(String(persona.sortOrder ?? ""))} ${escapeHtml(persona.title)}</strong>
     <span class="muted">${escapeHtml(persona.content)}</span>
     <form data-action="persona-update" data-character-id="${escapeHtml(characterId)}" data-persona-id="${escapeHtml(persona.id)}">
-      <label>제목<input name="title" value="${escapeHtml(persona.title)}" required /></label>
-      <label>내용<textarea name="content" rows="2" required>${escapeHtml(persona.content)}</textarea></label>
+      <label>제목<input name="title" value="${escapeHtml(persona.title)}" maxlength="200" required /></label>
+      <label>내용<textarea name="content" rows="2" maxlength="8000" required>${escapeHtml(persona.content)}</textarea></label>
+      <label>순서<input name="sortOrder" type="number" min="0" step="1" value="${escapeHtml(String(persona.sortOrder ?? ""))}" /></label>
       <button type="submit">저장</button>
     </form>
     <form data-action="persona-delete" data-character-id="${escapeHtml(characterId)}" data-persona-id="${escapeHtml(persona.id)}">
@@ -852,8 +928,8 @@ function memoryRow(characterId, memory) {
     <strong>${escapeHtml(memory.content)}</strong>
     <span class="muted">${escapeHtml(memory.reason)}</span>
     <form data-action="memory-update" data-character-id="${escapeHtml(characterId)}" data-memory-id="${escapeHtml(memory.id)}">
-      <label>내용<textarea name="content" rows="2" required>${escapeHtml(memory.content)}</textarea></label>
-      <label>이유<input name="reason" value="${escapeHtml(memory.reason)}" required /></label>
+      <label>내용<textarea name="content" rows="2" maxlength="8000" required>${escapeHtml(memory.content)}</textarea></label>
+      <label>이유<textarea name="reason" rows="2" maxlength="1000" required>${escapeHtml(memory.reason)}</textarea></label>
       <button type="submit">저장</button>
     </form>
     <form data-action="memory-delete" data-character-id="${escapeHtml(characterId)}" data-memory-id="${escapeHtml(memory.id)}">
@@ -1058,6 +1134,23 @@ export async function postPayload(
       ? [{ mediaId: await uploadMedia(file, mediaType, requestFn, putObject) }]
       : [{ mediaType, url: requiredMediaUrl(form) }],
   };
+}
+
+function parseBulkItems(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    throw new Error("items is required");
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("items must be valid JSON");
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error("items must be a non-empty JSON array");
+  }
+  return parsed;
 }
 
 function splitCsv(value) {

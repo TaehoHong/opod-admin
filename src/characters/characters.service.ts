@@ -68,6 +68,7 @@ type CharacterPersona = {
   characterId: string;
   title: string;
   content: string;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
@@ -178,6 +179,7 @@ type CharactersPrismaClient = {
         characterId: string;
         title: string;
         content: string;
+        sortOrder: number;
       };
       select: typeof characterPersonaFields;
     }): Promise<PrismaCharacterPersona>;
@@ -185,9 +187,14 @@ type CharactersPrismaClient = {
       where: { id: string; characterId: string; deletedAt: null };
       select: { id: true };
     }): Promise<{ id: string } | null>;
+    findFirst(input: {
+      where: { characterId: string; deletedAt: null };
+      orderBy: { sortOrder: "desc" };
+      select: { sortOrder: true };
+    }): Promise<{ sortOrder: number } | null>;
     findMany(input: {
       where: { characterId: string; deletedAt: null };
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }];
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }];
       select: typeof characterPersonaFields;
     }): Promise<PrismaCharacterPersona[]>;
     update(input: {
@@ -195,6 +202,7 @@ type CharactersPrismaClient = {
       data: {
         title?: string;
         content?: string;
+        sortOrder?: number;
         deletedAt?: Date;
       };
       select: typeof characterPersonaFields;
@@ -227,6 +235,7 @@ const characterPersonaFields = {
   characterId: true,
   title: true,
   content: true,
+  sortOrder: true,
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
@@ -241,6 +250,17 @@ const characterMemoryFields = {
   updatedAt: true,
   deletedAt: true,
 } as const;
+
+// Persona/memory text is assembled into LLM prompts downstream; the length
+// caps keep a single entry from blowing the prompt budget.
+const PERSONA_TITLE_MAX_LENGTH = 200;
+const PERSONA_CONTENT_MAX_LENGTH = 8000;
+const MEMORY_CONTENT_MAX_LENGTH = 8000;
+const MEMORY_REASON_MAX_LENGTH = 1000;
+const BULK_CREATE_MAX_ITEMS = 50;
+// Personas are numbered in steps so an entry can be inserted between two
+// existing ones (e.g. 15 between 10 and 20) without renumbering the rest.
+const PERSONA_SORT_STEP = 10;
 
 @Injectable()
 export class CharactersService {
@@ -374,7 +394,7 @@ export class CharactersService {
     const [personas, memories] = await Promise.all([
       this.prisma.characterPersona.findMany({
         where: { characterId, deletedAt: null },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
         select: characterPersonaFields,
       }),
       this.prisma.characterMemory.findMany({
@@ -441,14 +461,8 @@ export class CharactersService {
     if (!(await this.hasCharacter(input.characterId))) {
       throw new BadRequestException("Character not found");
     }
-    const content = input.content?.trim();
-    const reason = input.reason?.trim();
-    if (!content) {
-      throw new BadRequestException("Character memory content is required");
-    }
-    if (!reason) {
-      throw new BadRequestException("Character memory reason is required");
-    }
+    const content = this.parseMemoryContent(input.content, "Character memory");
+    const reason = this.parseMemoryReason(input.reason, "Character memory");
 
     const memory = await this.prisma.characterMemory.create({
       data: {
@@ -458,7 +472,52 @@ export class CharactersService {
       },
       select: characterMemoryFields,
     });
+    await this.recordCharacterActionLog({
+      characterId: input.characterId,
+      actionType: "MEMORY_CREATED",
+      targetTable: "character_memories",
+      targetId: memory.id,
+      reason: "memory created",
+    });
     return this.toCharacterMemory(memory);
+  }
+
+  async createCharacterMemories(input: {
+    characterId: string;
+    items?: Array<{ content?: string; reason?: string }>;
+  }): Promise<{ items: CharacterMemory[] }> {
+    if (!(await this.hasCharacter(input.characterId))) {
+      throw new BadRequestException("Character not found");
+    }
+    const items = this.parseBulkItems(input.items, "Character memory").map(
+      (item, index) => ({
+        content: this.parseMemoryContent(
+          item.content ?? "",
+          `Character memory items[${index}]`,
+        ),
+        reason: this.parseMemoryReason(
+          item.reason ?? "",
+          `Character memory items[${index}]`,
+        ),
+      }),
+    );
+
+    const memories: CharacterMemory[] = [];
+    for (const item of items) {
+      const memory = await this.prisma.characterMemory.create({
+        data: { characterId: input.characterId, ...item },
+        select: characterMemoryFields,
+      });
+      await this.recordCharacterActionLog({
+        characterId: input.characterId,
+        actionType: "MEMORY_CREATED",
+        targetTable: "character_memories",
+        targetId: memory.id,
+        reason: "memory created (bulk)",
+      });
+      memories.push(this.toCharacterMemory(memory));
+    }
+    return { items: memories };
   }
 
   async updateCharacterMemory(input: {
@@ -470,18 +529,10 @@ export class CharactersService {
     await this.assertCharacterMemory(input.characterId, input.memoryId);
     const data: { content?: string; reason?: string } = {};
     if (input.content !== undefined) {
-      const content = input.content.trim();
-      if (!content) {
-        throw new BadRequestException("Character memory content is required");
-      }
-      data.content = content;
+      data.content = this.parseMemoryContent(input.content, "Character memory");
     }
     if (input.reason !== undefined) {
-      const reason = input.reason.trim();
-      if (!reason) {
-        throw new BadRequestException("Character memory reason is required");
-      }
-      data.reason = reason;
+      data.reason = this.parseMemoryReason(input.reason, "Character memory");
     }
     if (Object.keys(data).length === 0) {
       throw new BadRequestException("Character memory update is empty");
@@ -491,9 +542,19 @@ export class CharactersService {
       data,
       select: characterMemoryFields,
     });
+    await this.recordCharacterActionLog({
+      characterId: input.characterId,
+      actionType: "MEMORY_UPDATED",
+      targetTable: "character_memories",
+      targetId: memory.id,
+      reason: "memory updated",
+    });
     return this.toCharacterMemory(memory);
   }
 
+  // TODO: soft-deleted memories/personas cannot be recovered from the admin
+  // API. Add deleted-item listing and restore endpoints so operators can undo
+  // deletes without touching the database directly.
   async deleteCharacterMemory(input: {
     characterId: string;
     memoryId: string;
@@ -503,6 +564,13 @@ export class CharactersService {
       where: { id: input.memoryId },
       data: { deletedAt: new Date() },
       select: characterMemoryFields,
+    });
+    await this.recordCharacterActionLog({
+      characterId: input.characterId,
+      actionType: "MEMORY_DELETED",
+      targetTable: "character_memories",
+      targetId: memory.id,
+      reason: "memory soft-deleted",
     });
     return {
       id: memory.id,
@@ -518,7 +586,7 @@ export class CharactersService {
     }
     const personas = await this.prisma.characterPersona.findMany({
       where: { characterId, deletedAt: null },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
       select: characterPersonaFields,
     });
     return {
@@ -526,31 +594,92 @@ export class CharactersService {
     };
   }
 
+  private async nextPersonaSortOrder(characterId: string): Promise<number> {
+    const top = await this.prisma.characterPersona.findFirst({
+      where: { characterId, deletedAt: null },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
+    });
+    return (top?.sortOrder ?? 0) + PERSONA_SORT_STEP;
+  }
+
   async createCharacterPersona(input: {
     characterId: string;
     title: string;
     content: string;
+    sortOrder?: number;
   }): Promise<CharacterPersona> {
     if (!(await this.hasCharacter(input.characterId))) {
       throw new BadRequestException("Character not found");
     }
-    const title = input.title?.trim();
-    const content = input.content?.trim();
-    if (!title) {
-      throw new BadRequestException("Character persona title is required");
-    }
-    if (!content) {
-      throw new BadRequestException("Character persona content is required");
-    }
+    const title = this.parsePersonaTitle(input.title, "Character persona");
+    const content = this.parsePersonaContent(
+      input.content,
+      "Character persona",
+    );
+    const sortOrder =
+      input.sortOrder === undefined
+        ? await this.nextPersonaSortOrder(input.characterId)
+        : this.parseSortOrder(input.sortOrder, "Character persona");
     const persona = await this.prisma.characterPersona.create({
       data: {
         characterId: input.characterId,
         title,
         content,
+        sortOrder,
       },
       select: characterPersonaFields,
     });
+    await this.recordCharacterActionLog({
+      characterId: input.characterId,
+      actionType: "PERSONA_CREATED",
+      targetTable: "character_personas",
+      targetId: persona.id,
+      reason: "persona created",
+    });
     return this.toCharacterPersona(persona);
+  }
+
+  async createCharacterPersonas(input: {
+    characterId: string;
+    items?: Array<{ title?: string; content?: string }>;
+  }): Promise<{ items: CharacterPersona[] }> {
+    if (!(await this.hasCharacter(input.characterId))) {
+      throw new BadRequestException("Character not found");
+    }
+    const items = this.parseBulkItems(input.items, "Character persona").map(
+      (item, index) => ({
+        title: this.parsePersonaTitle(
+          item.title ?? "",
+          `Character persona items[${index}]`,
+        ),
+        content: this.parsePersonaContent(
+          item.content ?? "",
+          `Character persona items[${index}]`,
+        ),
+      }),
+    );
+
+    // Number personas in the order they were submitted so the pasted sequence
+    // becomes the assembly order.
+    let sortOrder = await this.nextPersonaSortOrder(input.characterId);
+    const personas: CharacterPersona[] = [];
+    for (const item of items) {
+      const persona = await this.prisma.characterPersona.create({
+        data: { characterId: input.characterId, ...item, sortOrder },
+        select: characterPersonaFields,
+      });
+      await this.recordCharacterActionLog({
+        characterId: input.characterId,
+        actionType: "PERSONA_CREATED",
+        targetTable: "character_personas",
+        targetId: persona.id,
+        reason: "persona created (bulk)",
+      });
+      personas.push(this.toCharacterPersona(persona));
+      sortOrder += PERSONA_SORT_STEP;
+    }
+    return { items: personas };
   }
 
   async updateCharacterPersona(input: {
@@ -558,22 +687,24 @@ export class CharactersService {
     personaId: string;
     title?: string;
     content?: string;
+    sortOrder?: number;
   }): Promise<CharacterPersona> {
     await this.assertCharacterPersona(input.characterId, input.personaId);
-    const data: { title?: string; content?: string } = {};
+    const data: { title?: string; content?: string; sortOrder?: number } = {};
     if (input.title !== undefined) {
-      const title = input.title.trim();
-      if (!title) {
-        throw new BadRequestException("Character persona title is required");
-      }
-      data.title = title;
+      data.title = this.parsePersonaTitle(input.title, "Character persona");
     }
     if (input.content !== undefined) {
-      const content = input.content.trim();
-      if (!content) {
-        throw new BadRequestException("Character persona content is required");
-      }
-      data.content = content;
+      data.content = this.parsePersonaContent(
+        input.content,
+        "Character persona",
+      );
+    }
+    if (input.sortOrder !== undefined) {
+      data.sortOrder = this.parseSortOrder(
+        input.sortOrder,
+        "Character persona",
+      );
     }
     if (Object.keys(data).length === 0) {
       throw new BadRequestException("Character persona update is empty");
@@ -583,7 +714,68 @@ export class CharactersService {
       data,
       select: characterPersonaFields,
     });
+    await this.recordCharacterActionLog({
+      characterId: input.characterId,
+      actionType: "PERSONA_UPDATED",
+      targetTable: "character_personas",
+      targetId: persona.id,
+      reason: "persona updated",
+    });
     return this.toCharacterPersona(persona);
+  }
+
+  // Replaces the full ordering: personaIds must list every active persona for
+  // the character exactly once. Personas are renumbered to 10, 20, 30, ... in
+  // the given order, which also normalizes any legacy rows still at 0.
+  async reorderCharacterPersonas(input: {
+    characterId: string;
+    personaIds?: string[];
+  }): Promise<{ items: CharacterPersona[] }> {
+    if (!(await this.hasCharacter(input.characterId))) {
+      throw new BadRequestException("Character not found");
+    }
+    const requested = input.personaIds;
+    if (!Array.isArray(requested) || requested.length === 0) {
+      throw new BadRequestException("Character persona personaIds are required");
+    }
+    if (new Set(requested).size !== requested.length) {
+      throw new BadRequestException(
+        "Character persona personaIds must not contain duplicates",
+      );
+    }
+
+    const existing = await this.prisma.characterPersona.findMany({
+      where: { characterId: input.characterId, deletedAt: null },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: characterPersonaFields,
+    });
+    const existingIds = new Set(existing.map((persona) => persona.id));
+    if (
+      requested.length !== existingIds.size ||
+      !requested.every((id) => existingIds.has(id))
+    ) {
+      throw new BadRequestException(
+        "Character persona personaIds must match the active personas exactly",
+      );
+    }
+
+    const reordered: CharacterPersona[] = [];
+    for (const [index, personaId] of requested.entries()) {
+      const persona = await this.prisma.characterPersona.update({
+        where: { id: personaId },
+        data: { sortOrder: (index + 1) * PERSONA_SORT_STEP },
+        select: characterPersonaFields,
+      });
+      reordered.push(this.toCharacterPersona(persona));
+    }
+    await this.recordCharacterActionLog({
+      characterId: input.characterId,
+      actionType: "PERSONA_REORDERED",
+      targetTable: "character_personas",
+      targetId: input.characterId,
+      reason: "personas reordered",
+    });
+    return { items: reordered };
   }
 
   async deleteCharacterPersona(input: {
@@ -595,6 +787,13 @@ export class CharactersService {
       where: { id: input.personaId },
       data: { deletedAt: new Date() },
       select: characterPersonaFields,
+    });
+    await this.recordCharacterActionLog({
+      characterId: input.characterId,
+      actionType: "PERSONA_DELETED",
+      targetTable: "character_personas",
+      targetId: persona.id,
+      reason: "persona soft-deleted",
     });
     return {
       id: persona.id,
@@ -674,12 +873,88 @@ export class CharactersService {
       characterId: persona.characterId,
       title: persona.title,
       content: persona.content,
+      sortOrder: persona.sortOrder,
       createdAt: persona.createdAt.toISOString(),
       updatedAt: persona.updatedAt.toISOString(),
       ...(persona.deletedAt
         ? { deletedAt: persona.deletedAt.toISOString() }
         : {}),
     };
+  }
+
+  private parseBulkItems<T>(items: T[] | undefined, subject: string): T[] {
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new BadRequestException(`${subject} items are required`);
+    }
+    if (items.length > BULK_CREATE_MAX_ITEMS) {
+      throw new BadRequestException(
+        `${subject} items must be ${BULK_CREATE_MAX_ITEMS} or fewer`,
+      );
+    }
+    return items;
+  }
+
+  private parsePersonaTitle(value: string, subject: string): string {
+    return this.parseTextField(
+      value,
+      `${subject} title`,
+      PERSONA_TITLE_MAX_LENGTH,
+    );
+  }
+
+  private parsePersonaContent(value: string, subject: string): string {
+    return this.parseTextField(
+      value,
+      `${subject} content`,
+      PERSONA_CONTENT_MAX_LENGTH,
+    );
+  }
+
+  private parseMemoryContent(value: string, subject: string): string {
+    return this.parseTextField(
+      value,
+      `${subject} content`,
+      MEMORY_CONTENT_MAX_LENGTH,
+    );
+  }
+
+  private parseMemoryReason(value: string, subject: string): string {
+    return this.parseTextField(
+      value,
+      `${subject} reason`,
+      MEMORY_REASON_MAX_LENGTH,
+    );
+  }
+
+  private parseSortOrder(value: number, subject: string): number {
+    if (
+      typeof value !== "number" ||
+      !Number.isInteger(value) ||
+      value < 0 ||
+      value > 1_000_000
+    ) {
+      throw new BadRequestException(
+        `${subject} sortOrder must be an integer between 0 and 1000000`,
+      );
+    }
+    return value;
+  }
+
+  private parseTextField(
+    value: string,
+    label: string,
+    maxLength: number,
+  ): string {
+    const text = value?.trim();
+    if (!text) {
+      throw new BadRequestException(`${label} is required`);
+    }
+    if (text.length > maxLength) {
+      throw new BadRequestException(
+        `${label} must be at most ${maxLength} characters`,
+      );
+    }
+    return text;
   }
 
   private parseCharacterStatus(status?: string): CharacterStatus | undefined {

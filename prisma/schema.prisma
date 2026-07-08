@@ -42,6 +42,15 @@ enum CreditPurchaseStatus {
   @@schema("opod")
 }
 
+enum CreditReservationStatus {
+  reserved
+  captured
+  released
+
+  @@map("credit_reservation_status")
+  @@schema("opod")
+}
+
 enum GenerationJobStatus {
   queued
   running
@@ -86,8 +95,10 @@ model User {
   displayName          String                  @map("display_name")
   createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   characterFollows     UserCharacterFollow[]
+  creditCheckIns       CreditCheckIn[]
   creditLedgerEntries  CreditLedgerEntry[]
   creditPurchases      CreditPurchase[]
+  creditReservations   CreditReservation[]
   events               UserEvent[]
   messageConversations MessageConversation[]
   notifications        Notification[]
@@ -341,12 +352,17 @@ model CreditLedgerEntry {
   userId            String          @map("user_id") @db.Uuid
   entryType         CreditEntryType @map("entry_type")
   amount            Int
+  // grant-only: unconsumed credits left in this grant bucket.
+  remainingAmount   Int?            @map("remaining_amount")
+  // grant-only: free credits expire; null means no expiry (paid credits).
+  expiresAt         DateTime?       @map("expires_at") @db.Timestamptz(6)
   reason            String
   externalReference String?         @map("external_reference")
   createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   user              User            @relation(fields: [userId], references: [id])
 
   @@index([userId, createdAt])
+  @@index([userId, entryType, expiresAt])
   @@map("credit_ledger_entries")
   @@schema("opod")
 }
@@ -365,6 +381,36 @@ model CreditPurchase {
 
   @@index([userId, createdAt])
   @@map("credit_purchases")
+  @@schema("opod")
+}
+
+model CreditReservation {
+  id         String                  @id @default(uuid(7)) @db.Uuid
+  userId     String                  @map("user_id") @db.Uuid
+  actionType String                  @map("action_type")
+  amount     Int
+  status     CreditReservationStatus @default(reserved)
+  reference  String                  @unique
+  expiresAt  DateTime                @map("expires_at") @db.Timestamptz(6)
+  createdAt  DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user       User                    @relation(fields: [userId], references: [id])
+
+  @@index([userId, status, expiresAt])
+  @@map("credit_reservations")
+  @@schema("opod")
+}
+
+model CreditCheckIn {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  // KST calendar date the user checked in, formatted YYYY-MM-DD.
+  checkInDate String   @map("check_in_date")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, checkInDate])
+  @@map("credit_check_ins")
   @@schema("opod")
 }
 
@@ -438,12 +484,15 @@ model CharacterPersona {
   characterId String    @map("character_id") @db.Uuid
   title       String
   content     String
+  // Assembly order when personas are stitched into a prompt; lower comes first.
+  // Assigned in steps of 10 so entries can be inserted between without renumber.
+  sortOrder   Int       @default(0) @map("sort_order")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
   character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
 
-  @@index([characterId, deletedAt, createdAt])
+  @@index([characterId, deletedAt, sortOrder])
   @@map("character_personas")
   @@schema("opod")
 }
