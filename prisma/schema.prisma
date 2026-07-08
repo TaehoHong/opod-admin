@@ -87,6 +87,14 @@ enum CharacterStatus {
   @@schema("opod")
 }
 
+enum InquiryStatus {
+  submitted
+  answered
+
+  @@map("inquiry_status")
+  @@schema("opod")
+}
+
 model User {
   id                   String                  @id @default(uuid(7)) @db.Uuid
   email                String?                 @unique
@@ -100,6 +108,7 @@ model User {
   creditPurchases      CreditPurchase[]
   creditReservations   CreditReservation[]
   events               UserEvent[]
+  inquiries            Inquiry[]
   messageConversations MessageConversation[]
   notifications        Notification[]
   refreshTokens        UserRefreshToken[]
@@ -120,6 +129,60 @@ model UserRefreshToken {
 
   @@index([userId, createdAt])
   @@map("user_refresh_tokens")
+  @@schema("opod")
+}
+
+// Content authoring lives in opod-admin; opod-service-backend owns the
+// schema/migrations and exposes read-only public APIs (see its
+// docs/account-support-policy.md and docs/api/support.md).
+model Faq {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  category    String
+  question    String
+  answer      String
+  sortOrder   Int      @default(0) @map("sort_order")
+  isPublished Boolean  @default(false) @map("is_published")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([isPublished, category, sortOrder])
+  @@map("faqs")
+  @@schema("opod")
+}
+
+model Notice {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  title       String
+  body        String
+  isPinned    Boolean   @default(false) @map("is_pinned")
+  // null = 초안, 미래 시각 = 예약 발행. 발행분만 서비스에 노출된다.
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([isPinned, publishedAt])
+  @@map("notices")
+  @@schema("opod")
+}
+
+model Inquiry {
+  id         String        @id @default(uuid(7)) @db.Uuid
+  // 탈퇴 후에도 익명화된 users 행에 연결을 유지한다 (분쟁처리 기록 보존).
+  userId     String        @map("user_id") @db.Uuid
+  category   String
+  body       String
+  status     InquiryStatus @default(submitted)
+  // opod-admin이 답변을 기록한다. 답변 저장 시 inquiry.answered 알림도
+  // 같은 트랜잭션에서 opod-service-backend가 정의한 타입 문자열로 insert한다.
+  answerBody String?       @map("answer_body")
+  answeredAt DateTime?     @map("answered_at") @db.Timestamptz(6)
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user       User          @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("inquiries")
   @@schema("opod")
 }
 
