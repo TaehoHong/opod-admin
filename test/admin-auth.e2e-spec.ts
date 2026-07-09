@@ -19,7 +19,7 @@ describe("admin authorization", () => {
     await app.close();
   });
 
-  it("rejects admin routes without the admin API key", async () => {
+  it("rejects admin routes without an admin JWT", async () => {
     await request(app.getHttpServer())
       .get("/api/character-action-logs")
       .expect(401);

@@ -32,7 +32,7 @@ export class AdminAuthController {
 
   @Post("logout")
   @UseGuards(AdminJwtGuard)
-  logout(@Req() request: AdminRequest) {
-    return this.adminAuthService.logout(request.adminToken ?? "");
+  logout() {
+    return this.adminAuthService.logout();
   }
 }

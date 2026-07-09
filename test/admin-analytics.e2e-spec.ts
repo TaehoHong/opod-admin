@@ -6,6 +6,7 @@ import { adminHeaders } from "./admin-auth";
 
 describe("admin analytics", () => {
   let app: INestApplication;
+  let headers: Record<string, string>;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -14,6 +15,7 @@ describe("admin analytics", () => {
 
     app = moduleRef.createNestApplication();
     await app.init();
+    headers = await adminHeaders(app);
   });
 
   afterAll(async () => {
@@ -23,7 +25,7 @@ describe("admin analytics", () => {
   it("returns analytics metrics for admins", async () => {
     await request(app.getHttpServer())
       .get("/api/analytics")
-      .set(adminHeaders)
+      .set(headers)
       .query({ metric: "messages.count" })
       .expect(200)
       .expect((response) => {

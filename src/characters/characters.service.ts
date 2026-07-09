@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import {
   decodeCursor,
   Page,
@@ -35,13 +35,6 @@ type CharacterStatusReceipt = {
   id: string;
   status: CharacterStatus;
   updatedAt: string;
-};
-
-type PrismaCharacterStatusReceipt = Omit<
-  CharacterStatusReceipt,
-  "updatedAt"
-> & {
-  updatedAt: Date;
 };
 
 type CharacterMemory = {
@@ -86,128 +79,6 @@ type PrismaCharacterPersona = Omit<
 type SoftDeleteReceipt = {
   id: string;
   deletedAt: string;
-};
-
-type CharactersPrismaClient = {
-  character: {
-    create(input: {
-      data: {
-        publicId: string;
-        displayName: string;
-        bio: string;
-        interests: string[];
-      };
-      select: typeof characterFields;
-    }): Promise<AdminCharacter>;
-    findUnique(input: {
-      where: { id: string };
-      select: typeof characterListFields;
-    }): Promise<PrismaCharacterListItem | null>;
-    findUnique(input: {
-      where: { id: string };
-      select: { id: true };
-    }): Promise<{ id: string } | null>;
-    findFirst(input: {
-      where: { id: string; status?: CharacterStatus };
-      select: { id: true };
-    }): Promise<{ id: string } | null>;
-    findMany(input: {
-      where: { status?: CharacterStatus };
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }];
-      take: number;
-      cursor?: { id: string };
-      skip?: number;
-      select: typeof characterListFields;
-    }): Promise<PrismaCharacterListItem[]>;
-    update(input: {
-      where: { id: string };
-      data: {
-        displayName?: string;
-        bio?: string;
-        interests?: string[];
-      };
-      select: typeof characterFields;
-    }): Promise<AdminCharacter>;
-    update(input: {
-      where: { id: string };
-      data: { status: CharacterStatus };
-      select: typeof characterStatusFields;
-    }): Promise<PrismaCharacterStatusReceipt>;
-  };
-  characterActionLog: {
-    create(input: {
-      data: {
-        characterId: string;
-        actionType: string;
-        targetTable: string;
-        targetId: string;
-        reason: string;
-      };
-    }): Promise<unknown>;
-  };
-  characterMemory: {
-    create(input: {
-      data: {
-        characterId: string;
-        content: string;
-        reason: string;
-      };
-      select: typeof characterMemoryFields;
-    }): Promise<PrismaCharacterMemory>;
-    findFirst(input: {
-      where: { id: string; characterId: string; deletedAt: null };
-      select: { id: true };
-    }): Promise<{ id: string } | null>;
-    findMany(input: {
-      where: { characterId: string; deletedAt: null };
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }];
-      select: typeof characterMemoryFields;
-    }): Promise<PrismaCharacterMemory[]>;
-    update(input: {
-      where: { id: string };
-      data: {
-        content?: string;
-        reason?: string;
-        deletedAt?: Date;
-      };
-      select: typeof characterMemoryFields;
-    }): Promise<PrismaCharacterMemory>;
-  };
-  characterPersona: {
-    create(input: {
-      data: {
-        characterId: string;
-        title: string;
-        content: string;
-        sortOrder: number;
-      };
-      select: typeof characterPersonaFields;
-    }): Promise<PrismaCharacterPersona>;
-    findFirst(input: {
-      where: { id: string; characterId: string; deletedAt: null };
-      select: { id: true };
-    }): Promise<{ id: string } | null>;
-    findFirst(input: {
-      where: { characterId: string; deletedAt: null };
-      orderBy: { sortOrder: "desc" };
-      select: { sortOrder: true };
-    }): Promise<{ sortOrder: number } | null>;
-    findMany(input: {
-      where: { characterId: string; deletedAt: null };
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }];
-      select: typeof characterPersonaFields;
-    }): Promise<PrismaCharacterPersona[]>;
-    update(input: {
-      where: { id: string };
-      data: {
-        title?: string;
-        content?: string;
-        sortOrder?: number;
-        deletedAt?: Date;
-      };
-      select: typeof characterPersonaFields;
-    }): Promise<PrismaCharacterPersona>;
-  };
 };
 
 const characterFields = {
@@ -264,10 +135,7 @@ const PERSONA_SORT_STEP = 10;
 
 @Injectable()
 export class CharactersService {
-  constructor(
-    @Inject(PrismaService)
-    private readonly prisma: CharactersPrismaClient,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async createCharacter(input: {
     publicId: string;
@@ -736,7 +604,9 @@ export class CharactersService {
     }
     const requested = input.personaIds;
     if (!Array.isArray(requested) || requested.length === 0) {
-      throw new BadRequestException("Character persona personaIds are required");
+      throw new BadRequestException(
+        "Character persona personaIds are required",
+      );
     }
     if (new Set(requested).size !== requested.length) {
       throw new BadRequestException(
@@ -867,7 +737,9 @@ export class CharactersService {
     };
   }
 
-  private toCharacterPersona(persona: PrismaCharacterPersona): CharacterPersona {
+  private toCharacterPersona(
+    persona: PrismaCharacterPersona,
+  ): CharacterPersona {
     return {
       id: persona.id,
       characterId: persona.characterId,

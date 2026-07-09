@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  Inject,
   Injectable,
   OnModuleInit,
   UnauthorizedException,
@@ -43,37 +42,6 @@ type JwtPayload = {
   exp: number;
 };
 
-type AdminAuthPrismaClient = {
-  admin: {
-    findUnique(input: {
-      where: { email: string } | { id: string };
-      select: {
-        id: true;
-        email: true;
-        password?: true;
-        isEnabled: true;
-        isDeleted: true;
-        createdAt: true;
-      };
-    }): Promise<AdminRow | PublicAdminRow | null>;
-    create(input: {
-      data: {
-        email: string;
-        password: string;
-        isEnabled?: boolean;
-        isDeleted?: boolean;
-      };
-      select: {
-        id: true;
-        email: true;
-        isEnabled: true;
-        isDeleted: true;
-        createdAt: true;
-      };
-    }): Promise<PublicAdminRow>;
-  };
-};
-
 const adminAuthFields = {
   id: true,
   email: true,
@@ -93,10 +61,7 @@ const publicAdminFields = {
 
 @Injectable()
 export class AdminAuthService implements OnModuleInit {
-  constructor(
-    @Inject(PrismaService)
-    private readonly prisma: AdminAuthPrismaClient,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async onModuleInit() {
     const existing = await this.prisma.admin.findUnique({
@@ -174,7 +139,7 @@ export class AdminAuthService implements OnModuleInit {
     };
   }
 
-  async logout(_token?: string) {
+  async logout() {
     return { status: "ok" };
   }
 
@@ -294,7 +259,10 @@ export function hashAdminPassword(password: string, salt = randomSalt()) {
   return `scrypt$${salt}$${key}`;
 }
 
-function verifyAdminPassword(password: string, storedPassword: string): boolean {
+function verifyAdminPassword(
+  password: string,
+  storedPassword: string,
+): boolean {
   const [algorithm, salt, expected] = storedPassword.split("$");
   if (algorithm !== "scrypt" || !salt || !expected) return false;
   const actual = scryptSync(password, salt, 64).toString("base64url");

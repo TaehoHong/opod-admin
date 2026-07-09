@@ -15,9 +15,11 @@ describe("generation", () => {
 
     await app.init();
 
+    const headers = await adminHeaders(app);
+
     const character = await request(app.getHttpServer())
       .post("/api/characters")
-      .set(adminHeaders)
+      .set(headers)
       .send({
         publicId: uniqueHandle("gen"),
         displayName: "Gen",
@@ -28,7 +30,7 @@ describe("generation", () => {
 
     const created = await request(app.getHttpServer())
       .post("/api/generation/jobs")
-      .set(adminHeaders)
+      .set(headers)
       .send({
         characterId: character.body.id,
         mediaType: "image",
@@ -38,7 +40,7 @@ describe("generation", () => {
 
     await request(app.getHttpServer())
       .post(`/api/generation/jobs/${created.body.id}/start`)
-      .set(adminHeaders)
+      .set(headers)
       .expect(201)
       .expect((response) => {
         expect(response.body.status).toBe("running");
@@ -46,7 +48,7 @@ describe("generation", () => {
 
     await request(app.getHttpServer())
       .post(`/api/generation/jobs/${created.body.id}/complete`)
-      .set(adminHeaders)
+      .set(headers)
       .send({
         url: "https://cdn.local/generated.png",
         width: 1024,
@@ -62,7 +64,7 @@ describe("generation", () => {
 
     const logs = await request(app.getHttpServer())
       .get("/api/character-action-logs")
-      .set(adminHeaders)
+      .set(headers)
       .expect(200);
 
     const actionTypes = logs.body
@@ -93,7 +95,7 @@ describe("generation", () => {
 
     await request(app.getHttpServer())
       .post("/api/generation/jobs")
-      .set(adminHeaders)
+      .set(headers)
       .send({
         characterId: "ai-1",
         mediaType: "audio",
@@ -112,9 +114,11 @@ describe("generation", () => {
 
     await app.init();
 
+    const headers = await adminHeaders(app);
+
     const character = await request(app.getHttpServer())
       .post("/api/characters")
-      .set(adminHeaders)
+      .set(headers)
       .send({
         publicId: uniqueHandle("gen-media"),
         displayName: "Gen Media",
@@ -125,7 +129,7 @@ describe("generation", () => {
 
     const job = await request(app.getHttpServer())
       .post("/api/generation/jobs")
-      .set(adminHeaders)
+      .set(headers)
       .send({
         characterId: character.body.id,
         mediaType: "image",
@@ -135,7 +139,7 @@ describe("generation", () => {
 
     const upload = await request(app.getHttpServer())
       .post("/api/media/uploads")
-      .set(adminHeaders)
+      .set(headers)
       .send({
         mediaType: "image",
         contentType: "image/png",
@@ -145,17 +149,17 @@ describe("generation", () => {
 
     await request(app.getHttpServer())
       .post(`/api/media/${upload.body.media.id}/confirm-upload`)
-      .set(adminHeaders)
+      .set(headers)
       .expect(201);
 
     await request(app.getHttpServer())
       .post(`/api/generation/jobs/${job.body.id}/start`)
-      .set(adminHeaders)
+      .set(headers)
       .expect(201);
 
     await request(app.getHttpServer())
       .post(`/api/generation/jobs/${job.body.id}/complete`)
-      .set(adminHeaders)
+      .set(headers)
       .send({ mediaId: upload.body.media.id })
       .expect(201)
       .expect((response) => {
@@ -174,9 +178,11 @@ describe("generation", () => {
 
     await app.init();
 
+    const headers = await adminHeaders(app);
+
     const character = await request(app.getHttpServer())
       .post("/api/characters")
-      .set(adminHeaders)
+      .set(headers)
       .send({
         publicId: uniqueHandle("gen-run"),
         displayName: "Gen Run",
@@ -186,7 +192,7 @@ describe("generation", () => {
       .expect(201);
     const job = await request(app.getHttpServer())
       .post("/api/generation/jobs")
-      .set(adminHeaders)
+      .set(headers)
       .send({
         characterId: character.body.id,
         mediaType: "image",
@@ -196,7 +202,7 @@ describe("generation", () => {
 
     await request(app.getHttpServer())
       .post(`/api/generation/jobs/${job.body.id}/run`)
-      .set(adminHeaders)
+      .set(headers)
       .send({ provider: "local" })
       .expect(201)
       .expect({
@@ -206,7 +212,7 @@ describe("generation", () => {
 
     const logs = await request(app.getHttpServer())
       .get("/api/character-action-logs")
-      .set(adminHeaders)
+      .set(headers)
       .expect(200);
 
     expect(
@@ -224,9 +230,11 @@ describe("generation", () => {
 
     await app.init();
 
+    const headers = await adminHeaders(app);
+
     const character = await request(app.getHttpServer())
       .post("/api/characters")
-      .set(adminHeaders)
+      .set(headers)
       .send({
         publicId: uniqueHandle("gen-retry"),
         displayName: "Gen Retry",
@@ -236,7 +244,7 @@ describe("generation", () => {
       .expect(201);
     const job = await request(app.getHttpServer())
       .post("/api/generation/jobs")
-      .set(adminHeaders)
+      .set(headers)
       .send({
         characterId: character.body.id,
         mediaType: "image",
@@ -246,7 +254,7 @@ describe("generation", () => {
 
     await request(app.getHttpServer())
       .post(`/api/generation/jobs/${job.body.id}/retry`)
-      .set(adminHeaders)
+      .set(headers)
       .send({ reason: "provider timeout" })
       .expect(201)
       .expect((response) => {
