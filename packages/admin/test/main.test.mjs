@@ -30,6 +30,7 @@ import {
   postPayload,
   reportUpdatePayload,
   selectedOption,
+  storyPayload,
   userDetailRequests,
 } from "../main.js";
 
@@ -38,6 +39,7 @@ test("postPayload uploads selected media before creating the post", async () => 
   form.set("actorId", " character-1 ");
   form.set("content", " hello ");
   form.set("reason", " daily post ");
+  form.set("contentType", " reel ");
   form.set("mediaType", " image ");
   form.set(
     "mediaFile",
@@ -75,6 +77,7 @@ test("postPayload uploads selected media before creating the post", async () => 
     actorId: "character-1",
     content: "hello",
     reason: "daily post",
+    contentType: "reel",
     media: [{ mediaId: "media-1" }],
   });
   assert.equal(calls[0].path, "/api/media/uploads");
@@ -83,6 +86,7 @@ test("postPayload uploads selected media before creating the post", async () => 
     contentType: "image/png",
     fileName: "photo.png",
     byteSize: 11,
+    storagePrefix: "pod/reels/character/character-1",
   });
   assert.equal(
     calls[1].url,
@@ -97,10 +101,63 @@ test("postPayload rejects blank post content", async () => {
   form.set("actorId", "character-1");
   form.set("content", " ");
   form.set("reason", "daily post");
+  form.set("contentType", "feed");
   form.set("mediaType", "image");
   form.set("mediaUrl", "https://cdn.example/image.png");
 
   await assert.rejects(() => postPayload(form), /content is required/);
+});
+
+test("storyPayload uploads selected media under the story prefix", async () => {
+  const form = new FormData();
+  form.set("characterId", " character-1 ");
+  form.set("caption", " hello story ");
+  form.set("reason", " daily story ");
+  form.set("mediaType", " image ");
+  form.set(
+    "mediaFile",
+    new File(["image-bytes"], "story.png", { type: "image/png" }),
+  );
+
+  const calls = [];
+  const request = async (path, options = {}) => {
+    calls.push({ path, options });
+    if (path === "/api/media/uploads") {
+      return {
+        ok: true,
+        body: {
+          media: { id: "media-story" },
+          uploadUrl: "https://bucket.s3.us-east-1.amazonaws.com/story.png",
+          method: "PUT",
+          headers: { "content-type": "image/png" },
+        },
+      };
+    }
+    if (path === "/api/media/media-story/confirm-upload") {
+      return { ok: true, body: { id: "media-story" } };
+    }
+    throw new Error(`Unexpected request ${path}`);
+  };
+  const putObject = async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true };
+  };
+
+  const payload = await storyPayload(form, request, putObject);
+
+  assert.deepEqual(payload, {
+    characterId: "character-1",
+    caption: "hello story",
+    reason: "daily story",
+    media: { mediaId: "media-story" },
+  });
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    mediaType: "image",
+    contentType: "image/png",
+    fileName: "story.png",
+    byteSize: 11,
+    storagePrefix: "pod/stories/character/character-1",
+  });
 });
 
 test("navItems exposes the sidebar tabs in order", () => {
@@ -162,14 +219,20 @@ test("currentRouteFromHash sends anonymous admins to login", () => {
   assert.equal(currentRouteFromHash("#characters", ""), "login");
   assert.equal(currentRouteFromHash("#login", ""), "login");
   assert.equal(currentRouteFromHash("#login", "token-1"), "dashboard");
-  assert.equal(currentRouteFromHash("#characters?mode=create", "token-1"), "characters");
+  assert.equal(
+    currentRouteFromHash("#characters?mode=create", "token-1"),
+    "characters",
+  );
 });
 
 test("parseResponseBody preserves plain text backend errors", () => {
-  assert.deepEqual(parseResponseBody("Internal server error", { status: 500 }), {
-    error: "Internal server error",
-    status: 500,
-  });
+  assert.deepEqual(
+    parseResponseBody("Internal server error", { status: 500 }),
+    {
+      error: "Internal server error",
+      status: 500,
+    },
+  );
   assert.deepEqual(parseResponseBody("", { status: 204 }), { status: 204 });
 });
 
@@ -613,6 +676,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "post-create",
       data: {
         actorId: " char-1 ",
+        contentType: " feed ",
         content: " hello ",
         reason: " daily ",
         mediaType: " image ",
@@ -623,9 +687,31 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       body: {
         actorType: "character",
         actorId: "char-1",
+        contentType: "feed",
         content: "hello",
         reason: "daily",
         media: [{ mediaType: "image", url: "https://cdn.example/image.png" }],
+      },
+    },
+    {
+      action: "story-create",
+      data: {
+        characterId: " char-1 ",
+        caption: " hello ",
+        reason: " story ",
+        mediaType: " image ",
+        mediaUrl: " pod/stories/character/char-1/story.png ",
+      },
+      path: "/api/stories",
+      method: "POST",
+      body: {
+        characterId: "char-1",
+        caption: "hello",
+        reason: "story",
+        media: {
+          mediaType: "image",
+          url: "pod/stories/character/char-1/story.png",
+        },
       },
     },
     {

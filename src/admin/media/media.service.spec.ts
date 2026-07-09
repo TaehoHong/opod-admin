@@ -74,6 +74,62 @@ describe("MediaService", () => {
     }
   });
 
+  it("starts an avatar content upload under the requested S3 prefix", async () => {
+    const restoreS3Env = setS3Env({
+      S3_BUCKET: "bucket",
+      AWS_REGION: "us-east-1",
+      AWS_ACCESS_KEY_ID: "test-access",
+      AWS_SECRET_ACCESS_KEY: "test-secret",
+      S3_PUBLIC_BASE_URL: "https://cdn.example.com",
+    });
+    const createdAt = new Date("2026-06-30T00:00:00.000Z");
+    const create = jest.fn().mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: "media-1",
+        ...data,
+        durationSeconds: data.durationSeconds ?? null,
+        uploadedAt: null,
+        createdAt,
+      }),
+    );
+    const service = new (
+      MediaService as new (...args: unknown[]) => MediaService
+    )({ media: { create } });
+
+    try {
+      await expect(
+        service.startUpload({
+          mediaType: "video",
+          contentType: "video/mp4",
+          fileName: " reel.mp4 ",
+          storagePrefix: "pod/reels/character/character-1",
+        }),
+      ).resolves.toMatchObject({
+        media: {
+          id: "media-1",
+          mediaType: "video",
+          url: expect.stringMatching(
+            /^pod\/reels\/character\/character-1\/.+\.mp4$/,
+          ),
+        },
+        uploadUrl: expect.stringContaining(
+          "https://bucket.s3.us-east-1.amazonaws.com/pod/reels/character/character-1/",
+        ),
+      });
+      expect(create.mock.calls[0][0].data).toMatchObject({
+        mediaType: "video",
+        storageKey: expect.stringMatching(
+          /^pod\/reels\/character\/character-1\/.+\.mp4$/,
+        ),
+        url: expect.stringMatching(
+          /^pod\/reels\/character\/character-1\/.+\.mp4$/,
+        ),
+      });
+    } finally {
+      restoreS3Env();
+    }
+  });
+
   it("fails clearly when S3 upload signing is not configured", async () => {
     const restoreS3Env = setS3Env({});
     const service = new (

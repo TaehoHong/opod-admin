@@ -52,6 +52,7 @@ type SignPutUpload = (input: {
   mediaType: MediaType;
   contentType: string;
   fileName: string;
+  storagePrefix?: string;
 }) => Promise<SignedMediaUpload>;
 
 @Injectable()
@@ -66,6 +67,7 @@ export class MediaService {
     width?: number;
     height?: number;
     durationSeconds?: number;
+    storagePrefix?: string;
   }): Promise<{
     media: Media;
     uploadUrl: string;
@@ -76,6 +78,7 @@ export class MediaService {
     const mediaType = this.parseMediaType(input.mediaType);
     const contentType = this.validateContentType(mediaType, input.contentType);
     const fileName = this.validateFileName(input.fileName);
+    const storagePrefix = this.validateStoragePrefix(input.storagePrefix);
     const numbers = this.validateMetadata(mediaType, input);
 
     const signPutUpload = createS3UploadSigner();
@@ -89,11 +92,12 @@ export class MediaService {
       mediaType,
       contentType,
       fileName,
+      ...(storagePrefix ? { storagePrefix } : {}),
     });
     const media = await this.prisma.media.create({
       data: {
         mediaType,
-        url: signed.publicUrl,
+        url: storagePrefix ? signed.storageKey : signed.publicUrl,
         storageKey: signed.storageKey,
         contentType,
         ...numbers,
@@ -151,6 +155,23 @@ export class MediaService {
       throw new BadRequestException("Media file name is required");
     }
     return value;
+  }
+
+  private validateStoragePrefix(storagePrefix?: string): string | undefined {
+    const value = storagePrefix?.trim().replace(/^\/+|\/+$/g, "");
+    if (!value) {
+      return undefined;
+    }
+    const parts = value.split("/");
+    if (
+      parts.some(
+        (part) =>
+          !part || part === "." || part === ".." || !/^[\w-]+$/.test(part),
+      )
+    ) {
+      throw new BadRequestException("Invalid media storage prefix");
+    }
+    return parts.join("/");
   }
 
   private validateMetadata(
@@ -263,9 +284,9 @@ export function createS3UploadSigner(
   });
 
   return async (input) => {
+    const prefix = input.storagePrefix ?? ["media", input.mediaType].join("/");
     const storageKey = [
-      "media",
-      input.mediaType,
+      prefix,
       `${randomId()}${extname(input.fileName).toLowerCase()}`,
     ].join("/");
     const expiresInSeconds = 600;

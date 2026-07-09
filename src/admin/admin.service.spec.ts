@@ -270,6 +270,7 @@ describe("AdminService", () => {
     const postCreate = jest.fn().mockResolvedValue({
       id: "post-1",
       characterId: "ai-1",
+      contentType: "reel",
       content: "hello",
       hashtags: [],
       createdAt,
@@ -304,6 +305,7 @@ describe("AdminService", () => {
     await service.createPost({
       actorType: "character",
       actorId: "ai-1",
+      contentType: "reel",
       content: "hello",
       reason: "daily post",
       media: [{ mediaType: "image", url: "https://cdn.local/post.png" }],
@@ -312,6 +314,7 @@ describe("AdminService", () => {
     expect(postCreate).toHaveBeenCalledWith({
       data: {
         characterId: "ai-1",
+        contentType: "reel",
         content: "hello",
         hashtags: {
           create: [],
@@ -364,6 +367,84 @@ describe("AdminService", () => {
     expect(findMany).toHaveBeenCalledWith({
       orderBy: { createdAt: "desc" },
       take: 50,
+    });
+  });
+
+  it("creates avatar stories with confirmed uploaded media", async () => {
+    const createdAt = new Date("2026-06-30T00:00:00.000Z");
+    const expiresAt = new Date("2026-07-01T00:00:00.000Z");
+    const createLog = jest.fn().mockResolvedValue(undefined);
+    const storyCreate = jest.fn().mockResolvedValue({
+      id: "story-1",
+      characterId: "ai-1",
+      caption: "daily story",
+      createdAt,
+      expiresAt,
+      media: {
+        mediaType: "image",
+        url: "pod/stories/character/ai-1/story.png",
+      },
+    });
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        characterActionLog: {
+          create: createLog,
+        },
+        character: {
+          findUnique: jest.fn().mockResolvedValue({ id: "ai-1" }),
+        },
+        media: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: "media-1",
+            mediaType: "image",
+            uploadedAt: createdAt,
+          }),
+        },
+        story: {
+          create: storyCreate,
+        },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.createStory({
+        characterId: "ai-1",
+        caption: " daily story ",
+        reason: "operator story",
+        media: { mediaId: "media-1" },
+      }),
+    ).resolves.toEqual({
+      id: "story-1",
+      characterId: "ai-1",
+      caption: "daily story",
+      media: {
+        mediaType: "image",
+        url: "pod/stories/character/ai-1/story.png",
+      },
+      createdAt: createdAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    });
+    expect(storyCreate).toHaveBeenCalledWith({
+      data: {
+        character: { connect: { id: "ai-1" } },
+        caption: "daily story",
+        expiresAt: expect.any(Date),
+        media: { connect: { id: "media-1" } },
+      },
+      include: { media: true },
+    });
+    expect(createLog).toHaveBeenCalledWith({
+      data: {
+        characterId: "ai-1",
+        actionType: "STORY_CREATED",
+        targetTable: "stories",
+        targetId: "story-1",
+        reason: "operator story",
+      },
     });
   });
 });

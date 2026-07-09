@@ -303,7 +303,11 @@ export async function formActionRequest(action, form, dataset = {}) {
     return jsonRequest("/api/admin/login", "POST", adminLoginPayload(form));
   }
   if (action === "admin-create") {
-    return jsonRequest("/api/admin/accounts", "POST", adminAccountPayload(form));
+    return jsonRequest(
+      "/api/admin/accounts",
+      "POST",
+      adminAccountPayload(form),
+    );
   }
   if (action === "character-create") {
     return jsonRequest("/api/characters", "POST", characterCreatePayload(form));
@@ -408,6 +412,9 @@ export async function formActionRequest(action, form, dataset = {}) {
   if (action === "post-create") {
     return jsonRequest("/api/posts", "POST", await postPayload(form));
   }
+  if (action === "story-create") {
+    return jsonRequest("/api/stories", "POST", await storyPayload(form));
+  }
   if (action === "generation-create") {
     return jsonRequest(
       "/api/generation/jobs",
@@ -461,7 +468,8 @@ function currentRoute() {
 
 function setActiveRoute(route) {
   const item = navItems.find((candidate) => candidate.id === route);
-  routeTitle.textContent = route === "login" ? "로그인" : (item?.label ?? "대시보드");
+  routeTitle.textContent =
+    route === "login" ? "로그인" : (item?.label ?? "대시보드");
   routeEyebrow.textContent = route === "login" ? "Admin" : "운영 콘솔";
   for (const button of sidebarNav.querySelectorAll("[data-route]")) {
     const isActive = button.dataset.route === route;
@@ -703,7 +711,9 @@ function loginHtml() {
 }
 
 async function charactersHtml() {
-  const state = characterRouteState(hasDocument ? location.hash : "#characters");
+  const state = characterRouteState(
+    hasDocument ? location.hash : "#characters",
+  );
   if (state.mode === "create") {
     return characterCreatePageHtml();
   }
@@ -795,6 +805,7 @@ function characterTabsHtml(characterId, activeTab) {
   return `<nav class="tabs" aria-label="캐릭터 상세 탭">
     ${[
       ["profile", "프로필"],
+      ["content", "콘텐츠"],
       ["persona", "페르소나"],
       ["memory", "메모리"],
       ["logs", "로그"],
@@ -810,6 +821,12 @@ function characterTabsHtml(characterId, activeTab) {
 }
 
 function characterTabHtml(character, personas, memory, logs, activeTab) {
+  if (activeTab === "content") {
+    return `<div class="two-column">
+      <section class="panel"><h3>피드 / 릴스 업로드</h3>${postFormHtml(character.id)}</section>
+      <section class="panel"><h3>스토리 업로드</h3>${storyFormHtml(character.id)}</section>
+    </div>`;
+  }
   if (activeTab === "persona") {
     return `<div class="two-column">
       ${listPanel("페르소나", personas, (item) =>
@@ -971,15 +988,29 @@ function creditGrantForm() {
   </form>`;
 }
 
-function postFormHtml() {
+function postFormHtml(characterId = "") {
   return `<form data-action="post-create">
-    <label>AI 캐릭터 ID<input name="actorId" required /></label>
+    <label>AI 캐릭터 ID<input name="actorId" value="${escapeHtml(characterId)}" required /></label>
+    <label>콘텐츠 타입<select name="contentType"><option value="feed">feed</option><option value="reel">reel</option></select></label>
     <label>본문<textarea name="content" rows="3" required></textarea></label>
     <label>로그 이유<input name="reason" required /></label>
     <label>미디어 타입<select name="mediaType"><option value="image">image</option><option value="video">video</option></select></label>
     <label>미디어 URL<input name="mediaUrl" type="url" /></label>
     <label>미디어 파일<input name="mediaFile" type="file" accept="image/*,video/*" /></label>
     <button type="submit">게시</button>
+  </form>`;
+}
+
+function storyFormHtml(characterId = "") {
+  return `<form data-action="story-create">
+    <label>AI 캐릭터 ID<input name="characterId" value="${escapeHtml(characterId)}" required /></label>
+    <label>캡션<textarea name="caption" rows="3"></textarea></label>
+    <label>로그 이유<input name="reason" required /></label>
+    <label>미디어 타입<select name="mediaType"><option value="image">image</option><option value="video">video</option></select></label>
+    <label>미디어 URL<input name="mediaUrl" /></label>
+    <label>미디어 파일<input name="mediaFile" type="file" accept="image/*,video/*" /></label>
+    <p class="muted">스토리는 생성 시점부터 24시간 노출됩니다.</p>
+    <button type="submit">스토리 게시</button>
   </form>`;
 }
 
@@ -1122,17 +1153,57 @@ export async function postPayload(
   requestFn = request,
   putObject = fetch,
 ) {
+  const actorId = requiredField(form, "actorId");
+  const contentType = requiredField(form, "contentType");
   const mediaType = requiredField(form, "mediaType");
   const file = selectedFile(form);
 
   return {
     actorType: "character",
-    actorId: requiredField(form, "actorId"),
+    actorId,
+    contentType,
     content: requiredField(form, "content"),
     reason: requiredField(form, "reason"),
     media: file
-      ? [{ mediaId: await uploadMedia(file, mediaType, requestFn, putObject) }]
+      ? [
+          {
+            mediaId: await uploadMedia(
+              file,
+              mediaType,
+              requestFn,
+              putObject,
+              contentStoragePrefix(contentType, actorId),
+            ),
+          },
+        ]
       : [{ mediaType, url: requiredMediaUrl(form) }],
+  };
+}
+
+export async function storyPayload(
+  form,
+  requestFn = request,
+  putObject = fetch,
+) {
+  const characterId = requiredField(form, "characterId");
+  const mediaType = requiredField(form, "mediaType");
+  const file = selectedFile(form);
+
+  return {
+    characterId,
+    caption: fieldValue(form, "caption"),
+    reason: requiredField(form, "reason"),
+    media: file
+      ? {
+          mediaId: await uploadMedia(
+            file,
+            mediaType,
+            requestFn,
+            putObject,
+            contentStoragePrefix("story", characterId),
+          ),
+        }
+      : { mediaType, url: requiredMediaUrl(form) },
   };
 }
 
@@ -1198,7 +1269,13 @@ function selectedFile(form) {
     : undefined;
 }
 
-async function uploadMedia(file, mediaType, requestFn, putObject) {
+async function uploadMedia(
+  file,
+  mediaType,
+  requestFn,
+  putObject,
+  storagePrefix = "",
+) {
   const contentType = file.type || `${mediaType}/octet-stream`;
   const upload = await requestFn("/api/media/uploads", {
     method: "POST",
@@ -1208,6 +1285,7 @@ async function uploadMedia(file, mediaType, requestFn, putObject) {
       contentType,
       fileName: file.name,
       ...(file.size > 0 ? { byteSize: file.size } : {}),
+      ...(storagePrefix ? { storagePrefix } : {}),
     }),
   });
 
@@ -1243,6 +1321,19 @@ function requiredMediaUrl(form) {
     throw new Error("Media URL or file is required");
   }
   return url;
+}
+
+function contentStoragePrefix(contentType, characterId) {
+  if (contentType === "feed") {
+    return `pod/feed/character/${characterId}`;
+  }
+  if (contentType === "reel") {
+    return `pod/reels/character/${characterId}`;
+  }
+  if (contentType === "story") {
+    return `pod/stories/character/${characterId}`;
+  }
+  throw new Error("contentType must be feed or reel");
 }
 
 function errorMessage(body, fallback) {

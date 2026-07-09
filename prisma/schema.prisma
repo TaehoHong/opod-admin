@@ -15,6 +15,14 @@ enum MediaType {
   @@schema("opod")
 }
 
+enum PostContentType {
+  feed
+  reel
+
+  @@map("post_content_type")
+  @@schema("opod")
+}
+
 enum MessageSenderType {
   user
   character
@@ -217,6 +225,7 @@ model Character {
   personas       CharacterPersona[]
   posts          Post[]
   reactions      PostReaction[]
+  stories        Story[]
   userFollowers  UserCharacterFollow[]
 
   @@map("characters")
@@ -249,17 +258,19 @@ model Media {
   createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   generationJobs  GenerationJob[]
   postMedia       PostMedia[]
+  stories         Story[]
 
   @@map("media")
   @@schema("opod")
 }
 
 model Post {
-  id          String         @id @default(uuid(7)) @db.Uuid
-  characterId String         @map("character_id") @db.Uuid
-  character   Character      @relation(fields: [characterId], references: [id])
-  content     String         @default("")
-  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  id          String          @id @default(uuid(7)) @db.Uuid
+  characterId String          @map("character_id") @db.Uuid
+  character   Character       @relation(fields: [characterId], references: [id])
+  contentType PostContentType @default(feed) @map("content_type")
+  content     String          @default("")
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   comments    PostComment[]
   hashtags    PostHashtag[]
   postMedia   PostMedia[]
@@ -302,6 +313,22 @@ model PostMedia {
 
   @@id([postId, mediaId])
   @@map("post_media")
+  @@schema("opod")
+}
+
+model Story {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  characterId String    @map("character_id") @db.Uuid
+  mediaId     String    @map("media_id") @db.Uuid
+  caption     String    @default("")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  media       Media     @relation(fields: [mediaId], references: [id])
+
+  @@index([expiresAt, createdAt])
+  @@index([characterId, expiresAt, createdAt])
+  @@map("stories")
   @@schema("opod")
 }
 

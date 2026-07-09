@@ -12,6 +12,7 @@ import { Media, MediaService } from "./media/media.service";
 const freeCreditTtlDays = 30;
 
 type MediaType = "image" | "video";
+type PostContentType = "feed" | "reel";
 type ActorType = "character" | "user";
 type ReportTargetType = "character" | "post" | "message";
 type ReportStatus = "submitted" | "reviewing" | "resolved" | "rejected";
@@ -103,6 +104,7 @@ type StoredMediaInput = {
 type AdminPost = {
   id: string;
   characterId: string;
+  contentType: PostContentType;
   content: string;
   media: DirectMediaInput[];
   hashtags: string[];
@@ -112,6 +114,7 @@ type AdminPost = {
 type PrismaPost = {
   id: string;
   characterId: string;
+  contentType: PostContentType;
   content: string;
   createdAt: Date;
   hashtags: Array<{
@@ -128,6 +131,27 @@ type PrismaPost = {
       durationSeconds?: number | null;
     };
   }>;
+};
+
+type AdminStory = {
+  id: string;
+  characterId: string;
+  caption: string;
+  media: DirectMediaInput;
+  createdAt: string;
+  expiresAt: string;
+};
+
+type PrismaStory = Omit<AdminStory, "createdAt" | "expiresAt" | "media"> & {
+  createdAt: Date;
+  expiresAt: Date;
+  media: {
+    mediaType: MediaType;
+    url: string;
+    width?: number | null;
+    height?: number | null;
+    durationSeconds?: number | null;
+  };
 };
 
 type AdminPostComment = {
@@ -436,6 +460,7 @@ export class AdminService {
   async createPost(input: {
     actorType: ActorType;
     actorId: string;
+    contentType?: PostContentType;
     content: string;
     reason?: string;
     hashtags?: string[];
@@ -451,12 +476,14 @@ export class AdminService {
       throw new BadRequestException("Character not found");
     }
 
+    const contentType = this.parsePostContentType(input.contentType ?? "feed");
     await this.assertStoredMedia(input.media);
     const hashtags = this.cleanHashtags(input.hashtags);
     const post = this.toPost(
       await this.prisma.post.create({
         data: {
           characterId: input.actorId,
+          contentType,
           content: input.content,
           hashtags: {
             create: hashtags.map((name) => ({
@@ -489,6 +516,41 @@ export class AdminService {
       reason: input.reason?.trim() || "post created",
     });
     return post;
+  }
+
+  async createStory(input: {
+    characterId: string;
+    caption?: string;
+    reason?: string;
+    media: DirectMediaInput | StoredMediaInput;
+  }): Promise<AdminStory> {
+    if (!(await this.hasCharacter(input.characterId))) {
+      throw new BadRequestException("Character not found");
+    }
+
+    await this.assertStoredMedia([input.media]);
+    const story = this.toStory(
+      await this.prisma.story.create({
+        data: {
+          character: { connect: { id: input.characterId } },
+          caption: input.caption?.trim() ?? "",
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          media:
+            "mediaId" in input.media
+              ? { connect: { id: input.media.mediaId } }
+              : { create: input.media },
+        },
+        include: { media: true },
+      }),
+    );
+    await this.recordCharacterActionLog({
+      characterId: story.characterId,
+      actionType: "STORY_CREATED",
+      targetTable: "stories",
+      targetId: story.id,
+      reason: input.reason?.trim() || "story created",
+    });
+    return story;
   }
 
   async createPostComment(input: {
@@ -962,6 +1024,13 @@ export class AdminService {
     ];
   }
 
+  private parsePostContentType(contentType: string): PostContentType {
+    if (contentType !== "feed" && contentType !== "reel") {
+      throw new BadRequestException("Post content type must be feed or reel");
+    }
+    return contentType;
+  }
+
   private async assertStoredMedia(
     media: Array<DirectMediaInput | StoredMediaInput>,
   ): Promise<void> {
@@ -1003,6 +1072,7 @@ export class AdminService {
     return {
       id: post.id,
       characterId: post.characterId,
+      contentType: post.contentType,
       content: post.content,
       media: post.postMedia.map((item) => ({
         mediaType: item.media.mediaType,
@@ -1015,6 +1085,25 @@ export class AdminService {
       })),
       hashtags: post.hashtags.map((item) => item.hashtag.name),
       createdAt: post.createdAt.toISOString(),
+    };
+  }
+
+  private toStory(story: PrismaStory): AdminStory {
+    return {
+      id: story.id,
+      characterId: story.characterId,
+      caption: story.caption,
+      media: {
+        mediaType: story.media.mediaType,
+        url: story.media.url,
+        ...(story.media.width ? { width: story.media.width } : {}),
+        ...(story.media.height ? { height: story.media.height } : {}),
+        ...(story.media.durationSeconds
+          ? { durationSeconds: story.media.durationSeconds }
+          : {}),
+      },
+      createdAt: story.createdAt.toISOString(),
+      expiresAt: story.expiresAt.toISOString(),
     };
   }
 

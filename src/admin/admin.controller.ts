@@ -25,6 +25,14 @@ export class AdminController {
     return this.adminService.createPost(body);
   }
 
+  @Post("stories")
+  createStory(
+    @Body()
+    body: Parameters<AdminService["createStory"]>[0],
+  ) {
+    return this.adminService.createStory(body);
+  }
+
   @Post("posts/:id/comments")
   createPostComment(
     @Param("id") postId: string,
