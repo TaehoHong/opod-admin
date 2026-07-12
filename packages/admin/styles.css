@@ -258,6 +258,12 @@ select.input {
   align-items: center;
   gap: 6px;
   padding: 7px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.2;
   font-size: 13px;
   cursor: pointer;
   user-select: none;
@@ -430,6 +436,7 @@ select.input {
 /* — sidebar — */
 .sidebar {
   padding: 28px 24px;
+  background: var(--color-bg);
   border-right: 1px solid var(--color-divider);
   display: flex;
   flex-direction: column;
@@ -491,6 +498,7 @@ select.input {
 .nav-item.active {
   color: var(--color-accent-800);
   background: var(--color-accent-100);
+  font-weight: 600;
 }
 .nav-badge {
   font-size: 10.5px;
@@ -508,6 +516,19 @@ select.input {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.identity-button {
+  width: 100%;
+  padding-inline: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.identity-button:hover .admin-identity-name {
+  color: var(--color-accent-700);
 }
 .avatar {
   width: 36px;
@@ -535,15 +556,12 @@ select.input {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.identity-logout {
-  margin-left: auto;
-  flex: none;
-}
 
 /* — main — */
 .admin-main {
   padding: 34px 44px 60px;
   min-width: 0;
+  background: var(--color-bg);
 }
 .content-max {
   max-width: 1080px;

@@ -32,6 +32,14 @@ describe("AdminService", () => {
 
   it("lists user follow counts", async () => {
     const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const grantGroupBy = jest
+      .fn()
+      .mockResolvedValue([
+        { userId: "user-1", _sum: { remainingAmount: 120 } },
+      ]);
+    const reservationGroupBy = jest
+      .fn()
+      .mockResolvedValue([{ userId: "user-1", _sum: { amount: 12 } }]);
     const findMany = jest.fn().mockResolvedValue([
       {
         id: "user-1",
@@ -44,7 +52,11 @@ describe("AdminService", () => {
     const service = new (
       AdminService as new (...args: unknown[]) => AdminService
     )(
-      { user: { findMany } },
+      {
+        user: { findMany },
+        creditLedgerEntry: { groupBy: grantGroupBy },
+        creditReservation: { groupBy: reservationGroupBy },
+      },
       { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
       { startUpload: jest.fn(), confirmUpload: jest.fn() },
     );
@@ -56,6 +68,7 @@ describe("AdminService", () => {
           displayName: "Taeho",
           email: "taeho@example.com",
           followCount: 7,
+          creditBalance: 108,
           createdAt: createdAt.toISOString(),
         },
       ],
@@ -67,6 +80,24 @@ describe("AdminService", () => {
       select: expect.objectContaining({
         _count: { select: { characterFollows: true } },
       }),
+    });
+    expect(grantGroupBy).toHaveBeenCalledWith({
+      by: ["userId"],
+      where: {
+        userId: { in: ["user-1"] },
+        entryType: "grant",
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+      },
+      _sum: { remainingAmount: true },
+    });
+    expect(reservationGroupBy).toHaveBeenCalledWith({
+      by: ["userId"],
+      where: {
+        userId: { in: ["user-1"] },
+        status: "reserved",
+        expiresAt: { gt: expect.any(Date) },
+      },
+      _sum: { amount: true },
     });
   });
 
@@ -532,6 +563,7 @@ describe("AdminService", () => {
           },
         ],
         hashtags: [{ hashtag: { name: "launch" } }],
+        _count: { comments: 3, reactions: 8 },
       },
       {
         id: "post-1",
@@ -541,6 +573,7 @@ describe("AdminService", () => {
         createdAt,
         postMedia: [],
         hashtags: [],
+        _count: { comments: 0, reactions: 0 },
       },
     ]);
     const service = new (
@@ -574,6 +607,8 @@ describe("AdminService", () => {
             },
           ],
           hashtags: ["launch"],
+          commentCount: 3,
+          reactionCount: 8,
           createdAt: createdAt.toISOString(),
         },
       ],
@@ -602,7 +637,48 @@ describe("AdminService", () => {
           include: { hashtag: true },
           orderBy: { hashtag: { name: "asc" } },
         },
+        _count: { select: { comments: true, reactions: true } },
       },
+    });
+  });
+
+  it("lists credit ledger entries across all users", async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { creditLedgerEntry: { findMany } },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(service.listCreditLedger({ limit: 20 })).resolves.toEqual({
+      items: [],
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: {},
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 21,
+    });
+  });
+
+  it("lists hashtag preferences across all users", async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { userHashtagPreference: { findMany } },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(service.listHashtagPreferences({})).resolves.toEqual({
+      items: [],
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: {},
+      orderBy: [{ score: "desc" }, { hashtag: { name: "asc" } }],
+      include: { hashtag: { select: { name: true } } },
     });
   });
 
@@ -668,6 +744,7 @@ describe("AdminService", () => {
         },
       ],
       hashtags: [{ hashtag: { name: "detail" } }],
+      _count: { comments: 2, reactions: 5 },
     });
     const service = new (
       AdminService as new (...args: unknown[]) => AdminService
@@ -692,6 +769,8 @@ describe("AdminService", () => {
         },
       ],
       hashtags: ["detail"],
+      commentCount: 2,
+      reactionCount: 5,
       createdAt: createdAt.toISOString(),
     });
     expect(findUnique).toHaveBeenCalledWith({
@@ -705,6 +784,7 @@ describe("AdminService", () => {
           include: { hashtag: true },
           orderBy: { hashtag: { name: "asc" } },
         },
+        _count: { select: { comments: true, reactions: true } },
       },
     });
   });
@@ -1146,6 +1226,7 @@ describe("AdminService", () => {
           },
         },
       ],
+      _count: { comments: 0, reactions: 0 },
     });
     const service = new (
       AdminService as new (...args: unknown[]) => AdminService
@@ -1206,6 +1287,7 @@ describe("AdminService", () => {
           include: { media: true },
           orderBy: { sortOrder: "asc" },
         },
+        _count: { select: { comments: true, reactions: true } },
       },
     });
     expect(createLog).toHaveBeenCalledWith({

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   adminUserStats,
+  analyticsDateRange,
   analyticsRequests,
   characterCreatePayload,
   characterDetailRequests,
@@ -28,6 +29,7 @@ import {
   memoryBulkPayload,
   memoryPayload,
   navItems,
+  navBadgeRequests,
   parseResponseBody,
   paymentDetailRequest,
   personaBulkPayload,
@@ -175,12 +177,12 @@ test("navItems exposes the sidebar tabs in order", () => {
       "posts",
       "media",
       "generation",
+      "logs",
       "users",
       "credits",
       "payments",
       "moderation",
       "events",
-      "logs",
       "analytics",
     ],
   );
@@ -208,9 +210,29 @@ test("dashboardRequests uses existing admin endpoints", () => {
   ]);
 });
 
-test("analyticsRequests includes metrics and top hashtags", () => {
-  assert.deepEqual(analyticsRequests(), [
-    "/api/analytics",
+test("navBadgeRequests covers every badge shown in the design", () => {
+  assert.deepEqual(navBadgeRequests(), [
+    { key: "media", path: "/api/media?uploaded=false&limit=50" },
+    { key: "generation", path: "/api/generation/jobs?status=failed&limit=50" },
+    {
+      key: "moderation",
+      path: "/api/moderation/reports?status=submitted&limit=50",
+    },
+    {
+      key: "payments",
+      path: "/api/payments/reconciliation?status=mismatch",
+    },
+  ]);
+});
+
+test("analyticsRequests applies the selected reporting period", () => {
+  const now = new Date("2026-07-12T12:00:00.000Z");
+  assert.deepEqual(analyticsDateRange("7일", now), {
+    from: "2026-07-05T12:00:00.000Z",
+    to: "2026-07-12T12:00:00.000Z",
+  });
+  assert.deepEqual(analyticsRequests("30일", now), [
+    "/api/analytics?from=2026-06-12T12%3A00%3A00.000Z&to=2026-07-12T12%3A00%3A00.000Z",
     "/api/analytics/hashtags?limit=10",
   ]);
 });

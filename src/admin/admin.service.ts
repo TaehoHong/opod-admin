@@ -33,16 +33,15 @@ type AdminUser = {
   displayName: string;
   email?: string;
   followCount: number;
+  creditBalance: number;
   createdAt: string;
 };
 
-type AdminUserDetail = AdminUser & {
-  creditBalance: number;
-};
+type AdminUserDetail = AdminUser;
 
 type PrismaAdminUser = Omit<
   AdminUser,
-  "createdAt" | "email" | "followCount"
+  "createdAt" | "email" | "followCount" | "creditBalance"
 > & {
   email: string | null;
   createdAt: Date;
@@ -119,6 +118,8 @@ type AdminPost = {
   content: string;
   media: DirectMediaInput[];
   hashtags: string[];
+  commentCount: number;
+  reactionCount: number;
   createdAt: string;
 };
 
@@ -142,6 +143,10 @@ type PrismaPost = {
       durationSeconds?: number | null;
     };
   }>;
+  _count: {
+    comments: number;
+    reactions: number;
+  };
 };
 
 type AdminStory = {
@@ -315,6 +320,7 @@ const postWithMedia = {
     include: { hashtag: true },
     orderBy: { hashtag: { name: "asc" } },
   },
+  _count: { select: { comments: true, reactions: true } },
 } as const;
 
 @Injectable()
@@ -353,8 +359,51 @@ export class AdminService {
       ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
       select: userFields,
     });
+    const userIds = users.map((user) => user.id);
+    const now = new Date();
+    const [grants, reservations] =
+      userIds.length === 0
+        ? [[], []]
+        : await Promise.all([
+            this.prisma.creditLedgerEntry.groupBy({
+              by: ["userId"],
+              where: {
+                userId: { in: userIds },
+                entryType: "grant",
+                OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+              },
+              _sum: { remainingAmount: true },
+            }),
+            this.prisma.creditReservation.groupBy({
+              by: ["userId"],
+              where: {
+                userId: { in: userIds },
+                status: "reserved",
+                expiresAt: { gt: now },
+              },
+              _sum: { amount: true },
+            }),
+          ]);
+    const grantedByUser = new Map(
+      grants.map((grant) => [grant.userId, grant._sum.remainingAmount ?? 0]),
+    );
+    const reservedByUser = new Map(
+      reservations.map((reservation) => [
+        reservation.userId,
+        reservation._sum.amount ?? 0,
+      ]),
+    );
     return pageFromRows(
-      users.map((user) => this.toAdminUser(user)),
+      users.map((user) =>
+        this.toAdminUser(
+          user,
+          Math.max(
+            0,
+            (grantedByUser.get(user.id) ?? 0) -
+              (reservedByUser.get(user.id) ?? 0),
+          ),
+        ),
+      ),
       input.limit,
     );
   }
@@ -387,7 +436,7 @@ export class AdminService {
       }),
     ]);
     return {
-      ...this.toAdminUser(user),
+      ...this.toAdminUser(user, 0),
       creditBalance: Math.max(
         0,
         (grants._sum.remainingAmount ?? 0) - (reservations._sum.amount ?? 0),
@@ -436,11 +485,8 @@ export class AdminService {
     userId?: string;
   }): Promise<{ items: AdminHashtagPreference[] }> {
     const userId = input.userId?.trim();
-    if (!userId) {
-      throw new BadRequestException("User ID is required");
-    }
     const preferences = await this.prisma.userHashtagPreference.findMany({
-      where: { userId },
+      where: userId ? { userId } : {},
       orderBy: [{ score: "desc" }, { hashtag: { name: "asc" } }],
       include: { hashtag: { select: { name: true } } },
     });
@@ -865,14 +911,12 @@ export class AdminService {
     input: { userId?: string } & PageInput,
   ): Promise<Page<CreditEntry>> {
     const userId = input.userId?.trim();
-    if (!userId) {
-      throw new BadRequestException("User ID is required");
-    }
+    const where = userId ? { userId } : {};
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
       !(await this.prisma.creditLedgerEntry.findFirst({
-        where: { id: cursorId, userId },
+        where: { id: cursorId, ...where },
         select: { id: true },
       }))
     ) {
@@ -880,7 +924,7 @@ export class AdminService {
     }
 
     const entries = await this.prisma.creditLedgerEntry.findMany({
-      where: { userId },
+      where,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: input.limit + 1,
       ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
@@ -1314,6 +1358,8 @@ export class AdminService {
           : {}),
       })),
       hashtags: post.hashtags.map((item) => item.hashtag.name),
+      commentCount: post._count.comments,
+      reactionCount: post._count.reactions,
       createdAt: post.createdAt.toISOString(),
     };
   }
@@ -1357,12 +1403,13 @@ export class AdminService {
     };
   }
 
-  private toAdminUser(user: PrismaAdminUser): AdminUser {
+  private toAdminUser(user: PrismaAdminUser, creditBalance: number): AdminUser {
     return {
       id: user.id,
       displayName: user.displayName,
       ...(user.email ? { email: user.email } : {}),
       followCount: user._count.characterFollows,
+      creditBalance,
       createdAt: user.createdAt.toISOString(),
     };
   }

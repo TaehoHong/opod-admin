@@ -35,12 +35,12 @@ export const navItems = [
   { id: "posts", label: "게시물" },
   { id: "media", label: "미디어" },
   { id: "generation", label: "생성 작업" },
+  { id: "logs", label: "액션 로그" },
   { id: "users", label: "사용자" },
   { id: "credits", label: "크레딧" },
   { id: "payments", label: "결제 정산" },
   { id: "moderation", label: "신고 처리" },
   { id: "events", label: "이벤트 · 선호" },
-  { id: "logs", label: "액션 로그" },
   { id: "analytics", label: "분석" },
 ];
 
@@ -88,8 +88,44 @@ export function dashboardRequests() {
   ];
 }
 
-export function analyticsRequests() {
-  return ["/api/analytics", "/api/analytics/hashtags?limit=10"];
+export function navBadgeRequests() {
+  return [
+    {
+      key: "media",
+      path: endpoint("/api/media", { uploaded: false, limit: 50 }),
+    },
+    {
+      key: "generation",
+      path: endpoint("/api/generation/jobs", { status: "failed", limit: 50 }),
+    },
+    {
+      key: "moderation",
+      path: endpoint("/api/moderation/reports", {
+        status: "submitted",
+        limit: 50,
+      }),
+    },
+    {
+      key: "payments",
+      path: endpoint("/api/payments/reconciliation", { status: "mismatch" }),
+    },
+  ];
+}
+
+export function analyticsDateRange(period = "7일", now = new Date()) {
+  const days = period === "30일" ? 30 : 7;
+  const to = new Date(now);
+  const from = new Date(to);
+  from.setUTCDate(from.getUTCDate() - days);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+
+export function analyticsRequests(period = "7일", now = new Date()) {
+  const range = analyticsDateRange(period, now);
+  return [
+    endpoint("/api/analytics", range),
+    "/api/analytics/hashtags?limit=10",
+  ];
 }
 
 export function userDetailRequests(userId) {
@@ -709,12 +745,12 @@ function errorMessage(body, fallback) {
 const ui = {
   filters: {
     charStatus: "전체",
-    postType: "전체",
     mediaType: "전체",
     mediaUploaded: "전체",
     jobStatus: "전체",
     payStatus: "전체",
     reportStatus: "전체",
+    analyticsPeriod: "7일",
   },
   selMediaId: null,
   selUserId: null,
@@ -1026,13 +1062,14 @@ async function renderCharacters() {
 
 async function renderCharacterList() {
   const filter = ui.filters.charStatus;
-  const statusParam =
-    filter === "활성" ? "active" : filter === "비활성" ? "inactive" : "";
-  const res = await request(
-    endpoint("/api/characters", { status: statusParam, limit: 50 }),
-  );
-  const chars = itemsFromPage(res.body);
-  for (const c of chars) {
+  const res = await request(endpoint("/api/characters", { limit: 50 }));
+  const allChars = itemsFromPage(res.body);
+  const chars = allChars.filter((character) => {
+    if (filter === "활성") return character.status === "active";
+    if (filter === "비활성") return character.status === "inactive";
+    return true;
+  });
+  for (const c of allChars) {
     ui.cache.charNames.set(c.id, c.displayName || c.publicId || c.id);
   }
 
@@ -1063,7 +1100,7 @@ async function renderCharacterList() {
   return `
     ${sectionHead(
       "캐릭터",
-      "AI 캐릭터의 생성, 프로필 수정, 상태 전환, 기억 관리",
+      `활성 ${allChars.filter((character) => character.status === "active").length} · 비활성 ${allChars.filter((character) => character.status === "inactive").length} — AI 캐릭터의 생성, 프로필 수정, 상태 전환, 기억 관리`,
       `<button class="btn btn-primary" data-act="open-dialog" data-dialog="new-char">새 캐릭터</button>`,
     )}
     <div class="toolbar">
@@ -1242,12 +1279,8 @@ async function renderCharacterDetail(id, tab) {
               <td><span class="tag tag-neutral">${escapeHtml(
                 mediaLabel(p.media),
               )}</span></td>
-              <td style="text-align:right;white-space:nowrap"><button class="btn btn-ghost" data-act="open-dialog" data-dialog="comment" data-post-id="${attr(
-                p.id,
-              )}">댓글</button></td>
-              <td style="text-align:right;white-space:nowrap"><button class="btn btn-ghost" data-act="open-dialog" data-dialog="reaction" data-post-id="${attr(
-                p.id,
-              )}">반응</button></td>
+              <td style="text-align:right;font-variant-numeric:tabular-nums">${p.commentCount ?? 0}</td>
+              <td style="text-align:right;font-variant-numeric:tabular-nums">${p.reactionCount ?? 0}</td>
               <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
                 p.createdAt,
               )}</td>
@@ -1327,10 +1360,7 @@ async function renderPosts() {
     return renderPostDetail(ui.selPostId);
   }
   await loadCharacterOptions();
-  const typeParam = ui.filters.postType === "전체" ? "" : ui.filters.postType;
-  const res = await request(
-    endpoint("/api/posts", { contentType: typeParam, limit: 50 }),
-  );
+  const res = await request(endpoint("/api/posts", { limit: 50 }));
   const posts = itemsFromPage(res.body);
 
   const rows = posts.length
@@ -1349,6 +1379,8 @@ async function renderPosts() {
             <td><span class="tag tag-neutral">${escapeHtml(
               mediaLabel(p.media),
             )}</span></td>
+            <td style="text-align:right;font-variant-numeric:tabular-nums">${p.commentCount ?? 0}</td>
+            <td style="text-align:right;font-variant-numeric:tabular-nums">${p.reactionCount ?? 0}</td>
             <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
               p.createdAt,
             )}</td>
@@ -1360,7 +1392,7 @@ async function renderPosts() {
           </tr>`;
         })
         .join("")
-    : `<tr class="empty-row"><td colspan="6">게시물이 없습니다.</td></tr>`;
+    : `<tr class="empty-row"><td colspan="8">게시물이 없습니다.</td></tr>`;
 
   return `
     ${sectionHead(
@@ -1368,20 +1400,8 @@ async function renderPosts() {
       "캐릭터 명의의 게시물 생성과, 캐릭터 명의 댓글·반응 부여",
       `<button class="btn btn-primary" data-act="open-dialog" data-dialog="new-post">새 게시물</button>`,
     )}
-    <div class="toolbar">
-      ${segControl(
-        "postType",
-        [
-          { value: "전체", label: "전체" },
-          { value: "feed", label: "feed" },
-          { value: "reel", label: "reel" },
-        ],
-        ui.filters.postType,
-      )}
-      <span class="count-note">${posts.length}건</span>
-    </div>
     <table class="table">
-      <thead><tr><th>작성 캐릭터</th><th>본문</th><th>해시태그</th><th>미디어</th><th>작성</th><th></th></tr></thead>
+      <thead><tr><th>작성 캐릭터</th><th>본문</th><th>해시태그</th><th>미디어</th><th style="text-align:right">댓글</th><th style="text-align:right">반응</th><th>작성</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
@@ -1651,7 +1671,7 @@ async function renderGeneration() {
               )}">완료 처리</button>`,
             );
           }
-          if (j.status === "completed" || j.status === "failed") {
+          if (j.status === "failed") {
             actions.push(
               `<button class="btn btn-ghost" style="color:var(--color-accent-2-700)" data-act="job-retry" data-id="${attr(
                 j.id,
@@ -1688,6 +1708,7 @@ async function renderGeneration() {
           { value: "queued", label: "queued" },
           { value: "running", label: "running" },
           { value: "completed", label: "completed" },
+          { value: "failed", label: "failed" },
         ],
         ui.filters.jobStatus,
       )}
@@ -1715,20 +1736,21 @@ async function renderUsers() {
         .map((u) => {
           const haystack =
             `${u.email ?? ""} ${u.displayName ?? ""}`.toLowerCase();
-          const { followCount } = adminUserStats(u);
+          const { followCount, creditBalance } = adminUserStats(u);
           return `<tr class="clickable user-row" data-search="${attr(
             haystack,
           )}" data-act="select-user" data-id="${attr(u.id)}">
             <td style="font-weight:600">${escapeHtml(u.email ?? "—")}</td>
             <td>${escapeHtml(u.displayName ?? "—")}</td>
-            <td style="text-align:right;font-variant-numeric:tabular-nums">${followCount}</td>
             <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDate(
               u.createdAt,
             )}</td>
+            <td style="text-align:right;font-variant-numeric:tabular-nums">${followCount}</td>
+            <td style="text-align:right;font-variant-numeric:tabular-nums">${creditBalance.toLocaleString()}</td>
           </tr>`;
         })
         .join("")
-    : `<tr class="empty-row"><td colspan="4">조건에 맞는 사용자가 없습니다.</td></tr>`;
+    : `<tr class="empty-row"><td colspan="5">조건에 맞는 사용자가 없습니다.</td></tr>`;
 
   return `
     ${sectionHead(
@@ -1740,7 +1762,7 @@ async function renderUsers() {
       <span class="count-note">${users.length}건</span>
     </div>
     <table class="table">
-      <thead><tr><th>이메일</th><th>닉네임</th><th style="text-align:right">팔로우</th><th>가입</th></tr></thead>
+      <thead><tr><th>이메일</th><th>닉네임</th><th>가입</th><th style="text-align:right">팔로우</th><th style="text-align:right">크레딧 잔액</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
@@ -1830,34 +1852,29 @@ async function renderUserDetail(id) {
 
 async function renderCredits() {
   const users = await loadUserOptions();
-  const ledgerUserId = ui.ledgerUserId || (users[0]?.id ?? "");
-  ui.ledgerUserId = ledgerUserId;
-
-  let ledgerRows = `<tr class="empty-row"><td colspan="4">사용자를 선택하면 원장이 표시됩니다.</td></tr>`;
-  if (ledgerUserId) {
-    const res = await request(
-      endpoint("/api/credits/ledger", { userId: ledgerUserId, limit: 30 }),
-    );
-    const ledger = itemsFromPage(res.body);
-    ledgerRows = ledger.length
-      ? ledger
-          .map(
-            (e) =>
-              `<tr><td><span class="tag ${
-                e.entryType === "grant" ? "tag-accent" : "tag-accent-2"
-              }">${escapeHtml(
-                e.entryType,
-              )}</span></td><td style="font-weight:600;text-align:right;font-variant-numeric:tabular-nums">${
-                e.amount > 0 ? "+" : ""
-              }${escapeHtml(e.amount)}</td><td>${escapeHtml(
-                e.reason,
-              )}</td><td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
-                e.createdAt,
-              )}</td></tr>`,
-          )
-          .join("")
-      : `<tr class="empty-row"><td colspan="4">표시할 원장 내역이 없습니다.</td></tr>`;
-  }
+  const ledgerUserId = ui.ledgerUserId;
+  const res = await request(
+    endpoint("/api/credits/ledger", { userId: ledgerUserId, limit: 30 }),
+  );
+  const ledger = itemsFromPage(res.body);
+  const ledgerRows = ledger.length
+    ? ledger
+        .map(
+          (e) =>
+            `<tr><td>${escapeHtml(userLabel(e.userId))}</td><td><span class="tag ${
+              e.entryType === "grant" ? "tag-accent" : "tag-accent-2"
+            }">${escapeHtml(
+              e.entryType,
+            )}</span></td><td style="font-weight:600;text-align:right;font-variant-numeric:tabular-nums">${
+              e.amount > 0 ? "+" : ""
+            }${escapeHtml(e.amount)}</td><td>${escapeHtml(
+              e.reason,
+            )}</td><td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+              e.createdAt,
+            )}</td></tr>`,
+        )
+        .join("")
+    : `<tr class="empty-row"><td colspan="5">표시할 원장 내역이 없습니다.</td></tr>`;
 
   const userOpts = optionList(
     users,
@@ -1867,7 +1884,7 @@ async function renderCredits() {
   );
 
   return `
-    ${sectionHead("크레딧", "운영 지급(grant)과 사용자별 원장 조회")}
+    ${sectionHead("크레딧", "운영 지급(grant)과 전체 원장 조회")}
     <div style="display:grid;grid-template-columns:320px 1fr;gap:48px;align-items:start">
       <form data-action="credit-grant-full" style="display:flex;flex-direction:column;gap:12px">
         <h6 style="color:var(--color-neutral-600);margin:0">크레딧 지급 — POST /api/credits/grants</h6>
@@ -1893,10 +1910,10 @@ async function renderCredits() {
       <div>
         <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;gap:12px">
           <h6 style="color:var(--color-neutral-600);margin:0">원장</h6>
-          <select class="input" style="max-width:240px" data-select="ledger-user">${userOpts}</select>
+          <select class="input" style="max-width:220px;min-height:32px" data-select="ledger-user"><option value="">전체 사용자</option>${userOpts}</select>
         </div>
         <table class="table">
-          <thead><tr><th>구분</th><th style="text-align:right">금액</th><th>사유</th><th>시각</th></tr></thead>
+          <thead><tr><th>사용자</th><th>구분</th><th style="text-align:right">금액</th><th>사유</th><th>시각</th></tr></thead>
           <tbody>${ledgerRows}</tbody>
         </table>
       </div>
@@ -1906,9 +1923,6 @@ async function renderCredits() {
 // ── 결제 정산 ──────────────────────────────────────────────────────────────
 
 async function renderPayments() {
-  if (ui.selPayId) {
-    return renderPaymentDetail(ui.selPayId);
-  }
   const statusParam =
     ui.filters.payStatus === "전체" ? "" : ui.filters.payStatus;
   const res = await request(
@@ -1942,6 +1956,29 @@ async function renderPayments() {
         })
         .join("")
     : `<tr class="empty-row"><td colspan="6">조건에 맞는 결제가 없습니다.</td></tr>`;
+  let detail = "";
+  if (ui.selPayId) {
+    const detailRes = await request(paymentDetailRequest(ui.selPayId));
+    const payment = detailRes.body;
+    if (detailRes.ok && payment?.id) {
+      await ensureUserLabels([payment.userId]);
+      detail = `
+        <div style="margin-top:32px;max-width:560px">
+          <h6 style="color:var(--color-neutral-600)">결제 상세 — GET /api/payments/:id</h6>
+          <div style="display:flex;align-items:baseline;gap:12px;margin:6px 0 14px">
+            <h3 style="font-size:22px;margin:0">${escapeHtml(String(payment.id).slice(0, 12))}</h3>
+            <span class="tag ${providerStatusClass(payment.status)}">${escapeHtml(payment.status)}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 32px;font-size:13.5px">
+            <div><div class="stat-label">사용자</div>${escapeHtml(userLabel(payment.userId))}</div>
+            <div><div class="stat-label">금액</div>${escapeHtml(payment.paidAmount)} ${escapeHtml(payment.currency ?? "")}</div>
+            <div><div class="stat-label">지급 크레딧</div>${escapeHtml(payment.creditAmount)}</div>
+            <div><div class="stat-label">결제 시각</div>${fmtDateTime(payment.createdAt)}</div>
+            <div style="grid-column:1/-1"><div class="stat-label">원장 반영</div>${escapeHtml(rows.find((row) => row.paymentId === payment.id)?.ledgerStatus ?? "—")}</div>
+          </div>
+        </div>`;
+    }
+  }
 
   return `
     ${sectionHead(
@@ -1963,47 +2000,8 @@ async function renderPayments() {
     <table class="table">
       <thead><tr><th>결제 ID</th><th>사용자</th><th>Provider</th><th>Provider 상태</th><th>원장 상태</th><th>비고</th></tr></thead>
       <tbody>${body}</tbody>
-    </table>`;
-}
-
-async function renderPaymentDetail(id) {
-  const res = await request(paymentDetailRequest(id));
-  const p = res.body;
-  if (!res.ok || !p?.id) {
-    return `<button class="btn btn-ghost" style="margin:0 0 14px -5px" data-act="back-payments">← 결제 목록</button>${noticeBlock(
-      "결제를 찾을 수 없습니다.",
-    )}`;
-  }
-  await ensureUserLabels([p.userId]);
-  const fields = [
-    ["사용자", userLabel(p.userId)],
-    ["Provider", p.provider],
-    ["결제 금액", `${p.paidAmount} ${p.currency ?? ""}`],
-    ["지급 크레딧", p.creditAmount],
-    ["결제 시각", fmtDateTime(p.createdAt)],
-    ["최근 갱신", fmtDateTime(p.updatedAt)],
-  ];
-  return `
-    <button class="btn btn-ghost" style="margin:0 0 14px -5px" data-act="back-payments">← 결제 목록</button>
-    <div style="max-width:560px">
-      <h6 style="color:var(--color-neutral-600)">결제 상세 — GET /api/payments/:id</h6>
-      <div style="display:flex;align-items:baseline;gap:12px;margin:6px 0 18px;flex-wrap:wrap">
-        <h3 style="font-size:22px;margin:0">${escapeHtml(String(p.id).slice(0, 12))}</h3>
-        <span class="tag ${providerStatusClass(p.status)}">${escapeHtml(
-          p.status,
-        )}</span>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 32px;font-size:13.5px">
-        ${fields
-          .map(
-            ([label, value]) =>
-              `<div><div class="stat-label">${escapeHtml(
-                label,
-              )}</div>${escapeHtml(value)}</div>`,
-          )
-          .join("")}
-      </div>
-    </div>`;
+    </table>
+    ${detail}`;
 }
 
 // ── 신고 처리 ──────────────────────────────────────────────────────────────
@@ -2077,54 +2075,48 @@ async function renderModeration() {
 
 async function renderEvents() {
   const users = await loadUserOptions();
-  const userId = ui.eventUserId || (users[0]?.id ?? "");
-  ui.eventUserId = userId;
-
-  let eventRows = `<tr class="empty-row"><td colspan="3">사용자를 선택하세요.</td></tr>`;
-  let prefRows = `<div style="padding:9px 0;color:var(--color-neutral-600);font-style:italic">사용자를 선택하세요.</div>`;
-  if (userId) {
-    const [evRes, prefRes] = await Promise.all([
-      request(endpoint("/api/events", { userId, limit: 30 })),
-      request(endpoint("/api/hashtag-preferences", { userId })),
-    ]);
-    const events = itemsFromPage(evRes.body);
-    const prefs = itemsFromPage(prefRes.body);
-    eventRows = events.length
-      ? events
-          .map(
-            (e) =>
-              `<tr><td><span class="tag tag-neutral">${escapeHtml(
-                e.eventType,
-              )}</span></td><td style="color:var(--color-neutral-700)">${escapeHtml(
-                e.targetType ?? "",
-              )} · ${escapeHtml(
-                e.targetId ?? "",
-              )}</td><td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
-                e.createdAt,
-              )}</td></tr>`,
-          )
-          .join("")
-      : `<tr class="empty-row"><td colspan="3">선택한 사용자의 이벤트가 없습니다.</td></tr>`;
-    prefRows = prefs.length
-      ? prefs
-          .map(
-            (p) =>
-              `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--color-divider)"><span style="color:var(--color-accent-700)">#${escapeHtml(
-                p.hashtag,
-              )}</span><span style="font-family:var(--font-heading);font-weight:600">${escapeHtml(
-                typeof p.score === "number" ? p.score.toFixed(2) : p.score,
-              )}</span></div>`,
-          )
-          .join("")
-      : `<div style="padding:9px 0;color:var(--color-neutral-600);font-style:italic">학습된 선호가 없습니다.</div>`;
-  }
+  const userId = ui.eventUserId;
+  const [evRes, prefRes] = await Promise.all([
+    request(endpoint("/api/events", { userId, limit: 30 })),
+    request(endpoint("/api/hashtag-preferences", { userId })),
+  ]);
+  const events = itemsFromPage(evRes.body);
+  const prefs = itemsFromPage(prefRes.body);
+  const eventRows = events.length
+    ? events
+        .map(
+          (e) =>
+            `<tr><td>${escapeHtml(userLabel(e.userId))}</td><td><span class="tag tag-neutral">${escapeHtml(
+              e.eventType,
+            )}</span></td><td style="color:var(--color-neutral-700)">${escapeHtml(
+              e.targetType ?? "",
+            )} · ${escapeHtml(
+              e.targetId ?? "",
+            )}</td><td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+              e.createdAt,
+            )}</td></tr>`,
+        )
+        .join("")
+    : `<tr class="empty-row"><td colspan="4">선택한 사용자의 이벤트가 없습니다.</td></tr>`;
+  const prefRows = prefs.length
+    ? prefs
+        .map(
+          (p) =>
+            `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--color-divider)"><span><span style="color:var(--color-neutral-600);font-size:12px;margin-right:8px">${escapeHtml(userLabel(p.userId))}</span><span style="color:var(--color-accent-700)">#${escapeHtml(
+              p.hashtag,
+            )}</span></span><span style="font-family:var(--font-heading);font-weight:600">${escapeHtml(
+              typeof p.score === "number" ? p.score.toFixed(2) : p.score,
+            )}</span></div>`,
+        )
+        .join("")
+    : `<div style="padding:9px 0;color:var(--color-neutral-600);font-style:italic">학습된 선호가 없습니다.</div>`;
 
   return `
     ${sectionHead(
       "이벤트 · 해시태그 선호",
       "추천 피드 랭킹에 쓰이는 사용자 이벤트와 학습된 해시태그 선호 확인",
     )}
-    <select class="input" style="max-width:260px;margin-bottom:16px" data-select="event-user">${optionList(
+    <select class="input" style="max-width:240px;margin-bottom:16px;min-height:34px" data-select="event-user"><option value="">전체 사용자</option>${optionList(
       users,
       "id",
       (u) => u.email || u.displayName || u.id,
@@ -2134,7 +2126,7 @@ async function renderEvents() {
       <div>
         <h6 style="color:var(--color-neutral-600)">사용자 이벤트 — GET /api/events</h6>
         <table class="table">
-          <thead><tr><th>이벤트</th><th>대상</th><th>시각</th></tr></thead>
+          <thead><tr><th>사용자</th><th>이벤트</th><th>대상</th><th>시각</th></tr></thead>
           <tbody>${eventRows}</tbody>
         </table>
       </div>
@@ -2190,7 +2182,8 @@ async function renderLogs() {
 // ── 분석 ──────────────────────────────────────────────────────────────────
 
 async function renderAnalytics() {
-  const [metricsPath, hashtagsPath] = analyticsRequests();
+  const period = ui.filters.analyticsPeriod;
+  const [metricsPath, hashtagsPath] = analyticsRequests(period);
   const [metricsRes, hashtagsRes] = await Promise.all([
     request(metricsPath),
     request(hashtagsPath),
@@ -2199,20 +2192,29 @@ async function renderAnalytics() {
     ? metricsRes.body.metrics
     : [];
   const hashtags = itemsFromPage(hashtagsRes.body);
+  const metricNotes = {
+    "events.count": `${period} 사용자 행동`,
+    "messages.count": "1:1 대화 수",
+    "credits.granted": "운영·결제 지급",
+    "credits.debited": "AI 기능 사용",
+    "generation_jobs.count": "이미지·영상 생성",
+  };
   const cards = metrics.length
     ? metrics
+        .slice(0, 4)
         .map(
           (m) => `
       <div>
-        <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:18px">${escapeHtml(
+        <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:20px">${escapeHtml(
           analyticsLabel(m.name),
         )}</div>
-        <span class="cmyk-num" style="display:inline-block;font-family:var(--font-heading);font-weight:600;font-size:48px">
-          <span class="paper">${escapeHtml(m.value)}</span>
-          <span class="plate plate-c" aria-hidden="true">${escapeHtml(m.value)}</span>
-          <span class="plate plate-m" aria-hidden="true">${escapeHtml(m.value)}</span>
-          <span class="plate plate-y" aria-hidden="true">${escapeHtml(m.value)}</span>
+        <span class="cmyk-num" style="display:inline-block;font-family:var(--font-heading);font-weight:600;font-size:52px">
+          <span class="paper">${escapeHtml(Number(m.value).toLocaleString())}</span>
+          <span class="plate plate-c" aria-hidden="true">${escapeHtml(Number(m.value).toLocaleString())}</span>
+          <span class="plate plate-m" aria-hidden="true">${escapeHtml(Number(m.value).toLocaleString())}</span>
+          <span class="plate plate-y" aria-hidden="true">${escapeHtml(Number(m.value).toLocaleString())}</span>
         </span>
+        <div style="font-size:12.5px;color:var(--color-neutral-700);margin-top:10px">${escapeHtml(metricNotes[m.name] ?? period)}</div>
       </div>`,
         )
         .join("")
@@ -2220,28 +2222,34 @@ async function renderAnalytics() {
   const hashtagRows = hashtags.length
     ? hashtags
         .map(
-          (item, index) => `<tr>
-            <td style="width:52px;color:var(--color-neutral-500);font-variant-numeric:tabular-nums">${index + 1}</td>
-            <td style="color:var(--color-accent-700);font-weight:600">#${escapeHtml(
+          (
+            item,
+          ) => `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--color-divider);font-size:14.5px">
+            <span style="color:var(--color-accent-700)">#${escapeHtml(
               item.hashtag,
-            )}</td>
-            <td style="text-align:right;font-variant-numeric:tabular-nums">${escapeHtml(
-              item.postCount ?? 0,
-            )}</td>
-          </tr>`,
+            )}</span>
+            <span style="font-family:var(--font-heading);font-weight:600">${escapeHtml(Number(item.postCount ?? 0).toLocaleString())}</span>
+          </div>`,
         )
         .join("")
-    : `<tr class="empty-row"><td colspan="3">집계된 해시태그가 없습니다.</td></tr>`;
+    : `<div style="padding:9px 0;color:var(--color-neutral-600);font-style:italic">집계된 해시태그가 없습니다.</div>`;
 
   return `
-    ${sectionHead("분석", "서비스 핵심 지표 — GET /api/analytics")}
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:32px;margin-bottom:24px">${cards}</div>
-    <div style="max-width:560px">
-      <h6 style="color:var(--color-neutral-600)">상위 해시태그 — GET /api/analytics/hashtags?limit=10</h6>
-      <table class="table">
-        <thead><tr><th>순위</th><th>해시태그</th><th style="text-align:right">게시물</th></tr></thead>
-        <tbody>${hashtagRows}</tbody>
-      </table>
+    <div class="section-head" style="margin-bottom:36px">
+      <div><h2>분석</h2><p class="section-sub">서비스 핵심 지표 — GET /api/analytics</p></div>
+      ${segControl(
+        "analyticsPeriod",
+        [
+          { value: "7일", label: "7일" },
+          { value: "30일", label: "30일" },
+        ],
+        period,
+      )}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:32px;margin-bottom:48px">${cards}</div>
+    <div style="max-width:480px">
+      <h6 style="color:var(--color-neutral-600)">상위 해시태그</h6>
+      ${hashtagRows}
     </div>`;
 }
 
@@ -2831,11 +2839,6 @@ async function handleClick(event) {
     renderApp();
     return;
   }
-  if (act === "back-payments") {
-    ui.selPayId = null;
-    renderApp();
-    return;
-  }
   if (act === "media-confirm") {
     event.stopPropagation();
     const result = await submitViaSpec(
@@ -2937,16 +2940,13 @@ function loginHtml() {
 
 async function updateNavBadges() {
   if (!sidebarNav) return;
-  const [reports, payments] = await Promise.all([
-    request(
-      endpoint("/api/moderation/reports", { status: "submitted", limit: 50 }),
-    ),
-    request(endpoint("/api/payments/reconciliation", { status: "mismatch" })),
-  ]);
-  ui.badges.moderation = itemsFromPage(reports.body).length;
-  ui.badges.payments = itemsFromPage(payments.body).length;
-  applyBadge("moderation", ui.badges.moderation);
-  applyBadge("payments", ui.badges.payments);
+  const specs = navBadgeRequests();
+  const results = await Promise.all(specs.map((spec) => request(spec.path)));
+  specs.forEach((spec, index) => {
+    const count = itemsFromPage(results[index].body).length;
+    ui.badges[spec.key] = count;
+    applyBadge(spec.key, count);
+  });
 }
 
 function applyBadge(route, count) {
