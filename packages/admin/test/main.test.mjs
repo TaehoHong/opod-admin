@@ -4,6 +4,7 @@ import {
   adminUserStats,
   analyticsDateRange,
   analyticsRequests,
+  appendPostMediaFiles,
   characterCreatePayload,
   characterDetailRequests,
   characterHref,
@@ -28,6 +29,7 @@ import {
   itemsFromPage,
   memoryBulkPayload,
   memoryPayload,
+  mediaTypeForFile,
   navItems,
   navBadgeRequests,
   parseResponseBody,
@@ -38,71 +40,146 @@ import {
   postSelectionAfterAction,
   postPayload,
   reportUpdatePayload,
+  removePostMediaFile,
   selectedOption,
   storyPayload,
   userDetailRequests,
 } from "../main.js";
 
-test("postPayload uploads selected media before creating the post", async () => {
+test("post media selection appends mixed files and removes by index", () => {
+  const image = new File(["image"], "photo.png", { type: "image/png" });
+  const video = new File(["video"], "clip.mp4", { type: "video/mp4" });
+
+  const selected = appendPostMediaFiles([image], [video]);
+
+  assert.deepEqual(selected, [image, video]);
+  assert.equal(mediaTypeForFile(image), "image");
+  assert.equal(mediaTypeForFile(video), "video");
+  assert.deepEqual(removePostMediaFile(selected, 0), [video]);
+});
+
+test("post media selection rejects unsupported files by name", () => {
+  const text = new File(["notes"], "notes.txt", { type: "text/plain" });
+
+  assert.throws(
+    () => appendPostMediaFiles([], [text]),
+    /notes\.txt.*image or video/i,
+  );
+});
+
+test("postPayload uploads mixed media sequentially and preserves order", async () => {
   const form = new FormData();
   form.set("actorId", " character-1 ");
   form.set("content", " hello ");
   form.set("reason", " daily post ");
-  form.set("contentType", " reel ");
-  form.set("mediaType", " image ");
-  form.set(
-    "mediaFile",
+  form.set("contentType", " feed ");
+  form.set("hashtags", " film, night ");
+  const files = [
     new File(["image-bytes"], "photo.png", { type: "image/png" }),
-  );
-
+    new File(["video-bytes"], "clip.mp4", { type: "video/mp4" }),
+  ];
   const calls = [];
+  let uploadNumber = 0;
   const request = async (path, options = {}) => {
     calls.push({ path, options });
     if (path === "/api/media/uploads") {
+      uploadNumber += 1;
       return {
         ok: true,
         body: {
-          media: { id: "media-1" },
-          uploadUrl: "https://bucket.s3.us-east-1.amazonaws.com/media-1.png",
+          media: { id: `media-${uploadNumber}` },
+          uploadUrl: `https://s3.example/upload-${uploadNumber}`,
           method: "PUT",
-          headers: { "content-type": "image/png" },
+          headers: {
+            "content-type": uploadNumber === 1 ? "image/png" : "video/mp4",
+          },
         },
       };
     }
-    if (path === "/api/media/media-1/confirm-upload") {
-      return { ok: true, body: { id: "media-1" } };
-    }
-    throw new Error(`Unexpected request ${path}`);
+    return { ok: true, body: { id: path.split("/")[3] } };
   };
   const putObject = async (url, options) => {
     calls.push({ url, options });
     return { ok: true };
   };
 
-  const payload = await postPayload(form, request, putObject);
+  const payload = await postPayload(form, request, putObject, files);
 
   assert.deepEqual(payload, {
     actorType: "character",
     actorId: "character-1",
     content: "hello",
     reason: "daily post",
-    contentType: "reel",
-    media: [{ mediaId: "media-1" }],
+    contentType: "feed",
+    hashtags: ["film", "night"],
+    media: [{ mediaId: "media-1" }, { mediaId: "media-2" }],
   });
-  assert.equal(calls[0].path, "/api/media/uploads");
-  assert.deepEqual(JSON.parse(calls[0].options.body), {
-    mediaType: "image",
-    contentType: "image/png",
-    fileName: "photo.png",
-    byteSize: 11,
-    storagePrefix: "pod/reels/character/character-1",
-  });
-  assert.equal(
-    calls[1].url,
-    "https://bucket.s3.us-east-1.amazonaws.com/media-1.png",
+  const presignBodies = calls
+    .filter((call) => call.path === "/api/media/uploads")
+    .map((call) => JSON.parse(call.options.body));
+  assert.deepEqual(
+    presignBodies.map(({ mediaType, storagePrefix }) => ({
+      mediaType,
+      storagePrefix,
+    })),
+    [
+      {
+        mediaType: "image",
+        storagePrefix: "pod/feed/character/character-1",
+      },
+      {
+        mediaType: "video",
+        storagePrefix: "pod/feed/character/character-1",
+      },
+    ],
   );
-  assert.equal(calls[1].options.method, "PUT");
-  assert.equal(calls[2].path, "/api/media/media-1/confirm-upload");
+  assert.deepEqual(
+    calls.map((call) => call.path ?? call.url),
+    [
+      "/api/media/uploads",
+      "https://s3.example/upload-1",
+      "/api/media/media-1/confirm-upload",
+      "/api/media/uploads",
+      "https://s3.example/upload-2",
+      "/api/media/media-2/confirm-upload",
+    ],
+  );
+});
+
+test("postPayload identifies the failed file and does not continue", async () => {
+  const form = new FormData();
+  form.set("actorId", "character-1");
+  form.set("content", "hello");
+  form.set("reason", "daily post");
+  form.set("contentType", "feed");
+  form.set("hashtags", "");
+  const files = [
+    new File(["image"], "first.png", { type: "image/png" }),
+    new File(["video"], "broken.mp4", { type: "video/mp4" }),
+  ];
+  let presignCount = 0;
+  const request = async (path) => {
+    if (path === "/api/media/uploads" && ++presignCount === 2) {
+      return { ok: false, body: { message: "signing failed" } };
+    }
+    if (path === "/api/media/uploads") {
+      return {
+        ok: true,
+        body: {
+          media: { id: "media-1" },
+          uploadUrl: "https://s3.example/first",
+          method: "PUT",
+          headers: { "content-type": "image/png" },
+        },
+      };
+    }
+    return { ok: true, body: { id: "media-1" } };
+  };
+
+  await assert.rejects(
+    () => postPayload(form, request, async () => ({ ok: true }), files),
+    /broken\.mp4.*signing failed/,
+  );
 });
 
 test("postPayload rejects blank post content", async () => {
@@ -805,27 +882,6 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       path: "/api/credits/grants",
       method: "POST",
       body: { userId: "user-1", amount: 10, reason: "campaign" },
-    },
-    {
-      action: "post-create",
-      data: {
-        actorId: " char-1 ",
-        contentType: " feed ",
-        content: " hello ",
-        reason: " daily ",
-        mediaType: " image ",
-        mediaUrl: " https://cdn.example/image.png ",
-      },
-      path: "/api/posts",
-      method: "POST",
-      body: {
-        actorType: "character",
-        actorId: "char-1",
-        contentType: "feed",
-        content: "hello",
-        reason: "daily",
-        media: [{ mediaType: "image", url: "https://cdn.example/image.png" }],
-      },
     },
     {
       action: "story-create",

@@ -488,9 +488,6 @@ export async function formActionRequest(action, form, dataset = {}) {
   if (action === "credit-grant") {
     return jsonRequest("/api/credits/grants", "POST", creditGrantPayload(form));
   }
-  if (action === "post-create") {
-    return jsonRequest("/api/posts", "POST", await postPayload(form));
-  }
   if (action === "story-create") {
     return jsonRequest("/api/stories", "POST", await storyPayload(form));
   }
@@ -539,35 +536,68 @@ export function parseResponseBody(text, response = { status: 0 }) {
   }
 }
 
+export function mediaTypeForFile(file) {
+  const contentType = String(file?.type ?? "").toLowerCase();
+  if (contentType.startsWith("image/")) return "image";
+  if (contentType.startsWith("video/")) return "video";
+  throw new Error(
+    `${String(file?.name ?? "file")} must be an image or video file`,
+  );
+}
+
+export function appendPostMediaFiles(current, incoming) {
+  const added = Array.from(incoming ?? []);
+  added.forEach(mediaTypeForFile);
+  return [...current, ...added];
+}
+
+export function removePostMediaFile(current, index) {
+  return current.filter((_, currentIndex) => currentIndex !== Number(index));
+}
+
 export async function postPayload(
   form,
   requestFn = request,
   putObject = fetch,
+  files = [],
 ) {
   const actorId = requiredField(form, "actorId");
-  const contentType = requiredField(form, "contentType");
-  const mediaType = requiredField(form, "mediaType");
-  const file = selectedFile(form);
+  const contentType = fieldValue(form, "contentType") || "feed";
+  const content = requiredField(form, "content");
+  const reason = requiredField(form, "reason");
+  const hashtags = splitCsv(form.get("hashtags"));
+  const selected = Array.from(files);
+  if (selected.length === 0) {
+    throw new Error("At least one image or video file is required");
+  }
+
+  const media = [];
+  for (const file of selected) {
+    try {
+      media.push({
+        mediaId: await uploadMedia(
+          file,
+          mediaTypeForFile(file),
+          requestFn,
+          putObject,
+          contentStoragePrefix(contentType, actorId),
+        ),
+      });
+    } catch (error) {
+      throw new Error(
+        `${file.name}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   return {
     actorType: "character",
     actorId,
     contentType,
-    content: requiredField(form, "content"),
-    reason: requiredField(form, "reason"),
-    media: file
-      ? [
-          {
-            mediaId: await uploadMedia(
-              file,
-              mediaType,
-              requestFn,
-              putObject,
-              contentStoragePrefix(contentType, actorId),
-            ),
-          },
-        ]
-      : [{ mediaType, url: requiredMediaUrl(form) }],
+    content,
+    reason,
+    hashtags,
+    media,
   };
 }
 
