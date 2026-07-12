@@ -17,6 +17,25 @@ import { AdminService } from "./admin.service";
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
+  @Get("posts")
+  listPosts(
+    @Query("characterId") characterId?: string,
+    @Query("contentType") contentType?: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.adminService.listPosts({
+      characterId,
+      contentType,
+      ...parsePageQuery(cursor, limit),
+    });
+  }
+
+  @Get("posts/:id")
+  getPost(@Param("id") postId: string) {
+    return this.adminService.getPost(postId);
+  }
+
   @Post("posts")
   createPost(
     @Body()

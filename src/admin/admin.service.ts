@@ -457,6 +457,52 @@ export class AdminService {
     return this.toMedia(media);
   }
 
+  async listPosts(
+    input: { characterId?: string; contentType?: string } & PageInput,
+  ): Promise<Page<AdminPost>> {
+    const characterId = input.characterId?.trim();
+    const contentType = input.contentType?.trim()
+      ? this.parsePostContentType(input.contentType.trim())
+      : undefined;
+    const where = {
+      ...(characterId ? { characterId } : {}),
+      ...(contentType ? { contentType } : {}),
+    };
+    const cursorId = decodeCursor(input.cursor);
+    if (
+      cursorId &&
+      !(await this.prisma.post.findFirst({
+        where: { id: cursorId, ...where },
+        select: { id: true },
+      }))
+    ) {
+      throw new BadRequestException("Invalid cursor");
+    }
+
+    const posts = await this.prisma.post.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: input.limit + 1,
+      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+      include: postWithMedia,
+    });
+    return pageFromRows(
+      posts.map((post) => this.toPost(post)),
+      input.limit,
+    );
+  }
+
+  async getPost(postId: string): Promise<AdminPost> {
+    const post = await this.prisma.post.findUnique({
+      where: { id: postId },
+      include: postWithMedia,
+    });
+    if (!post) {
+      throw new BadRequestException("Post not found");
+    }
+    return this.toPost(post);
+  }
+
   async createPost(input: {
     actorType: ActorType;
     actorId: string;

@@ -253,6 +253,223 @@ describe("AdminService", () => {
     });
   });
 
+  it("lists filtered posts with cursor pagination", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const cursor = Buffer.from(
+      JSON.stringify({ id: "post-cursor" }),
+      "utf8",
+    ).toString("base64url");
+    const findFirst = jest.fn().mockResolvedValue({ id: "post-cursor" });
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: "post-2",
+        characterId: "ai-1",
+        contentType: "feed",
+        content: "newer",
+        createdAt,
+        postMedia: [
+          {
+            media: {
+              mediaType: "image",
+              url: "https://cdn.local/newer.png",
+              width: 1080,
+              height: 1080,
+              durationSeconds: null,
+            },
+          },
+        ],
+        hashtags: [{ hashtag: { name: "launch" } }],
+      },
+      {
+        id: "post-1",
+        characterId: "ai-1",
+        contentType: "feed",
+        content: "older",
+        createdAt,
+        postMedia: [],
+        hashtags: [],
+      },
+    ]);
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { post: { findFirst, findMany } },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listPosts({
+        characterId: " ai-1 ",
+        contentType: " feed ",
+        cursor,
+        limit: 1,
+      }),
+    ).resolves.toEqual({
+      items: [
+        {
+          id: "post-2",
+          characterId: "ai-1",
+          contentType: "feed",
+          content: "newer",
+          media: [
+            {
+              mediaType: "image",
+              url: "https://cdn.local/newer.png",
+              width: 1080,
+              height: 1080,
+            },
+          ],
+          hashtags: ["launch"],
+          createdAt: createdAt.toISOString(),
+        },
+      ],
+      nextCursor: expect.any(String),
+    });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "post-cursor",
+        characterId: "ai-1",
+        contentType: "feed",
+      },
+      select: { id: true },
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: { characterId: "ai-1", contentType: "feed" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 2,
+      cursor: { id: "post-cursor" },
+      skip: 1,
+      include: {
+        postMedia: {
+          include: { media: true },
+          orderBy: { sortOrder: "asc" },
+        },
+        hashtags: {
+          include: { hashtag: true },
+          orderBy: { hashtag: { name: "asc" } },
+        },
+      },
+    });
+  });
+
+  it("rejects a post cursor outside the active filters", async () => {
+    const cursor = Buffer.from(
+      JSON.stringify({ id: "post-cursor" }),
+      "utf8",
+    ).toString("base64url");
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        post: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          findMany: jest.fn().mockResolvedValue([]),
+        },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listPosts({ characterId: "ai-1", cursor, limit: 20 }),
+    ).rejects.toThrow("Invalid cursor");
+  });
+
+  it("rejects an invalid post list content type", async () => {
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        post: {
+          findFirst: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([]),
+        },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listPosts({ contentType: "article", limit: 20 }),
+    ).rejects.toThrow("Post content type must be feed or reel");
+  });
+
+  it("gets a post with the admin post representation", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const findUnique = jest.fn().mockResolvedValue({
+      id: "post-1",
+      characterId: "ai-1",
+      contentType: "reel",
+      content: "detail",
+      createdAt,
+      postMedia: [
+        {
+          media: {
+            mediaType: "video",
+            url: "https://cdn.local/detail.mp4",
+            width: 1080,
+            height: 1920,
+            durationSeconds: 15,
+          },
+        },
+      ],
+      hashtags: [{ hashtag: { name: "detail" } }],
+    });
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { post: { findUnique } },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(service.getPost("post-1")).resolves.toEqual({
+      id: "post-1",
+      characterId: "ai-1",
+      contentType: "reel",
+      content: "detail",
+      media: [
+        {
+          mediaType: "video",
+          url: "https://cdn.local/detail.mp4",
+          width: 1080,
+          height: 1920,
+          durationSeconds: 15,
+        },
+      ],
+      hashtags: ["detail"],
+      createdAt: createdAt.toISOString(),
+    });
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { id: "post-1" },
+      include: {
+        postMedia: {
+          include: { media: true },
+          orderBy: { sortOrder: "asc" },
+        },
+        hashtags: {
+          include: { hashtag: true },
+          orderBy: { hashtag: { name: "asc" } },
+        },
+      },
+    });
+  });
+
+  it("rejects a missing post detail", async () => {
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { post: { findUnique: jest.fn().mockResolvedValue(null) } },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(service.getPost("missing-post")).rejects.toThrow(
+      "Post not found",
+    );
+  });
+
   it("creates AI posts through admin-owned Prisma code and records logs", async () => {
     const createdAt = new Date("2026-06-30T00:00:00.000Z");
     const createLog = jest.fn().mockResolvedValue(undefined);
