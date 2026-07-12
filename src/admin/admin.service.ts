@@ -226,6 +226,9 @@ type PaymentReconciliationItem = {
   userId: string;
   provider: string;
   providerStatus: CreditPurchaseStatus;
+  creditAmount: number;
+  paidAmount: number;
+  currency: string;
   ledgerStatus: LedgerStatus;
   reason?: string;
 };
@@ -1080,6 +1083,9 @@ export class AdminService {
           userId: item.userId,
           provider: item.provider,
           providerStatus: item.providerStatus,
+          creditAmount: item.creditAmount,
+          paidAmount: item.paidAmount,
+          currency: item.currency,
           ledgerStatus: item.ledgerStatus,
           ...(item.reason ? { reason: item.reason } : {}),
         })),
@@ -1434,12 +1440,18 @@ export class AdminService {
     purchase: PrismaCreditPurchase,
     hasGrant: boolean,
   ): PaymentReconciliationRow {
+    const payment = {
+      paymentId: purchase.id,
+      userId: purchase.userId,
+      provider: purchase.provider,
+      providerStatus: purchase.status,
+      creditAmount: purchase.creditAmount,
+      paidAmount: purchase.paidAmount,
+      currency: purchase.currency,
+    };
     if (purchase.status === "pending") {
       return {
-        paymentId: purchase.id,
-        userId: purchase.userId,
-        provider: purchase.provider,
-        providerStatus: purchase.status,
+        ...payment,
         ledgerStatus: hasGrant ? "granted" : "not_granted",
         reconciliationStatus: hasGrant ? "mismatch" : "pending",
         ...(hasGrant
@@ -1450,10 +1462,7 @@ export class AdminService {
 
     if (purchase.status === "paid") {
       return {
-        paymentId: purchase.id,
-        userId: purchase.userId,
-        provider: purchase.provider,
-        providerStatus: purchase.status,
+        ...payment,
         ledgerStatus: hasGrant ? "granted" : "missing_grant",
         reconciliationStatus: hasGrant ? "resolved" : "mismatch",
         ...(hasGrant ? {} : { reason: "paid purchase has no credit grant" }),
@@ -1461,10 +1470,7 @@ export class AdminService {
     }
 
     return {
-      paymentId: purchase.id,
-      userId: purchase.userId,
-      provider: purchase.provider,
-      providerStatus: purchase.status,
+      ...payment,
       ledgerStatus: hasGrant ? "granted" : "not_granted",
       reconciliationStatus: hasGrant ? "mismatch" : "resolved",
       ...(hasGrant ? { reason: "non-paid purchase has credit grant" } : {}),

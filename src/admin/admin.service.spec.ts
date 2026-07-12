@@ -269,6 +269,9 @@ describe("AdminService", () => {
           userId: "human-1",
           provider: "local",
           providerStatus: "paid",
+          creditAmount: 100,
+          paidAmount: 9900,
+          currency: "KRW",
           ledgerStatus: "missing_grant",
           reason: "paid purchase has no credit grant",
         },
@@ -294,6 +297,52 @@ describe("AdminService", () => {
         },
       },
       select: { externalReference: true },
+    });
+  });
+
+  it("includes amounts on pending payment reconciliation rows", async () => {
+    const createdAt = new Date("2026-07-02T00:00:00.000Z");
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        creditLedgerEntry: { findMany: jest.fn().mockResolvedValue([]) },
+        creditPurchase: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: "purchase-pending",
+              userId: "human-1",
+              provider: "local",
+              status: "pending",
+              creditAmount: 50,
+              paidAmount: 4900,
+              currency: "KRW",
+              createdAt,
+              updatedAt: createdAt,
+            },
+          ]),
+        },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listPaymentReconciliation({ status: "pending" }),
+    ).resolves.toEqual({
+      items: [
+        {
+          paymentId: "purchase-pending",
+          userId: "human-1",
+          provider: "local",
+          providerStatus: "pending",
+          creditAmount: 50,
+          paidAmount: 4900,
+          currency: "KRW",
+          ledgerStatus: "not_granted",
+          reason: "payment pending",
+        },
+      ],
     });
   });
 
