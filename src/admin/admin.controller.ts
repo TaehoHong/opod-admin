@@ -160,6 +160,27 @@ export class AdminController {
     return this.adminService.listHashtagPreferences({ userId });
   }
 
+  @Get("generation/jobs")
+  listGenerationJobs(
+    @Query("characterId") characterId?: string,
+    @Query("status") status?: string,
+    @Query("mediaType") mediaType?: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.adminService.listGenerationJobs({
+      characterId,
+      status,
+      mediaType,
+      ...parsePageQuery(cursor, limit),
+    });
+  }
+
+  @Get("generation/jobs/:id")
+  getGenerationJob(@Param("id") jobId: string) {
+    return this.adminService.getGenerationJob(jobId);
+  }
+
   @Post("generation/jobs")
   enqueueGenerationJob(
     @Body()

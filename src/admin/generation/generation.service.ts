@@ -1,4 +1,10 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  decodeCursor,
+  Page,
+  PageInput,
+  pageFromRows,
+} from "../../domain/database/page";
 import { PrismaService } from "../../domain/database/prisma.service";
 import { assertUploadedMedia } from "../media/media.service";
 
@@ -45,6 +51,45 @@ type PrismaGenerationJob = Omit<
 export class GenerationService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async listJobs(
+    input: {
+      characterId?: string;
+      status?: string;
+      mediaType?: string;
+    } & PageInput,
+  ): Promise<Page<GenerationJob>> {
+    const characterId = input.characterId?.trim();
+    const status = this.parseOptionalStatus(input.status);
+    const mediaType = this.parseOptionalMediaType(input.mediaType);
+    const where = {
+      ...(characterId ? { characterId } : {}),
+      ...(status ? { status } : {}),
+      ...(mediaType ? { mediaType } : {}),
+    };
+    const cursorId = decodeCursor(input.cursor);
+    if (
+      cursorId &&
+      !(await this.prisma.generationJob.findFirst({
+        where: { id: cursorId, ...where },
+        select: { id: true },
+      }))
+    ) {
+      throw new BadRequestException("Invalid cursor");
+    }
+
+    const jobs = await this.prisma.generationJob.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: input.limit + 1,
+      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+      include: this.jobWithOutput,
+    });
+    return pageFromRows(
+      jobs.map((job) => this.toGenerationJob(job as PrismaGenerationJob)),
+      input.limit,
+    );
+  }
+
   async enqueueJob(input: {
     characterId: string;
     mediaType: string;
@@ -74,7 +119,7 @@ export class GenerationService {
   }
 
   async startJob(jobId: string): Promise<GenerationJob> {
-    const job = await this.findJob(jobId);
+    const job = await this.getJob(jobId);
 
     if (job.status !== "queued") {
       throw new BadRequestException("Only queued generation jobs can start");
@@ -89,7 +134,7 @@ export class GenerationService {
   }
 
   async retryJob(jobId: string): Promise<GenerationJob> {
-    const job = await this.findJob(jobId);
+    const job = await this.getJob(jobId);
     const retried = await this.prisma.generationJob.create({
       data: {
         characterId: job.characterId,
@@ -109,7 +154,7 @@ export class GenerationService {
     height?: number;
     durationSeconds?: number;
   }): Promise<GenerationJob> {
-    const job = await this.findJob(input.jobId);
+    const job = await this.getJob(input.jobId);
 
     if (job.status !== "running") {
       throw new BadRequestException(
@@ -167,7 +212,7 @@ export class GenerationService {
     return this.toGenerationJob(updated as PrismaGenerationJob);
   }
 
-  private async findJob(jobId: string): Promise<GenerationJob> {
+  async getJob(jobId: string): Promise<GenerationJob> {
     const job = await this.prisma.generationJob.findUnique({
       where: { id: jobId },
       include: this.jobWithOutput,
@@ -178,6 +223,32 @@ export class GenerationService {
     }
 
     return this.toGenerationJob(job as PrismaGenerationJob);
+  }
+
+  private parseOptionalStatus(status?: string): JobStatus | undefined {
+    const value = status?.trim();
+    if (!value) {
+      return undefined;
+    }
+    if (value === "queued" || value === "running" || value === "completed") {
+      return value;
+    }
+    throw new BadRequestException(
+      "Generation job status must be queued, running, or completed",
+    );
+  }
+
+  private parseOptionalMediaType(mediaType?: string): MediaType | undefined {
+    const value = mediaType?.trim();
+    if (!value) {
+      return undefined;
+    }
+    if (value === "image" || value === "video") {
+      return value;
+    }
+    throw new BadRequestException(
+      "Generation media type must be image or video",
+    );
   }
 
   private toGenerationJob(job: PrismaGenerationJob): GenerationJob {

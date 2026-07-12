@@ -253,6 +253,27 @@ describe("AdminService", () => {
     });
   });
 
+  it("delegates generation job reads without recording action logs", async () => {
+    const listJobs = jest.fn().mockResolvedValue({ items: [] });
+    const getJob = jest.fn().mockResolvedValue({ id: "job-1" });
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {},
+      { listJobs, getJob },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listGenerationJobs({ status: "queued", limit: 20 }),
+    ).resolves.toEqual({ items: [] });
+    await expect(service.getGenerationJob("job-1")).resolves.toEqual({
+      id: "job-1",
+    });
+    expect(listJobs).toHaveBeenCalledWith({ status: "queued", limit: 20 });
+    expect(getJob).toHaveBeenCalledWith("job-1");
+  });
+
   it("lists filtered posts with cursor pagination", async () => {
     const createdAt = new Date("2026-07-12T00:00:00.000Z");
     const cursor = Buffer.from(

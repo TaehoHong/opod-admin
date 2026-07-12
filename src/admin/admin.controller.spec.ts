@@ -5,10 +5,12 @@ import { AdminController } from "./admin.controller";
 import { AdminService } from "./admin.service";
 import { AdminJwtGuard } from "./auth/admin-jwt.guard";
 
-describe("AdminController post reads", () => {
+describe("AdminController reads", () => {
   let app: INestApplication;
   const listPosts = jest.fn();
   const getPost = jest.fn();
+  const listGenerationJobs = jest.fn();
+  const getGenerationJob = jest.fn();
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({
@@ -16,7 +18,12 @@ describe("AdminController post reads", () => {
       providers: [
         {
           provide: AdminService,
-          useValue: { listPosts, getPost },
+          useValue: {
+            listPosts,
+            getPost,
+            listGenerationJobs,
+            getGenerationJob,
+          },
         },
       ],
     })
@@ -30,6 +37,8 @@ describe("AdminController post reads", () => {
   beforeEach(() => {
     listPosts.mockReset();
     getPost.mockReset();
+    listGenerationJobs.mockReset();
+    getGenerationJob.mockReset();
   });
 
   afterAll(async () => {
@@ -61,5 +70,38 @@ describe("AdminController post reads", () => {
       .expect({ id: "post-1" });
 
     expect(getPost).toHaveBeenCalledWith("post-1");
+  });
+
+  it("forwards generation job list filters and pagination", async () => {
+    listGenerationJobs.mockResolvedValue({ items: [] });
+
+    await request(app.getHttpServer())
+      .get("/api/generation/jobs")
+      .query({
+        characterId: "ai-1",
+        status: "queued",
+        mediaType: "image",
+        limit: "9",
+      })
+      .expect(200)
+      .expect({ items: [] });
+
+    expect(listGenerationJobs).toHaveBeenCalledWith({
+      characterId: "ai-1",
+      status: "queued",
+      mediaType: "image",
+      limit: 9,
+    });
+  });
+
+  it("forwards the generation job detail ID", async () => {
+    getGenerationJob.mockResolvedValue({ id: "job-1" });
+
+    await request(app.getHttpServer())
+      .get("/api/generation/jobs/job-1")
+      .expect(200)
+      .expect({ id: "job-1" });
+
+    expect(getGenerationJob).toHaveBeenCalledWith("job-1");
   });
 });

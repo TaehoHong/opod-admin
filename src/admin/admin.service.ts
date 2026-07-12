@@ -718,6 +718,14 @@ export class AdminService {
     );
   }
 
+  listGenerationJobs(input: Parameters<GenerationService["listJobs"]>[0]) {
+    return this.generationService.listJobs(input);
+  }
+
+  getGenerationJob(jobId: string) {
+    return this.generationService.getJob(jobId);
+  }
+
   async enqueueGenerationJob(
     input: Parameters<GenerationService["enqueueJob"]>[0],
   ) {
