@@ -69,6 +69,7 @@ describe("CharactersService", () => {
           interests: ["art"],
           status: "active",
           createdAt,
+          _count: { posts: 12, userFollowers: 340 },
         }),
       },
       characterPersona: {
@@ -107,6 +108,8 @@ describe("CharactersService", () => {
       bio: "City walks",
       interests: ["art"],
       status: "active",
+      postCount: 12,
+      followerCount: 340,
       createdAt: createdAt.toISOString(),
       personas: [
         {
@@ -129,6 +132,51 @@ describe("CharactersService", () => {
           updatedAt: createdAt.toISOString(),
         },
       ],
+    });
+  });
+
+  it("lists character post and follower counts", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: "character-1",
+        publicId: "mina_ai",
+        displayName: "Mina",
+        bio: "City walks",
+        interests: ["art"],
+        status: "active",
+        createdAt,
+        _count: { posts: 12, userFollowers: 340 },
+      },
+    ]);
+    const service = new (
+      CharactersService as new (...args: unknown[]) => CharactersService
+    )({ character: { findMany } });
+
+    await expect(
+      service.listCharacters({ status: "active", limit: 20 }),
+    ).resolves.toEqual({
+      items: [
+        {
+          id: "character-1",
+          publicId: "mina_ai",
+          displayName: "Mina",
+          bio: "City walks",
+          interests: ["art"],
+          status: "active",
+          postCount: 12,
+          followerCount: 340,
+          createdAt: createdAt.toISOString(),
+        },
+      ],
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: { status: "active" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 21,
+      select: expect.objectContaining({
+        _count: { select: { posts: true, userFollowers: true } },
+      }),
     });
   });
 

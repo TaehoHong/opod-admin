@@ -19,6 +19,8 @@ type AdminCharacter = {
 
 type AdminCharacterListItem = AdminCharacter & {
   status: CharacterStatus;
+  postCount: number;
+  followerCount: number;
   createdAt: string;
 };
 
@@ -27,8 +29,15 @@ type AdminCharacterDetail = AdminCharacterListItem & {
   memories: CharacterMemory[];
 };
 
-type PrismaCharacterListItem = Omit<AdminCharacterListItem, "createdAt"> & {
+type PrismaCharacterListItem = Omit<
+  AdminCharacterListItem,
+  "createdAt" | "postCount" | "followerCount"
+> & {
   createdAt: Date;
+  _count: {
+    posts: number;
+    userFollowers: number;
+  };
 };
 
 type CharacterStatusReceipt = {
@@ -93,6 +102,12 @@ const characterListFields = {
   ...characterFields,
   status: true,
   createdAt: true,
+  _count: {
+    select: {
+      posts: true,
+      userFollowers: true,
+    },
+  },
 } as const;
 
 const characterStatusFields = {
@@ -719,6 +734,8 @@ export class CharactersService {
       bio: character.bio,
       interests: character.interests,
       status: character.status,
+      postCount: character._count.posts,
+      followerCount: character._count.userFollowers,
       createdAt: character.createdAt.toISOString(),
     };
   }
