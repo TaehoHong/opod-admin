@@ -97,7 +97,7 @@ export class MediaService {
     const media = await this.prisma.media.create({
       data: {
         mediaType,
-        url: storagePrefix ? signed.storageKey : signed.publicUrl,
+        url: signed.publicUrl,
         storageKey: signed.storageKey,
         contentType,
         ...numbers,

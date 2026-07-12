@@ -109,7 +109,7 @@ describe("MediaService", () => {
           id: "media-1",
           mediaType: "video",
           url: expect.stringMatching(
-            /^pod\/reels\/character\/character-1\/.+\.mp4$/,
+            /^https:\/\/cdn\.example\.com\/pod\/reels\/character\/character-1\/.+\.mp4$/,
           ),
         },
         uploadUrl: expect.stringContaining(
@@ -122,7 +122,7 @@ describe("MediaService", () => {
           /^pod\/reels\/character\/character-1\/.+\.mp4$/,
         ),
         url: expect.stringMatching(
-          /^pod\/reels\/character\/character-1\/.+\.mp4$/,
+          /^https:\/\/cdn\.example\.com\/pod\/reels\/character\/character-1\/.+\.mp4$/,
         ),
       });
     } finally {
