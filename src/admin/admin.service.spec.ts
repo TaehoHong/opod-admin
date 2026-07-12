@@ -491,6 +491,117 @@ describe("AdminService", () => {
     );
   });
 
+  it("lists post comments with author-filtered cursor pagination", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const cursor = Buffer.from(
+      JSON.stringify({ id: "comment-cursor" }),
+      "utf8",
+    ).toString("base64url");
+    const findFirst = jest.fn().mockResolvedValue({ id: "comment-cursor" });
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: "comment-2",
+        postId: "post-1",
+        characterId: "ai-1",
+        body: "newer",
+        createdAt,
+      },
+      {
+        id: "comment-1",
+        postId: "post-1",
+        characterId: "ai-1",
+        body: "older",
+        createdAt,
+      },
+    ]);
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        post: { findUnique: jest.fn().mockResolvedValue({ id: "post-1" }) },
+        postComment: { findFirst, findMany },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listPostComments({
+        postId: "post-1",
+        characterId: " ai-1 ",
+        cursor,
+        limit: 1,
+      }),
+    ).resolves.toEqual({
+      items: [
+        {
+          id: "comment-2",
+          postId: "post-1",
+          characterId: "ai-1",
+          body: "newer",
+          createdAt: createdAt.toISOString(),
+        },
+      ],
+      nextCursor: expect.any(String),
+    });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "comment-cursor",
+        postId: "post-1",
+        characterId: "ai-1",
+      },
+      select: { id: true },
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: { postId: "post-1", characterId: "ai-1" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 2,
+      cursor: { id: "comment-cursor" },
+      skip: 1,
+    });
+  });
+
+  it("rejects listing comments for a missing post", async () => {
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        post: { findUnique: jest.fn().mockResolvedValue(null) },
+        postComment: { findFirst: jest.fn(), findMany: jest.fn() },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listPostComments({ postId: "missing-post", limit: 20 }),
+    ).rejects.toThrow("Post not found");
+  });
+
+  it("rejects a post comment cursor outside the active post", async () => {
+    const cursor = Buffer.from(
+      JSON.stringify({ id: "comment-cursor" }),
+      "utf8",
+    ).toString("base64url");
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        post: { findUnique: jest.fn().mockResolvedValue({ id: "post-1" }) },
+        postComment: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          findMany: jest.fn(),
+        },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listPostComments({ postId: "post-1", cursor, limit: 20 }),
+    ).rejects.toThrow("Invalid cursor");
+  });
+
   it("creates AI posts through admin-owned Prisma code and records logs", async () => {
     const createdAt = new Date("2026-06-30T00:00:00.000Z");
     const createLog = jest.fn().mockResolvedValue(undefined);

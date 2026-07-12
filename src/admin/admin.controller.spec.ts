@@ -9,6 +9,7 @@ describe("AdminController reads", () => {
   let app: INestApplication;
   const listPosts = jest.fn();
   const getPost = jest.fn();
+  const listPostComments = jest.fn();
   const listGenerationJobs = jest.fn();
   const getGenerationJob = jest.fn();
 
@@ -21,6 +22,7 @@ describe("AdminController reads", () => {
           useValue: {
             listPosts,
             getPost,
+            listPostComments,
             listGenerationJobs,
             getGenerationJob,
           },
@@ -37,6 +39,7 @@ describe("AdminController reads", () => {
   beforeEach(() => {
     listPosts.mockReset();
     getPost.mockReset();
+    listPostComments.mockReset();
     listGenerationJobs.mockReset();
     getGenerationJob.mockReset();
   });
@@ -70,6 +73,22 @@ describe("AdminController reads", () => {
       .expect({ id: "post-1" });
 
     expect(getPost).toHaveBeenCalledWith("post-1");
+  });
+
+  it("forwards the post comment path, author filter, and pagination", async () => {
+    listPostComments.mockResolvedValue({ items: [] });
+
+    await request(app.getHttpServer())
+      .get("/api/posts/post-1/comments")
+      .query({ characterId: "ai-1", limit: "6" })
+      .expect(200)
+      .expect({ items: [] });
+
+    expect(listPostComments).toHaveBeenCalledWith({
+      postId: "post-1",
+      characterId: "ai-1",
+      limit: 6,
+    });
   });
 
   it("forwards generation job list filters and pagination", async () => {

@@ -599,6 +599,40 @@ export class AdminService {
     return story;
   }
 
+  async listPostComments(
+    input: { postId: string; characterId?: string } & PageInput,
+  ): Promise<Page<AdminPostComment>> {
+    if (!(await this.hasPost(input.postId))) {
+      throw new BadRequestException("Post not found");
+    }
+    const characterId = input.characterId?.trim();
+    const where = {
+      postId: input.postId,
+      ...(characterId ? { characterId } : {}),
+    };
+    const cursorId = decodeCursor(input.cursor);
+    if (
+      cursorId &&
+      !(await this.prisma.postComment.findFirst({
+        where: { id: cursorId, ...where },
+        select: { id: true },
+      }))
+    ) {
+      throw new BadRequestException("Invalid cursor");
+    }
+
+    const comments = await this.prisma.postComment.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: input.limit + 1,
+      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+    });
+    return pageFromRows(
+      comments.map((comment) => this.toPostComment(comment)),
+      input.limit,
+    );
+  }
+
   async createPostComment(input: {
     postId: string;
     characterId: string;

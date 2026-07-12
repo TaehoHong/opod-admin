@@ -36,6 +36,20 @@ export class AdminController {
     return this.adminService.getPost(postId);
   }
 
+  @Get("posts/:id/comments")
+  listPostComments(
+    @Param("id") postId: string,
+    @Query("characterId") characterId?: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.adminService.listPostComments({
+      postId,
+      characterId,
+      ...parsePageQuery(cursor, limit),
+    });
+  }
+
   @Post("posts")
   createPost(
     @Body()
