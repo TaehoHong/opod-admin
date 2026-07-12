@@ -164,15 +164,17 @@ test("navItems exposes the sidebar tabs in order", () => {
   assert.deepEqual(
     navItems.map((item) => item.id),
     [
-      "dashboard",
-      "users",
       "characters",
+      "posts",
       "media",
       "generation",
-      "moderation",
+      "users",
+      "credits",
       "payments",
+      "moderation",
+      "events",
+      "logs",
       "analytics",
-      "settings",
     ],
   );
 });
@@ -215,10 +217,11 @@ test("itemsFromPage accepts page objects and arrays", () => {
 });
 
 test("currentRouteFromHash sends anonymous admins to login", () => {
-  assert.equal(currentRouteFromHash("#dashboard", ""), "login");
   assert.equal(currentRouteFromHash("#characters", ""), "login");
+  assert.equal(currentRouteFromHash("#media", ""), "login");
   assert.equal(currentRouteFromHash("#login", ""), "login");
-  assert.equal(currentRouteFromHash("#login", "token-1"), "dashboard");
+  assert.equal(currentRouteFromHash("#login", "token-1"), "characters");
+  assert.equal(currentRouteFromHash("#unknown", "token-1"), "characters");
   assert.equal(
     currentRouteFromHash("#characters?mode=create", "token-1"),
     "characters",
@@ -259,13 +262,18 @@ test("characterRouteState parses list, create, detail, and tab states", () => {
     tab: "profile",
   });
   assert.deepEqual(
-    characterRouteState("#characters?characterId=char-1&tab=memory"),
+    characterRouteState("#characters?characterId=char-1&tab=activity"),
     {
       route: "characters",
       mode: "detail",
       characterId: "char-1",
-      tab: "memory",
+      tab: "activity",
     },
+  );
+  // Unknown tabs fall back to the profile tab.
+  assert.equal(
+    characterRouteState("#characters?characterId=char-1&tab=memory").tab,
+    "profile",
   );
 });
 
@@ -273,8 +281,8 @@ test("characterHref builds character route hashes", () => {
   assert.equal(characterHref(), "#characters");
   assert.equal(characterHref({ mode: "create" }), "#characters?mode=create");
   assert.equal(
-    characterHref({ characterId: "char-1", tab: "persona" }),
-    "#characters?characterId=char-1&tab=persona",
+    characterHref({ characterId: "char-1", tab: "activity" }),
+    "#characters?characterId=char-1&tab=activity",
   );
 });
 

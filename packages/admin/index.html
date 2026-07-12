@@ -7,52 +7,89 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="admin-shell">
+    <div class="admin-shell" id="appShell" hidden>
       <aside class="sidebar" aria-label="Admin navigation">
-        <div class="brand">
-          <p class="eyebrow">AI SNS</p>
-          <h1>Admin</h1>
+        <div>
+          <div class="brand-kicker">AI SNS</div>
+          <div class="brand-title">OPOD Admin</div>
         </div>
+
         <nav id="sidebarNav" class="sidebar-nav">
-          <button type="button" data-route="dashboard">대시보드</button>
-          <button type="button" data-route="users">사용자</button>
-          <button type="button" data-route="characters">AI 캐릭터</button>
-          <button type="button" data-route="media">콘텐츠 / 미디어</button>
-          <button type="button" data-route="generation">생성 작업</button>
-          <button type="button" data-route="moderation">신고 / 모더레이션</button>
-          <button type="button" data-route="payments">결제 / 정산</button>
-          <button type="button" data-route="analytics">분석 / 로그</button>
-          <button type="button" data-route="settings">설정</button>
+          <div>
+            <div class="nav-group-title">콘텐츠</div>
+            <div class="nav-group-items">
+              <button type="button" class="nav-item" data-route="characters">
+                <span>캐릭터</span>
+              </button>
+              <button type="button" class="nav-item" data-route="posts">
+                <span>게시물</span>
+              </button>
+              <button type="button" class="nav-item" data-route="media">
+                <span>미디어</span>
+              </button>
+              <button type="button" class="nav-item" data-route="generation">
+                <span>생성 작업</span>
+              </button>
+            </div>
+          </div>
+          <div>
+            <div class="nav-group-title">사용자 · 크레딧</div>
+            <div class="nav-group-items">
+              <button type="button" class="nav-item" data-route="users">
+                <span>사용자</span>
+              </button>
+              <button type="button" class="nav-item" data-route="credits">
+                <span>크레딧</span>
+              </button>
+              <button type="button" class="nav-item" data-route="payments">
+                <span>결제 정산</span>
+              </button>
+            </div>
+          </div>
+          <div>
+            <div class="nav-group-title">운영</div>
+            <div class="nav-group-items">
+              <button type="button" class="nav-item" data-route="moderation">
+                <span>신고 처리</span>
+              </button>
+              <button type="button" class="nav-item" data-route="events">
+                <span>이벤트 · 선호</span>
+              </button>
+              <button type="button" class="nav-item" data-route="logs">
+                <span>액션 로그</span>
+              </button>
+              <button type="button" class="nav-item" data-route="analytics">
+                <span>분석</span>
+              </button>
+            </div>
+          </div>
         </nav>
-        <div class="sidebar-status" aria-live="polite">
-          <span class="status-dot" id="statusDot"></span>
-          <span id="statusText">대기 중</span>
+
+        <div class="admin-identity">
+          <span class="avatar" id="identityAvatar">·</span>
+          <div style="min-width: 0">
+            <div class="admin-identity-name" id="identityName">관리자</div>
+            <div class="admin-identity-email" id="identityEmail"></div>
+          </div>
+          <button
+            type="button"
+            id="logoutButton"
+            class="btn btn-ghost identity-logout"
+            title="로그아웃"
+          >
+            로그아웃
+          </button>
         </div>
       </aside>
 
       <main class="admin-main">
-        <header class="workspace-header">
-          <div>
-            <p class="eyebrow" id="routeEyebrow">운영 콘솔</p>
-            <h2 id="routeTitle">대시보드</h2>
-          </div>
-          <div class="header-actions">
-            <div id="adminAuthBox" class="session-box">
-              <span id="adminAuthEmail" class="muted"></span>
-              <button id="logoutButton" type="button">로그아웃</button>
-            </div>
-            <button id="healthButton" type="button">상태 확인</button>
-          </div>
-        </header>
-
-        <section id="mainPanel" class="workspace" aria-live="polite"></section>
-
-        <details class="diagnostics">
-          <summary>API 응답</summary>
-          <pre id="output">{}</pre>
-        </details>
+        <div id="mainPanel" class="content-max" aria-live="polite"></div>
       </main>
     </div>
+
+    <div id="loginRoot"></div>
+    <div id="toastRoot" aria-live="polite"></div>
+    <div id="dialogRoot"></div>
 
     <script type="module" src="./main.js"></script>
   </body>

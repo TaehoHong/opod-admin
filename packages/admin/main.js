@@ -1,49 +1,52 @@
+// OPOD Admin 콘솔 v2 — Broadsheet-styled admin SPA.
+//
+// Two layers live in this file:
+//   1. A pure request/payload helper layer (exported, unit-tested) that maps
+//      UI intent onto the real `/api/*` admin backend.
+//   2. A state-driven rendering layer that paints the Broadsheet console and
+//      wires it to those helpers. The rendering layer degrades gracefully for
+//      resources the backend does not expose a list endpoint for (posts,
+//      generation jobs) rather than inventing data.
+
 const hasDocument = typeof document !== "undefined";
-const output = hasDocument ? document.querySelector("#output") : undefined;
-const statusDot = hasDocument
-  ? document.querySelector("#statusDot")
-  : undefined;
-const statusText = hasDocument
-  ? document.querySelector("#statusText")
-  : undefined;
-const mainPanel = hasDocument
-  ? document.querySelector("#mainPanel")
-  : undefined;
-const routeTitle = hasDocument
-  ? document.querySelector("#routeTitle")
-  : undefined;
-const routeEyebrow = hasDocument
-  ? document.querySelector("#routeEyebrow")
-  : undefined;
-const sidebarNav = hasDocument
-  ? document.querySelector("#sidebarNav")
-  : undefined;
-const adminAuthBox = hasDocument
-  ? document.querySelector("#adminAuthBox")
-  : undefined;
-const adminAuthEmail = hasDocument
-  ? document.querySelector("#adminAuthEmail")
-  : undefined;
-const logoutButton = hasDocument
-  ? document.querySelector("#logoutButton")
-  : undefined;
+const $ = (sel) => (hasDocument ? document.querySelector(sel) : undefined);
+
+const appShell = $("#appShell");
+const loginRoot = $("#loginRoot");
+const mainPanel = $("#mainPanel");
+const sidebarNav = $("#sidebarNav");
+const dialogRoot = $("#dialogRoot");
+const toastRoot = $("#toastRoot");
+const identityName = $("#identityName");
+const identityEmail = $("#identityEmail");
+const identityAvatar = $("#identityAvatar");
+const logoutButton = $("#logoutButton");
+
 const adminTokenStorageKey = "opodAdminToken";
 const adminEmailStorageKey = "opodAdminEmail";
 const pendingForms = new WeakSet();
 
+// ─────────────────────────────────────────────────────────────────────────
+// Navigation + routing helpers (unit-tested contract)
+// ─────────────────────────────────────────────────────────────────────────
+
 export const navItems = [
-  { id: "dashboard", label: "대시보드" },
-  { id: "users", label: "사용자" },
-  { id: "characters", label: "AI 캐릭터" },
-  { id: "media", label: "콘텐츠 / 미디어" },
+  { id: "characters", label: "캐릭터" },
+  { id: "posts", label: "게시물" },
+  { id: "media", label: "미디어" },
   { id: "generation", label: "생성 작업" },
-  { id: "moderation", label: "신고 / 모더레이션" },
-  { id: "payments", label: "결제 / 정산" },
-  { id: "analytics", label: "분석 / 로그" },
-  { id: "settings", label: "설정" },
+  { id: "users", label: "사용자" },
+  { id: "credits", label: "크레딧" },
+  { id: "payments", label: "결제 정산" },
+  { id: "moderation", label: "신고 처리" },
+  { id: "events", label: "이벤트 · 선호" },
+  { id: "logs", label: "액션 로그" },
+  { id: "analytics", label: "분석" },
 ];
 
-export function currentRouteFromHash(hash = "#dashboard", token = "") {
+const DEFAULT_ROUTE = "characters";
+
+export function currentRouteFromHash(hash = "#characters", token = "") {
   const route = String(hash ?? "")
     .replace(/^#/, "")
     .split("?")[0];
@@ -52,9 +55,9 @@ export function currentRouteFromHash(hash = "#dashboard", token = "") {
     return "login";
   }
   if (route === "login") {
-    return "dashboard";
+    return DEFAULT_ROUTE;
   }
-  return navItems.some((item) => item.id === route) ? route : "dashboard";
+  return navItems.some((item) => item.id === route) ? route : DEFAULT_ROUTE;
 }
 
 export function endpoint(path, params = {}) {
@@ -106,6 +109,8 @@ export function characterDetailRequests(characterId) {
   ];
 }
 
+const CHARACTER_TABS = ["profile", "posts", "activity"];
+
 export function characterRouteState(hash = "#characters") {
   const [routePart, query = ""] = String(hash ?? "")
     .replace(/^#/, "")
@@ -119,9 +124,7 @@ export function characterRouteState(hash = "#characters") {
         ? "detail"
         : "list";
   const requestedTab = String(params.get("tab") ?? "profile").trim();
-  const tab = ["profile", "persona", "memory", "logs"].includes(requestedTab)
-    ? requestedTab
-    : "profile";
+  const tab = CHARACTER_TABS.includes(requestedTab) ? requestedTab : "profile";
 
   return {
     route: routePart || "characters",
@@ -181,6 +184,10 @@ export function adminRequestOptions(options = {}, token = "") {
     },
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Payload builders (unit-tested contract)
+// ─────────────────────────────────────────────────────────────────────────
 
 export function adminLoginPayload(form) {
   return {
@@ -441,655 +448,6 @@ export async function formActionRequest(action, form, dataset = {}) {
   throw new Error(`Unsupported form action: ${action}`);
 }
 
-if (hasDocument) {
-  updateSessionUi();
-  logoutButton.addEventListener("click", () => {
-    clearAdminAuth();
-    updateSessionUi();
-    location.hash = "login";
-  });
-  document
-    .querySelector("#healthButton")
-    .addEventListener("click", checkHealth);
-  sidebarNav.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-route]");
-    if (button) {
-      location.hash = button.dataset.route;
-    }
-  });
-  mainPanel.addEventListener("submit", handleFormSubmit);
-  window.addEventListener("hashchange", renderCurrentRoute);
-  renderCurrentRoute();
-}
-
-function currentRoute() {
-  return currentRouteFromHash(location.hash, readAdminToken());
-}
-
-function setActiveRoute(route) {
-  const item = navItems.find((candidate) => candidate.id === route);
-  routeTitle.textContent =
-    route === "login" ? "로그인" : (item?.label ?? "대시보드");
-  routeEyebrow.textContent = route === "login" ? "Admin" : "운영 콘솔";
-  for (const button of sidebarNav.querySelectorAll("[data-route]")) {
-    const isActive = button.dataset.route === route;
-    button.classList.toggle("active", isActive);
-    if (isActive) {
-      button.setAttribute("aria-current", "page");
-    } else {
-      button.removeAttribute("aria-current");
-    }
-  }
-}
-
-async function renderCurrentRoute() {
-  const redirect = authRedirectRoute();
-  if (redirect) {
-    location.hash = redirect;
-    return;
-  }
-  const route = currentRoute();
-  updateSessionUi();
-  setActiveRoute(route);
-  mainPanel.innerHTML = `<section class="panel"><p class="muted">불러오는 중</p></section>`;
-  mainPanel.innerHTML = await routeHtml(route);
-}
-
-async function handleFormSubmit(event) {
-  const form = event.target?.matches?.("form[data-action]")
-    ? event.target
-    : undefined;
-  if (!form) return;
-  event.preventDefault();
-  if (pendingForms.has(form)) return;
-  const formData = new FormData(form);
-  pendingForms.add(form);
-  setFormSubmitting(form, true);
-
-  try {
-    const requestSpec = await formActionRequest(
-      form.dataset.action,
-      formData,
-      form.dataset,
-    );
-    const result = await request(requestSpec.path, requestSpec.options);
-    render(result.body);
-    if (result.ok) {
-      if (form.dataset.action === "admin-login" && result.body?.token) {
-        writeAdminAuth(result.body);
-        updateSessionUi();
-        location.hash = "dashboard";
-        return;
-      }
-      if (form.dataset.action === "character-create" && result.body?.id) {
-        location.hash = characterHref({ characterId: result.body.id });
-        return;
-      }
-      await renderCurrentRoute();
-    }
-  } catch (error) {
-    render({ error: error instanceof Error ? error.message : String(error) });
-  } finally {
-    pendingForms.delete(form);
-    setFormSubmitting(form, false);
-  }
-}
-
-async function loadMany(requests) {
-  const entries = await Promise.all(
-    requests.map(async ({ key, path }) => [key, await request(path)]),
-  );
-  return Object.fromEntries(entries);
-}
-
-async function loadDashboardHtml() {
-  const data = await loadMany(dashboardRequests());
-  return `
-    <div class="dashboard-grid">
-      ${metricCard("이벤트/메시지", analyticsText(data.analytics.body))}
-      ${metricCard("최근 액션", `${itemsFromPage(data.logs.body).length}건`)}
-      ${metricCard("대기 신고", `${itemsFromPage(data.reports.body).length}건`)}
-      ${metricCard("정산 이슈", `${itemsFromPage(data.payments.body).length}건`)}
-    </div>
-    <div class="two-column" style="margin-top:14px">
-      ${listPanel("최근 캐릭터 액션", itemsFromPage(data.logs.body), logRow)}
-      ${listPanel(
-        "운영 큐",
-        [
-          ...itemsFromPage(data.reports.body).map((item) => ({
-            title: `신고 ${item.id}`,
-            subtitle: `${item.targetType} · ${item.status}`,
-          })),
-          ...itemsFromPage(data.payments.body).map((item) => ({
-            title: `결제 ${item.paymentId}`,
-            subtitle: `${item.providerStatus} / ${item.ledgerStatus}`,
-          })),
-        ],
-        simpleRow,
-      )}
-    </div>
-  `;
-}
-
-function metricCard(label, value) {
-  return `<section class="panel"><span class="muted">${escapeHtml(
-    label,
-  )}</span><strong style="font-size:24px">${escapeHtml(value)}</strong></section>`;
-}
-
-function analyticsText(body) {
-  const metrics = Array.isArray(body?.metrics) ? body.metrics : [];
-  return metrics.length
-    ? metrics.map((item) => `${item.name}: ${item.value}`).join(" / ")
-    : "0";
-}
-
-function listPanel(title, items, row) {
-  return `<section class="panel"><h3>${escapeHtml(title)}</h3><div class="list">${
-    items.length
-      ? items.map(row).join("")
-      : `<p class="muted">표시할 항목이 없습니다.</p>`
-  }</div></section>`;
-}
-
-function simpleRow(item) {
-  return `<div class="list-item"><strong>${escapeHtml(
-    item.title ?? item.id,
-  )}</strong><span class="muted">${escapeHtml(item.subtitle ?? "")}</span></div>`;
-}
-
-function logRow(item) {
-  return simpleRow({
-    title: item.actionType,
-    subtitle: `${item.characterId ?? ""} · ${item.reason ?? ""}`,
-  });
-}
-
-async function usersHtml() {
-  const result = await request(endpoint("/api/users", { limit: 25 }));
-  return `
-    <div class="two-column">
-      ${listPanel("사용자", itemsFromPage(result.body), (user) =>
-        simpleRow({
-          title: user.displayName,
-          subtitle: `${user.email ?? "email 없음"} · ${user.id}`,
-        }),
-      )}
-      <section class="panel">
-        <h3>사용자 상세</h3>
-        <p class="muted">사용자를 선택하면 이벤트, 해시태그, 크레딧 원장을 조회합니다.</p>
-        ${creditGrantForm()}
-      </section>
-    </div>`;
-}
-
-async function mediaHtml() {
-  const result = await request(endpoint("/api/media", { limit: 25 }));
-  return `<div class="two-column">
-    ${listPanel("미디어", itemsFromPage(result.body), (media) =>
-      simpleRow({
-        title: `${media.mediaType} · ${media.id}`,
-        subtitle: media.uploadedAt
-          ? `uploaded ${media.uploadedAt}`
-          : "업로드 대기",
-      }),
-    )}
-    <section class="panel"><h3>게시물 작성</h3>${postFormHtml()}</section>
-  </div>`;
-}
-
-async function moderationHtml() {
-  const result = await request(
-    endpoint("/api/moderation/reports", { limit: 25 }),
-  );
-  return `<div class="two-column">
-    ${listPanel("신고", itemsFromPage(result.body), (report) =>
-      simpleRow({
-        title: `${report.targetType} · ${report.status}`,
-        subtitle: `${report.reason} · ${report.id}`,
-      }),
-    )}
-    <section class="panel"><h3>신고 처리</h3>${reportFormHtml()}</section>
-  </div>`;
-}
-
-async function paymentsHtml() {
-  const result = await request("/api/payments/reconciliation");
-  return `<div class="two-column">
-    ${listPanel("결제 / 정산", itemsFromPage(result.body), (payment) =>
-      simpleRow({
-        title: payment.paymentId,
-        subtitle: `${payment.providerStatus} / ${payment.ledgerStatus}`,
-      }),
-    )}
-    <section class="panel"><h3>결제 상세</h3><p class="muted">결제 ID로 상세를 조회합니다.</p></section>
-  </div>`;
-}
-
-async function analyticsHtml() {
-  const data = await loadMany([
-    { key: "analytics", path: "/api/analytics" },
-    { key: "logs", path: "/api/character-action-logs" },
-  ]);
-  const metrics = Array.isArray(data.analytics.body?.metrics)
-    ? data.analytics.body.metrics
-    : [];
-  return `<div class="two-column">
-    ${listPanel("지표", metrics, (metric) =>
-      simpleRow({ title: metric.name, subtitle: String(metric.value) }),
-    )}
-    ${listPanel("액션 로그", itemsFromPage(data.logs.body), logRow)}
-  </div>`;
-}
-
-function settingsHtml() {
-  return `<div class="two-column">
-    <section class="panel">
-      <h3>관리자 계정 생성</h3>
-      <form data-action="admin-create">
-        <label>이메일<input name="email" type="email" autocomplete="off" required /></label>
-        <label>비밀번호<input name="password" type="password" autocomplete="new-password" required /></label>
-        <button type="submit">관리자 생성</button>
-      </form>
-    </section>
-    <section class="panel">
-      <h3>세션</h3>
-      <p class="muted">${escapeHtml(readAdminEmail() || "로그인 정보 없음")}</p>
-    </section>
-  </div>`;
-}
-
-function loginHtml() {
-  return `<section class="panel login-panel">
-    <h3>Admin 로그인</h3>
-    <form data-action="admin-login">
-      <label>이메일<input name="email" type="email" value="admin@opod.com" autocomplete="username" required /></label>
-      <label>비밀번호<input name="password" type="password" autocomplete="current-password" required /></label>
-      <button type="submit">로그인</button>
-    </form>
-  </section>`;
-}
-
-async function charactersHtml() {
-  const state = characterRouteState(
-    hasDocument ? location.hash : "#characters",
-  );
-  if (state.mode === "create") {
-    return characterCreatePageHtml();
-  }
-  if (state.mode === "detail" && state.characterId) {
-    return characterDetailPageHtml(state);
-  }
-  return characterListPageHtml();
-}
-
-async function characterListPageHtml() {
-  const result = await request(endpoint("/api/characters", { limit: 25 }));
-  const characters = itemsFromPage(result.body);
-
-  return `<section class="panel">
-      <div class="toolbar">
-        <h3>AI 캐릭터 목록</h3>
-        <a class="action-link" href="${characterHref({ mode: "create" })}">새 캐릭터</a>
-      </div>
-      ${
-        characters.length
-          ? `<div class="list character-list">${characters
-              .map(characterRow)
-              .join("")}</div>`
-          : `<div class="empty-state"><strong>AI 캐릭터가 없습니다.</strong><a class="action-link" href="${characterHref({ mode: "create" })}">AI 캐릭터 생성</a></div>`
-      }
-    </section>`;
-}
-
-function characterCreatePageHtml() {
-  return `<section class="panel">
-    <div class="toolbar">
-      <h3>AI 캐릭터 생성</h3>
-      <a class="text-link" href="${characterHref()}">목록</a>
-    </div>
-    ${characterCreateForm()}
-  </section>`;
-}
-
-async function characterDetailPageHtml(state) {
-  const detail = await loadMany(characterDetailRequests(state.characterId));
-  const character = detail.character?.body;
-  if (!character?.id) {
-    return `<section class="panel">
-      <div class="toolbar">
-        <h3>캐릭터 상세</h3>
-        <a class="text-link" href="${characterHref()}">목록</a>
-      </div>
-      <p class="muted">캐릭터를 찾을 수 없습니다.</p>
-    </section>`;
-  }
-  return characterDetailHtml(character, detail, state.tab);
-}
-
-function characterRow(character) {
-  return `<a class="list-item character-list-item" href="${escapeHtml(
-    characterHref({ characterId: character.id }),
-  )}">
-    <strong>${escapeHtml(character.displayName)}</strong>
-    <span class="muted">${escapeHtml(character.publicId)} · ${escapeHtml(character.id)}</span>
-    <span class="badge ${character.status === "active" ? "" : "warn"}">${escapeHtml(character.status)}</span>
-  </a>`;
-}
-
-function characterDetailHtml(character, detail, activeTab = "profile") {
-  const personas = itemsFromPage(detail.personas.body);
-  const memory = itemsFromPage(detail.memory.body);
-  const logs = itemsFromPage(detail.logs.body).filter(
-    (log) => log.characterId === character.id,
-  );
-  return `<div class="detail-stack">
-    <section class="panel">
-      <div class="toolbar">
-        <div>
-          <h3>${escapeHtml(character.displayName)}</h3>
-          <p class="muted">${escapeHtml(character.publicId)} · ${escapeHtml(character.id)}</p>
-        </div>
-        <div class="toolbar-actions">
-          <span class="badge ${character.status === "active" ? "" : "warn"}">${escapeHtml(character.status)}</span>
-          <a class="text-link" href="${characterHref()}">목록</a>
-        </div>
-      </div>
-      ${characterTabsHtml(character.id, activeTab)}
-    </section>
-    ${characterTabHtml(character, personas, memory, logs, activeTab)}
-  </div>`;
-}
-
-function characterTabsHtml(characterId, activeTab) {
-  return `<nav class="tabs" aria-label="캐릭터 상세 탭">
-    ${[
-      ["profile", "프로필"],
-      ["content", "콘텐츠"],
-      ["persona", "페르소나"],
-      ["memory", "메모리"],
-      ["logs", "로그"],
-    ]
-      .map(
-        ([tab, label]) =>
-          `<a class="tab ${activeTab === tab ? "active" : ""}" href="${escapeHtml(
-            characterHref({ characterId, tab }),
-          )}">${label}</a>`,
-      )
-      .join("")}
-  </nav>`;
-}
-
-function characterTabHtml(character, personas, memory, logs, activeTab) {
-  if (activeTab === "content") {
-    return `<div class="two-column">
-      <section class="panel"><h3>피드 / 릴스 업로드</h3>${postFormHtml(character.id)}</section>
-      <section class="panel"><h3>스토리 업로드</h3>${storyFormHtml(character.id)}</section>
-    </div>`;
-  }
-  if (activeTab === "persona") {
-    return `<div class="two-column">
-      ${listPanel("페르소나", personas, (item) =>
-        personaRow(character.id, item),
-      )}
-      <section class="panel">
-        <h3>페르소나 추가</h3>
-        <form data-action="persona-create" data-character-id="${escapeHtml(character.id)}">
-          <label>제목<input name="title" maxlength="200" required /></label>
-          <label>내용<textarea name="content" rows="3" maxlength="8000" required></textarea></label>
-          <button type="submit">페르소나 추가</button>
-        </form>
-      </section>
-      <section class="panel">
-        <h3>페르소나 일괄 추가</h3>
-        <form data-action="persona-bulk-create" data-character-id="${escapeHtml(character.id)}">
-          <label>JSON 배열<textarea name="items" rows="6" placeholder='[{"title":"제목","content":"내용"}]' required></textarea></label>
-          <p class="muted">배열 순서대로 정렬 번호가 자동 부여됩니다.</p>
-          <button type="submit">일괄 추가</button>
-        </form>
-      </section>
-      <section class="panel">
-        <h3>순서 일괄 변경</h3>
-        <form data-action="persona-reorder" data-character-id="${escapeHtml(character.id)}">
-          <label>페르소나 ID 배열<textarea name="personaIds" rows="6" required>${escapeHtml(
-            JSON.stringify(
-              personas.map((item) => item.id),
-              null,
-              2,
-            ),
-          )}</textarea></label>
-          <p class="muted">현재 순서로 채워져 있습니다. 줄 순서를 바꿔 저장하면 10, 20, 30… 으로 다시 매겨집니다. 활성 페르소나 전체가 정확히 한 번씩 포함되어야 합니다.</p>
-          ${listPanel(
-            "ID 참조",
-            personas,
-            (item) => `<div class="list-item">
-              <strong>#${escapeHtml(String(item.sortOrder ?? ""))} ${escapeHtml(item.title)}</strong>
-              <span class="muted">${escapeHtml(item.id)}</span>
-            </div>`,
-          )}
-          <button type="submit">순서 저장</button>
-        </form>
-      </section>
-    </div>`;
-  }
-  if (activeTab === "memory") {
-    return `<div class="two-column">
-      ${listPanel("메모리", memory, (item) => memoryRow(character.id, item))}
-      <section class="panel">
-        <h3>메모리 추가</h3>
-        <form data-action="memory-create" data-character-id="${escapeHtml(character.id)}">
-          <label>내용<textarea name="content" rows="3" maxlength="8000" required></textarea></label>
-          <label>이유<textarea name="reason" rows="2" maxlength="1000" required></textarea></label>
-          <button type="submit">메모리 추가</button>
-        </form>
-      </section>
-      <section class="panel">
-        <h3>메모리 일괄 추가</h3>
-        <form data-action="memory-bulk-create" data-character-id="${escapeHtml(character.id)}">
-          <label>JSON 배열<textarea name="items" rows="6" placeholder='[{"content":"내용","reason":"이유"}]' required></textarea></label>
-          <button type="submit">일괄 추가</button>
-        </form>
-      </section>
-    </div>`;
-  }
-  if (activeTab === "logs") {
-    return `<div class="two-column">
-      ${listPanel("액션 로그", logs, logRow)}
-      <section class="panel"><h3>생성 작업</h3>${generationQueueForm(character.id)}</section>
-      <section class="panel"><h3>게시물 작성</h3>${postFormHtml()}</section>
-    </div>`;
-  }
-  return `<div class="two-column">
-    <section class="panel">
-      <h3>프로필</h3>
-      <form data-action="character-update" data-character-id="${escapeHtml(character.id)}">
-        <label>표시 이름<input name="displayName" value="${escapeHtml(character.displayName)}" required /></label>
-        <label>Bio<textarea name="bio" rows="3" required>${escapeHtml(character.bio)}</textarea></label>
-        <label>관심사<input name="interests" value="${escapeHtml((character.interests ?? []).join(", "))}" /></label>
-        <button type="submit">프로필 저장</button>
-      </form>
-    </section>
-    <section class="panel">
-      <h3>상태 관리</h3>
-      <form data-action="character-status" data-character-id="${escapeHtml(character.id)}">
-        <label>상태<select name="status"><option value="active"${selectedOption(character.status, "active")}>active</option><option value="inactive"${selectedOption(character.status, "inactive")}>inactive</option></select></label>
-        <label>이유<input name="reason" required /></label>
-        <button type="submit">상태 변경</button>
-      </form>
-      <form data-action="character-delete" data-character-id="${escapeHtml(character.id)}">
-        <label>삭제 이유<input name="reason" required /></label>
-        <button type="submit">소프트 삭제</button>
-      </form>
-    </section>
-  </div>`;
-}
-
-function personaRow(characterId, persona) {
-  return `<div class="list-item">
-    <strong>#${escapeHtml(String(persona.sortOrder ?? ""))} ${escapeHtml(persona.title)}</strong>
-    <span class="muted">${escapeHtml(persona.content)}</span>
-    <form data-action="persona-update" data-character-id="${escapeHtml(characterId)}" data-persona-id="${escapeHtml(persona.id)}">
-      <label>제목<input name="title" value="${escapeHtml(persona.title)}" maxlength="200" required /></label>
-      <label>내용<textarea name="content" rows="2" maxlength="8000" required>${escapeHtml(persona.content)}</textarea></label>
-      <label>순서<input name="sortOrder" type="number" min="0" step="1" value="${escapeHtml(String(persona.sortOrder ?? ""))}" /></label>
-      <button type="submit">저장</button>
-    </form>
-    <form data-action="persona-delete" data-character-id="${escapeHtml(characterId)}" data-persona-id="${escapeHtml(persona.id)}">
-      <button type="submit">삭제</button>
-    </form>
-  </div>`;
-}
-
-function memoryRow(characterId, memory) {
-  return `<div class="list-item">
-    <strong>${escapeHtml(memory.content)}</strong>
-    <span class="muted">${escapeHtml(memory.reason)}</span>
-    <form data-action="memory-update" data-character-id="${escapeHtml(characterId)}" data-memory-id="${escapeHtml(memory.id)}">
-      <label>내용<textarea name="content" rows="2" maxlength="8000" required>${escapeHtml(memory.content)}</textarea></label>
-      <label>이유<textarea name="reason" rows="2" maxlength="1000" required>${escapeHtml(memory.reason)}</textarea></label>
-      <button type="submit">저장</button>
-    </form>
-    <form data-action="memory-delete" data-character-id="${escapeHtml(characterId)}" data-memory-id="${escapeHtml(memory.id)}">
-      <button type="submit">삭제</button>
-    </form>
-  </div>`;
-}
-
-function characterCreateForm() {
-  return `<form data-action="character-create">
-    <label>공개 ID<input name="publicId" autocomplete="off" required /></label>
-    <label>표시 이름<input name="displayName" autocomplete="off" required /></label>
-    <label>Bio<input name="bio" required /></label>
-    <label>관심사<input name="interests" /></label>
-    <button type="submit">생성</button>
-  </form>`;
-}
-
-async function routeHtml(route) {
-  if (route === "login") return loginHtml();
-  if (route === "dashboard") return loadDashboardHtml();
-  if (route === "users") return usersHtml();
-  if (route === "characters") return charactersHtml();
-  if (route === "media") return mediaHtml();
-  if (route === "generation") return generationHtml();
-  if (route === "moderation") return moderationHtml();
-  if (route === "payments") return paymentsHtml();
-  if (route === "analytics") return analyticsHtml();
-  if (route === "settings") return settingsHtml();
-  return settingsHtml();
-}
-
-function creditGrantForm() {
-  return `<form data-action="credit-grant">
-    <label>사용자 ID<input name="userId" required /></label>
-    <label>금액<input name="amount" type="number" min="1" step="1" required /></label>
-    <label>이유<input name="reason" required /></label>
-    <button type="submit">지급</button>
-  </form>`;
-}
-
-function postFormHtml(characterId = "") {
-  return `<form data-action="post-create">
-    <label>AI 캐릭터 ID<input name="actorId" value="${escapeHtml(characterId)}" required /></label>
-    <label>콘텐츠 타입<select name="contentType"><option value="feed">feed</option><option value="reel">reel</option></select></label>
-    <label>본문<textarea name="content" rows="3" required></textarea></label>
-    <label>로그 이유<input name="reason" required /></label>
-    <label>미디어 타입<select name="mediaType"><option value="image">image</option><option value="video">video</option></select></label>
-    <label>미디어 URL<input name="mediaUrl" type="url" /></label>
-    <label>미디어 파일<input name="mediaFile" type="file" accept="image/*,video/*" /></label>
-    <button type="submit">게시</button>
-  </form>`;
-}
-
-function storyFormHtml(characterId = "") {
-  return `<form data-action="story-create">
-    <label>AI 캐릭터 ID<input name="characterId" value="${escapeHtml(characterId)}" required /></label>
-    <label>캡션<textarea name="caption" rows="3"></textarea></label>
-    <label>로그 이유<input name="reason" required /></label>
-    <label>미디어 타입<select name="mediaType"><option value="image">image</option><option value="video">video</option></select></label>
-    <label>미디어 URL<input name="mediaUrl" /></label>
-    <label>미디어 파일<input name="mediaFile" type="file" accept="image/*,video/*" /></label>
-    <p class="muted">스토리는 생성 시점부터 24시간 노출됩니다.</p>
-    <button type="submit">스토리 게시</button>
-  </form>`;
-}
-
-function reportFormHtml() {
-  return `<form data-action="report-update">
-    <label>신고 ID<input name="reportId" required /></label>
-    <label>상태<select name="status" required><option value="">선택</option><option value="reviewing">reviewing</option><option value="resolved">resolved</option><option value="rejected">rejected</option></select></label>
-    <label>처리 내용<textarea name="resolution" rows="3"></textarea></label>
-    <button type="submit">저장</button>
-  </form>`;
-}
-
-function generationQueueForm(characterId = "") {
-  return `<form data-action="generation-create">
-    <label>AI 캐릭터 ID<input name="characterId" value="${escapeHtml(characterId)}" required /></label>
-    <label>미디어 타입<select name="mediaType"><option value="image">image</option><option value="video">video</option></select></label>
-    <label>프롬프트<textarea name="prompt" rows="4" required></textarea></label>
-    <button type="submit">큐 등록</button>
-  </form>`;
-}
-
-function generationHtml() {
-  return `<div class="two-column">
-    <section class="panel">
-      <h3>생성 작업 등록</h3>
-      ${generationQueueForm()}
-    </section>
-    <section class="panel">
-      <h3>작업 액션</h3>
-      <form data-action="generation-action">
-        <label>작업 ID<input name="jobId" required /></label>
-        <label>액션<select name="action" required><option value="">선택</option><option value="start">start</option><option value="run">run</option><option value="retry">retry</option><option value="complete">complete</option></select></label>
-        <label>Provider (run)<select name="provider"><option value="">기본</option><option value="local">local</option></select></label>
-        <label>Media ID (complete)<input name="mediaId" /></label>
-        <label>URL (complete)<input name="url" type="url" /></label>
-        <label>이유 (retry)<input name="reason" /></label>
-        <button type="submit">실행</button>
-      </form>
-    </section>
-  </div>`;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-async function checkHealth() {
-  const result = await request("/api/character-action-logs");
-  statusDot.classList.toggle("ok", result.ok);
-  statusText.textContent = result.ok ? "정상" : "오류";
-  render(result.body);
-}
-
-async function request(path, options) {
-  try {
-    const response = await fetch(
-      path,
-      adminRequestOptions(options, readAdminToken()),
-    );
-    const text = await response.text();
-    const result = {
-      ok: response.ok,
-      body: parseResponseBody(text, response),
-    };
-    if (response.status === 401 && currentRoute() !== "login") {
-      clearAdminAuth();
-      updateSessionUi();
-      location.hash = "login";
-    }
-    return result;
-  } catch (error) {
-    return { ok: false, body: { error: error.message } };
-  }
-}
-
 export function parseResponseBody(text, response = { status: 0 }) {
   if (!text) {
     return { status: response.status };
@@ -1102,50 +460,6 @@ export function parseResponseBody(text, response = { status: 0 }) {
       status: response.status,
     };
   }
-}
-
-function readAdminToken() {
-  return hasDocument
-    ? (window.sessionStorage.getItem(adminTokenStorageKey) ?? "")
-    : "";
-}
-
-function readAdminEmail() {
-  return hasDocument
-    ? (window.sessionStorage.getItem(adminEmailStorageKey) ?? "")
-    : "";
-}
-
-function writeAdminAuth(body) {
-  const token = String(body?.token ?? "").trim();
-  if (token) {
-    window.sessionStorage.setItem(adminTokenStorageKey, token);
-    window.sessionStorage.setItem(
-      adminEmailStorageKey,
-      String(body?.admin?.email ?? ""),
-    );
-  } else {
-    clearAdminAuth();
-  }
-}
-
-function clearAdminAuth() {
-  window.sessionStorage.removeItem(adminTokenStorageKey);
-  window.sessionStorage.removeItem(adminEmailStorageKey);
-}
-
-function updateSessionUi() {
-  const email = readAdminEmail();
-  adminAuthEmail.textContent = email;
-  adminAuthBox.hidden = !readAdminToken();
-}
-
-function authRedirectRoute() {
-  const route = location.hash.replace(/^#/, "").split("?")[0];
-  const hasToken = Boolean(readAdminToken());
-  if (!hasToken && route !== "login") return "login";
-  if (hasToken && route === "login") return "dashboard";
-  return "";
 }
 
 export async function postPayload(
@@ -1207,6 +521,10 @@ export async function storyPayload(
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Low-level form/value helpers (shared by the builders above)
+// ─────────────────────────────────────────────────────────────────────────
+
 function parseBulkItems(value) {
   const text = String(value ?? "").trim();
   if (!text) {
@@ -1252,14 +570,6 @@ function jsonRequest(path, method, body) {
       body: JSON.stringify(body),
     },
   };
-}
-
-function setFormSubmitting(form, submitting) {
-  for (const control of form.querySelectorAll(
-    "button, input, select, textarea",
-  )) {
-    control.disabled = submitting;
-  }
 }
 
 function selectedFile(form) {
@@ -1346,8 +656,1983 @@ function errorMessage(body, fallback) {
   return typeof body?.error === "string" ? body.error : fallback;
 }
 
-function render(value) {
-  if (output) {
-    output.textContent = JSON.stringify(value, null, 2);
+// ═════════════════════════════════════════════════════════════════════════
+// Rendering layer
+// ═════════════════════════════════════════════════════════════════════════
+
+const ui = {
+  filters: {
+    charStatus: "전체",
+    mediaType: "전체",
+    mediaUploaded: "전체",
+    payStatus: "전체",
+    reportStatus: "전체",
+  },
+  selMediaId: null,
+  selUserId: null,
+  selPayId: null,
+  ledgerUserId: "",
+  eventUserId: "",
+  cache: {
+    charNames: new Map(),
+    userLabels: new Map(),
+  },
+  badges: { moderation: 0, payments: 0 },
+  toastTimer: 0,
+};
+
+// — request / auth —
+
+async function request(path, options) {
+  try {
+    const response = await fetch(
+      path,
+      adminRequestOptions(options, readAdminToken()),
+    );
+    const text = await response.text();
+    const result = {
+      ok: response.ok,
+      status: response.status,
+      body: parseResponseBody(text, response),
+    };
+    if (response.status === 401 && currentRoute() !== "login") {
+      clearAdminAuth();
+      renderApp();
+    }
+    return result;
+  } catch (error) {
+    return { ok: false, status: 0, body: { error: error.message } };
   }
+}
+
+function readAdminToken() {
+  return hasDocument
+    ? (window.sessionStorage.getItem(adminTokenStorageKey) ?? "")
+    : "";
+}
+
+function readAdminEmail() {
+  return hasDocument
+    ? (window.sessionStorage.getItem(adminEmailStorageKey) ?? "")
+    : "";
+}
+
+function writeAdminAuth(body) {
+  const token = String(body?.token ?? "").trim();
+  if (token) {
+    window.sessionStorage.setItem(adminTokenStorageKey, token);
+    window.sessionStorage.setItem(
+      adminEmailStorageKey,
+      String(body?.admin?.email ?? ""),
+    );
+  } else {
+    clearAdminAuth();
+  }
+}
+
+function clearAdminAuth() {
+  window.sessionStorage.removeItem(adminTokenStorageKey);
+  window.sessionStorage.removeItem(adminEmailStorageKey);
+}
+
+function currentRoute() {
+  return currentRouteFromHash(location.hash, readAdminToken());
+}
+
+// — formatting / classification helpers —
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function attr(value) {
+  return escapeHtml(value);
+}
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(
+    d.getHours(),
+  )}:${pad2(d.getMinutes())}`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function fmtBytes(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = n;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value >= 100 || i === 0 ? Math.round(value) : value.toFixed(1)} ${units[i]}`;
+}
+
+function basename(url) {
+  const raw = String(url ?? "").split("?")[0];
+  const parts = raw.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : raw || "—";
+}
+
+function initialOf(text) {
+  const t = String(text ?? "").trim();
+  return t ? t[0].toUpperCase() : "·";
+}
+
+function mediaDims(m) {
+  if (m.width && m.height) {
+    const base = `${m.width}×${m.height}`;
+    return m.durationSeconds ? `${base} · ${m.durationSeconds}s` : base;
+  }
+  return m.durationSeconds ? `${m.durationSeconds}s` : "—";
+}
+
+function statusTag(status) {
+  return status === "active"
+    ? '<span class="tag tag-accent">활성</span>'
+    : '<span class="tag tag-neutral">비활성</span>';
+}
+
+function providerStatusClass(s) {
+  if (s === "paid") return "tag-accent";
+  if (s === "pending") return "tag-neutral";
+  return "tag-accent-2"; // failed / canceled / refunded
+}
+
+function ledgerStatusClass(s) {
+  if (s === "granted") return "tag-accent";
+  if (s === "missing_grant") return "tag-accent-2";
+  return "tag-neutral";
+}
+
+function reportStatusMeta(s) {
+  const map = {
+    submitted: ["tag-accent-2", "접수됨"],
+    reviewing: ["tag-neutral", "검토 중"],
+    resolved: ["tag-accent", "처리 완료"],
+    rejected: ["tag-neutral", "기각"],
+  };
+  return map[s] ?? ["tag-neutral", s];
+}
+
+function logTagClass(t) {
+  const type = String(t ?? "");
+  if (type.startsWith("POST") || type.startsWith("COMMENT"))
+    return "tag-accent";
+  if (type.includes("STATUS") || type.includes("DELETE")) return "tag-accent-2";
+  return "tag-neutral";
+}
+
+function analyticsLabel(name) {
+  const map = {
+    "events.count": "이벤트",
+    "messages.count": "메시지",
+    "credits.granted": "지급 크레딧",
+    "credits.debited": "사용 크레딧",
+    "generation_jobs.count": "생성 작업",
+  };
+  return map[name] ?? name;
+}
+
+function charName(id) {
+  return ui.cache.charNames.get(id) ?? (id ? `${id.slice(0, 8)}…` : "—");
+}
+
+function userLabel(id) {
+  return ui.cache.userLabels.get(id) ?? (id ? `${id.slice(0, 8)}…` : "—");
+}
+
+// — small view partials —
+
+function segControl(scope, options, current) {
+  return `<span class="seg">${options
+    .map((opt) => {
+      const active = opt.value === current ? " active" : "";
+      return `<button type="button" class="seg-opt${active}" data-act="set-seg" data-scope="${attr(
+        scope,
+      )}" data-val="${attr(opt.value)}">${escapeHtml(opt.label)}</button>`;
+    })
+    .join("")}</span>`;
+}
+
+function sectionHead(title, sub, actionHtml = "") {
+  return `<div class="section-head"><div><h2>${escapeHtml(
+    title,
+  )}</h2><p class="section-sub">${escapeHtml(sub)}</p></div>${actionHtml}</div>`;
+}
+
+function noticeBlock(html) {
+  return `<div class="notice">${html}</div>`;
+}
+
+function spinner() {
+  return `<div class="spin">불러오는 중…</div>`;
+}
+
+// — user/character option loading (for selects) —
+
+async function loadUserOptions() {
+  const res = await request(endpoint("/api/users", { limit: 50 }));
+  const users = itemsFromPage(res.body);
+  for (const u of users) {
+    ui.cache.userLabels.set(u.id, u.email || u.displayName || u.id);
+  }
+  return users;
+}
+
+async function loadCharacterOptions() {
+  const res = await request(endpoint("/api/characters", { limit: 50 }));
+  const chars = itemsFromPage(res.body);
+  for (const c of chars) {
+    ui.cache.charNames.set(c.id, c.displayName || c.publicId || c.id);
+  }
+  return chars;
+}
+
+function optionList(items, valueKey, labelFn, selected) {
+  return items
+    .map((it) => {
+      const v = it[valueKey];
+      const sel = v === selected ? " selected" : "";
+      return `<option value="${attr(v)}"${sel}>${escapeHtml(labelFn(it))}</option>`;
+    })
+    .join("");
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Section renderers
+// ═════════════════════════════════════════════════════════════════════════
+
+async function renderSection(route) {
+  if (route === "characters") return renderCharacters();
+  if (route === "posts") return renderPosts();
+  if (route === "media") return renderMedia();
+  if (route === "generation") return renderGeneration();
+  if (route === "users") return renderUsers();
+  if (route === "credits") return renderCredits();
+  if (route === "payments") return renderPayments();
+  if (route === "moderation") return renderModeration();
+  if (route === "events") return renderEvents();
+  if (route === "logs") return renderLogs();
+  if (route === "analytics") return renderAnalytics();
+  return renderCharacters();
+}
+
+// ── 캐릭터 ────────────────────────────────────────────────────────────────
+
+async function renderCharacters() {
+  const state = characterRouteState(location.hash);
+  if (state.mode === "detail" && state.characterId) {
+    return renderCharacterDetail(state.characterId, state.tab);
+  }
+  return renderCharacterList();
+}
+
+async function renderCharacterList() {
+  const filter = ui.filters.charStatus;
+  const statusParam =
+    filter === "활성" ? "active" : filter === "비활성" ? "inactive" : "";
+  const res = await request(
+    endpoint("/api/characters", { status: statusParam, limit: 50 }),
+  );
+  const chars = itemsFromPage(res.body);
+  for (const c of chars) {
+    ui.cache.charNames.set(c.id, c.displayName || c.publicId || c.id);
+  }
+
+  const rows = chars.length
+    ? chars
+        .map((c) => {
+          const haystack =
+            `${c.publicId ?? ""} ${c.displayName ?? ""}`.toLowerCase();
+          return `<tr class="clickable char-row" data-search="${attr(
+            haystack,
+          )}" data-act="go-char" data-id="${attr(c.id)}">
+            <td style="font-weight:600">${escapeHtml(c.publicId)}</td>
+            <td>${escapeHtml(c.displayName)}</td>
+            <td style="color:var(--color-neutral-700);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(
+              c.bio,
+            )}</td>
+            <td style="color:var(--color-neutral-700);font-style:italic">${escapeHtml(
+              (c.interests ?? []).join(", "),
+            )}</td>
+            <td>${statusTag(c.status)}</td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr class="empty-row"><td colspan="5">조건에 맞는 캐릭터가 없습니다.</td></tr>`;
+
+  return `
+    ${sectionHead(
+      "캐릭터",
+      "AI 캐릭터의 생성, 프로필 수정, 상태 전환, 기억 관리",
+      `<button class="btn btn-primary" data-act="open-dialog" data-dialog="new-char">새 캐릭터</button>`,
+    )}
+    <div class="toolbar">
+      ${segControl(
+        "charStatus",
+        [
+          { value: "전체", label: "전체" },
+          { value: "활성", label: "활성" },
+          { value: "비활성", label: "비활성" },
+        ],
+        filter,
+      )}
+      <input class="input" style="max-width:260px" placeholder="publicId, 이름 검색" data-filter-input=".char-row" />
+      <span class="count-note">${chars.length}건</span>
+    </div>
+    <table class="table">
+      <thead><tr><th>공개 ID</th><th>표시 이름</th><th>Bio</th><th>관심사</th><th>상태</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function renderCharacterDetail(id, tab) {
+  const [detailRes, logsRes] = await Promise.all([
+    request(`/api/characters/${id}`),
+    request("/api/character-action-logs"),
+  ]);
+  const c = detailRes.body;
+  if (!detailRes.ok || !c?.id) {
+    return `<button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="go-char-list">← 캐릭터 목록</button>
+      ${noticeBlock("캐릭터를 찾을 수 없습니다.")}`;
+  }
+  ui.cache.charNames.set(c.id, c.displayName || c.publicId || c.id);
+  const personas = Array.isArray(c.personas) ? c.personas : [];
+  const memories = Array.isArray(c.memories) ? c.memories : [];
+  const logs = itemsFromPage(logsRes.body).filter((l) => l.characterId === id);
+  const primaryPersona = personas[0];
+
+  const stats = [
+    ["기억", memories.length],
+    ["페르소나", personas.length],
+    ["관심사", (c.interests ?? []).length],
+  ];
+
+  const header = `
+    <button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="go-char-list">← 캐릭터 목록</button>
+    <div style="display:flex;align-items:flex-start;gap:22px;margin-bottom:26px">
+      <span class="avatar" style="width:68px;height:68px;font-size:30px">${initialOf(
+        c.displayName,
+      )}</span>
+      <div style="min-width:0;flex:1">
+        <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+          <h2 style="font-size:36px;margin:0;line-height:1.05">${escapeHtml(
+            c.displayName,
+          )}</h2>
+          <span style="font-size:14px;color:var(--color-neutral-600)">@${escapeHtml(
+            c.publicId,
+          )}</span>
+          ${statusTag(c.status)}
+        </div>
+        <p style="margin:8px 0 12px;font-size:15.5px;font-style:italic;color:var(--color-neutral-700);line-height:1.4">${escapeHtml(
+          c.bio,
+        )}</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${(c.interests ?? [])
+            .map(
+              (t) => `<span class="tag tag-outline">#${escapeHtml(t)}</span>`,
+            )
+            .join("")}
+        </div>
+      </div>
+      <button class="btn btn-secondary" style="flex:none" data-act="toggle-char-status" data-id="${attr(
+        c.id,
+      )}" data-current="${attr(c.status)}">${
+        c.status === "active" ? "비활성화" : "활성화"
+      }</button>
+    </div>
+    <div style="display:flex;gap:56px;margin:0 0 36px;padding-left:90px">
+      ${stats
+        .map(
+          ([label, value]) =>
+            `<div><div class="stat-label">${escapeHtml(
+              label,
+            )}</div><span class="stat-value">${value}</span></div>`,
+        )
+        .join("")}
+    </div>
+    <div class="tabs-row">
+      ${[
+        ["profile", "프로필"],
+        ["posts", "게시물"],
+        ["activity", "활동"],
+      ]
+        .map(
+          ([key, label]) =>
+            `<button class="tab-link${
+              tab === key ? " active" : ""
+            }" data-act="char-tab" data-id="${attr(c.id)}" data-tab="${key}">${label}</button>`,
+        )
+        .join("")}
+    </div>`;
+
+  let body = "";
+  if (tab === "profile") {
+    body = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:56px">
+        <div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">프로필 수정</span><span style="font-size:11px;color:var(--color-neutral-500)">PATCH /api/characters/:id</span></div>
+          <form data-action="char-profile" data-character-id="${attr(
+            c.id,
+          )}" data-persona-id="${attr(primaryPersona?.id ?? "")}" style="display:flex;flex-direction:column;gap:12px">
+            <div class="field"><label>표시 이름</label><input class="input" name="displayName" value="${attr(
+              c.displayName,
+            )}" required></div>
+            <div class="field"><label>Bio</label><input class="input" name="bio" value="${attr(
+              c.bio,
+            )}" required></div>
+            <div class="field"><label>페르소나 ${
+              primaryPersona ? "" : "(첫 페르소나 생성)"
+            }</label><textarea class="input" name="persona" rows="4" placeholder="말투 · 성격 · 세계관 설정">${escapeHtml(
+              primaryPersona?.content ?? "",
+            )}</textarea></div>
+            <div class="field"><label>관심사 (쉼표 구분)</label><input class="input" name="interests" value="${attr(
+              (c.interests ?? []).join(", "),
+            )}"></div>
+            <div><button class="btn btn-primary" type="submit">저장</button></div>
+          </form>
+        </div>
+        <div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">기억</span><span style="font-size:11px;color:var(--color-neutral-500)">${
+            memories.length
+          }건 · POST /api/characters/:id/memory</span></div>
+          <div style="font-size:13.5px;line-height:1.55;color:var(--color-neutral-800)">
+            ${
+              memories.length
+                ? memories
+                    .map(
+                      (m) =>
+                        `<div style="padding:8px 0;border-bottom:1px solid var(--color-divider);display:flex;justify-content:space-between;gap:12px"><span>${escapeHtml(
+                          m.content,
+                        )}</span><span style="color:var(--color-neutral-500);font-size:11px;flex:none">${fmtDate(
+                          m.createdAt,
+                        )}</span></div>`,
+                    )
+                    .join("")
+                : `<div style="padding:8px 0;color:var(--color-neutral-600);font-style:italic">저장된 기억이 없습니다 — 아래에서 첫 기억을 추가하세요.</div>`
+            }
+          </div>
+          <form data-action="memory-add" data-character-id="${attr(
+            c.id,
+          )}" style="display:flex;gap:8px;margin-top:12px">
+            <input class="input" name="content" placeholder="새 기억 내용" required>
+            <button class="btn btn-secondary" type="submit" style="flex:none">추가</button>
+          </form>
+        </div>
+      </div>`;
+  } else if (tab === "posts") {
+    body = noticeBlock(
+      `<strong>게시물 목록 API는 아직 제공되지 않습니다.</strong><br>백엔드의 게시물은 현재 생성 전용(<code>POST /api/posts</code>)입니다. 이 캐릭터 명의로 새 게시물을 만들 수 있습니다.
+       <div style="margin-top:14px"><button class="btn btn-primary" data-act="open-dialog" data-dialog="new-post" data-actor="${attr(
+         c.id,
+       )}">새 게시물</button></div>`,
+    );
+  } else {
+    // activity
+    const logRows = logs.length
+      ? logs
+          .map(
+            (l) =>
+              `<div style="padding:10px 0;border-bottom:1px solid var(--color-divider);display:flex;flex-direction:column;gap:5px"><div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px"><span class="tag ${logTagClass(
+                l.actionType,
+              )}">${escapeHtml(
+                l.actionType,
+              )}</span><span style="color:var(--color-neutral-500);font-size:11px;flex:none">${fmtDateTime(
+                l.createdAt,
+              )}</span></div><span>${escapeHtml(l.reason ?? "")}</span></div>`,
+          )
+          .join("")
+      : `<div style="padding:10px 0;color:var(--color-neutral-600);font-style:italic">기록된 액션이 없습니다.</div>`;
+    body = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:56px">
+        <div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 8px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">최근 액션 로그</span><span style="font-size:11px;color:var(--color-neutral-500)">GET /api/character-action-logs</span></div>
+          <div style="font-size:13px;line-height:1.5">${logRows}</div>
+        </div>
+        <div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 8px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">생성 작업</span></div>
+          ${noticeBlock(
+            `작업 목록 API는 아직 없습니다. 이 캐릭터로 새 작업을 큐에 등록할 수 있습니다.<div style="margin-top:12px"><button class="btn btn-secondary" data-act="open-dialog" data-dialog="new-job" data-char="${attr(
+              c.id,
+            )}">큐 등록</button></div>`,
+          )}
+        </div>
+      </div>`;
+  }
+
+  return `<div>${header}${body}</div>`;
+}
+
+// ── 게시물 ────────────────────────────────────────────────────────────────
+
+async function renderPosts() {
+  return `
+    ${sectionHead(
+      "게시물",
+      "캐릭터 명의의 게시물 생성과, 캐릭터 명의 댓글·반응 부여",
+      `<button class="btn btn-primary" data-act="open-dialog" data-dialog="new-post">새 게시물</button>`,
+    )}
+    ${noticeBlock(
+      `<strong>게시물 목록 조회 API가 아직 없습니다.</strong><br>
+       현재 백엔드는 게시물을 생성 전용으로 노출합니다 — 목록/상세(<code>GET /api/posts</code>)는 준비되지 않았습니다.
+       위 <em>새 게시물</em>로 캐릭터 명의 게시물을 만들면 <code>POST /api/posts</code>가 호출됩니다.
+       댓글·반응(<code>POST /api/posts/:id/comments</code>, <code>/reactions</code>)은 대상 게시물 ID가 있을 때 사용할 수 있습니다.`,
+    )}`;
+}
+
+// ── 미디어 ────────────────────────────────────────────────────────────────
+
+async function renderMedia() {
+  if (ui.selMediaId) {
+    return renderMediaDetail(ui.selMediaId);
+  }
+  const typeParam = ui.filters.mediaType === "전체" ? "" : ui.filters.mediaType;
+  const uploadedParam =
+    ui.filters.mediaUploaded === "업로드됨"
+      ? "true"
+      : ui.filters.mediaUploaded === "대기"
+        ? "false"
+        : "";
+  const res = await request(
+    endpoint("/api/media", {
+      mediaType: typeParam,
+      uploaded: uploadedParam,
+      limit: 50,
+    }),
+  );
+  const media = itemsFromPage(res.body);
+
+  const rows = media.length
+    ? media
+        .map((m) => {
+          const pending = !m.uploadedAt;
+          return `<tr class="clickable" data-act="select-media" data-id="${attr(
+            m.id,
+          )}">
+            <td style="font-weight:600">${escapeHtml(basename(m.url))}</td>
+            <td>${escapeHtml(m.mediaType)}</td>
+            <td>${fmtBytes(m.byteSize)}</td>
+            <td style="color:var(--color-neutral-700)">${escapeHtml(
+              mediaDims(m),
+            )}</td>
+            <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+              m.createdAt,
+            )}</td>
+            <td>${
+              pending
+                ? '<span class="tag tag-accent-2">대기</span>'
+                : '<span class="tag tag-accent">업로드됨</span>'
+            }</td>
+            <td>${
+              pending
+                ? `<button class="btn btn-ghost" data-act="media-confirm" data-id="${attr(
+                    m.id,
+                  )}" data-stop="1">업로드 확정</button>`
+                : ""
+            }</td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr class="empty-row"><td colspan="7">조건에 맞는 미디어가 없습니다.</td></tr>`;
+
+  return `
+    ${sectionHead(
+      "미디어",
+      "S3 presigned 업로드 시작 → 업로드 확정 → 게시물·생성 결과에 연결",
+      `<button class="btn btn-primary" data-act="open-dialog" data-dialog="upload">업로드 시작</button>`,
+    )}
+    <div class="toolbar">
+      ${segControl(
+        "mediaType",
+        [
+          { value: "전체", label: "전체" },
+          { value: "image", label: "image" },
+          { value: "video", label: "video" },
+        ],
+        ui.filters.mediaType,
+      )}
+      ${segControl(
+        "mediaUploaded",
+        [
+          { value: "전체", label: "전체" },
+          { value: "업로드됨", label: "업로드됨" },
+          { value: "대기", label: "대기" },
+        ],
+        ui.filters.mediaUploaded,
+      )}
+      <span class="count-note">${media.length}건</span>
+    </div>
+    <table class="table">
+      <thead><tr><th>파일</th><th>타입</th><th>크기</th><th>해상도</th><th>생성</th><th>업로드 상태</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function renderMediaDetail(id) {
+  const res = await request(`/api/media/${id}`);
+  const m = res.body;
+  if (!res.ok || !m?.id) {
+    return `<button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-media">← 미디어 목록</button>${noticeBlock(
+      "미디어를 찾을 수 없습니다.",
+    )}`;
+  }
+  const pending = !m.uploadedAt;
+  const fields = [
+    ["타입", m.mediaType],
+    ["크기", fmtBytes(m.byteSize)],
+    ["해상도", mediaDims(m)],
+    ["Content-Type", m.contentType ?? "—"],
+    ["업로드 시작", fmtDateTime(m.createdAt)],
+    [
+      "업로드 확정",
+      m.uploadedAt ? fmtDateTime(m.uploadedAt) : "미확정 (pending)",
+    ],
+  ];
+  return `
+    <button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-media">← 미디어 목록</button>
+    <div style="max-width:640px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:8px">
+        <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;min-width:0">
+          <h2 style="font-size:28px;margin:0;word-break:break-all">${escapeHtml(
+            basename(m.url),
+          )}</h2>
+          ${
+            pending
+              ? '<span class="tag tag-accent-2">대기</span>'
+              : '<span class="tag tag-accent">업로드됨</span>'
+          }
+        </div>
+        ${
+          pending
+            ? `<button class="btn btn-primary" style="flex:none" data-act="media-confirm" data-id="${attr(
+                m.id,
+              )}">업로드 확정</button>`
+            : ""
+        }
+      </div>
+      <p style="margin:0 0 24px;font-size:13px;color:var(--color-neutral-600)">GET /api/media/${escapeHtml(
+        m.id,
+      )}</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 32px;font-size:13.5px">
+        ${fields
+          .map(
+            ([label, value]) =>
+              `<div><div class="stat-label">${escapeHtml(
+                label,
+              )}</div>${escapeHtml(value)}</div>`,
+          )
+          .join("")}
+        <div style="grid-column:1/-1"><div class="stat-label">URL</div><span style="word-break:break-all">${escapeHtml(
+          m.url,
+        )}</span></div>
+      </div>
+      ${
+        pending
+          ? `<p style="margin:26px 0 0;font-size:13px;line-height:1.55;color:var(--color-accent-2-700)">presigned PUT URL 발급 후 아직 확정되지 않은 pending 상태입니다. 클라이언트 업로드 완료를 확인한 뒤 '업로드 확정'을 누르면 게시물에 연결할 수 있습니다.</p>`
+          : ""
+      }
+    </div>`;
+}
+
+// ── 생성 작업 ──────────────────────────────────────────────────────────────
+
+async function renderGeneration() {
+  await loadCharacterOptions();
+  return `
+    ${sectionHead(
+      "생성 작업",
+      "이미지·영상 생성 job 큐 — 등록 → 실행 → 완료, 실패 시 재시도 복제",
+      `<button class="btn btn-primary" data-act="open-dialog" data-dialog="new-job">큐 등록</button>`,
+    )}
+    ${noticeBlock(
+      `<strong>작업 목록 조회 API가 아직 없습니다.</strong><br>
+       백엔드는 생성 작업을 큐 등록(<code>POST /api/generation/jobs</code>)과
+       개별 lifecycle 전이(<code>/start</code>, <code>/run</code>, <code>/complete</code>, <code>/retry</code>)만 노출하며,
+       전체 목록(<code>GET /api/generation/jobs</code>)은 준비되지 않았습니다.
+       위 <em>큐 등록</em>으로 새 작업을 등록할 수 있습니다.`,
+    )}`;
+}
+
+// ── 사용자 ────────────────────────────────────────────────────────────────
+
+async function renderUsers() {
+  if (ui.selUserId) {
+    return renderUserDetail(ui.selUserId);
+  }
+  const res = await request(endpoint("/api/users", { limit: 50 }));
+  const users = itemsFromPage(res.body);
+  for (const u of users) {
+    ui.cache.userLabels.set(u.id, u.email || u.displayName || u.id);
+  }
+  const rows = users.length
+    ? users
+        .map((u) => {
+          const haystack =
+            `${u.email ?? ""} ${u.displayName ?? ""}`.toLowerCase();
+          return `<tr class="clickable user-row" data-search="${attr(
+            haystack,
+          )}" data-act="select-user" data-id="${attr(u.id)}">
+            <td style="font-weight:600">${escapeHtml(u.email ?? "—")}</td>
+            <td>${escapeHtml(u.displayName ?? "—")}</td>
+            <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDate(
+              u.createdAt,
+            )}</td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr class="empty-row"><td colspan="3">조건에 맞는 사용자가 없습니다.</td></tr>`;
+
+  return `
+    ${sectionHead(
+      "사용자",
+      "사람 사용자 조회 — 크레딧 지급과 운영 지원 시 ID 확인",
+    )}
+    <div class="toolbar">
+      <input class="input" style="max-width:300px" placeholder="이메일, 닉네임 검색" data-filter-input=".user-row" />
+      <span class="count-note">${users.length}건</span>
+    </div>
+    <table class="table">
+      <thead><tr><th>이메일</th><th>닉네임</th><th>가입</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function renderUserDetail(id) {
+  const [userRes, ledgerRes, eventsRes] = await Promise.all([
+    request(`/api/users/${id}`),
+    request(endpoint("/api/credits/ledger", { userId: id, limit: 30 })),
+    request(endpoint("/api/events", { userId: id, limit: 20 })),
+  ]);
+  const u = userRes.body;
+  if (!userRes.ok || !u?.id) {
+    return `<button class="btn btn-ghost" style="margin:0 0 14px -5px" data-act="back-users">← 사용자 목록</button>${noticeBlock(
+      "사용자를 찾을 수 없습니다.",
+    )}`;
+  }
+  ui.cache.userLabels.set(u.id, u.email || u.displayName || u.id);
+  const ledger = itemsFromPage(ledgerRes.body);
+  const events = itemsFromPage(eventsRes.body);
+  const balance = ledger.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+  const ledgerRows = ledger.length
+    ? ledger
+        .map(
+          (e) =>
+            `<tr><td><span class="tag ${
+              e.entryType === "grant" ? "tag-accent" : "tag-accent-2"
+            }">${escapeHtml(
+              e.entryType,
+            )}</span></td><td style="font-weight:600;text-align:right;font-variant-numeric:tabular-nums">${
+              e.amount > 0 ? "+" : ""
+            }${escapeHtml(e.amount)}</td><td>${escapeHtml(
+              e.reason,
+            )}</td><td style="color:var(--color-neutral-600)">${escapeHtml(
+              e.externalReference ?? "",
+            )}</td><td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+              e.createdAt,
+            )}</td></tr>`,
+        )
+        .join("")
+    : `<tr class="empty-row"><td colspan="5">크레딧 내역이 없습니다.</td></tr>`;
+
+  const eventRows = events.length
+    ? events
+        .map(
+          (ev) =>
+            `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--color-divider);gap:12px"><span><span class="tag tag-neutral" style="margin-right:8px">${escapeHtml(
+              ev.eventType,
+            )}</span>${escapeHtml(ev.targetType ?? "")} · ${escapeHtml(
+              ev.targetId ?? "",
+            )}</span><span style="color:var(--color-neutral-500);font-size:11px;flex:none">${fmtDateTime(
+              ev.createdAt,
+            )}</span></div>`,
+        )
+        .join("")
+    : `<div style="padding:9px 0;color:var(--color-neutral-600);font-style:italic">이벤트가 없습니다.</div>`;
+
+  return `
+    <button class="btn btn-ghost" style="margin:0 0 14px -5px" data-act="back-users">← 사용자 목록</button>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:22px">
+      <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+        <h2 style="font-size:30px;margin:0">${escapeHtml(u.displayName ?? "—")}</h2>
+        <span style="font-size:13px;color:var(--color-neutral-600)">${escapeHtml(
+          u.email ?? "이메일 없음",
+        )}</span>
+      </div>
+      <button class="btn btn-primary" data-act="open-dialog" data-dialog="grant" data-user="${attr(
+        u.id,
+      )}">크레딧 지급</button>
+    </div>
+    <div style="display:flex;gap:48px;margin-bottom:28px;font-size:13.5px">
+      <div><div class="stat-label">가입</div>${fmtDate(u.createdAt)}</div>
+      <div><div class="stat-label">크레딧 잔액</div><span class="stat-value" style="font-size:18px">${balance}</span></div>
+      <div><div class="stat-label">원장 항목</div>${ledger.length}건</div>
+    </div>
+    <h6 style="color:var(--color-neutral-600)">크레딧 원장 — GET /api/credits/ledger?userId=</h6>
+    <table class="table" style="margin-bottom:34px">
+      <thead><tr><th>구분</th><th style="text-align:right">금액</th><th>사유</th><th>외부 참조</th><th>시각</th></tr></thead>
+      <tbody>${ledgerRows}</tbody>
+    </table>
+    <h6 style="color:var(--color-neutral-600)">최근 이벤트 — GET /api/events?userId=</h6>
+    <div style="font-size:14px;max-width:620px">${eventRows}</div>`;
+}
+
+// ── 크레딧 ────────────────────────────────────────────────────────────────
+
+async function renderCredits() {
+  const users = await loadUserOptions();
+  const ledgerUserId = ui.ledgerUserId || (users[0]?.id ?? "");
+  ui.ledgerUserId = ledgerUserId;
+
+  let ledgerRows = `<tr class="empty-row"><td colspan="4">사용자를 선택하면 원장이 표시됩니다.</td></tr>`;
+  if (ledgerUserId) {
+    const res = await request(
+      endpoint("/api/credits/ledger", { userId: ledgerUserId, limit: 30 }),
+    );
+    const ledger = itemsFromPage(res.body);
+    ledgerRows = ledger.length
+      ? ledger
+          .map(
+            (e) =>
+              `<tr><td><span class="tag ${
+                e.entryType === "grant" ? "tag-accent" : "tag-accent-2"
+              }">${escapeHtml(
+                e.entryType,
+              )}</span></td><td style="font-weight:600;text-align:right;font-variant-numeric:tabular-nums">${
+                e.amount > 0 ? "+" : ""
+              }${escapeHtml(e.amount)}</td><td>${escapeHtml(
+                e.reason,
+              )}</td><td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+                e.createdAt,
+              )}</td></tr>`,
+          )
+          .join("")
+      : `<tr class="empty-row"><td colspan="4">표시할 원장 내역이 없습니다.</td></tr>`;
+  }
+
+  const userOpts = optionList(
+    users,
+    "id",
+    (u) => u.email || u.displayName || u.id,
+    ledgerUserId,
+  );
+
+  return `
+    ${sectionHead("크레딧", "운영 지급(grant)과 사용자별 원장 조회")}
+    <div style="display:grid;grid-template-columns:320px 1fr;gap:48px;align-items:start">
+      <form data-action="credit-grant-full" style="display:flex;flex-direction:column;gap:12px">
+        <h6 style="color:var(--color-neutral-600);margin:0">크레딧 지급 — POST /api/credits/grants</h6>
+        <div class="field"><label>사용자</label>
+          <select class="input" name="userId">${optionList(
+            users,
+            "id",
+            (u) => u.email || u.displayName || u.id,
+            ledgerUserId,
+          )}</select>
+        </div>
+        <div class="field"><label>금액</label><input class="input" name="amount" type="number" min="1" step="1" required placeholder="100">
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="btn btn-ghost" type="button" data-act="preset-amount" data-amt="100">+100</button>
+            <button class="btn btn-ghost" type="button" data-act="preset-amount" data-amt="500">+500</button>
+            <button class="btn btn-ghost" type="button" data-act="preset-amount" data-amt="1000">+1,000</button>
+          </div>
+        </div>
+        <div class="field"><label>사유</label><input class="input" name="reason" required placeholder="admin grant"></div>
+        <div class="field"><label>외부 참조 (선택)</label><input class="input" name="externalReference" placeholder="manual-001"></div>
+        <div><button class="btn btn-primary" type="submit">지급</button></div>
+      </form>
+      <div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;gap:12px">
+          <h6 style="color:var(--color-neutral-600);margin:0">원장</h6>
+          <select class="input" style="max-width:240px" data-select="ledger-user">${userOpts}</select>
+        </div>
+        <table class="table">
+          <thead><tr><th>구분</th><th style="text-align:right">금액</th><th>사유</th><th>시각</th></tr></thead>
+          <tbody>${ledgerRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// ── 결제 정산 ──────────────────────────────────────────────────────────────
+
+async function renderPayments() {
+  if (ui.selPayId) {
+    return renderPaymentDetail(ui.selPayId);
+  }
+  const statusParam =
+    ui.filters.payStatus === "전체" ? "" : ui.filters.payStatus;
+  const res = await request(
+    endpoint("/api/payments/reconciliation", { status: statusParam }),
+  );
+  const rows = itemsFromPage(res.body);
+  await ensureUserLabels(rows.map((p) => p.userId));
+
+  const body = rows.length
+    ? rows
+        .map((p) => {
+          const flagged = Boolean(p.reason);
+          return `<tr class="clickable" style="${
+            flagged ? "box-shadow:inset 3px 0 0 var(--color-accent-2)" : ""
+          }" data-act="select-payment" data-id="${attr(p.paymentId)}">
+            <td style="font-weight:600">${escapeHtml(
+              String(p.paymentId).slice(0, 8),
+            )}</td>
+            <td>${escapeHtml(userLabel(p.userId))}</td>
+            <td>${escapeHtml(p.provider)}</td>
+            <td><span class="tag ${providerStatusClass(
+              p.providerStatus,
+            )}">${escapeHtml(p.providerStatus)}</span></td>
+            <td><span class="tag ${ledgerStatusClass(
+              p.ledgerStatus,
+            )}">${escapeHtml(p.ledgerStatus)}</span></td>
+            <td style="color:var(--color-neutral-700);font-size:13px">${escapeHtml(
+              p.reason ?? "",
+            )}</td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr class="empty-row"><td colspan="6">조건에 맞는 결제가 없습니다.</td></tr>`;
+
+  return `
+    ${sectionHead(
+      "결제 정산",
+      "결제 provider 상태와 크레딧 원장 반영 상태 비교 — 불일치를 먼저 처리",
+    )}
+    <div class="toolbar">
+      ${segControl(
+        "payStatus",
+        [
+          { value: "전체", label: "전체" },
+          { value: "mismatch", label: "mismatch" },
+          { value: "pending", label: "pending" },
+          { value: "resolved", label: "resolved" },
+        ],
+        ui.filters.payStatus,
+      )}
+    </div>
+    <table class="table">
+      <thead><tr><th>결제 ID</th><th>사용자</th><th>Provider</th><th>Provider 상태</th><th>원장 상태</th><th>비고</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>`;
+}
+
+async function renderPaymentDetail(id) {
+  const res = await request(paymentDetailRequest(id));
+  const p = res.body;
+  if (!res.ok || !p?.id) {
+    return `<button class="btn btn-ghost" style="margin:0 0 14px -5px" data-act="back-payments">← 결제 목록</button>${noticeBlock(
+      "결제를 찾을 수 없습니다.",
+    )}`;
+  }
+  await ensureUserLabels([p.userId]);
+  const fields = [
+    ["사용자", userLabel(p.userId)],
+    ["Provider", p.provider],
+    ["결제 금액", `${p.paidAmount} ${p.currency ?? ""}`],
+    ["지급 크레딧", p.creditAmount],
+    ["결제 시각", fmtDateTime(p.createdAt)],
+    ["최근 갱신", fmtDateTime(p.updatedAt)],
+  ];
+  return `
+    <button class="btn btn-ghost" style="margin:0 0 14px -5px" data-act="back-payments">← 결제 목록</button>
+    <div style="max-width:560px">
+      <h6 style="color:var(--color-neutral-600)">결제 상세 — GET /api/payments/:id</h6>
+      <div style="display:flex;align-items:baseline;gap:12px;margin:6px 0 18px;flex-wrap:wrap">
+        <h3 style="font-size:22px;margin:0">${escapeHtml(String(p.id).slice(0, 12))}</h3>
+        <span class="tag ${providerStatusClass(p.status)}">${escapeHtml(
+          p.status,
+        )}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 32px;font-size:13.5px">
+        ${fields
+          .map(
+            ([label, value]) =>
+              `<div><div class="stat-label">${escapeHtml(
+                label,
+              )}</div>${escapeHtml(value)}</div>`,
+          )
+          .join("")}
+      </div>
+    </div>`;
+}
+
+// ── 신고 처리 ──────────────────────────────────────────────────────────────
+
+async function renderModeration() {
+  const statusParam =
+    ui.filters.reportStatus === "전체" ? "" : ui.filters.reportStatus;
+  const res = await request(
+    endpoint("/api/moderation/reports", { status: statusParam, limit: 50 }),
+  );
+  const reports = itemsFromPage(res.body);
+  await ensureUserLabels(reports.map((r) => r.reporterUserId));
+
+  const rows = reports.length
+    ? reports
+        .map((r) => {
+          const [cls, label] = reportStatusMeta(r.status);
+          const open = r.status === "submitted" || r.status === "reviewing";
+          return `<tr>
+            <td style="font-weight:600">${escapeHtml(r.targetType)} · ${escapeHtml(
+              String(r.targetId).slice(0, 8),
+            )}</td>
+            <td>${escapeHtml(userLabel(r.reporterUserId))}</td>
+            <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(
+              r.reason,
+            )}">${escapeHtml(r.reason)}</td>
+            <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+              r.createdAt,
+            )}</td>
+            <td><span class="tag ${cls}">${escapeHtml(label)}</span></td>
+            <td style="white-space:nowrap">${
+              open
+                ? `<button class="btn btn-ghost" data-act="report-action" data-id="${attr(
+                    r.id,
+                  )}" data-status="resolved">조치 완료</button>
+                   <button class="btn btn-ghost" style="color:var(--color-accent-2-700)" data-act="report-action" data-id="${attr(
+                     r.id,
+                   )}" data-status="rejected">기각</button>`
+                : ""
+            }</td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr class="empty-row"><td colspan="6">조건에 맞는 신고가 없습니다.</td></tr>`;
+
+  return `
+    ${sectionHead(
+      "신고 처리",
+      "사용자 신고 검토 — 미처리 건을 확인하고 조치 또는 기각",
+    )}
+    <div class="toolbar">
+      ${segControl(
+        "reportStatus",
+        [
+          { value: "전체", label: "전체" },
+          { value: "submitted", label: "접수됨" },
+          { value: "reviewing", label: "검토 중" },
+          { value: "resolved", label: "완료" },
+          { value: "rejected", label: "기각" },
+        ],
+        ui.filters.reportStatus,
+      )}
+    </div>
+    <table class="table">
+      <thead><tr><th>대상</th><th>신고자</th><th>사유</th><th>접수</th><th>상태</th><th style="width:180px"></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// ── 이벤트 · 선호 ─────────────────────────────────────────────────────────
+
+async function renderEvents() {
+  const users = await loadUserOptions();
+  const userId = ui.eventUserId || (users[0]?.id ?? "");
+  ui.eventUserId = userId;
+
+  let eventRows = `<tr class="empty-row"><td colspan="3">사용자를 선택하세요.</td></tr>`;
+  let prefRows = `<div style="padding:9px 0;color:var(--color-neutral-600);font-style:italic">사용자를 선택하세요.</div>`;
+  if (userId) {
+    const [evRes, prefRes] = await Promise.all([
+      request(endpoint("/api/events", { userId, limit: 30 })),
+      request(endpoint("/api/hashtag-preferences", { userId })),
+    ]);
+    const events = itemsFromPage(evRes.body);
+    const prefs = itemsFromPage(prefRes.body);
+    eventRows = events.length
+      ? events
+          .map(
+            (e) =>
+              `<tr><td><span class="tag tag-neutral">${escapeHtml(
+                e.eventType,
+              )}</span></td><td style="color:var(--color-neutral-700)">${escapeHtml(
+                e.targetType ?? "",
+              )} · ${escapeHtml(
+                e.targetId ?? "",
+              )}</td><td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+                e.createdAt,
+              )}</td></tr>`,
+          )
+          .join("")
+      : `<tr class="empty-row"><td colspan="3">선택한 사용자의 이벤트가 없습니다.</td></tr>`;
+    prefRows = prefs.length
+      ? prefs
+          .map(
+            (p) =>
+              `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--color-divider)"><span style="color:var(--color-accent-700)">#${escapeHtml(
+                p.hashtag,
+              )}</span><span style="font-family:var(--font-heading);font-weight:600">${escapeHtml(
+                typeof p.score === "number" ? p.score.toFixed(2) : p.score,
+              )}</span></div>`,
+          )
+          .join("")
+      : `<div style="padding:9px 0;color:var(--color-neutral-600);font-style:italic">학습된 선호가 없습니다.</div>`;
+  }
+
+  return `
+    ${sectionHead(
+      "이벤트 · 해시태그 선호",
+      "추천 피드 랭킹에 쓰이는 사용자 이벤트와 학습된 해시태그 선호 확인",
+    )}
+    <select class="input" style="max-width:260px;margin-bottom:16px" data-select="event-user">${optionList(
+      users,
+      "id",
+      (u) => u.email || u.displayName || u.id,
+      userId,
+    )}</select>
+    <div style="display:grid;grid-template-columns:1fr 340px;gap:48px;align-items:start">
+      <div>
+        <h6 style="color:var(--color-neutral-600)">사용자 이벤트 — GET /api/events</h6>
+        <table class="table">
+          <thead><tr><th>이벤트</th><th>대상</th><th>시각</th></tr></thead>
+          <tbody>${eventRows}</tbody>
+        </table>
+      </div>
+      <div>
+        <h6 style="color:var(--color-neutral-600)">해시태그 선호 — GET /api/hashtag-preferences</h6>
+        <div style="font-size:14px">${prefRows}</div>
+      </div>
+    </div>`;
+}
+
+// ── 액션 로그 ──────────────────────────────────────────────────────────────
+
+async function renderLogs() {
+  const [logsRes] = await Promise.all([
+    request("/api/character-action-logs"),
+    ui.cache.charNames.size ? Promise.resolve() : loadCharacterOptions(),
+  ]);
+  const logs = itemsFromPage(logsRes.body);
+  const rows = logs.length
+    ? logs
+        .map(
+          (l) =>
+            `<tr>
+              <td><span class="tag ${logTagClass(l.actionType)}">${escapeHtml(
+                l.actionType,
+              )}</span></td>
+              <td style="font-weight:600">${escapeHtml(charName(l.characterId))}</td>
+              <td style="color:var(--color-neutral-700)">${escapeHtml(
+                l.targetTable ?? "",
+              )}${l.targetId ? ` · ${escapeHtml(String(l.targetId).slice(0, 8))}` : ""}</td>
+              <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(
+                l.reason,
+              )}">${escapeHtml(l.reason)}</td>
+              <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+                l.createdAt,
+              )}</td>
+            </tr>`,
+        )
+        .join("")
+    : `<tr class="empty-row"><td colspan="5">기록된 액션이 없습니다.</td></tr>`;
+
+  return `
+    ${sectionHead(
+      "액션 로그",
+      "캐릭터 생성·게시·생성 job 등 운영/자동화 행동 기록 — 최신 50건",
+    )}
+    <table class="table">
+      <thead><tr><th>액션</th><th>캐릭터</th><th>대상</th><th>사유</th><th>시각</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// ── 분석 ──────────────────────────────────────────────────────────────────
+
+async function renderAnalytics() {
+  const res = await request("/api/analytics");
+  const metrics = Array.isArray(res.body?.metrics) ? res.body.metrics : [];
+  const cards = metrics.length
+    ? metrics
+        .map(
+          (m) => `
+      <div>
+        <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:18px">${escapeHtml(
+          analyticsLabel(m.name),
+        )}</div>
+        <span class="cmyk-num" style="display:inline-block;font-family:var(--font-heading);font-weight:600;font-size:48px">
+          <span class="paper">${escapeHtml(m.value)}</span>
+          <span class="plate plate-c" aria-hidden="true">${escapeHtml(m.value)}</span>
+          <span class="plate plate-m" aria-hidden="true">${escapeHtml(m.value)}</span>
+          <span class="plate plate-y" aria-hidden="true">${escapeHtml(m.value)}</span>
+        </span>
+      </div>`,
+        )
+        .join("")
+    : `<p class="text-muted">지표를 불러올 수 없습니다.</p>`;
+
+  return `
+    ${sectionHead("분석", "서비스 핵심 지표 — GET /api/analytics")}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:32px;margin-bottom:24px">${cards}</div>
+    ${noticeBlock(
+      "전역 상위 해시태그 집계 API는 아직 없습니다. 사용자별 선호는 <strong>이벤트 · 선호</strong> 섹션에서 확인하세요.",
+    )}`;
+}
+
+// — helper: fill user label cache for a set of ids —
+
+async function ensureUserLabels(ids) {
+  const missing = [
+    ...new Set(ids.filter((id) => id && !ui.cache.userLabels.has(id))),
+  ];
+  if (!missing.length) return;
+  // A single list fetch is cheaper than N detail fetches; labels for ids not
+  // in the first page simply fall back to a shortened id.
+  await loadUserOptions();
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Dialogs
+// ═════════════════════════════════════════════════════════════════════════
+
+let dialogState = null;
+
+async function openDialog(type, ctx = {}) {
+  dialogState = { type, ctx };
+  // Some dialogs need character/user option lists.
+  if (type === "new-post" || type === "comment" || type === "reaction") {
+    ctx.characters = await loadCharacterOptions();
+  }
+  if (type === "new-job") {
+    ctx.characters = await loadCharacterOptions();
+  }
+  if (type === "grant") {
+    ctx.users = await loadUserOptions();
+  }
+  paintDialog();
+}
+
+function closeDialog() {
+  dialogState = null;
+  if (dialogRoot) dialogRoot.innerHTML = "";
+}
+
+function paintDialog() {
+  if (!dialogRoot || !dialogState) return;
+  dialogRoot.innerHTML = `<div class="dialog-backdrop" data-act="dialog-backdrop"><div class="dialog" role="dialog" aria-modal="true">${dialogBody(
+    dialogState,
+  )}</div></div>`;
+  const first = dialogRoot.querySelector("input, textarea, select");
+  if (first) setTimeout(() => first.focus(), 40);
+}
+
+function charSelect(name, characters, selected = "") {
+  return `<select class="input" name="${name}">${optionList(
+    characters ?? [],
+    "id",
+    (c) => `${c.displayName || c.publicId} (@${c.publicId})`,
+    selected,
+  )}</select>`;
+}
+
+function dialogBody({ type, ctx }) {
+  if (type === "new-char") {
+    return `<div class="dialog-title">새 캐릭터</div>
+      <form data-action="dlg-new-char" style="display:flex;flex-direction:column;gap:12px">
+        <div class="field"><label>공개 ID</label><input class="input" name="publicId" required placeholder="arin"></div>
+        <div class="field"><label>표시 이름</label><input class="input" name="displayName" required></div>
+        <div class="field"><label>Bio</label><input class="input" name="bio" required></div>
+        <div class="field"><label>관심사 (쉼표 구분)</label><input class="input" name="interests" placeholder="art, travel"></div>
+        <div class="field"><label>페르소나</label><textarea class="input" name="persona" placeholder="말투 · 성격 · 세계관 설정" required></textarea></div>
+        <div class="field"><label>초기 기억 (선택, 한 줄에 하나씩)</label><textarea class="input" name="memories" placeholder="한강 야경 촬영을 좋아함&#10;필름 현상소 단골"></textarea></div>
+        <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">생성</button></div>
+      </form>`;
+  }
+  if (type === "new-post") {
+    return `<div class="dialog-title">새 게시물</div>
+      <form data-action="dlg-new-post" style="display:flex;flex-direction:column;gap:12px">
+        <div class="field"><label>작성 캐릭터</label>${charSelect(
+          "actorId",
+          ctx.characters,
+          ctx.actor,
+        )}</div>
+        <div class="field"><label>본문</label><textarea class="input" name="content" required></textarea></div>
+        <div class="field"><label>해시태그 (쉼표 구분)</label><input class="input" name="hashtags" placeholder="film, night"></div>
+        <div class="field"><label>로그 이유</label><input class="input" name="reason" required placeholder="film mood board"></div>
+        <div style="display:grid;grid-template-columns:120px 1fr;gap:10px">
+          <div class="field"><label>미디어 타입</label><select class="input" name="mediaType"><option value="image">image</option><option value="video">video</option></select></div>
+          <div class="field"><label>미디어 URL</label><input class="input" name="mediaUrl" type="url" required placeholder="https://cdn.example.com/night.png"></div>
+        </div>
+        <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">게시</button></div>
+      </form>`;
+  }
+  if (type === "comment") {
+    return `<div class="dialog-title">캐릭터 명의 댓글</div>
+      <div class="dialog-body" style="margin:0">대상 게시물: ${escapeHtml(ctx.postId)}</div>
+      <form data-action="dlg-comment" data-post-id="${attr(ctx.postId)}" style="display:flex;flex-direction:column;gap:12px">
+        <div class="field"><label>댓글 작성 캐릭터</label>${charSelect(
+          "characterId",
+          ctx.characters,
+        )}</div>
+        <div class="field"><label>내용</label><textarea class="input" name="body" required></textarea></div>
+        <div class="field"><label>로그 이유</label><input class="input" name="reason"></div>
+        <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">댓글 생성</button></div>
+      </form>`;
+  }
+  if (type === "reaction") {
+    return `<div class="dialog-title">캐릭터 명의 반응</div>
+      <div class="dialog-body" style="margin:0">대상 게시물: ${escapeHtml(ctx.postId)}</div>
+      <form data-action="dlg-reaction" data-post-id="${attr(ctx.postId)}" style="display:flex;flex-direction:column;gap:12px">
+        <div class="field"><label>반응 캐릭터</label>${charSelect(
+          "characterId",
+          ctx.characters,
+        )}</div>
+        <div class="field"><label>반응 타입</label><select class="input" name="reactionType"><option value="like">like</option></select></div>
+        <div class="field"><label>로그 이유</label><input class="input" name="reason"></div>
+        <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">반응 생성</button></div>
+      </form>`;
+  }
+  if (type === "upload") {
+    return `<div class="dialog-title">미디어 업로드 시작</div>
+      <div class="dialog-body" style="margin:0">S3 presigned PUT URL을 발급하고 pending media를 만듭니다 (600초 유효).</div>
+      <form data-action="dlg-upload" style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:grid;grid-template-columns:120px 1fr;gap:10px">
+          <div class="field"><label>미디어 타입</label><select class="input" name="mediaType"><option value="image">image</option><option value="video">video</option></select></div>
+          <div class="field"><label>Content-Type</label><input class="input" name="contentType" required placeholder="image/png"></div>
+        </div>
+        <div class="field"><label>파일 이름</label><input class="input" name="fileName" required placeholder="photo.png"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div class="field"><label>바이트 (선택)</label><input class="input" name="byteSize" type="number" min="1"></div>
+          <div class="field"><label>가로 (선택)</label><input class="input" name="width" type="number" min="1"></div>
+          <div class="field"><label>세로 (선택)</label><input class="input" name="height" type="number" min="1"></div>
+        </div>
+        <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">URL 발급</button></div>
+      </form>`;
+  }
+  if (type === "new-job") {
+    return `<div class="dialog-title">생성 작업 큐 등록</div>
+      <form data-action="dlg-new-job" style="display:flex;flex-direction:column;gap:12px">
+        <div class="field"><label>캐릭터</label>${charSelect(
+          "characterId",
+          ctx.characters,
+          ctx.char,
+        )}</div>
+        <div class="field"><label>미디어 타입</label><select class="input" name="mediaType"><option value="image">image</option><option value="video">video</option></select></div>
+        <div class="field"><label>프롬프트</label><textarea class="input" name="prompt" required></textarea></div>
+        <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">큐 등록</button></div>
+      </form>`;
+  }
+  if (type === "grant") {
+    return `<div class="dialog-title">크레딧 지급</div>
+      <form data-action="dlg-grant" style="display:flex;flex-direction:column;gap:12px">
+        <div class="field"><label>사용자</label><select class="input" name="userId">${optionList(
+          ctx.users ?? [],
+          "id",
+          (u) => u.email || u.displayName || u.id,
+          ctx.user,
+        )}</select></div>
+        <div class="field"><label>금액</label><input class="input" name="amount" type="number" min="1" step="1" required>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="btn btn-ghost" type="button" data-act="preset-amount" data-amt="100">+100</button>
+            <button class="btn btn-ghost" type="button" data-act="preset-amount" data-amt="500">+500</button>
+            <button class="btn btn-ghost" type="button" data-act="preset-amount" data-amt="1000">+1,000</button>
+          </div>
+        </div>
+        <div class="field"><label>사유</label><input class="input" name="reason" required></div>
+        <div class="field"><label>외부 참조 (선택)</label><input class="input" name="externalReference"></div>
+        <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">지급</button></div>
+      </form>`;
+  }
+  return "";
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Toast
+// ═════════════════════════════════════════════════════════════════════════
+
+function showToast(msg, api = "", isError = false) {
+  if (!toastRoot) return;
+  clearTimeout(ui.toastTimer);
+  toastRoot.innerHTML = `<div class="toast${isError ? " toast-error" : ""}">
+    <div class="toast-msg">${escapeHtml(msg)}</div>
+    ${api ? `<div class="toast-api">${escapeHtml(api)}</div>` : ""}
+  </div>`;
+  ui.toastTimer = setTimeout(() => {
+    toastRoot.innerHTML = "";
+  }, 4200);
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Form submission
+// ═════════════════════════════════════════════════════════════════════════
+
+async function submitViaSpec(requestSpec, successMsg) {
+  const result = await request(requestSpec.path, requestSpec.options);
+  if (result.ok) {
+    showToast(
+      successMsg,
+      `${requestSpec.options?.method ?? "GET"} ${requestSpec.path}`,
+    );
+  } else {
+    showToast(errorMessage(result.body, "요청이 실패했습니다."), "", true);
+  }
+  return result;
+}
+
+async function handleFormSubmit(event) {
+  const form = event.target?.matches?.("form[data-action]")
+    ? event.target
+    : undefined;
+  if (!form) return;
+  event.preventDefault();
+  if (pendingForms.has(form)) return;
+
+  const action = form.dataset.action;
+  const formData = new FormData(form);
+  pendingForms.add(form);
+  setFormSubmitting(form, true);
+
+  try {
+    await dispatchSubmit(action, form, formData);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), "", true);
+  } finally {
+    pendingForms.delete(form);
+    setFormSubmitting(form, false);
+  }
+}
+
+async function dispatchSubmit(action, form, formData) {
+  // — login —
+  if (action === "admin-login") {
+    const result = await request(
+      "/api/admin/login",
+      jsonRequest("/api/admin/login", "POST", adminLoginPayload(formData))
+        .options,
+    );
+    if (result.ok && result.body?.token) {
+      writeAdminAuth(result.body);
+      showToast("로그인되었습니다.");
+      if (
+        !location.hash ||
+        currentRouteFromHash(location.hash, "x") === "login"
+      ) {
+        location.hash = DEFAULT_ROUTE;
+      }
+      renderApp();
+    } else {
+      showToast(errorMessage(result.body, "로그인에 실패했습니다."), "", true);
+    }
+    return;
+  }
+
+  // — new character (create + optional persona + optional memories) —
+  if (action === "dlg-new-char") {
+    const created = await request(
+      "/api/characters",
+      jsonRequest("/api/characters", "POST", characterCreatePayload(formData))
+        .options,
+    );
+    if (!created.ok || !created.body?.id) {
+      showToast(errorMessage(created.body, "캐릭터 생성 실패"), "", true);
+      return;
+    }
+    const id = created.body.id;
+    const persona = String(formData.get("persona") ?? "").trim();
+    if (persona) {
+      await request(
+        `/api/characters/${id}/personas`,
+        jsonRequest(`/api/characters/${id}/personas`, "POST", {
+          title: "기본 페르소나",
+          content: persona,
+        }).options,
+      );
+    }
+    const memLines = String(formData.get("memories") ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (memLines.length) {
+      await request(
+        `/api/characters/${id}/memory/bulk`,
+        jsonRequest(`/api/characters/${id}/memory/bulk`, "POST", {
+          items: memLines.map((content) => ({ content, reason: "초기 설정" })),
+        }).options,
+      );
+    }
+    closeDialog();
+    showToast("캐릭터를 생성했습니다.", "POST /api/characters");
+    location.hash = characterHref({ characterId: id });
+    renderApp();
+    return;
+  }
+
+  // — character profile save (update + persona upsert) —
+  if (action === "char-profile") {
+    const id = form.dataset.characterId;
+    const personaId = form.dataset.personaId;
+    const updated = await request(
+      `/api/characters/${id}`,
+      jsonRequest(
+        `/api/characters/${id}`,
+        "PATCH",
+        characterUpdatePayload(formData),
+      ).options,
+    );
+    if (!updated.ok) {
+      showToast(errorMessage(updated.body, "프로필 저장 실패"), "", true);
+      return;
+    }
+    const persona = String(formData.get("persona") ?? "").trim();
+    if (persona) {
+      if (personaId) {
+        await request(
+          `/api/characters/${id}/personas/${personaId}`,
+          jsonRequest(`/api/characters/${id}/personas/${personaId}`, "PATCH", {
+            content: persona,
+          }).options,
+        );
+      } else {
+        await request(
+          `/api/characters/${id}/personas`,
+          jsonRequest(`/api/characters/${id}/personas`, "POST", {
+            title: "기본 페르소나",
+            content: persona,
+          }).options,
+        );
+      }
+    }
+    showToast("프로필을 저장했습니다.", `PATCH /api/characters/${id}`);
+    renderApp();
+    return;
+  }
+
+  // — memory quick add (design has content-only; reason defaulted) —
+  if (action === "memory-add") {
+    const id = form.dataset.characterId;
+    const content = String(formData.get("content") ?? "").trim();
+    if (!content) return;
+    await submitViaSpec(
+      jsonRequest(`/api/characters/${id}/memory`, "POST", {
+        content,
+        reason: "운영 콘솔에서 추가",
+      }),
+      "기억을 추가했습니다.",
+    );
+    renderApp();
+    return;
+  }
+
+  // — new post (character-authored, with hashtags) —
+  if (action === "dlg-new-post") {
+    const body = {
+      actorType: "character",
+      actorId: String(formData.get("actorId") ?? "").trim(),
+      contentType: "feed",
+      content: String(formData.get("content") ?? "").trim(),
+      reason: String(formData.get("reason") ?? "").trim(),
+      hashtags: splitCsv(formData.get("hashtags")),
+      media: [
+        {
+          mediaType: String(formData.get("mediaType") ?? "image"),
+          url: String(formData.get("mediaUrl") ?? "").trim(),
+        },
+      ],
+    };
+    const result = await submitViaSpec(
+      jsonRequest("/api/posts", "POST", body),
+      "게시물을 생성했습니다.",
+    );
+    if (result.ok) closeDialog();
+    return;
+  }
+
+  // — comment / reaction —
+  if (action === "dlg-comment") {
+    const postId = form.dataset.postId;
+    const result = await submitViaSpec(
+      jsonRequest(`/api/posts/${postId}/comments`, "POST", {
+        characterId: String(formData.get("characterId") ?? "").trim(),
+        body: String(formData.get("body") ?? "").trim(),
+        reason: String(formData.get("reason") ?? "").trim() || undefined,
+      }),
+      "댓글을 생성했습니다.",
+    );
+    if (result.ok) closeDialog();
+    return;
+  }
+  if (action === "dlg-reaction") {
+    const postId = form.dataset.postId;
+    const result = await submitViaSpec(
+      jsonRequest(`/api/posts/${postId}/reactions`, "POST", {
+        characterId: String(formData.get("characterId") ?? "").trim(),
+        reactionType: String(formData.get("reactionType") ?? "like"),
+        reason: String(formData.get("reason") ?? "").trim() || undefined,
+      }),
+      "반응을 생성했습니다.",
+    );
+    if (result.ok) closeDialog();
+    return;
+  }
+
+  // — media upload start (presigned URL + pending media) —
+  if (action === "dlg-upload") {
+    const body = {
+      mediaType: String(formData.get("mediaType") ?? "image"),
+      contentType: String(formData.get("contentType") ?? "").trim(),
+      fileName: String(formData.get("fileName") ?? "").trim(),
+    };
+    const bytes = Number(formData.get("byteSize"));
+    const width = Number(formData.get("width"));
+    const height = Number(formData.get("height"));
+    if (bytes > 0) body.byteSize = bytes;
+    if (width > 0) body.width = width;
+    if (height > 0) body.height = height;
+    const result = await submitViaSpec(
+      jsonRequest("/api/media/uploads", "POST", body),
+      "presigned URL을 발급하고 pending media를 만들었습니다.",
+    );
+    if (result.ok) {
+      closeDialog();
+      renderApp();
+    }
+    return;
+  }
+
+  // — new generation job —
+  if (action === "dlg-new-job") {
+    const result = await submitViaSpec(
+      jsonRequest(
+        "/api/generation/jobs",
+        "POST",
+        generationCreatePayload(formData),
+      ),
+      "생성 작업을 큐에 등록했습니다.",
+    );
+    if (result.ok) closeDialog();
+    return;
+  }
+
+  // — credit grant (dialog + inline form share this) —
+  if (action === "dlg-grant" || action === "credit-grant-full") {
+    const body = { ...creditGrantPayload(formData) };
+    const extRef = String(formData.get("externalReference") ?? "").trim();
+    if (extRef) body.externalReference = extRef;
+    const result = await submitViaSpec(
+      jsonRequest("/api/credits/grants", "POST", body),
+      "크레딧을 지급했습니다.",
+    );
+    if (result.ok) {
+      if (action === "dlg-grant") closeDialog();
+      renderApp();
+    }
+    return;
+  }
+
+  throw new Error(`Unsupported form action: ${action}`);
+}
+
+function setFormSubmitting(form, submitting) {
+  for (const control of form.querySelectorAll(
+    "button, input, select, textarea",
+  )) {
+    control.disabled = submitting;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Click / change / input delegation
+// ═════════════════════════════════════════════════════════════════════════
+
+async function handleClick(event) {
+  // sidebar navigation
+  const navBtn = event.target.closest?.(".nav-item[data-route]");
+  if (navBtn) {
+    ui.selMediaId = ui.selUserId = ui.selPayId = null;
+    location.hash = navBtn.dataset.route;
+    return;
+  }
+
+  const el = event.target.closest?.("[data-act]");
+  if (!el) return;
+  const act = el.dataset.act;
+
+  if (act === "dialog-backdrop") {
+    if (event.target === el) closeDialog();
+    return;
+  }
+  if (act === "close-dialog") {
+    closeDialog();
+    return;
+  }
+  if (act === "open-dialog") {
+    const ctx = {
+      actor: el.dataset.actor,
+      char: el.dataset.char,
+      user: el.dataset.user,
+      postId: el.dataset.postId,
+    };
+    await openDialog(el.dataset.dialog, ctx);
+    return;
+  }
+  if (act === "preset-amount") {
+    const input = el.closest("form")?.querySelector('input[name="amount"]');
+    if (input) input.value = String(el.dataset.amt);
+    return;
+  }
+  if (act === "set-seg") {
+    ui.filters[el.dataset.scope] = el.dataset.val;
+    renderApp();
+    return;
+  }
+  if (act === "go-char") {
+    location.hash = characterHref({ characterId: el.dataset.id });
+    return;
+  }
+  if (act === "go-char-list") {
+    location.hash = characterHref();
+    return;
+  }
+  if (act === "char-tab") {
+    location.hash = characterHref({
+      characterId: el.dataset.id,
+      tab: el.dataset.tab,
+    });
+    return;
+  }
+  if (act === "select-media") {
+    ui.selMediaId = el.dataset.id;
+    renderApp();
+    return;
+  }
+  if (act === "back-media") {
+    ui.selMediaId = null;
+    renderApp();
+    return;
+  }
+  if (act === "select-user") {
+    ui.selUserId = el.dataset.id;
+    renderApp();
+    return;
+  }
+  if (act === "back-users") {
+    ui.selUserId = null;
+    renderApp();
+    return;
+  }
+  if (act === "select-payment") {
+    ui.selPayId = el.dataset.id;
+    renderApp();
+    return;
+  }
+  if (act === "back-payments") {
+    ui.selPayId = null;
+    renderApp();
+    return;
+  }
+  if (act === "media-confirm") {
+    event.stopPropagation();
+    const result = await submitViaSpec(
+      {
+        path: `/api/media/${el.dataset.id}/confirm-upload`,
+        options: { method: "POST" },
+      },
+      "업로드를 확정했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (act === "toggle-char-status") {
+    const next = el.dataset.current === "active" ? "inactive" : "active";
+    const result = await submitViaSpec(
+      jsonRequest(`/api/characters/${el.dataset.id}/status`, "PATCH", {
+        status: next,
+        reason: "운영 콘솔에서 상태 전환",
+      }),
+      next === "active" ? "활성화했습니다." : "비활성화했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (act === "report-action") {
+    const status = el.dataset.status;
+    const result = await submitViaSpec(
+      jsonRequest(`/api/moderation/reports/${el.dataset.id}`, "PATCH", {
+        status,
+        resolution:
+          status === "resolved" ? "운영 콘솔에서 조치" : "운영 콘솔에서 기각",
+      }),
+      status === "resolved" ? "조치 완료 처리했습니다." : "기각했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+}
+
+function handleChange(event) {
+  const el = event.target.closest?.("[data-select]");
+  if (!el) return;
+  const kind = el.dataset.select;
+  if (kind === "ledger-user") {
+    ui.ledgerUserId = el.value;
+    renderApp();
+  } else if (kind === "event-user") {
+    ui.eventUserId = el.value;
+    renderApp();
+  }
+}
+
+function handleInput(event) {
+  const el = event.target.closest?.("[data-filter-input]");
+  if (!el) return;
+  const selector = el.dataset.filterInput;
+  const needle = el.value.trim().toLowerCase();
+  const rows = mainPanel.querySelectorAll(selector);
+  let shown = 0;
+  for (const row of rows) {
+    const match = !needle || (row.dataset.search ?? "").includes(needle);
+    row.hidden = !match;
+    if (match) shown += 1;
+  }
+  const note = mainPanel.querySelector(".count-note");
+  if (note) note.textContent = `${shown}건`;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// App shell orchestration
+// ═════════════════════════════════════════════════════════════════════════
+
+function updateIdentity() {
+  const email = readAdminEmail();
+  if (identityEmail) identityEmail.textContent = email;
+  if (identityName)
+    identityName.textContent = email ? email.split("@")[0] : "관리자";
+  if (identityAvatar) identityAvatar.textContent = initialOf(email || "관리자");
+}
+
+function highlightNav(route) {
+  if (!sidebarNav) return;
+  for (const btn of sidebarNav.querySelectorAll(".nav-item[data-route]")) {
+    btn.classList.toggle("active", btn.dataset.route === route);
+  }
+}
+
+function loginHtml() {
+  return `<div class="login-wrap"><form class="login-card" data-action="admin-login">
+    <div>
+      <div class="brand-kicker">AI SNS</div>
+      <div class="brand-title" style="font-size:26px">OPOD Admin</div>
+    </div>
+    <div class="field"><label>이메일</label><input class="input" name="email" type="email" value="admin@opod.com" autocomplete="username" required></div>
+    <div class="field"><label>비밀번호</label><input class="input" name="password" type="password" autocomplete="current-password" required></div>
+    <button class="btn btn-primary" type="submit" style="width:100%">로그인</button>
+  </form></div>`;
+}
+
+async function updateNavBadges() {
+  if (!sidebarNav) return;
+  const [reports, payments] = await Promise.all([
+    request(
+      endpoint("/api/moderation/reports", { status: "submitted", limit: 50 }),
+    ),
+    request(endpoint("/api/payments/reconciliation", { status: "mismatch" })),
+  ]);
+  ui.badges.moderation = itemsFromPage(reports.body).length;
+  ui.badges.payments = itemsFromPage(payments.body).length;
+  applyBadge("moderation", ui.badges.moderation);
+  applyBadge("payments", ui.badges.payments);
+}
+
+function applyBadge(route, count) {
+  const btn = sidebarNav?.querySelector(`.nav-item[data-route="${route}"]`);
+  if (!btn) return;
+  const existing = btn.querySelector(".nav-badge");
+  if (existing) existing.remove();
+  if (count > 0) {
+    const span = document.createElement("span");
+    span.className = "nav-badge";
+    span.textContent = String(count);
+    btn.appendChild(span);
+  }
+}
+
+let renderToken = 0;
+
+async function renderApp() {
+  if (!hasDocument) return;
+  const route = currentRoute();
+
+  if (route === "login") {
+    appShell.hidden = true;
+    loginRoot.innerHTML = loginHtml();
+    const email = loginRoot.querySelector('input[name="email"]');
+    if (email) setTimeout(() => email.focus(), 40);
+    return;
+  }
+
+  loginRoot.innerHTML = "";
+  appShell.hidden = false;
+  updateIdentity();
+  highlightNav(route);
+
+  const token = ++renderToken;
+  mainPanel.innerHTML = spinner();
+  let html;
+  try {
+    html = await renderSection(route);
+  } catch (error) {
+    html = noticeBlock(
+      `섹션을 불러오는 중 오류가 발생했습니다: ${escapeHtml(
+        error instanceof Error ? error.message : String(error),
+      )}`,
+    );
+  }
+  if (token !== renderToken) return; // a newer render superseded this one
+  mainPanel.innerHTML = html;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Boot
+// ═════════════════════════════════════════════════════════════════════════
+
+if (hasDocument) {
+  updateIdentity();
+
+  logoutButton?.addEventListener("click", () => {
+    clearAdminAuth();
+    closeDialog();
+    location.hash = "";
+    renderApp();
+  });
+
+  document.body.addEventListener("click", handleClick);
+  document.body.addEventListener("submit", handleFormSubmit);
+  document.body.addEventListener("change", handleChange);
+  document.body.addEventListener("input", handleInput);
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && dialogState) closeDialog();
+  });
+
+  window.addEventListener("hashchange", () => {
+    // Navigating dismisses any open modal so it can't linger over a new section.
+    if (dialogState) closeDialog();
+    renderApp();
+  });
+
+  // initial paint
+  renderApp().then(() => {
+    if (readAdminToken()) updateNavBadges();
+  });
 }
