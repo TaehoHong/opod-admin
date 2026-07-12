@@ -33,7 +33,6 @@ const pendingForms = new WeakSet();
 export const navItems = [
   { id: "characters", label: "캐릭터" },
   { id: "posts", label: "게시물" },
-  { id: "media", label: "미디어" },
   { id: "generation", label: "생성 작업" },
   { id: "logs", label: "액션 로그" },
   { id: "users", label: "사용자" },
@@ -90,10 +89,6 @@ export function dashboardRequests() {
 
 export function navBadgeRequests() {
   return [
-    {
-      key: "media",
-      path: endpoint("/api/media", { uploaded: false, limit: 50 }),
-    },
     {
       key: "generation",
       path: endpoint("/api/generation/jobs", { status: "failed", limit: 50 }),
@@ -745,14 +740,11 @@ function errorMessage(body, fallback) {
 const ui = {
   filters: {
     charStatus: "전체",
-    mediaType: "전체",
-    mediaUploaded: "전체",
     jobStatus: "전체",
     payStatus: "전체",
     reportStatus: "전체",
     analyticsPeriod: "7일",
   },
-  selMediaId: null,
   selUserId: null,
   selPostId: null,
   selPayId: null,
@@ -859,36 +851,9 @@ function fmtDate(iso) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-function fmtBytes(bytes) {
-  const n = Number(bytes);
-  if (!Number.isFinite(n) || n <= 0) return "—";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = n;
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024;
-    i += 1;
-  }
-  return `${value >= 100 || i === 0 ? Math.round(value) : value.toFixed(1)} ${units[i]}`;
-}
-
-function basename(url) {
-  const raw = String(url ?? "").split("?")[0];
-  const parts = raw.split("/").filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : raw || "—";
-}
-
 function initialOf(text) {
   const t = String(text ?? "").trim();
   return t ? t[0].toUpperCase() : "·";
-}
-
-function mediaDims(m) {
-  if (m.width && m.height) {
-    const base = `${m.width}×${m.height}`;
-    return m.durationSeconds ? `${base} · ${m.durationSeconds}s` : base;
-  }
-  return m.durationSeconds ? `${m.durationSeconds}s` : "—";
 }
 
 function statusTag(status) {
@@ -1038,7 +1003,6 @@ function optionList(items, valueKey, labelFn, selected) {
 async function renderSection(route) {
   if (route === "characters") return renderCharacters();
   if (route === "posts") return renderPosts();
-  if (route === "media") return renderMedia();
   if (route === "generation") return renderGeneration();
   if (route === "users") return renderUsers();
   if (route === "credits") return renderCredits();
@@ -1484,160 +1448,6 @@ async function renderPostDetail(id) {
       </div>
       <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 4px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">관련 액션 로그</span><span style="font-size:11px;color:var(--color-neutral-500)">GET /api/character-action-logs</span></div>
       <div style="font-size:13px;line-height:1.5;max-width:560px">${logRows}</div>
-    </div>`;
-}
-
-// ── 미디어 ────────────────────────────────────────────────────────────────
-
-async function renderMedia() {
-  if (ui.selMediaId) {
-    return renderMediaDetail(ui.selMediaId);
-  }
-  const typeParam = ui.filters.mediaType === "전체" ? "" : ui.filters.mediaType;
-  const uploadedParam =
-    ui.filters.mediaUploaded === "업로드됨"
-      ? "true"
-      : ui.filters.mediaUploaded === "대기"
-        ? "false"
-        : "";
-  const res = await request(
-    endpoint("/api/media", {
-      mediaType: typeParam,
-      uploaded: uploadedParam,
-      limit: 50,
-    }),
-  );
-  const media = itemsFromPage(res.body);
-
-  const rows = media.length
-    ? media
-        .map((m) => {
-          const pending = !m.uploadedAt;
-          return `<tr class="clickable" data-act="select-media" data-id="${attr(
-            m.id,
-          )}">
-            <td style="font-weight:600">${escapeHtml(basename(m.url))}</td>
-            <td>${escapeHtml(m.mediaType)}</td>
-            <td>${fmtBytes(m.byteSize)}</td>
-            <td style="color:var(--color-neutral-700)">${escapeHtml(
-              mediaDims(m),
-            )}</td>
-            <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
-              m.createdAt,
-            )}</td>
-            <td>${
-              pending
-                ? '<span class="tag tag-accent-2">대기</span>'
-                : '<span class="tag tag-accent">업로드됨</span>'
-            }</td>
-            <td>${
-              pending
-                ? `<button class="btn btn-ghost" data-act="media-confirm" data-id="${attr(
-                    m.id,
-                  )}" data-stop="1">업로드 확정</button>`
-                : ""
-            }</td>
-          </tr>`;
-        })
-        .join("")
-    : `<tr class="empty-row"><td colspan="7">조건에 맞는 미디어가 없습니다.</td></tr>`;
-
-  return `
-    ${sectionHead(
-      "미디어",
-      "S3 presigned 업로드 시작 → 업로드 확정 → 게시물·생성 결과에 연결",
-      `<button class="btn btn-primary" data-act="open-dialog" data-dialog="upload">업로드 시작</button>`,
-    )}
-    <div class="toolbar">
-      ${segControl(
-        "mediaType",
-        [
-          { value: "전체", label: "전체" },
-          { value: "image", label: "image" },
-          { value: "video", label: "video" },
-        ],
-        ui.filters.mediaType,
-      )}
-      ${segControl(
-        "mediaUploaded",
-        [
-          { value: "전체", label: "전체" },
-          { value: "업로드됨", label: "업로드됨" },
-          { value: "대기", label: "대기" },
-        ],
-        ui.filters.mediaUploaded,
-      )}
-      <span class="count-note">${media.length}건</span>
-    </div>
-    <table class="table">
-      <thead><tr><th>파일</th><th>타입</th><th>크기</th><th>해상도</th><th>생성</th><th>업로드 상태</th><th></th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-}
-
-async function renderMediaDetail(id) {
-  const res = await request(`/api/media/${id}`);
-  const m = res.body;
-  if (!res.ok || !m?.id) {
-    return `<button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-media">← 미디어 목록</button>${noticeBlock(
-      "미디어를 찾을 수 없습니다.",
-    )}`;
-  }
-  const pending = !m.uploadedAt;
-  const fields = [
-    ["타입", m.mediaType],
-    ["크기", fmtBytes(m.byteSize)],
-    ["해상도", mediaDims(m)],
-    ["Content-Type", m.contentType ?? "—"],
-    ["업로드 시작", fmtDateTime(m.createdAt)],
-    [
-      "업로드 확정",
-      m.uploadedAt ? fmtDateTime(m.uploadedAt) : "미확정 (pending)",
-    ],
-  ];
-  return `
-    <button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-media">← 미디어 목록</button>
-    <div style="max-width:640px">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:8px">
-        <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;min-width:0">
-          <h2 style="font-size:28px;margin:0;word-break:break-all">${escapeHtml(
-            basename(m.url),
-          )}</h2>
-          ${
-            pending
-              ? '<span class="tag tag-accent-2">대기</span>'
-              : '<span class="tag tag-accent">업로드됨</span>'
-          }
-        </div>
-        ${
-          pending
-            ? `<button class="btn btn-primary" style="flex:none" data-act="media-confirm" data-id="${attr(
-                m.id,
-              )}">업로드 확정</button>`
-            : ""
-        }
-      </div>
-      <p style="margin:0 0 24px;font-size:13px;color:var(--color-neutral-600)">GET /api/media/${escapeHtml(
-        m.id,
-      )}</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 32px;font-size:13.5px">
-        ${fields
-          .map(
-            ([label, value]) =>
-              `<div><div class="stat-label">${escapeHtml(
-                label,
-              )}</div>${escapeHtml(value)}</div>`,
-          )
-          .join("")}
-        <div style="grid-column:1/-1"><div class="stat-label">URL</div><span style="word-break:break-all">${escapeHtml(
-          m.url,
-        )}</span></div>
-      </div>
-      ${
-        pending
-          ? `<p style="margin:26px 0 0;font-size:13px;line-height:1.55;color:var(--color-accent-2-700)">presigned PUT URL 발급 후 아직 확정되지 않은 pending 상태입니다. 클라이언트 업로드 완료를 확인한 뒤 '업로드 확정'을 누르면 게시물에 연결할 수 있습니다.</p>`
-          : ""
-      }
     </div>`;
 }
 
@@ -2366,23 +2176,6 @@ export function dialogBody({ type, ctx }) {
         <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">반응 생성</button></div>
       </form>`;
   }
-  if (type === "upload") {
-    return `<div class="dialog-title">미디어 업로드 시작</div>
-      <div class="dialog-body" style="margin:0">S3 presigned PUT URL을 발급하고 pending media를 만듭니다 (600초 유효).</div>
-      <form data-action="dlg-upload" style="display:flex;flex-direction:column;gap:12px">
-        <div style="display:grid;grid-template-columns:120px 1fr;gap:10px">
-          <div class="field"><label>미디어 타입</label><select class="input" name="mediaType"><option value="image">image</option><option value="video">video</option></select></div>
-          <div class="field"><label>Content-Type</label><input class="input" name="contentType" required placeholder="image/png"></div>
-        </div>
-        <div class="field"><label>파일 이름</label><input class="input" name="fileName" required placeholder="photo.png"></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-          <div class="field"><label>바이트 (선택)</label><input class="input" name="byteSize" type="number" min="1"></div>
-          <div class="field"><label>가로 (선택)</label><input class="input" name="width" type="number" min="1"></div>
-          <div class="field"><label>세로 (선택)</label><input class="input" name="height" type="number" min="1"></div>
-        </div>
-        <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">URL 발급</button></div>
-      </form>`;
-  }
   if (type === "new-job") {
     return `<div class="dialog-title">생성 작업 큐 등록</div>
       <form data-action="dlg-new-job" style="display:flex;flex-direction:column;gap:12px">
@@ -2660,30 +2453,6 @@ async function dispatchSubmit(action, form, formData) {
     return;
   }
 
-  // — media upload start (presigned URL + pending media) —
-  if (action === "dlg-upload") {
-    const body = {
-      mediaType: String(formData.get("mediaType") ?? "image"),
-      contentType: String(formData.get("contentType") ?? "").trim(),
-      fileName: String(formData.get("fileName") ?? "").trim(),
-    };
-    const bytes = Number(formData.get("byteSize"));
-    const width = Number(formData.get("width"));
-    const height = Number(formData.get("height"));
-    if (bytes > 0) body.byteSize = bytes;
-    if (width > 0) body.width = width;
-    if (height > 0) body.height = height;
-    const result = await submitViaSpec(
-      jsonRequest("/api/media/uploads", "POST", body),
-      "presigned URL을 발급하고 pending media를 만들었습니다.",
-    );
-    if (result.ok) {
-      closeDialog();
-      renderApp();
-    }
-    return;
-  }
-
   // — new generation job —
   const generationFormRequest = await generationFormActionRequest(
     action,
@@ -2749,7 +2518,7 @@ async function handleClick(event) {
   // sidebar navigation
   const navBtn = event.target.closest?.(".nav-item[data-route]");
   if (navBtn) {
-    ui.selMediaId = ui.selUserId = ui.selPayId = null;
+    ui.selUserId = ui.selPayId = null;
     ui.selPostId = postSelectionAfterAction("sidebar-navigation", ui.selPostId);
     location.hash = navBtn.dataset.route;
     return;
@@ -2814,16 +2583,6 @@ async function handleClick(event) {
     renderApp();
     return;
   }
-  if (act === "select-media") {
-    ui.selMediaId = el.dataset.id;
-    renderApp();
-    return;
-  }
-  if (act === "back-media") {
-    ui.selMediaId = null;
-    renderApp();
-    return;
-  }
   if (act === "select-user") {
     ui.selUserId = el.dataset.id;
     renderApp();
@@ -2837,18 +2596,6 @@ async function handleClick(event) {
   if (act === "select-payment") {
     ui.selPayId = el.dataset.id;
     renderApp();
-    return;
-  }
-  if (act === "media-confirm") {
-    event.stopPropagation();
-    const result = await submitViaSpec(
-      {
-        path: `/api/media/${el.dataset.id}/confirm-upload`,
-        options: { method: "POST" },
-      },
-      "업로드를 확정했습니다.",
-    );
-    if (result.ok) renderApp();
     return;
   }
   if (act === "toggle-char-status") {

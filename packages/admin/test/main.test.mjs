@@ -175,7 +175,6 @@ test("navItems exposes the sidebar tabs in order", () => {
     [
       "characters",
       "posts",
-      "media",
       "generation",
       "logs",
       "users",
@@ -212,7 +211,6 @@ test("dashboardRequests uses existing admin endpoints", () => {
 
 test("navBadgeRequests covers every badge shown in the design", () => {
   assert.deepEqual(navBadgeRequests(), [
-    { key: "media", path: "/api/media?uploaded=false&limit=50" },
     { key: "generation", path: "/api/generation/jobs?status=failed&limit=50" },
     {
       key: "moderation",
@@ -268,6 +266,7 @@ test("currentRouteFromHash sends anonymous admins to login", () => {
   assert.equal(currentRouteFromHash("#media", ""), "login");
   assert.equal(currentRouteFromHash("#login", ""), "login");
   assert.equal(currentRouteFromHash("#login", "token-1"), "characters");
+  assert.equal(currentRouteFromHash("#media", "token-1"), "characters");
   assert.equal(currentRouteFromHash("#unknown", "token-1"), "characters");
   assert.equal(
     currentRouteFromHash("#characters?mode=create", "token-1"),
