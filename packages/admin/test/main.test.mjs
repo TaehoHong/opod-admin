@@ -38,6 +38,7 @@ import {
   personaBulkPayload,
   personaPayload,
   personaReorderPayload,
+  postMediaGallery,
   postSelectionAfterAction,
   postPayload,
   reportUpdatePayload,
@@ -46,6 +47,27 @@ import {
   storyPayload,
   userDetailRequests,
 } from "../main.js";
+
+test("postMediaGallery renders image and video previews with escaped URLs", () => {
+  const html = postMediaGallery([
+    { mediaType: "image", url: "https://cdn.example/photo.png?a=1&b=2" },
+    { mediaType: "video", url: "https://cdn.example/clip.mp4" },
+  ]);
+
+  assert.match(html, /<img/);
+  assert.match(html, /<video[^>]*controls/);
+  assert.match(html, /photo\.png\?a=1&amp;b=2/);
+  assert.match(html, /clip\.mp4/);
+});
+
+test("postMediaGallery does not create active previews for unsafe URLs", () => {
+  const html = postMediaGallery([
+    { mediaType: "image", url: "javascript:alert(1)" },
+  ]);
+
+  assert.doesNotMatch(html, /src="javascript:/);
+  assert.match(html, /javascript:alert\(1\)/);
+});
 
 test("pending new-post session blocks close and media mutations", () => {
   const session = { type: "new-post", submissionLocked: true };

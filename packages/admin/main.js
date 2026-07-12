@@ -962,6 +962,37 @@ function hashtagsText(tags) {
   return arr.length ? arr.map((t) => `#${t}`).join(" ") : "—";
 }
 
+function httpMediaUrl(value) {
+  try {
+    const url = new URL(String(value));
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.href
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+export function postMediaGallery(media) {
+  const items = Array.isArray(media) ? media : [];
+  if (items.length === 0) return "";
+  return `<div class="post-media-gallery">${items
+    .map((item) => {
+      const source = httpMediaUrl(item.url);
+      const preview = source
+        ? item.mediaType === "video"
+          ? `<video src="${attr(source)}" controls preload="metadata"></video>`
+          : `<img src="${attr(source)}" alt="">`
+        : `<div class="post-media-unavailable">미리보기 없음</div>`;
+      return `<figure class="post-media-item">${preview}<figcaption><span class="tag tag-neutral">${escapeHtml(
+        item.mediaType,
+      )}</span><span class="post-media-url">${escapeHtml(
+        item.url,
+      )}</span></figcaption></figure>`;
+    })
+    .join("")}</div>`;
+}
+
 function postTypeMeta(ct) {
   if (ct === "reel") return ["tag-neutral", "reel"];
   if (ct === "story") return ["tag-accent-2", "story"];
@@ -1465,6 +1496,7 @@ async function renderPostDetail(id) {
           .map((t) => `<span class="tag tag-outline">#${escapeHtml(t)}</span>`)
           .join("")}
       </div>
+      ${postMediaGallery(p.media)}
       <div style="display:flex;gap:48px;margin-bottom:30px;font-size:14px">
         ${stats
           .map(

@@ -309,6 +309,45 @@ select.input {
   font-size: 12px;
   color: var(--color-neutral-600);
 }
+.post-media-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.post-media-item {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--color-divider);
+  background: var(--color-surface);
+}
+.post-media-item img,
+.post-media-item video,
+.post-media-unavailable {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--color-neutral-200);
+}
+.post-media-unavailable {
+  display: grid;
+  place-items: center;
+  color: var(--color-neutral-600);
+}
+.post-media-item figcaption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+}
+.post-media-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--color-neutral-700);
+}
 
 /* — segmented control — */
 .seg {
