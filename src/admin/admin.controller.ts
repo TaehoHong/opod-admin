@@ -50,6 +50,22 @@ export class AdminController {
     });
   }
 
+  @Get("posts/:id/reactions")
+  listPostReactions(
+    @Param("id") postId: string,
+    @Query("characterId") characterId?: string,
+    @Query("reactionType") reactionType?: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.adminService.listPostReactions({
+      postId,
+      characterId,
+      reactionType,
+      ...parsePageQuery(cursor, limit),
+    });
+  }
+
   @Post("posts")
   createPost(
     @Body()

@@ -602,6 +602,123 @@ describe("AdminService", () => {
     ).rejects.toThrow("Invalid cursor");
   });
 
+  it("lists post reactions with filtered cursor pagination", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const cursor = Buffer.from(
+      JSON.stringify({ id: "reaction-cursor" }),
+      "utf8",
+    ).toString("base64url");
+    const findFirst = jest.fn().mockResolvedValue({ id: "reaction-cursor" });
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: "reaction-2",
+        postId: "post-1",
+        characterId: "ai-1",
+        reactionType: "like",
+        createdAt,
+      },
+      {
+        id: "reaction-1",
+        postId: "post-1",
+        characterId: "ai-1",
+        reactionType: "like",
+        createdAt,
+      },
+    ]);
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        post: { findUnique: jest.fn().mockResolvedValue({ id: "post-1" }) },
+        postReaction: { findFirst, findMany },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listPostReactions({
+        postId: "post-1",
+        characterId: " ai-1 ",
+        reactionType: " like ",
+        cursor,
+        limit: 1,
+      }),
+    ).resolves.toEqual({
+      items: [
+        {
+          id: "reaction-2",
+          postId: "post-1",
+          characterId: "ai-1",
+          reactionType: "like",
+          createdAt: createdAt.toISOString(),
+        },
+      ],
+      nextCursor: expect.any(String),
+    });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "reaction-cursor",
+        postId: "post-1",
+        characterId: "ai-1",
+        reactionType: "like",
+      },
+      select: { id: true },
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        postId: "post-1",
+        characterId: "ai-1",
+        reactionType: "like",
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 2,
+      cursor: { id: "reaction-cursor" },
+      skip: 1,
+    });
+  });
+
+  it("rejects listing reactions for a missing post", async () => {
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        post: { findUnique: jest.fn().mockResolvedValue(null) },
+        postReaction: { findFirst: jest.fn(), findMany: jest.fn() },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listPostReactions({ postId: "missing-post", limit: 20 }),
+    ).rejects.toThrow("Post not found");
+  });
+
+  it("rejects a post reaction cursor outside the active post", async () => {
+    const cursor = Buffer.from(
+      JSON.stringify({ id: "reaction-cursor" }),
+      "utf8",
+    ).toString("base64url");
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        post: { findUnique: jest.fn().mockResolvedValue({ id: "post-1" }) },
+        postReaction: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          findMany: jest.fn(),
+        },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listPostReactions({ postId: "post-1", cursor, limit: 20 }),
+    ).rejects.toThrow("Invalid cursor");
+  });
+
   it("creates AI posts through admin-owned Prisma code and records logs", async () => {
     const createdAt = new Date("2026-06-30T00:00:00.000Z");
     const createLog = jest.fn().mockResolvedValue(undefined);

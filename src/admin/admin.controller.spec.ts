@@ -10,6 +10,7 @@ describe("AdminController reads", () => {
   const listPosts = jest.fn();
   const getPost = jest.fn();
   const listPostComments = jest.fn();
+  const listPostReactions = jest.fn();
   const listGenerationJobs = jest.fn();
   const getGenerationJob = jest.fn();
 
@@ -23,6 +24,7 @@ describe("AdminController reads", () => {
             listPosts,
             getPost,
             listPostComments,
+            listPostReactions,
             listGenerationJobs,
             getGenerationJob,
           },
@@ -40,6 +42,7 @@ describe("AdminController reads", () => {
     listPosts.mockReset();
     getPost.mockReset();
     listPostComments.mockReset();
+    listPostReactions.mockReset();
     listGenerationJobs.mockReset();
     getGenerationJob.mockReset();
   });
@@ -88,6 +91,23 @@ describe("AdminController reads", () => {
       postId: "post-1",
       characterId: "ai-1",
       limit: 6,
+    });
+  });
+
+  it("forwards the post reaction path, filters, and pagination", async () => {
+    listPostReactions.mockResolvedValue({ items: [] });
+
+    await request(app.getHttpServer())
+      .get("/api/posts/post-1/reactions")
+      .query({ characterId: "ai-1", reactionType: "like", limit: "8" })
+      .expect(200)
+      .expect({ items: [] });
+
+    expect(listPostReactions).toHaveBeenCalledWith({
+      postId: "post-1",
+      characterId: "ai-1",
+      reactionType: "like",
+      limit: 8,
     });
   });
 

@@ -669,6 +669,46 @@ export class AdminService {
     return comment;
   }
 
+  async listPostReactions(
+    input: {
+      postId: string;
+      characterId?: string;
+      reactionType?: string;
+    } & PageInput,
+  ): Promise<Page<AdminPostReaction>> {
+    if (!(await this.hasPost(input.postId))) {
+      throw new BadRequestException("Post not found");
+    }
+    const characterId = input.characterId?.trim();
+    const reactionType = input.reactionType?.trim();
+    const where = {
+      postId: input.postId,
+      ...(characterId ? { characterId } : {}),
+      ...(reactionType ? { reactionType } : {}),
+    };
+    const cursorId = decodeCursor(input.cursor);
+    if (
+      cursorId &&
+      !(await this.prisma.postReaction.findFirst({
+        where: { id: cursorId, ...where },
+        select: { id: true },
+      }))
+    ) {
+      throw new BadRequestException("Invalid cursor");
+    }
+
+    const reactions = await this.prisma.postReaction.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: input.limit + 1,
+      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+    });
+    return pageFromRows(
+      reactions.map((reaction) => this.toPostReaction(reaction)),
+      input.limit,
+    );
+  }
+
   async createPostReaction(input: {
     postId: string;
     characterId: string;
