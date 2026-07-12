@@ -815,7 +815,11 @@ const ui = {
 
 // — request / auth —
 
+const LOG_PREFIX = "[opod-admin]";
+
 async function request(path, options) {
+  const method = options?.method ?? "GET";
+  const startedAt = Date.now();
   try {
     const response = await fetch(
       path,
@@ -827,12 +831,32 @@ async function request(path, options) {
       status: response.status,
       body: parseResponseBody(text, response),
     };
+    const elapsed = Date.now() - startedAt;
+    if (result.ok) {
+      console.info(
+        `${LOG_PREFIX} ${method} ${path} → ${result.status} (${elapsed}ms)`,
+      );
+      // Full response bodies stay at debug so the console isn't flooded
+      // unless verbose logging is enabled in devtools.
+      console.debug(`${LOG_PREFIX} response`, path, result.body);
+    } else {
+      console.error(
+        `${LOG_PREFIX} ${method} ${path} → ${result.status} (${elapsed}ms)`,
+        result.body,
+      );
+    }
     if (response.status === 401 && currentRoute() !== "login") {
       clearAdminAuth();
       renderApp();
     }
     return result;
   } catch (error) {
+    console.error(
+      `${LOG_PREFIX} ${method} ${path} → network error (${
+        Date.now() - startedAt
+      }ms)`,
+      error,
+    );
     return { ok: false, status: 0, body: { error: error.message } };
   }
 }
@@ -2378,6 +2402,8 @@ export function dialogBody({ type, ctx }) {
 // ═════════════════════════════════════════════════════════════════════════
 
 function showToast(msg, api = "", isError = false) {
+  // Every UI-visible error also lands in the console for debugging.
+  if (isError) console.error(`${LOG_PREFIX} error:`, msg);
   if (!toastRoot) return;
   clearTimeout(ui.toastTimer);
   toastRoot.innerHTML = `<div class="toast${isError ? " toast-error" : ""}">
@@ -2937,6 +2963,7 @@ async function renderApp() {
   try {
     html = await renderSection(route);
   } catch (error) {
+    console.error(`${LOG_PREFIX} render failed for section "${route}":`, error);
     html = noticeBlock(
       `섹션을 불러오는 중 오류가 발생했습니다: ${escapeHtml(
         error instanceof Error ? error.message : String(error),
@@ -2952,6 +2979,14 @@ async function renderApp() {
 // ═════════════════════════════════════════════════════════════════════════
 
 if (hasDocument) {
+  // Surface anything that escapes local error handling.
+  window.addEventListener("error", (event) => {
+    console.error(`${LOG_PREFIX} uncaught error:`, event.error ?? event.message);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error(`${LOG_PREFIX} unhandled rejection:`, event.reason);
+  });
+
   updateIdentity();
 
   logoutButton?.addEventListener("click", () => {

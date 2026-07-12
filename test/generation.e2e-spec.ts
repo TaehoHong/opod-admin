@@ -93,6 +93,8 @@ describe("generation", () => {
 
     await app.init();
 
+    const headers = await adminHeaders(app);
+
     await request(app.getHttpServer())
       .post("/api/generation/jobs")
       .set(headers)
