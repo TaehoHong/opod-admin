@@ -1,6 +1,35 @@
 import { AdminService } from "./admin.service";
 
 describe("AdminService", () => {
+  it("lists top global hashtags by post count", async () => {
+    const findMany = jest.fn().mockResolvedValue([
+      { name: "opod", _count: { posts: 42 } },
+      { name: "launch", _count: { posts: 18 } },
+    ]);
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { hashtag: { findMany } },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(service.listTopHashtags({ limit: 10 })).resolves.toEqual({
+      items: [
+        { hashtag: "opod", postCount: 42 },
+        { hashtag: "launch", postCount: 18 },
+      ],
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      orderBy: [{ posts: { _count: "desc" } }, { name: "asc" }],
+      take: 10,
+      select: {
+        name: true,
+        _count: { select: { posts: true } },
+      },
+    });
+  });
+
   it("returns filtered analytics metrics", async () => {
     const aggregate = jest.fn().mockResolvedValue({ _sum: { amount: 42 } });
     const service = new (

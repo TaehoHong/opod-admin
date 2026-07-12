@@ -273,6 +273,13 @@ export class AdminController {
     return this.adminService.listCharacterActionLogs();
   }
 
+  @Get("analytics/hashtags")
+  listTopHashtags(@Query("limit") limit?: string) {
+    return this.adminService.listTopHashtags({
+      limit: parsePageQuery(undefined, limit ?? "10").limit,
+    });
+  }
+
   @Get("analytics")
   getAnalytics(
     @Query("metric") metric?: string,

@@ -15,6 +15,7 @@ describe("AdminController reads", () => {
   const getStory = jest.fn();
   const listGenerationJobs = jest.fn();
   const getGenerationJob = jest.fn();
+  const listTopHashtags = jest.fn();
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({
@@ -31,6 +32,7 @@ describe("AdminController reads", () => {
             getStory,
             listGenerationJobs,
             getGenerationJob,
+            listTopHashtags,
           },
         },
       ],
@@ -51,6 +53,7 @@ describe("AdminController reads", () => {
     getStory.mockReset();
     listGenerationJobs.mockReset();
     getGenerationJob.mockReset();
+    listTopHashtags.mockReset();
   });
 
   afterAll(async () => {
@@ -174,5 +177,28 @@ describe("AdminController reads", () => {
       .expect({ id: "job-1" });
 
     expect(getGenerationJob).toHaveBeenCalledWith("job-1");
+  });
+
+  it("uses the default top hashtag limit", async () => {
+    listTopHashtags.mockResolvedValue({ items: [] });
+
+    await request(app.getHttpServer())
+      .get("/api/analytics/hashtags")
+      .expect(200)
+      .expect({ items: [] });
+
+    expect(listTopHashtags).toHaveBeenCalledWith({ limit: 10 });
+  });
+
+  it("forwards an explicit top hashtag limit", async () => {
+    listTopHashtags.mockResolvedValue({ items: [] });
+
+    await request(app.getHttpServer())
+      .get("/api/analytics/hashtags")
+      .query({ limit: "7" })
+      .expect(200)
+      .expect({ items: [] });
+
+    expect(listTopHashtags).toHaveBeenCalledWith({ limit: 7 });
   });
 });

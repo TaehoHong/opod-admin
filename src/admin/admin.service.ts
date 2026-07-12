@@ -411,6 +411,25 @@ export class AdminService {
     };
   }
 
+  async listTopHashtags(input: { limit: number }): Promise<{
+    items: Array<{ hashtag: string; postCount: number }>;
+  }> {
+    const hashtags = await this.prisma.hashtag.findMany({
+      orderBy: [{ posts: { _count: "desc" } }, { name: "asc" }],
+      take: input.limit,
+      select: {
+        name: true,
+        _count: { select: { posts: true } },
+      },
+    });
+    return {
+      items: hashtags.map((hashtag) => ({
+        hashtag: hashtag.name,
+        postCount: hashtag._count.posts,
+      })),
+    };
+  }
+
   async listMedia(
     input: { mediaType?: string; uploaded?: string } & PageInput,
   ): Promise<Page<Media>> {
