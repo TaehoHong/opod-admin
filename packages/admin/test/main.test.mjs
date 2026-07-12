@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  adminUserStats,
+  analyticsRequests,
   characterCreatePayload,
   characterDetailRequests,
   characterHref,
@@ -13,10 +15,14 @@ import {
   creditGrantPayload,
   currentRouteFromHash,
   dashboardRequests,
+  dialogContextFromDataset,
+  dialogBody,
   endpoint,
   formActionRequest,
   generationActionBody,
+  generationClickRequest,
   generationCreatePayload,
+  generationFormActionRequest,
   generationActionRequest,
   itemsFromPage,
   memoryBulkPayload,
@@ -27,6 +33,7 @@ import {
   personaBulkPayload,
   personaPayload,
   personaReorderPayload,
+  postSelectionAfterAction,
   postPayload,
   reportUpdatePayload,
   selectedOption,
@@ -201,6 +208,13 @@ test("dashboardRequests uses existing admin endpoints", () => {
   ]);
 });
 
+test("analyticsRequests includes metrics and top hashtags", () => {
+  assert.deepEqual(analyticsRequests(), [
+    "/api/analytics",
+    "/api/analytics/hashtags?limit=10",
+  ]);
+});
+
 test("userDetailRequests targets the selected user", () => {
   assert.deepEqual(userDetailRequests("user-1"), [
     { key: "user", path: "/api/users/user-1" },
@@ -208,6 +222,17 @@ test("userDetailRequests targets the selected user", () => {
     { key: "hashtags", path: "/api/hashtag-preferences?userId=user-1" },
     { key: "credits", path: "/api/credits/ledger?userId=user-1&limit=20" },
   ]);
+});
+
+test("adminUserStats uses authoritative user count and balance fields", () => {
+  assert.deepEqual(adminUserStats({ followCount: 7, creditBalance: 108 }), {
+    followCount: 7,
+    creditBalance: 108,
+  });
+  assert.deepEqual(adminUserStats({}), {
+    followCount: 0,
+    creditBalance: 0,
+  });
 });
 
 test("itemsFromPage accepts page objects and arrays", () => {
@@ -283,6 +308,19 @@ test("characterHref builds character route hashes", () => {
   assert.equal(
     characterHref({ characterId: "char-1", tab: "activity" }),
     "#characters?characterId=char-1&tab=activity",
+  );
+});
+
+test("post selection actions open, close, and reset post detail", () => {
+  assert.equal(
+    postSelectionAfterAction("select-post", null, "post-1"),
+    "post-1",
+  );
+  assert.equal(postSelectionAfterAction("back-posts", "post-1"), null);
+  assert.equal(postSelectionAfterAction("sidebar-navigation", "post-1"), null);
+  assert.equal(
+    postSelectionAfterAction("unrelated", "post-1", "post-2"),
+    "post-1",
   );
 });
 
@@ -402,6 +440,73 @@ test("generationActionRequest builds existing job action endpoints", () => {
       },
     },
   );
+});
+
+test("generation click actions map to runnable job endpoints", () => {
+  assert.deepEqual(generationClickRequest("job-run", "job-1"), {
+    path: "/api/generation/jobs/job-1/run",
+    options: {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    },
+  });
+  assert.deepEqual(generationClickRequest("job-retry", "job-2"), {
+    path: "/api/generation/jobs/job-2/retry",
+    options: {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    },
+  });
+  assert.equal(generationClickRequest("job-complete", "job-3"), null);
+});
+
+test("dialog context carries the selected generation job id", () => {
+  assert.deepEqual(
+    dialogContextFromDataset({
+      actor: "char-1",
+      char: "char-2",
+      user: "user-1",
+      postId: "post-1",
+      jobId: "job-1",
+    }),
+    {
+      actor: "char-1",
+      char: "char-2",
+      user: "user-1",
+      postId: "post-1",
+      jobId: "job-1",
+    },
+  );
+});
+
+test("generation completion dialog submits the selected job", () => {
+  const html = dialogBody({ type: "complete-job", ctx: { jobId: "job-1" } });
+
+  assert.match(html, /data-action="generation-action"/);
+  assert.match(html, /name="jobId" value="job-1"/);
+  assert.match(html, /name="action" value="complete"/);
+});
+
+test("generation completion form delegates to the job request builder", async () => {
+  const form = new FormData();
+  form.set("jobId", "job-1");
+  form.set("action", "complete");
+  form.set("mediaId", "media-1");
+
+  assert.deepEqual(
+    await generationFormActionRequest("generation-action", form),
+    {
+      path: "/api/generation/jobs/job-1/complete",
+      options: {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mediaId: "media-1" }),
+      },
+    },
+  );
+  assert.equal(await generationFormActionRequest("dlg-new-job", form), null);
 });
 
 test("paymentDetailRequest targets payment detail endpoint", () => {

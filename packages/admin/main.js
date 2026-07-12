@@ -88,6 +88,10 @@ export function dashboardRequests() {
   ];
 }
 
+export function analyticsRequests() {
+  return ["/api/analytics", "/api/analytics/hashtags?limit=10"];
+}
+
 export function userDetailRequests(userId) {
   return [
     { key: "user", path: `/api/users/${userId}` },
@@ -149,11 +153,38 @@ export function characterHref(input = {}) {
   return query ? `#characters?${query}` : "#characters";
 }
 
+export function postSelectionAfterAction(
+  action,
+  currentPostId,
+  selectedPostId = "",
+) {
+  if (action === "select-post") return selectedPostId || null;
+  if (action === "back-posts" || action === "sidebar-navigation") return null;
+  return currentPostId;
+}
+
+export function dialogContextFromDataset(dataset = {}) {
+  return {
+    actor: dataset.actor,
+    char: dataset.char,
+    user: dataset.user,
+    postId: dataset.postId,
+    jobId: dataset.jobId,
+  };
+}
+
 export function itemsFromPage(value) {
   if (Array.isArray(value)) {
     return value;
   }
   return Array.isArray(value?.items) ? value.items : [];
+}
+
+export function adminUserStats(user) {
+  return {
+    followCount: Number(user?.followCount) || 0,
+    creditBalance: Number(user?.creditBalance) || 0,
+  };
 }
 
 export function generationActionRequest(jobId, action, body = {}) {
@@ -165,6 +196,16 @@ export function generationActionRequest(jobId, action, body = {}) {
       body: JSON.stringify(body),
     },
   };
+}
+
+export function generationClickRequest(clickAction, jobId) {
+  if (clickAction === "job-run") {
+    return generationActionRequest(jobId, "run");
+  }
+  if (clickAction === "job-retry") {
+    return generationActionRequest(jobId, "retry");
+  }
+  return null;
 }
 
 export function paymentDetailRequest(paymentId) {
@@ -448,6 +489,11 @@ export async function formActionRequest(action, form, dataset = {}) {
   throw new Error(`Unsupported form action: ${action}`);
 }
 
+export async function generationFormActionRequest(action, form) {
+  if (action !== "generation-action") return null;
+  return formActionRequest(action, form);
+}
+
 export function parseResponseBody(text, response = { status: 0 }) {
   if (!text) {
     return { status: response.status };
@@ -663,13 +709,16 @@ function errorMessage(body, fallback) {
 const ui = {
   filters: {
     charStatus: "전체",
+    postType: "전체",
     mediaType: "전체",
     mediaUploaded: "전체",
+    jobStatus: "전체",
     payStatus: "전체",
     reportStatus: "전체",
   },
   selMediaId: null,
   selUserId: null,
+  selPostId: null,
   selPayId: null,
   ledgerUserId: "",
   eventUserId: "",
@@ -861,6 +910,34 @@ function userLabel(id) {
   return ui.cache.userLabels.get(id) ?? (id ? `${id.slice(0, 8)}…` : "—");
 }
 
+function mediaLabel(media) {
+  const arr = Array.isArray(media) ? media : [];
+  if (!arr.length) return "없음";
+  const type = arr[0].mediaType || "media";
+  return arr.length > 1 ? `${type} ×${arr.length}` : type;
+}
+
+function hashtagsText(tags) {
+  const arr = Array.isArray(tags) ? tags : [];
+  return arr.length ? arr.map((t) => `#${t}`).join(" ") : "—";
+}
+
+function postTypeMeta(ct) {
+  if (ct === "reel") return ["tag-neutral", "reel"];
+  if (ct === "story") return ["tag-accent-2", "story"];
+  return ["tag-accent", "feed"];
+}
+
+function jobStatusMeta(s) {
+  const map = {
+    queued: ["tag-neutral", "queued"],
+    running: ["tag-accent", "running"],
+    completed: ["tag-accent", "completed"],
+    failed: ["tag-accent-2", "failed"],
+  };
+  return map[s] ?? ["tag-neutral", s];
+}
+
 // — small view partials —
 
 function segControl(scope, options, current) {
@@ -975,11 +1052,13 @@ async function renderCharacterList() {
             <td style="color:var(--color-neutral-700);font-style:italic">${escapeHtml(
               (c.interests ?? []).join(", "),
             )}</td>
+            <td style="text-align:right;font-variant-numeric:tabular-nums">${c.postCount ?? 0}</td>
+            <td style="text-align:right;font-variant-numeric:tabular-nums">${c.followerCount ?? 0}</td>
             <td>${statusTag(c.status)}</td>
           </tr>`;
         })
         .join("")
-    : `<tr class="empty-row"><td colspan="5">조건에 맞는 캐릭터가 없습니다.</td></tr>`;
+    : `<tr class="empty-row"><td colspan="7">조건에 맞는 캐릭터가 없습니다.</td></tr>`;
 
   return `
     ${sectionHead(
@@ -1001,15 +1080,16 @@ async function renderCharacterList() {
       <span class="count-note">${chars.length}건</span>
     </div>
     <table class="table">
-      <thead><tr><th>공개 ID</th><th>표시 이름</th><th>Bio</th><th>관심사</th><th>상태</th></tr></thead>
+      <thead><tr><th>공개 ID</th><th>표시 이름</th><th>Bio</th><th>관심사</th><th style="text-align:right">게시물</th><th style="text-align:right">팔로워</th><th>상태</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
 
 async function renderCharacterDetail(id, tab) {
-  const [detailRes, logsRes] = await Promise.all([
+  const [detailRes, logsRes, jobsRes] = await Promise.all([
     request(`/api/characters/${id}`),
     request("/api/character-action-logs"),
+    request(endpoint("/api/generation/jobs", { characterId: id, limit: 50 })),
   ]);
   const c = detailRes.body;
   if (!detailRes.ok || !c?.id) {
@@ -1020,12 +1100,14 @@ async function renderCharacterDetail(id, tab) {
   const personas = Array.isArray(c.personas) ? c.personas : [];
   const memories = Array.isArray(c.memories) ? c.memories : [];
   const logs = itemsFromPage(logsRes.body).filter((l) => l.characterId === id);
+  const jobs = itemsFromPage(jobsRes.body);
   const primaryPersona = personas[0];
 
   const stats = [
+    ["게시물", c.postCount ?? 0],
+    ["팔로워", c.followerCount ?? 0],
     ["기억", memories.length],
-    ["페르소나", personas.length],
-    ["관심사", (c.interests ?? []).length],
+    ["생성 작업", jobs.length],
   ];
 
   const header = `
@@ -1141,12 +1223,49 @@ async function renderCharacterDetail(id, tab) {
         </div>
       </div>`;
   } else if (tab === "posts") {
-    body = noticeBlock(
-      `<strong>게시물 목록 API는 아직 제공되지 않습니다.</strong><br>백엔드의 게시물은 현재 생성 전용(<code>POST /api/posts</code>)입니다. 이 캐릭터 명의로 새 게시물을 만들 수 있습니다.
-       <div style="margin-top:14px"><button class="btn btn-primary" data-act="open-dialog" data-dialog="new-post" data-actor="${attr(
-         c.id,
-       )}">새 게시물</button></div>`,
+    const postsRes = await request(
+      endpoint("/api/posts", { characterId: id, limit: 50 }),
     );
+    const posts = itemsFromPage(postsRes.body);
+    const rows = posts.length
+      ? posts
+          .map((p) => {
+            const [tc, tl] = postTypeMeta(p.contentType);
+            return `<tr>
+              <td><span class="tag ${tc}">${tl}</span></td>
+              <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(
+                p.content,
+              )}">${escapeHtml(p.content)}</td>
+              <td style="color:var(--color-accent-700)">${escapeHtml(
+                hashtagsText(p.hashtags),
+              )}</td>
+              <td><span class="tag tag-neutral">${escapeHtml(
+                mediaLabel(p.media),
+              )}</span></td>
+              <td style="text-align:right;white-space:nowrap"><button class="btn btn-ghost" data-act="open-dialog" data-dialog="comment" data-post-id="${attr(
+                p.id,
+              )}">댓글</button></td>
+              <td style="text-align:right;white-space:nowrap"><button class="btn btn-ghost" data-act="open-dialog" data-dialog="reaction" data-post-id="${attr(
+                p.id,
+              )}">반응</button></td>
+              <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+                p.createdAt,
+              )}</td>
+            </tr>`;
+          })
+          .join("")
+      : `<tr class="empty-row"><td colspan="7">게시물이 없습니다.</td></tr>`;
+    body = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px">
+        <span class="count-note">${posts.length}건 · GET /api/posts?characterId=</span>
+        <button class="btn btn-primary" data-act="open-dialog" data-dialog="new-post" data-actor="${attr(
+          id,
+        )}">새 게시물</button>
+      </div>
+      <table class="table">
+        <thead><tr><th>타입</th><th>본문</th><th>해시태그</th><th>미디어</th><th style="text-align:right">댓글</th><th style="text-align:right">반응</th><th>작성</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
   } else {
     // activity
     const logRows = logs.length
@@ -1170,12 +1289,30 @@ async function renderCharacterDetail(id, tab) {
           <div style="font-size:13px;line-height:1.5">${logRows}</div>
         </div>
         <div>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 8px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">생성 작업</span></div>
-          ${noticeBlock(
-            `작업 목록 API는 아직 없습니다. 이 캐릭터로 새 작업을 큐에 등록할 수 있습니다.<div style="margin-top:12px"><button class="btn btn-secondary" data-act="open-dialog" data-dialog="new-job" data-char="${attr(
-              c.id,
-            )}">큐 등록</button></div>`,
-          )}
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 8px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">생성 작업</span><span style="font-size:11px;color:var(--color-neutral-500)">${
+            jobs.length
+          }건 · GET /api/generation/jobs</span></div>
+          <div style="font-size:13px">
+            ${
+              jobs.length
+                ? jobs
+                    .map((j) => {
+                      const [sc, sl] = jobStatusMeta(j.status);
+                      return `<div style="display:flex;align-items:baseline;gap:12px;padding:10px 0;border-bottom:1px solid var(--color-divider)"><span style="flex:1;min-width:0">${escapeHtml(
+                        j.prompt,
+                      )}</span><span style="color:var(--color-neutral-500);font-size:11px;flex:none">${escapeHtml(
+                        j.mediaType,
+                      )}</span><span class="tag ${sc}" style="flex:none">${escapeHtml(
+                        sl,
+                      )}</span></div>`;
+                    })
+                    .join("")
+                : `<div style="padding:10px 0;color:var(--color-neutral-600);font-style:italic">생성 작업이 없습니다.</div>`
+            }
+          </div>
+          <div style="margin-top:14px"><button class="btn btn-secondary" data-act="open-dialog" data-dialog="new-job" data-char="${attr(
+            c.id,
+          )}">큐 등록</button></div>
         </div>
       </div>`;
   }
@@ -1186,18 +1323,148 @@ async function renderCharacterDetail(id, tab) {
 // ── 게시물 ────────────────────────────────────────────────────────────────
 
 async function renderPosts() {
+  if (ui.selPostId) {
+    return renderPostDetail(ui.selPostId);
+  }
+  await loadCharacterOptions();
+  const typeParam = ui.filters.postType === "전체" ? "" : ui.filters.postType;
+  const res = await request(
+    endpoint("/api/posts", { contentType: typeParam, limit: 50 }),
+  );
+  const posts = itemsFromPage(res.body);
+
+  const rows = posts.length
+    ? posts
+        .map((p) => {
+          return `<tr class="clickable" data-act="select-post" data-id="${attr(
+            p.id,
+          )}">
+            <td style="font-weight:600">${escapeHtml(charName(p.characterId))}</td>
+            <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(
+              p.content,
+            )}">${escapeHtml(p.content)}</td>
+            <td style="color:var(--color-accent-700)">${escapeHtml(
+              hashtagsText(p.hashtags),
+            )}</td>
+            <td><span class="tag tag-neutral">${escapeHtml(
+              mediaLabel(p.media),
+            )}</span></td>
+            <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+              p.createdAt,
+            )}</td>
+            <td style="white-space:nowrap"><button class="btn btn-ghost" data-act="open-dialog" data-dialog="comment" data-post-id="${attr(
+              p.id,
+            )}">댓글</button> <button class="btn btn-ghost" data-act="open-dialog" data-dialog="reaction" data-post-id="${attr(
+              p.id,
+            )}">반응</button></td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr class="empty-row"><td colspan="6">게시물이 없습니다.</td></tr>`;
+
   return `
     ${sectionHead(
       "게시물",
       "캐릭터 명의의 게시물 생성과, 캐릭터 명의 댓글·반응 부여",
       `<button class="btn btn-primary" data-act="open-dialog" data-dialog="new-post">새 게시물</button>`,
     )}
-    ${noticeBlock(
-      `<strong>게시물 목록 조회 API가 아직 없습니다.</strong><br>
-       현재 백엔드는 게시물을 생성 전용으로 노출합니다 — 목록/상세(<code>GET /api/posts</code>)는 준비되지 않았습니다.
-       위 <em>새 게시물</em>로 캐릭터 명의 게시물을 만들면 <code>POST /api/posts</code>가 호출됩니다.
-       댓글·반응(<code>POST /api/posts/:id/comments</code>, <code>/reactions</code>)은 대상 게시물 ID가 있을 때 사용할 수 있습니다.`,
+    <div class="toolbar">
+      ${segControl(
+        "postType",
+        [
+          { value: "전체", label: "전체" },
+          { value: "feed", label: "feed" },
+          { value: "reel", label: "reel" },
+        ],
+        ui.filters.postType,
+      )}
+      <span class="count-note">${posts.length}건</span>
+    </div>
+    <table class="table">
+      <thead><tr><th>작성 캐릭터</th><th>본문</th><th>해시태그</th><th>미디어</th><th>작성</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function renderPostDetail(id) {
+  const [postRes, commentsRes, reactionsRes, logsRes] = await Promise.all([
+    request(`/api/posts/${id}`),
+    request(endpoint(`/api/posts/${id}/comments`, { limit: 50 })),
+    request(endpoint(`/api/posts/${id}/reactions`, { limit: 50 })),
+    request("/api/character-action-logs"),
+  ]);
+  const p = postRes.body;
+  if (!postRes.ok || !p?.id) {
+    return `<button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-posts">← 게시물 목록</button>${noticeBlock(
+      "게시물을 찾을 수 없습니다.",
     )}`;
+  }
+  await loadCharacterOptions();
+  const comments = itemsFromPage(commentsRes.body);
+  const reactions = itemsFromPage(reactionsRes.body);
+  const logs = itemsFromPage(logsRes.body).filter((l) => l.targetId === id);
+  const [tc, tl] = postTypeMeta(p.contentType);
+  const stats = [
+    ["미디어", mediaLabel(p.media)],
+    ["댓글", comments.length],
+    ["반응", reactions.length],
+  ];
+  const logRows = logs.length
+    ? logs
+        .map(
+          (l) =>
+            `<div style="padding:10px 0;border-bottom:1px solid var(--color-divider);display:flex;flex-direction:column;gap:5px"><div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px"><span class="tag ${logTagClass(
+              l.actionType,
+            )}">${escapeHtml(
+              l.actionType,
+            )}</span><span style="color:var(--color-neutral-500);font-size:11px;flex:none">${fmtDateTime(
+              l.createdAt,
+            )}</span></div><span>${escapeHtml(l.reason ?? "")}</span></div>`,
+        )
+        .join("")
+    : `<div style="padding:10px 0;color:var(--color-neutral-600);font-style:italic">관련 로그가 없습니다.</div>`;
+
+  return `
+    <button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-posts">← 게시물 목록</button>
+    <div style="max-width:760px">
+      <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+        <h2 style="font-size:30px;margin:0">${escapeHtml(charName(p.characterId))}</h2>
+        <span class="tag ${tc}">${tl}</span>
+        <span style="font-size:13px;color:var(--color-neutral-600)">${fmtDateTime(
+          p.createdAt,
+        )}</span>
+      </div>
+      <p style="font-size:19px;line-height:1.55;margin:0 0 14px">${escapeHtml(
+        p.content,
+      )}</p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:28px">
+        ${(p.hashtags ?? [])
+          .map((t) => `<span class="tag tag-outline">#${escapeHtml(t)}</span>`)
+          .join("")}
+      </div>
+      <div style="display:flex;gap:48px;margin-bottom:30px;font-size:14px">
+        ${stats
+          .map(
+            ([label, value]) =>
+              `<div><div class="stat-label">${escapeHtml(
+                label,
+              )}</div><span class="stat-value" style="font-size:18px">${escapeHtml(
+                value,
+              )}</span></div>`,
+          )
+          .join("")}
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:40px">
+        <button class="btn btn-secondary" data-act="open-dialog" data-dialog="comment" data-post-id="${attr(
+          p.id,
+        )}">캐릭터 댓글 달기</button>
+        <button class="btn btn-secondary" data-act="open-dialog" data-dialog="reaction" data-post-id="${attr(
+          p.id,
+        )}">캐릭터 반응 추가</button>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 4px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">관련 액션 로그</span><span style="font-size:11px;color:var(--color-neutral-500)">GET /api/character-action-logs</span></div>
+      <div style="font-size:13px;line-height:1.5;max-width:560px">${logRows}</div>
+    </div>`;
 }
 
 // ── 미디어 ────────────────────────────────────────────────────────────────
@@ -1358,19 +1625,78 @@ async function renderMediaDetail(id) {
 
 async function renderGeneration() {
   await loadCharacterOptions();
+  const statusParam =
+    ui.filters.jobStatus === "전체" ? "" : ui.filters.jobStatus;
+  const res = await request(
+    endpoint("/api/generation/jobs", { status: statusParam, limit: 50 }),
+  );
+  const jobs = itemsFromPage(res.body);
+
+  const rows = jobs.length
+    ? jobs
+        .map((j) => {
+          const [sc, sl] = jobStatusMeta(j.status);
+          const actions = [];
+          if (j.status === "queued") {
+            actions.push(
+              `<button class="btn btn-ghost" data-act="job-run" data-id="${attr(
+                j.id,
+              )}">실행</button>`,
+            );
+          }
+          if (j.status === "running") {
+            actions.push(
+              `<button class="btn btn-ghost" data-act="open-dialog" data-dialog="complete-job" data-job-id="${attr(
+                j.id,
+              )}">완료 처리</button>`,
+            );
+          }
+          if (j.status === "completed" || j.status === "failed") {
+            actions.push(
+              `<button class="btn btn-ghost" style="color:var(--color-accent-2-700)" data-act="job-retry" data-id="${attr(
+                j.id,
+              )}">재시도</button>`,
+            );
+          }
+          return `<tr>
+            <td style="font-weight:600">${escapeHtml(charName(j.characterId))}</td>
+            <td>${escapeHtml(j.mediaType)}</td>
+            <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(
+              j.prompt,
+            )}">${escapeHtml(j.prompt)}</td>
+            <td><span class="tag ${sc}">${escapeHtml(sl)}</span></td>
+            <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+              j.createdAt,
+            )}</td>
+            <td style="white-space:nowrap">${actions.join(" ")}</td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr class="empty-row"><td colspan="6">조건에 맞는 작업이 없습니다.</td></tr>`;
+
   return `
     ${sectionHead(
       "생성 작업",
       "이미지·영상 생성 job 큐 — 등록 → 실행 → 완료, 실패 시 재시도 복제",
       `<button class="btn btn-primary" data-act="open-dialog" data-dialog="new-job">큐 등록</button>`,
     )}
-    ${noticeBlock(
-      `<strong>작업 목록 조회 API가 아직 없습니다.</strong><br>
-       백엔드는 생성 작업을 큐 등록(<code>POST /api/generation/jobs</code>)과
-       개별 lifecycle 전이(<code>/start</code>, <code>/run</code>, <code>/complete</code>, <code>/retry</code>)만 노출하며,
-       전체 목록(<code>GET /api/generation/jobs</code>)은 준비되지 않았습니다.
-       위 <em>큐 등록</em>으로 새 작업을 등록할 수 있습니다.`,
-    )}`;
+    <div class="toolbar">
+      ${segControl(
+        "jobStatus",
+        [
+          { value: "전체", label: "전체" },
+          { value: "queued", label: "queued" },
+          { value: "running", label: "running" },
+          { value: "completed", label: "completed" },
+        ],
+        ui.filters.jobStatus,
+      )}
+      <span class="count-note">${jobs.length}건</span>
+    </div>
+    <table class="table">
+      <thead><tr><th>캐릭터</th><th>타입</th><th>프롬프트</th><th>상태</th><th>생성</th><th style="width:200px"></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 // ── 사용자 ────────────────────────────────────────────────────────────────
@@ -1389,18 +1715,20 @@ async function renderUsers() {
         .map((u) => {
           const haystack =
             `${u.email ?? ""} ${u.displayName ?? ""}`.toLowerCase();
+          const { followCount } = adminUserStats(u);
           return `<tr class="clickable user-row" data-search="${attr(
             haystack,
           )}" data-act="select-user" data-id="${attr(u.id)}">
             <td style="font-weight:600">${escapeHtml(u.email ?? "—")}</td>
             <td>${escapeHtml(u.displayName ?? "—")}</td>
+            <td style="text-align:right;font-variant-numeric:tabular-nums">${followCount}</td>
             <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDate(
               u.createdAt,
             )}</td>
           </tr>`;
         })
         .join("")
-    : `<tr class="empty-row"><td colspan="3">조건에 맞는 사용자가 없습니다.</td></tr>`;
+    : `<tr class="empty-row"><td colspan="4">조건에 맞는 사용자가 없습니다.</td></tr>`;
 
   return `
     ${sectionHead(
@@ -1412,7 +1740,7 @@ async function renderUsers() {
       <span class="count-note">${users.length}건</span>
     </div>
     <table class="table">
-      <thead><tr><th>이메일</th><th>닉네임</th><th>가입</th></tr></thead>
+      <thead><tr><th>이메일</th><th>닉네임</th><th style="text-align:right">팔로우</th><th>가입</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
@@ -1432,7 +1760,7 @@ async function renderUserDetail(id) {
   ui.cache.userLabels.set(u.id, u.email || u.displayName || u.id);
   const ledger = itemsFromPage(ledgerRes.body);
   const events = itemsFromPage(eventsRes.body);
-  const balance = ledger.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  const { followCount, creditBalance } = adminUserStats(u);
 
   const ledgerRows = ledger.length
     ? ledger
@@ -1485,7 +1813,8 @@ async function renderUserDetail(id) {
     </div>
     <div style="display:flex;gap:48px;margin-bottom:28px;font-size:13.5px">
       <div><div class="stat-label">가입</div>${fmtDate(u.createdAt)}</div>
-      <div><div class="stat-label">크레딧 잔액</div><span class="stat-value" style="font-size:18px">${balance}</span></div>
+      <div><div class="stat-label">팔로우</div><span class="stat-value" style="font-size:18px">${followCount}</span></div>
+      <div><div class="stat-label">크레딧 잔액</div><span class="stat-value" style="font-size:18px">${creditBalance}</span></div>
       <div><div class="stat-label">원장 항목</div>${ledger.length}건</div>
     </div>
     <h6 style="color:var(--color-neutral-600)">크레딧 원장 — GET /api/credits/ledger?userId=</h6>
@@ -1861,8 +2190,15 @@ async function renderLogs() {
 // ── 분석 ──────────────────────────────────────────────────────────────────
 
 async function renderAnalytics() {
-  const res = await request("/api/analytics");
-  const metrics = Array.isArray(res.body?.metrics) ? res.body.metrics : [];
+  const [metricsPath, hashtagsPath] = analyticsRequests();
+  const [metricsRes, hashtagsRes] = await Promise.all([
+    request(metricsPath),
+    request(hashtagsPath),
+  ]);
+  const metrics = Array.isArray(metricsRes.body?.metrics)
+    ? metricsRes.body.metrics
+    : [];
+  const hashtags = itemsFromPage(hashtagsRes.body);
   const cards = metrics.length
     ? metrics
         .map(
@@ -1881,13 +2217,32 @@ async function renderAnalytics() {
         )
         .join("")
     : `<p class="text-muted">지표를 불러올 수 없습니다.</p>`;
+  const hashtagRows = hashtags.length
+    ? hashtags
+        .map(
+          (item, index) => `<tr>
+            <td style="width:52px;color:var(--color-neutral-500);font-variant-numeric:tabular-nums">${index + 1}</td>
+            <td style="color:var(--color-accent-700);font-weight:600">#${escapeHtml(
+              item.hashtag,
+            )}</td>
+            <td style="text-align:right;font-variant-numeric:tabular-nums">${escapeHtml(
+              item.postCount ?? 0,
+            )}</td>
+          </tr>`,
+        )
+        .join("")
+    : `<tr class="empty-row"><td colspan="3">집계된 해시태그가 없습니다.</td></tr>`;
 
   return `
     ${sectionHead("분석", "서비스 핵심 지표 — GET /api/analytics")}
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:32px;margin-bottom:24px">${cards}</div>
-    ${noticeBlock(
-      "전역 상위 해시태그 집계 API는 아직 없습니다. 사용자별 선호는 <strong>이벤트 · 선호</strong> 섹션에서 확인하세요.",
-    )}`;
+    <div style="max-width:560px">
+      <h6 style="color:var(--color-neutral-600)">상위 해시태그 — GET /api/analytics/hashtags?limit=10</h6>
+      <table class="table">
+        <thead><tr><th>순위</th><th>해시태그</th><th style="text-align:right">게시물</th></tr></thead>
+        <tbody>${hashtagRows}</tbody>
+      </table>
+    </div>`;
 }
 
 // — helper: fill user label cache for a set of ids —
@@ -1946,7 +2301,7 @@ function charSelect(name, characters, selected = "") {
   )}</select>`;
 }
 
-function dialogBody({ type, ctx }) {
+export function dialogBody({ type, ctx }) {
   if (type === "new-char") {
     return `<div class="dialog-title">새 캐릭터</div>
       <form data-action="dlg-new-char" style="display:flex;flex-direction:column;gap:12px">
@@ -2031,6 +2386,17 @@ function dialogBody({ type, ctx }) {
         <div class="field"><label>미디어 타입</label><select class="input" name="mediaType"><option value="image">image</option><option value="video">video</option></select></div>
         <div class="field"><label>프롬프트</label><textarea class="input" name="prompt" required></textarea></div>
         <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">큐 등록</button></div>
+      </form>`;
+  }
+  if (type === "complete-job") {
+    return `<div class="dialog-title">생성 작업 완료 처리</div>
+      <div class="dialog-body" style="margin:0">출력 미디어 ID 또는 URL 중 하나를 입력하세요.</div>
+      <form data-action="generation-action" style="display:flex;flex-direction:column;gap:12px">
+        <input type="hidden" name="jobId" value="${attr(ctx.jobId)}">
+        <input type="hidden" name="action" value="complete">
+        <div class="field"><label>미디어 ID</label><input class="input" name="mediaId" placeholder="기존 media UUID"></div>
+        <div class="field"><label>출력 URL</label><input class="input" name="url" type="url" placeholder="https://cdn.example.com/generated.png"></div>
+        <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">완료 처리</button></div>
       </form>`;
   }
   if (type === "grant") {
@@ -2311,6 +2677,22 @@ async function dispatchSubmit(action, form, formData) {
   }
 
   // — new generation job —
+  const generationFormRequest = await generationFormActionRequest(
+    action,
+    formData,
+  );
+  if (generationFormRequest) {
+    const result = await submitViaSpec(
+      generationFormRequest,
+      "생성 작업을 완료 처리했습니다.",
+    );
+    if (result.ok) {
+      closeDialog();
+      renderApp();
+    }
+    return;
+  }
+
   if (action === "dlg-new-job") {
     const result = await submitViaSpec(
       jsonRequest(
@@ -2360,6 +2742,7 @@ async function handleClick(event) {
   const navBtn = event.target.closest?.(".nav-item[data-route]");
   if (navBtn) {
     ui.selMediaId = ui.selUserId = ui.selPayId = null;
+    ui.selPostId = postSelectionAfterAction("sidebar-navigation", ui.selPostId);
     location.hash = navBtn.dataset.route;
     return;
   }
@@ -2377,12 +2760,7 @@ async function handleClick(event) {
     return;
   }
   if (act === "open-dialog") {
-    const ctx = {
-      actor: el.dataset.actor,
-      char: el.dataset.char,
-      user: el.dataset.user,
-      postId: el.dataset.postId,
-    };
+    const ctx = dialogContextFromDataset(el.dataset);
     await openDialog(el.dataset.dialog, ctx);
     return;
   }
@@ -2394,6 +2772,18 @@ async function handleClick(event) {
   if (act === "set-seg") {
     ui.filters[el.dataset.scope] = el.dataset.val;
     renderApp();
+    return;
+  }
+  const generationRequest = generationClickRequest(act, el.dataset.id);
+  if (generationRequest) {
+    event.stopPropagation();
+    const result = await submitViaSpec(
+      generationRequest,
+      act === "job-run"
+        ? "생성 작업을 실행했습니다."
+        : "생성 작업을 재시도 큐에 등록했습니다.",
+    );
+    if (result.ok) renderApp();
     return;
   }
   if (act === "go-char") {
@@ -2409,6 +2799,11 @@ async function handleClick(event) {
       characterId: el.dataset.id,
       tab: el.dataset.tab,
     });
+    return;
+  }
+  if (act === "select-post" || act === "back-posts") {
+    ui.selPostId = postSelectionAfterAction(act, ui.selPostId, el.dataset.id);
+    renderApp();
     return;
   }
   if (act === "select-media") {
