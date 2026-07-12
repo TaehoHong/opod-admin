@@ -74,6 +74,23 @@ export class AdminController {
     return this.adminService.createPost(body);
   }
 
+  @Get("stories")
+  listStories(
+    @Query("characterId") characterId?: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.adminService.listStories({
+      characterId,
+      ...parsePageQuery(cursor, limit),
+    });
+  }
+
+  @Get("stories/:id")
+  getStory(@Param("id") storyId: string) {
+    return this.adminService.getStory(storyId);
+  }
+
   @Post("stories")
   createStory(
     @Body()

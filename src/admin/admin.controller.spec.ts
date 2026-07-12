@@ -11,6 +11,8 @@ describe("AdminController reads", () => {
   const getPost = jest.fn();
   const listPostComments = jest.fn();
   const listPostReactions = jest.fn();
+  const listStories = jest.fn();
+  const getStory = jest.fn();
   const listGenerationJobs = jest.fn();
   const getGenerationJob = jest.fn();
 
@@ -25,6 +27,8 @@ describe("AdminController reads", () => {
             getPost,
             listPostComments,
             listPostReactions,
+            listStories,
+            getStory,
             listGenerationJobs,
             getGenerationJob,
           },
@@ -43,6 +47,8 @@ describe("AdminController reads", () => {
     getPost.mockReset();
     listPostComments.mockReset();
     listPostReactions.mockReset();
+    listStories.mockReset();
+    getStory.mockReset();
     listGenerationJobs.mockReset();
     getGenerationJob.mockReset();
   });
@@ -109,6 +115,32 @@ describe("AdminController reads", () => {
       reactionType: "like",
       limit: 8,
     });
+  });
+
+  it("forwards story filters and pagination", async () => {
+    listStories.mockResolvedValue({ items: [] });
+
+    await request(app.getHttpServer())
+      .get("/api/stories")
+      .query({ characterId: "ai-1", limit: "5" })
+      .expect(200)
+      .expect({ items: [] });
+
+    expect(listStories).toHaveBeenCalledWith({
+      characterId: "ai-1",
+      limit: 5,
+    });
+  });
+
+  it("forwards the story detail ID", async () => {
+    getStory.mockResolvedValue({ id: "story-1" });
+
+    await request(app.getHttpServer())
+      .get("/api/stories/story-1")
+      .expect(200)
+      .expect({ id: "story-1" });
+
+    expect(getStory).toHaveBeenCalledWith("story-1");
   });
 
   it("forwards generation job list filters and pagination", async () => {

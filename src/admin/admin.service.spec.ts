@@ -719,6 +719,172 @@ describe("AdminService", () => {
     ).rejects.toThrow("Invalid cursor");
   });
 
+  it("lists stories with character-filtered cursor pagination", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const expiresAt = new Date("2026-07-13T00:00:00.000Z");
+    const cursor = Buffer.from(
+      JSON.stringify({ id: "story-cursor" }),
+      "utf8",
+    ).toString("base64url");
+    const findFirst = jest.fn().mockResolvedValue({ id: "story-cursor" });
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: "story-2",
+        characterId: "ai-1",
+        caption: "newer",
+        media: {
+          mediaType: "image",
+          url: "https://cdn.local/story.png",
+          width: 1080,
+          height: 1920,
+          durationSeconds: null,
+        },
+        createdAt,
+        expiresAt,
+      },
+      {
+        id: "story-1",
+        characterId: "ai-1",
+        caption: "older",
+        media: {
+          mediaType: "image",
+          url: "https://cdn.local/older.png",
+          width: null,
+          height: null,
+          durationSeconds: null,
+        },
+        createdAt,
+        expiresAt,
+      },
+    ]);
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { story: { findFirst, findMany } },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listStories({
+        characterId: " ai-1 ",
+        cursor,
+        limit: 1,
+      }),
+    ).resolves.toEqual({
+      items: [
+        {
+          id: "story-2",
+          characterId: "ai-1",
+          caption: "newer",
+          media: {
+            mediaType: "image",
+            url: "https://cdn.local/story.png",
+            width: 1080,
+            height: 1920,
+          },
+          createdAt: createdAt.toISOString(),
+          expiresAt: expiresAt.toISOString(),
+        },
+      ],
+      nextCursor: expect.any(String),
+    });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: "story-cursor", characterId: "ai-1" },
+      select: { id: true },
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: { characterId: "ai-1" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 2,
+      cursor: { id: "story-cursor" },
+      skip: 1,
+      include: { media: true },
+    });
+  });
+
+  it("rejects a story cursor outside the active filters", async () => {
+    const cursor = Buffer.from(
+      JSON.stringify({ id: "story-cursor" }),
+      "utf8",
+    ).toString("base64url");
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        story: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          findMany: jest.fn(),
+        },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listStories({ characterId: "ai-1", cursor, limit: 20 }),
+    ).rejects.toThrow("Invalid cursor");
+  });
+
+  it("gets a story with the creation response shape", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const expiresAt = new Date("2026-07-13T00:00:00.000Z");
+    const findUnique = jest.fn().mockResolvedValue({
+      id: "story-1",
+      characterId: "ai-1",
+      caption: "detail",
+      media: {
+        mediaType: "video",
+        url: "https://cdn.local/story.mp4",
+        width: 1080,
+        height: 1920,
+        durationSeconds: 15,
+      },
+      createdAt,
+      expiresAt,
+    });
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { story: { findUnique } },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(service.getStory("story-1")).resolves.toEqual({
+      id: "story-1",
+      characterId: "ai-1",
+      caption: "detail",
+      media: {
+        mediaType: "video",
+        url: "https://cdn.local/story.mp4",
+        width: 1080,
+        height: 1920,
+        durationSeconds: 15,
+      },
+      createdAt: createdAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    });
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { id: "story-1" },
+      include: { media: true },
+    });
+  });
+
+  it("rejects a missing story detail", async () => {
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { story: { findUnique: jest.fn().mockResolvedValue(null) } },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(service.getStory("missing-story")).rejects.toThrow(
+      "Story not found",
+    );
+  });
+
   it("creates AI posts through admin-owned Prisma code and records logs", async () => {
     const createdAt = new Date("2026-06-30T00:00:00.000Z");
     const createLog = jest.fn().mockResolvedValue(undefined);

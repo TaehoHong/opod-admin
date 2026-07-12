@@ -564,6 +564,46 @@ export class AdminService {
     return post;
   }
 
+  async listStories(
+    input: { characterId?: string } & PageInput,
+  ): Promise<Page<AdminStory>> {
+    const characterId = input.characterId?.trim();
+    const where = characterId ? { characterId } : {};
+    const cursorId = decodeCursor(input.cursor);
+    if (
+      cursorId &&
+      !(await this.prisma.story.findFirst({
+        where: { id: cursorId, ...where },
+        select: { id: true },
+      }))
+    ) {
+      throw new BadRequestException("Invalid cursor");
+    }
+
+    const stories = await this.prisma.story.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: input.limit + 1,
+      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+      include: { media: true },
+    });
+    return pageFromRows(
+      stories.map((story) => this.toStory(story)),
+      input.limit,
+    );
+  }
+
+  async getStory(storyId: string): Promise<AdminStory> {
+    const story = await this.prisma.story.findUnique({
+      where: { id: storyId },
+      include: { media: true },
+    });
+    if (!story) {
+      throw new BadRequestException("Story not found");
+    }
+    return this.toStory(story);
+  }
+
   async createStory(input: {
     characterId: string;
     caption?: string;
