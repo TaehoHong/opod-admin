@@ -39,12 +39,14 @@ import {
   personaPayload,
   personaReorderPayload,
   postMediaGallery,
+  postMediaSelectionItem,
   postSelectionAfterAction,
   postPayload,
   reportUpdatePayload,
   removePostMediaFile,
   selectedOption,
   storyPayload,
+  submitNewPost,
   userDetailRequests,
 } from "../main.js";
 
@@ -236,6 +238,193 @@ test("postPayload identifies the failed file and does not continue", async () =>
     () => postPayload(form, request, async () => ({ ok: true }), files),
     /broken\.mp4.*signing failed/,
   );
+});
+
+function newPostForm() {
+  const form = new FormData();
+  form.set("actorId", "character-1");
+  form.set("content", "hello");
+  form.set("reason", "daily post");
+  form.set("contentType", "feed");
+  form.set("hashtags", "film, night");
+  return form;
+}
+
+function newPostFiles() {
+  return [
+    new File(["first"], "first.png", { type: "image/png" }),
+    new File(["second"], "second.mp4", { type: "video/mp4" }),
+    new File(["third"], "third.png", { type: "image/png" }),
+  ];
+}
+
+test("submitNewPost creates one post after all confirmations with ordered media", async () => {
+  const events = [];
+  let uploadNumber = 0;
+  const request = async (path) => {
+    events.push(path);
+    if (path === "/api/media/uploads") {
+      uploadNumber += 1;
+      return {
+        ok: true,
+        body: {
+          media: { id: `media-${uploadNumber}` },
+          uploadUrl: `https://s3.example/upload-${uploadNumber}`,
+          method: "PUT",
+          headers: {},
+        },
+      };
+    }
+    return { ok: true, body: {} };
+  };
+  const putObject = async (url) => {
+    events.push(url);
+    return { ok: true };
+  };
+  const postRequests = [];
+  const submit = async (requestSpec) => {
+    events.push(requestSpec.path);
+    postRequests.push(requestSpec);
+    return { ok: true, body: { id: "post-1" } };
+  };
+
+  const result = await submitNewPost(
+    newPostForm(),
+    newPostFiles(),
+    request,
+    putObject,
+    submit,
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(postRequests.length, 1);
+  assert.equal(postRequests[0].path, "/api/posts");
+  assert.deepEqual(JSON.parse(postRequests[0].options.body).media, [
+    { mediaId: "media-1" },
+    { mediaId: "media-2" },
+    { mediaId: "media-3" },
+  ]);
+  assert.deepEqual(events.slice(-2), [
+    "/api/media/media-3/confirm-upload",
+    "/api/posts",
+  ]);
+});
+
+test("submitNewPost stops after a second-file upload stage failure", async (t) => {
+  for (const failure of [
+    { stage: "presign", message: "signing denied" },
+    { stage: "put", message: "storage denied" },
+    { stage: "confirm", message: "confirmation denied" },
+  ]) {
+    await t.test(failure.stage, async () => {
+      const events = [];
+      let uploadNumber = 0;
+      const request = async (path) => {
+        events.push(path);
+        if (path === "/api/media/uploads") {
+          uploadNumber += 1;
+          if (failure.stage === "presign" && uploadNumber === 2) {
+            return { ok: false, body: { message: failure.message } };
+          }
+          return {
+            ok: true,
+            body: {
+              media: { id: `media-${uploadNumber}` },
+              uploadUrl: `https://s3.example/upload-${uploadNumber}`,
+              method: "PUT",
+              headers: {},
+            },
+          };
+        }
+        if (
+          failure.stage === "confirm" &&
+          path === "/api/media/media-2/confirm-upload"
+        ) {
+          return { ok: false, body: { message: failure.message } };
+        }
+        return { ok: true, body: {} };
+      };
+      const putObject = async (url) => {
+        events.push(url);
+        if (failure.stage === "put" && url.endsWith("upload-2")) {
+          return { ok: false, statusText: failure.message };
+        }
+        return { ok: true };
+      };
+      let postCount = 0;
+
+      await assert.rejects(
+        () =>
+          submitNewPost(
+            newPostForm(),
+            newPostFiles(),
+            request,
+            putObject,
+            async () => {
+              postCount += 1;
+              return { ok: true };
+            },
+          ),
+        (error) => {
+          assert.match(error.message, /second\.mp4/);
+          assert.match(error.message, new RegExp(failure.message));
+          return true;
+        },
+      );
+
+      assert.equal(postCount, 0);
+      assert.equal(uploadNumber, 2);
+      assert.equal(
+        events.some((event) => String(event).includes("upload-3")),
+        false,
+      );
+    });
+  }
+});
+
+test("submitNewPost rejects zero files before any upload or post request", async () => {
+  let requestCount = 0;
+  let putCount = 0;
+  let postCount = 0;
+
+  await assert.rejects(
+    () =>
+      submitNewPost(
+        newPostForm(),
+        [],
+        async () => {
+          requestCount += 1;
+        },
+        async () => {
+          putCount += 1;
+        },
+        async () => {
+          postCount += 1;
+        },
+      ),
+    /At least one image or video file is required/,
+  );
+
+  assert.deepEqual(
+    { requestCount, putCount, postCount },
+    {
+      requestCount: 0,
+      putCount: 0,
+      postCount: 0,
+    },
+  );
+});
+
+test("selected post media remove button names its escaped file", () => {
+  const file = new File(["image"], 'photo&"wide.png', {
+    type: "image/png",
+  });
+
+  const html = postMediaSelectionItem(file, 0, "blob:preview");
+
+  assert.match(html, /aria-label="photo&amp;&quot;wide\.png 제거"/);
+  assert.match(html, />제거<\/button>/);
+  assert.doesNotMatch(html, /aria-label="photo&"/);
 });
 
 test("postPayload rejects blank post content", async () => {

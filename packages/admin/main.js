@@ -610,6 +610,20 @@ export async function postPayload(
   };
 }
 
+export async function submitNewPost(
+  form,
+  files,
+  requestFn = request,
+  putObject = fetch,
+  submitFn = submitViaSpec,
+) {
+  const body = await postPayload(form, requestFn, putObject, files);
+  return submitFn(
+    jsonRequest("/api/posts", "POST", body),
+    "게시물을 생성했습니다.",
+  );
+}
+
 export async function storyPayload(
   form,
   requestFn = request,
@@ -725,7 +739,9 @@ async function uploadMedia(
     body: file,
   });
   if (!uploaded.ok) {
-    throw new Error("S3 upload failed");
+    throw new Error(
+      errorMessage(uploaded.body, uploaded.statusText || "S3 upload failed"),
+    );
   }
 
   const mediaId = upload.body.media.id;
@@ -2158,6 +2174,21 @@ function clearPostMediaPreviewUrls() {
   postMediaPreviewUrls = [];
 }
 
+export function postMediaSelectionItem(file, index, url) {
+  const preview =
+    mediaTypeForFile(file) === "image"
+      ? `<img src="${attr(url)}" alt="">`
+      : `<video src="${attr(url)}" muted></video>`;
+  const fileName = String(file?.name ?? "file");
+  return `<div class="post-media-selection-item">${preview}<div><strong>${escapeHtml(
+    fileName,
+  )}</strong><span>${escapeHtml(
+    mediaTypeForFile(file),
+  )}</span></div><button type="button" class="btn btn-ghost" data-act="remove-post-media" data-index="${index}" aria-label="${attr(
+    `${fileName} 제거`,
+  )}">제거</button></div>`;
+}
+
 function renderPostMediaSelection() {
   const root = dialogRoot?.querySelector("[data-post-media-list]");
   if (!root || dialogState?.type !== "new-post") return;
@@ -2166,16 +2197,9 @@ function renderPostMediaSelection() {
     URL.createObjectURL(file),
   );
   root.innerHTML = dialogState.mediaFiles
-    .map((file, index) => {
-      const url = postMediaPreviewUrls[index];
-      const preview =
-        mediaTypeForFile(file) === "image"
-          ? `<img src="${attr(url)}" alt="">`
-          : `<video src="${attr(url)}" muted></video>`;
-      return `<div class="post-media-selection-item">${preview}<div><strong>${escapeHtml(
-        file.name,
-      )}</strong><span>${escapeHtml(mediaTypeForFile(file))}</span></div><button type="button" class="btn btn-ghost" data-act="remove-post-media" data-index="${index}">제거</button></div>`;
-    })
+    .map((file, index) =>
+      postMediaSelectionItem(file, index, postMediaPreviewUrls[index]),
+    )
     .join("");
 }
 
@@ -2532,16 +2556,7 @@ async function dispatchSubmit(action, form, formData) {
     if (!dialogSessionAllows(session, "submit-start")) return;
     session.submissionLocked = true;
     try {
-      const body = await postPayload(
-        formData,
-        request,
-        fetch,
-        session.mediaFiles,
-      );
-      const result = await submitViaSpec(
-        jsonRequest("/api/posts", "POST", body),
-        "게시물을 생성했습니다.",
-      );
+      const result = await submitNewPost(formData, session.mediaFiles);
       if (result.ok) closeDialog(session, "submit-success");
     } finally {
       if (dialogState === session) session.submissionLocked = false;
