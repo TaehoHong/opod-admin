@@ -555,6 +555,15 @@ export function removePostMediaFile(current, index) {
   return current.filter((_, currentIndex) => currentIndex !== Number(index));
 }
 
+export function dialogSessionAllows(session, action) {
+  if (!session) return false;
+  return (
+    session.type !== "new-post" ||
+    !session.submissionLocked ||
+    action === "submit-success"
+  );
+}
+
 export async function postPayload(
   form,
   requestFn = request,
@@ -2142,7 +2151,7 @@ async function openDialog(type, ctx = {}) {
   dialogState = {
     type,
     ctx,
-    ...(type === "new-post" ? { mediaFiles: [] } : {}),
+    ...(type === "new-post" ? { mediaFiles: [], submissionLocked: false } : {}),
   };
   // Some dialogs need character/user option lists.
   if (type === "new-post" || type === "comment" || type === "reaction") {
@@ -2158,10 +2167,18 @@ async function openDialog(type, ctx = {}) {
   renderPostMediaSelection();
 }
 
-function closeDialog() {
+function closeDialog(session = dialogState, action = "close") {
+  if (
+    !session ||
+    dialogState !== session ||
+    !dialogSessionAllows(session, action)
+  ) {
+    return false;
+  }
   clearPostMediaPreviewUrls();
   dialogState = null;
   if (dialogRoot) dialogRoot.innerHTML = "";
+  return true;
 }
 
 function paintDialog() {
@@ -2208,10 +2225,6 @@ export function dialogBody({ type, ctx }) {
         <div class="field"><label>로그 이유</label><input class="input" name="reason" required placeholder="film mood board"></div>
         <div class="field">
           <label>미디어</label>
-          <label class="media-dropzone" data-post-media-dropzone for="postMediaFiles">
-            <span class="media-dropzone-title">이미지 또는 영상을 드래그하세요</span>
-            <span class="media-dropzone-copy">여러 파일 선택 가능 · 클릭해서 찾아보기</span>
-          </label>
           <input
             class="media-file-input"
             id="postMediaFiles"
@@ -2221,6 +2234,10 @@ export function dialogBody({ type, ctx }) {
             multiple
             data-post-media-input
           >
+          <label class="media-dropzone" data-post-media-dropzone for="postMediaFiles">
+            <span class="media-dropzone-title">이미지 또는 영상을 드래그하세요</span>
+            <span class="media-dropzone-copy">여러 파일 선택 가능 · 클릭해서 찾아보기</span>
+          </label>
           <div class="post-media-selection" data-post-media-list></div>
         </div>
         <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">게시</button></div>
@@ -2479,17 +2496,24 @@ async function dispatchSubmit(action, form, formData) {
 
   // — new post (character-authored, with hashtags) —
   if (action === "dlg-new-post") {
-    const body = await postPayload(
-      formData,
-      request,
-      fetch,
-      dialogState?.mediaFiles ?? [],
-    );
-    const result = await submitViaSpec(
-      jsonRequest("/api/posts", "POST", body),
-      "게시물을 생성했습니다.",
-    );
-    if (result.ok) closeDialog();
+    const session = dialogState;
+    if (!dialogSessionAllows(session, "submit-start")) return;
+    session.submissionLocked = true;
+    try {
+      const body = await postPayload(
+        formData,
+        request,
+        fetch,
+        session.mediaFiles,
+      );
+      const result = await submitViaSpec(
+        jsonRequest("/api/posts", "POST", body),
+        "게시물을 생성했습니다.",
+      );
+      if (result.ok) closeDialog(session, "submit-success");
+    } finally {
+      if (dialogState === session) session.submissionLocked = false;
+    }
     return;
   }
 
@@ -2597,6 +2621,7 @@ async function handleClick(event) {
   const act = el.dataset.act;
 
   if (act === "remove-post-media") {
+    if (!dialogSessionAllows(dialogState, act)) return;
     dialogState.mediaFiles = removePostMediaFile(
       dialogState.mediaFiles,
       el.dataset.index,
@@ -2704,6 +2729,7 @@ async function handleClick(event) {
 function handleChange(event) {
   const fileInput = event.target.closest?.("[data-post-media-input]");
   if (fileInput) {
+    if (!dialogSessionAllows(dialogState, "add-post-media")) return;
     try {
       dialogState.mediaFiles = appendPostMediaFiles(
         dialogState.mediaFiles,
@@ -2741,6 +2767,7 @@ function handlePostMediaDragOver(event) {
   const dropzone = mediaDropzoneFor(event);
   if (!dropzone || dialogState?.type !== "new-post") return;
   event.preventDefault();
+  if (!dialogSessionAllows(dialogState, "drop-post-media")) return;
   dropzone.classList.add("is-dragging");
 }
 
@@ -2755,6 +2782,7 @@ function handlePostMediaDrop(event) {
   if (!dropzone || dialogState?.type !== "new-post") return;
   event.preventDefault();
   dropzone.classList.remove("is-dragging");
+  if (!dialogSessionAllows(dialogState, "drop-post-media")) return;
   try {
     dialogState.mediaFiles = appendPostMediaFiles(
       dialogState.mediaFiles,

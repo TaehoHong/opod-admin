@@ -17,6 +17,7 @@ import {
   creditGrantPayload,
   currentRouteFromHash,
   dashboardRequests,
+  dialogSessionAllows,
   dialogContextFromDataset,
   dialogBody,
   endpoint,
@@ -45,6 +46,28 @@ import {
   storyPayload,
   userDetailRequests,
 } from "../main.js";
+
+test("pending new-post session blocks close and media mutations", () => {
+  const session = { type: "new-post", submissionLocked: true };
+
+  for (const action of [
+    "close",
+    "add-post-media",
+    "drop-post-media",
+    "remove-post-media",
+  ]) {
+    assert.equal(dialogSessionAllows(session, action), false, action);
+  }
+});
+
+test("new-post session allows normal actions and successful completion", () => {
+  const ready = { type: "new-post", submissionLocked: false };
+  const pending = { type: "new-post", submissionLocked: true };
+
+  assert.equal(dialogSessionAllows(ready, "close"), true);
+  assert.equal(dialogSessionAllows(ready, "add-post-media"), true);
+  assert.equal(dialogSessionAllows(pending, "submit-success"), true);
+});
 
 test("post media selection appends mixed files and removes by index", () => {
   const image = new File(["image"], "photo.png", { type: "image/png" });
