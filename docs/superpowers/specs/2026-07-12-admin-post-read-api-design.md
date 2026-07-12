@@ -109,7 +109,7 @@ The API follows current admin conventions:
 - Invalid `limit`: HTTP 400, `limit must be a positive integer`
 - Invalid cursor encoding or a cursor outside the active filters: HTTP 400,
   `Invalid cursor`
-- Invalid `contentType`: HTTP 400, `Invalid post content type`
+- Invalid `contentType`: HTTP 400, `Post content type must be feed or reel`
 - Missing post detail: HTTP 400, `Post not found`
 
 The service does not separately validate that a filter `characterId` exists;
