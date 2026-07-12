@@ -32,12 +32,23 @@ type AdminUser = {
   id: string;
   displayName: string;
   email?: string;
+  followCount: number;
   createdAt: string;
 };
 
-type PrismaAdminUser = Omit<AdminUser, "createdAt" | "email"> & {
+type AdminUserDetail = AdminUser & {
+  creditBalance: number;
+};
+
+type PrismaAdminUser = Omit<
+  AdminUser,
+  "createdAt" | "email" | "followCount"
+> & {
   email: string | null;
   createdAt: Date;
+  _count: {
+    characterFollows: number;
+  };
 };
 
 type PrismaAdminMedia = Omit<
@@ -276,6 +287,7 @@ const userFields = {
   displayName: true,
   email: true,
   createdAt: true,
+  _count: { select: { characterFollows: true } },
 } as const;
 
 const mediaFields = {
@@ -344,7 +356,7 @@ export class AdminService {
     );
   }
 
-  async getUser(userId: string): Promise<AdminUser> {
+  async getUser(userId: string): Promise<AdminUserDetail> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: userFields,
@@ -352,7 +364,32 @@ export class AdminService {
     if (!user) {
       throw new BadRequestException("User not found");
     }
-    return this.toAdminUser(user);
+    const now = new Date();
+    const [grants, reservations] = await Promise.all([
+      this.prisma.creditLedgerEntry.aggregate({
+        _sum: { remainingAmount: true },
+        where: {
+          userId,
+          entryType: "grant",
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
+      }),
+      this.prisma.creditReservation.aggregate({
+        _sum: { amount: true },
+        where: {
+          userId,
+          status: "reserved",
+          expiresAt: { gt: now },
+        },
+      }),
+    ]);
+    return {
+      ...this.toAdminUser(user),
+      creditBalance: Math.max(
+        0,
+        (grants._sum.remainingAmount ?? 0) - (reservations._sum.amount ?? 0),
+      ),
+    };
   }
 
   async listEvents(
@@ -1319,6 +1356,7 @@ export class AdminService {
       id: user.id,
       displayName: user.displayName,
       ...(user.email ? { email: user.email } : {}),
+      followCount: user._count.characterFollows,
       createdAt: user.createdAt.toISOString(),
     };
   }

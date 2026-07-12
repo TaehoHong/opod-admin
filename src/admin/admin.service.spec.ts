@@ -30,6 +30,160 @@ describe("AdminService", () => {
     });
   });
 
+  it("lists user follow counts", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: "user-1",
+        displayName: "Taeho",
+        email: "taeho@example.com",
+        createdAt,
+        _count: { characterFollows: 7 },
+      },
+    ]);
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { user: { findMany } },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(service.listUsers({ limit: 20 })).resolves.toEqual({
+      items: [
+        {
+          id: "user-1",
+          displayName: "Taeho",
+          email: "taeho@example.com",
+          followCount: 7,
+          createdAt: createdAt.toISOString(),
+        },
+      ],
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: {},
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 21,
+      select: expect.objectContaining({
+        _count: { select: { characterFollows: true } },
+      }),
+    });
+  });
+
+  it("gets user follow count and spendable credit balance", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const grantAggregate = jest
+      .fn()
+      .mockResolvedValue({ _sum: { remainingAmount: 120 } });
+    const reservationAggregate = jest
+      .fn()
+      .mockResolvedValue({ _sum: { amount: 12 } });
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        user: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: "user-1",
+            displayName: "Taeho",
+            email: "taeho@example.com",
+            createdAt,
+            _count: { characterFollows: 7 },
+          }),
+        },
+        creditLedgerEntry: { aggregate: grantAggregate },
+        creditReservation: { aggregate: reservationAggregate },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(service.getUser("user-1")).resolves.toEqual({
+      id: "user-1",
+      displayName: "Taeho",
+      email: "taeho@example.com",
+      followCount: 7,
+      creditBalance: 108,
+      createdAt: createdAt.toISOString(),
+    });
+    expect(grantAggregate).toHaveBeenCalledWith({
+      _sum: { remainingAmount: true },
+      where: {
+        userId: "user-1",
+        entryType: "grant",
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+      },
+    });
+    expect(reservationAggregate).toHaveBeenCalledWith({
+      _sum: { amount: true },
+      where: {
+        userId: "user-1",
+        status: "reserved",
+        expiresAt: { gt: expect.any(Date) },
+      },
+    });
+    const grantNow = grantAggregate.mock.calls[0][0].where.OR[1].expiresAt.gt;
+    const reservationNow =
+      reservationAggregate.mock.calls[0][0].where.expiresAt.gt;
+    expect(grantNow.getTime()).toBe(reservationNow.getTime());
+  });
+
+  it("clamps a negative spendable credit balance to zero", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        user: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: "user-1",
+            displayName: "Taeho",
+            email: null,
+            createdAt,
+            _count: { characterFollows: 0 },
+          }),
+        },
+        creditLedgerEntry: {
+          aggregate: jest
+            .fn()
+            .mockResolvedValue({ _sum: { remainingAmount: 5 } }),
+        },
+        creditReservation: {
+          aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 7 } }),
+        },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(service.getUser("user-1")).resolves.toMatchObject({
+      id: "user-1",
+      creditBalance: 0,
+    });
+  });
+
+  it("does not aggregate credit balance for a missing user", async () => {
+    const grantAggregate = jest.fn();
+    const reservationAggregate = jest.fn();
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        user: { findUnique: jest.fn().mockResolvedValue(null) },
+        creditLedgerEntry: { aggregate: grantAggregate },
+        creditReservation: { aggregate: reservationAggregate },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(service.getUser("missing-user")).rejects.toThrow(
+      "User not found",
+    );
+    expect(grantAggregate).not.toHaveBeenCalled();
+    expect(reservationAggregate).not.toHaveBeenCalled();
+  });
+
   it("returns filtered analytics metrics", async () => {
     const aggregate = jest.fn().mockResolvedValue({ _sum: { amount: 42 } });
     const service = new (
