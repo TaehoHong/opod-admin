@@ -598,6 +598,20 @@ test("generation completion dialog submits the selected job", () => {
   assert.match(html, /name="action" value="complete"/);
 });
 
+test("new post dialog accepts multiple image and video files without URL fields", () => {
+  const html = dialogBody({
+    type: "new-post",
+    ctx: { characters: [], actor: "" },
+  });
+
+  assert.match(html, /name="mediaFiles"/);
+  assert.match(html, /type="file"/);
+  assert.match(html, /multiple/);
+  assert.match(html, /accept="image\/\*,video\/\*"/);
+  assert.doesNotMatch(html, /name="mediaUrl"/);
+  assert.doesNotMatch(html, /name="mediaType"/);
+});
+
 test("generation completion form delegates to the job request builder", async () => {
   const form = new FormData();
   form.set("jobId", "job-1");

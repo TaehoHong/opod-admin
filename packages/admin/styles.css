@@ -245,6 +245,66 @@ textarea.input {
 select.input {
   cursor: pointer;
 }
+.media-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.field > label.media-dropzone {
+  min-height: 120px;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  border: 1px dashed var(--color-neutral-500);
+  background: color-mix(in srgb, var(--color-accent) 4%, transparent);
+}
+.media-dropzone.is-dragging {
+  border-color: var(--color-accent);
+  background: var(--color-accent-100);
+}
+.media-dropzone-title {
+  font-weight: 600;
+}
+.media-dropzone-copy {
+  font-size: 12px;
+  color: var(--color-neutral-600);
+}
+.post-media-selection {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.post-media-selection-item {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--color-divider);
+}
+.post-media-selection-item img,
+.post-media-selection-item video {
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+}
+.post-media-selection-item strong,
+.post-media-selection-item span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.post-media-selection-item span {
+  font-size: 12px;
+  color: var(--color-neutral-600);
+}
 
 /* — segmented control — */
 .seg {

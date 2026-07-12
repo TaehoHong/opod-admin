@@ -2110,9 +2110,40 @@ async function ensureUserLabels(ids) {
 // ═════════════════════════════════════════════════════════════════════════
 
 let dialogState = null;
+let postMediaPreviewUrls = [];
+
+function clearPostMediaPreviewUrls() {
+  for (const url of postMediaPreviewUrls) URL.revokeObjectURL(url);
+  postMediaPreviewUrls = [];
+}
+
+function renderPostMediaSelection() {
+  const root = dialogRoot?.querySelector("[data-post-media-list]");
+  if (!root || dialogState?.type !== "new-post") return;
+  clearPostMediaPreviewUrls();
+  postMediaPreviewUrls = dialogState.mediaFiles.map((file) =>
+    URL.createObjectURL(file),
+  );
+  root.innerHTML = dialogState.mediaFiles
+    .map((file, index) => {
+      const url = postMediaPreviewUrls[index];
+      const preview =
+        mediaTypeForFile(file) === "image"
+          ? `<img src="${attr(url)}" alt="">`
+          : `<video src="${attr(url)}" muted></video>`;
+      return `<div class="post-media-selection-item">${preview}<div><strong>${escapeHtml(
+        file.name,
+      )}</strong><span>${escapeHtml(mediaTypeForFile(file))}</span></div><button type="button" class="btn btn-ghost" data-act="remove-post-media" data-index="${index}">제거</button></div>`;
+    })
+    .join("");
+}
 
 async function openDialog(type, ctx = {}) {
-  dialogState = { type, ctx };
+  dialogState = {
+    type,
+    ctx,
+    ...(type === "new-post" ? { mediaFiles: [] } : {}),
+  };
   // Some dialogs need character/user option lists.
   if (type === "new-post" || type === "comment" || type === "reaction") {
     ctx.characters = await loadCharacterOptions();
@@ -2124,9 +2155,11 @@ async function openDialog(type, ctx = {}) {
     ctx.users = await loadUserOptions();
   }
   paintDialog();
+  renderPostMediaSelection();
 }
 
 function closeDialog() {
+  clearPostMediaPreviewUrls();
   dialogState = null;
   if (dialogRoot) dialogRoot.innerHTML = "";
 }
@@ -2173,9 +2206,22 @@ export function dialogBody({ type, ctx }) {
         <div class="field"><label>본문</label><textarea class="input" name="content" required></textarea></div>
         <div class="field"><label>해시태그 (쉼표 구분)</label><input class="input" name="hashtags" placeholder="film, night"></div>
         <div class="field"><label>로그 이유</label><input class="input" name="reason" required placeholder="film mood board"></div>
-        <div style="display:grid;grid-template-columns:120px 1fr;gap:10px">
-          <div class="field"><label>미디어 타입</label><select class="input" name="mediaType"><option value="image">image</option><option value="video">video</option></select></div>
-          <div class="field"><label>미디어 URL</label><input class="input" name="mediaUrl" type="url" required placeholder="https://cdn.example.com/night.png"></div>
+        <div class="field">
+          <label>미디어</label>
+          <label class="media-dropzone" data-post-media-dropzone for="postMediaFiles">
+            <span class="media-dropzone-title">이미지 또는 영상을 드래그하세요</span>
+            <span class="media-dropzone-copy">여러 파일 선택 가능 · 클릭해서 찾아보기</span>
+          </label>
+          <input
+            class="media-file-input"
+            id="postMediaFiles"
+            name="mediaFiles"
+            type="file"
+            accept="image/*,video/*"
+            multiple
+            data-post-media-input
+          >
+          <div class="post-media-selection" data-post-media-list></div>
         </div>
         <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">게시</button></div>
       </form>`;
@@ -2433,20 +2479,12 @@ async function dispatchSubmit(action, form, formData) {
 
   // — new post (character-authored, with hashtags) —
   if (action === "dlg-new-post") {
-    const body = {
-      actorType: "character",
-      actorId: String(formData.get("actorId") ?? "").trim(),
-      contentType: "feed",
-      content: String(formData.get("content") ?? "").trim(),
-      reason: String(formData.get("reason") ?? "").trim(),
-      hashtags: splitCsv(formData.get("hashtags")),
-      media: [
-        {
-          mediaType: String(formData.get("mediaType") ?? "image"),
-          url: String(formData.get("mediaUrl") ?? "").trim(),
-        },
-      ],
-    };
+    const body = await postPayload(
+      formData,
+      request,
+      fetch,
+      dialogState?.mediaFiles ?? [],
+    );
     const result = await submitViaSpec(
       jsonRequest("/api/posts", "POST", body),
       "게시물을 생성했습니다.",
@@ -2558,6 +2596,14 @@ async function handleClick(event) {
   if (!el) return;
   const act = el.dataset.act;
 
+  if (act === "remove-post-media") {
+    dialogState.mediaFiles = removePostMediaFile(
+      dialogState.mediaFiles,
+      el.dataset.index,
+    );
+    renderPostMediaSelection();
+    return;
+  }
   if (act === "dialog-backdrop") {
     if (event.target === el) closeDialog();
     return;
@@ -2656,6 +2702,25 @@ async function handleClick(event) {
 }
 
 function handleChange(event) {
+  const fileInput = event.target.closest?.("[data-post-media-input]");
+  if (fileInput) {
+    try {
+      dialogState.mediaFiles = appendPostMediaFiles(
+        dialogState.mediaFiles,
+        fileInput.files,
+      );
+      renderPostMediaSelection();
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : String(error),
+        "",
+        true,
+      );
+    }
+    fileInput.value = "";
+    return;
+  }
+
   const el = event.target.closest?.("[data-select]");
   if (!el) return;
   const kind = el.dataset.select;
@@ -2665,6 +2730,39 @@ function handleChange(event) {
   } else if (kind === "event-user") {
     ui.eventUserId = el.value;
     renderApp();
+  }
+}
+
+function mediaDropzoneFor(event) {
+  return event.target.closest?.("[data-post-media-dropzone]");
+}
+
+function handlePostMediaDragOver(event) {
+  const dropzone = mediaDropzoneFor(event);
+  if (!dropzone || dialogState?.type !== "new-post") return;
+  event.preventDefault();
+  dropzone.classList.add("is-dragging");
+}
+
+function handlePostMediaDragLeave(event) {
+  const dropzone = mediaDropzoneFor(event);
+  if (!dropzone || dropzone.contains(event.relatedTarget)) return;
+  dropzone.classList.remove("is-dragging");
+}
+
+function handlePostMediaDrop(event) {
+  const dropzone = mediaDropzoneFor(event);
+  if (!dropzone || dialogState?.type !== "new-post") return;
+  event.preventDefault();
+  dropzone.classList.remove("is-dragging");
+  try {
+    dialogState.mediaFiles = appendPostMediaFiles(
+      dialogState.mediaFiles,
+      event.dataTransfer?.files,
+    );
+    renderPostMediaSelection();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), "", true);
   }
 }
 
@@ -2792,6 +2890,9 @@ if (hasDocument) {
   document.body.addEventListener("submit", handleFormSubmit);
   document.body.addEventListener("change", handleChange);
   document.body.addEventListener("input", handleInput);
+  document.body.addEventListener("dragover", handlePostMediaDragOver);
+  document.body.addEventListener("dragleave", handlePostMediaDragLeave);
+  document.body.addEventListener("drop", handlePostMediaDrop);
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && dialogState) closeDialog();
