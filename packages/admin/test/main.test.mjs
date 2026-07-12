@@ -49,13 +49,24 @@ import {
 test("post media selection appends mixed files and removes by index", () => {
   const image = new File(["image"], "photo.png", { type: "image/png" });
   const video = new File(["video"], "clip.mp4", { type: "video/mp4" });
+  const current = [image];
+  const incoming = [video];
 
-  const selected = appendPostMediaFiles([image], [video]);
+  const selected = appendPostMediaFiles(current, incoming);
 
+  assert.notStrictEqual(selected, current);
+  assert.notStrictEqual(selected, incoming);
   assert.deepEqual(selected, [image, video]);
+  assert.deepEqual(current, [image]);
+  assert.deepEqual(incoming, [video]);
   assert.equal(mediaTypeForFile(image), "image");
   assert.equal(mediaTypeForFile(video), "video");
-  assert.deepEqual(removePostMediaFile(selected, 0), [video]);
+
+  const remaining = removePostMediaFile(selected, 0);
+
+  assert.notStrictEqual(remaining, selected);
+  assert.deepEqual(remaining, [video]);
+  assert.deepEqual(selected, [image, video]);
 });
 
 test("post media selection rejects unsupported files by name", () => {
