@@ -52,6 +52,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     response
       .status(status)
-      .json(typeof body === "string" ? { statusCode: status, message: body } : body);
+      .json(
+        typeof body === "string" ? { statusCode: status, message: body } : body,
+      );
   }
 }

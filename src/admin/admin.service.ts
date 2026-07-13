@@ -1014,20 +1014,58 @@ export class AdminService {
     return job;
   }
 
-  async listCharacterActionLogs() {
-    const logs = await this.prisma.characterActionLog.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 50,
+  async failGenerationJob(input: { jobId: string; errorMessage?: string }) {
+    const errorMessage =
+      input.errorMessage?.trim() || "failed manually by admin";
+    const job = await this.generationService.failJob({
+      jobId: input.jobId,
+      errorMessage,
     });
-    return logs.map((log) => ({
-      id: log.id.toString(),
-      characterId: log.characterId,
-      actionType: log.actionType,
-      targetTable: log.targetTable ?? undefined,
-      targetId: log.targetId ?? undefined,
-      reason: log.reason,
-      createdAt: log.createdAt.toISOString(),
-    }));
+    await this.recordCharacterActionLog({
+      characterId: job.characterId,
+      actionType: "GENERATION_JOB_FAILED",
+      targetTable: "generation_jobs",
+      targetId: job.id,
+      reason: errorMessage,
+    });
+    return job;
+  }
+
+  // 워커 자동화로 로그량이 커지므로 커서 페이지네이션 + 캐릭터 필터를 지원한다.
+  async listCharacterActionLogs(
+    input: { characterId?: string } & Partial<PageInput> = {},
+  ) {
+    const limit = input.limit ?? 50;
+    const characterId = input.characterId?.trim();
+    const where = characterId ? { characterId } : {};
+    const cursorId = decodeCursor(input.cursor);
+    let cursor: bigint | undefined;
+    if (cursorId !== undefined) {
+      try {
+        cursor = BigInt(cursorId);
+      } catch {
+        throw new BadRequestException("Invalid cursor");
+      }
+    }
+
+    const logs = await this.prisma.characterActionLog.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      ...(cursor !== undefined ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    return pageFromRows(
+      logs.map((log) => ({
+        id: log.id.toString(),
+        characterId: log.characterId,
+        actionType: log.actionType,
+        targetTable: log.targetTable ?? undefined,
+        targetId: log.targetId ?? undefined,
+        reason: log.reason,
+        createdAt: log.createdAt.toISOString(),
+      })),
+      limit,
+    );
   }
 
   async getAnalytics(input: {

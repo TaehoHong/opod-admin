@@ -4,10 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
-import {
-  AdminAuthService,
-  AuthenticatedAdmin,
-} from "./admin-auth.service";
+import { AdminAuthService, AuthenticatedAdmin } from "./admin-auth.service";
 
 export type AdminRequest = {
   admin?: AuthenticatedAdmin;
@@ -33,6 +30,8 @@ export class AdminJwtGuard implements CanActivate {
 }
 
 function bearerToken(value?: string) {
-  const [scheme, token] = String(value ?? "").trim().split(/\s+/, 2);
+  const [scheme, token] = String(value ?? "")
+    .trim()
+    .split(/\s+/, 2);
   return scheme?.toLowerCase() === "bearer" ? token : "";
 }

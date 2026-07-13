@@ -1,13 +1,15 @@
 import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
 import { AdminAuthService } from "./admin-auth.service";
 import { AdminJwtGuard, AdminRequest } from "./admin-jwt.guard";
+import { AdminLoginDto } from "./dto/admin-login.dto";
+import { CreateAdminAccountDto } from "./dto/create-admin-account.dto";
 
 @Controller("api/admin")
 export class AdminAuthController {
   constructor(private readonly adminAuthService: AdminAuthService) {}
 
   @Post("login")
-  login(@Body() body: Parameters<AdminAuthService["login"]>[0]) {
+  login(@Body() body: AdminLoginDto) {
     return this.adminAuthService.login(body);
   }
 
@@ -21,8 +23,7 @@ export class AdminAuthController {
   @UseGuards(AdminJwtGuard)
   createAdminAccount(
     @Req() request: AdminRequest,
-    @Body()
-    body: Parameters<AdminAuthService["createAdminAccount"]>[0],
+    @Body() body: CreateAdminAccountDto,
   ) {
     return this.adminAuthService.createAdminAccount(
       body,

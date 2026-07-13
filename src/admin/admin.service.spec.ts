@@ -1299,20 +1299,23 @@ describe("AdminService", () => {
         reason: "daily post",
       },
     });
-    await expect(service.listCharacterActionLogs()).resolves.toEqual([
-      {
-        id: "1",
-        characterId: "ai-1",
-        actionType: "POST_CREATED",
-        targetTable: "posts",
-        targetId: "post-1",
-        reason: "daily post",
-        createdAt: createdAt.toISOString(),
-      },
-    ]);
+    await expect(service.listCharacterActionLogs()).resolves.toEqual({
+      items: [
+        {
+          id: "1",
+          characterId: "ai-1",
+          actionType: "POST_CREATED",
+          targetTable: "posts",
+          targetId: "post-1",
+          reason: "daily post",
+          createdAt: createdAt.toISOString(),
+        },
+      ],
+    });
     expect(findMany).toHaveBeenCalledWith({
-      orderBy: { createdAt: "desc" },
-      take: 50,
+      where: {},
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 51,
     });
   });
 

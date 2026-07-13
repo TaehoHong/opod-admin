@@ -11,6 +11,18 @@ import {
 import { parsePageQuery } from "../domain/database/page";
 import { AdminJwtGuard } from "./auth/admin-jwt.guard";
 import { AdminService } from "./admin.service";
+import { CompleteGenerationJobDto } from "./dto/complete-generation-job.dto";
+import { CreatePostCommentDto } from "./dto/create-post-comment.dto";
+import { CreatePostReactionDto } from "./dto/create-post-reaction.dto";
+import { CreatePostDto } from "./dto/create-post.dto";
+import { CreateStoryDto } from "./dto/create-story.dto";
+import { EnqueueGenerationJobDto } from "./dto/enqueue-generation-job.dto";
+import { FailGenerationJobDto } from "./dto/fail-generation-job.dto";
+import { GrantCreditsDto } from "./dto/grant-credits.dto";
+import { RetryGenerationJobDto } from "./dto/retry-generation-job.dto";
+import { RunGenerationJobDto } from "./dto/run-generation-job.dto";
+import { StartMediaUploadDto } from "./dto/start-media-upload.dto";
+import { UpdateReportDto } from "./dto/update-report.dto";
 
 @Controller("api")
 @UseGuards(AdminJwtGuard)
@@ -67,10 +79,7 @@ export class AdminController {
   }
 
   @Post("posts")
-  createPost(
-    @Body()
-    body: Parameters<AdminService["createPost"]>[0],
-  ) {
+  createPost(@Body() body: CreatePostDto) {
     return this.adminService.createPost(body);
   }
 
@@ -92,18 +101,14 @@ export class AdminController {
   }
 
   @Post("stories")
-  createStory(
-    @Body()
-    body: Parameters<AdminService["createStory"]>[0],
-  ) {
+  createStory(@Body() body: CreateStoryDto) {
     return this.adminService.createStory(body);
   }
 
   @Post("posts/:id/comments")
   createPostComment(
     @Param("id") postId: string,
-    @Body()
-    body: Omit<Parameters<AdminService["createPostComment"]>[0], "postId">,
+    @Body() body: CreatePostCommentDto,
   ) {
     return this.adminService.createPostComment({ postId, ...body });
   }
@@ -111,17 +116,13 @@ export class AdminController {
   @Post("posts/:id/reactions")
   createPostReaction(
     @Param("id") postId: string,
-    @Body()
-    body: Omit<Parameters<AdminService["createPostReaction"]>[0], "postId">,
+    @Body() body: CreatePostReactionDto,
   ) {
     return this.adminService.createPostReaction({ postId, ...body });
   }
 
   @Post("media/uploads")
-  startMediaUpload(
-    @Body()
-    body: Parameters<AdminService["startMediaUpload"]>[0],
-  ) {
+  startMediaUpload(@Body() body: StartMediaUploadDto) {
     return this.adminService.startMediaUpload(body);
   }
 
@@ -150,10 +151,7 @@ export class AdminController {
   }
 
   @Post("credits/grants")
-  grantCredits(
-    @Body()
-    body: Parameters<AdminService["grantCredits"]>[0],
-  ) {
+  grantCredits(@Body() body: GrantCreditsDto) {
     return this.adminService.grantCredits(body);
   }
 
@@ -229,10 +227,7 @@ export class AdminController {
   }
 
   @Post("generation/jobs")
-  enqueueGenerationJob(
-    @Body()
-    body: Parameters<AdminService["enqueueGenerationJob"]>[0],
-  ) {
+  enqueueGenerationJob(@Body() body: EnqueueGenerationJobDto) {
     return this.adminService.enqueueGenerationJob(body);
   }
 
@@ -244,8 +239,7 @@ export class AdminController {
   @Post("generation/jobs/:id/run")
   runGenerationJob(
     @Param("id") jobId: string,
-    @Body()
-    body: Omit<Parameters<AdminService["runGenerationJob"]>[0], "jobId">,
+    @Body() body: RunGenerationJobDto,
   ) {
     return this.adminService.runGenerationJob({ jobId, ...body });
   }
@@ -253,8 +247,7 @@ export class AdminController {
   @Post("generation/jobs/:id/retry")
   retryGenerationJob(
     @Param("id") jobId: string,
-    @Body()
-    body: Omit<Parameters<AdminService["retryGenerationJob"]>[0], "jobId">,
+    @Body() body: RetryGenerationJobDto,
   ) {
     return this.adminService.retryGenerationJob({ jobId, ...body });
   }
@@ -262,15 +255,29 @@ export class AdminController {
   @Post("generation/jobs/:id/complete")
   completeGenerationJob(
     @Param("id") jobId: string,
-    @Body()
-    body: Omit<Parameters<AdminService["completeGenerationJob"]>[0], "jobId">,
+    @Body() body: CompleteGenerationJobDto,
   ) {
     return this.adminService.completeGenerationJob({ jobId, ...body });
   }
 
+  @Post("generation/jobs/:id/fail")
+  failGenerationJob(
+    @Param("id") jobId: string,
+    @Body() body: FailGenerationJobDto,
+  ) {
+    return this.adminService.failGenerationJob({ jobId, ...body });
+  }
+
   @Get("character-action-logs")
-  listCharacterActionLogs() {
-    return this.adminService.listCharacterActionLogs();
+  listCharacterActionLogs(
+    @Query("characterId") characterId?: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.adminService.listCharacterActionLogs({
+      characterId,
+      ...parsePageQuery(cursor, limit),
+    });
   }
 
   @Get("analytics/hashtags")
@@ -321,11 +328,7 @@ export class AdminController {
   }
 
   @Patch("moderation/reports/:id")
-  updateReport(
-    @Param("id") reportId: string,
-    @Body()
-    body: Omit<Parameters<AdminService["updateReport"]>[0], "reportId">,
-  ) {
+  updateReport(@Param("id") reportId: string, @Body() body: UpdateReportDto) {
     return this.adminService.updateReport({ reportId, ...body });
   }
 }

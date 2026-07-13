@@ -13,11 +13,32 @@ import {
 import { AdminJwtGuard } from "../admin/auth/admin-jwt.guard";
 import { parsePageQuery } from "../domain/database/page";
 import { CharactersService } from "./characters.service";
+import { CreateCharacterMemoriesDto } from "./dto/create-character-memories.dto";
+import { CreateCharacterMemoryDto } from "./dto/create-character-memory.dto";
+import { CreateCharacterPersonaDto } from "./dto/create-character-persona.dto";
+import { CreateCharacterPersonasDto } from "./dto/create-character-personas.dto";
+import { CreateCharacterDto } from "./dto/create-character.dto";
+import { DeleteCharacterDto } from "./dto/delete-character.dto";
+import { EnqueueVisualProfileTestGenerationDto } from "./dto/enqueue-visual-profile-test-generation.dto";
+import { ReorderCharacterPersonasDto } from "./dto/reorder-character-personas.dto";
+import { SetVisualProfileReferencesDto } from "./dto/set-visual-profile-references.dto";
+import { UpdateCharacterMemoryDto } from "./dto/update-character-memory.dto";
+import { UpdateCharacterPersonaDto } from "./dto/update-character-persona.dto";
+import { UpdateCharacterStatusDto } from "./dto/update-character-status.dto";
+import { UpdateCharacterDto } from "./dto/update-character.dto";
+import { UpsertPostingPolicyDto } from "./dto/upsert-posting-policy.dto";
+import { UpsertVisualProfileDto } from "./dto/upsert-visual-profile.dto";
+import { PostingPolicyService } from "./posting-policy.service";
+import { VisualProfileService } from "./visual-profile.service";
 
 @Controller("api/characters")
 @UseGuards(AdminJwtGuard)
 export class CharactersController {
-  constructor(private readonly charactersService: CharactersService) {}
+  constructor(
+    private readonly charactersService: CharactersService,
+    private readonly postingPolicyService: PostingPolicyService,
+    private readonly visualProfileService: VisualProfileService,
+  ) {}
 
   @Get()
   listCharacters(
@@ -32,21 +53,14 @@ export class CharactersController {
   }
 
   @Post()
-  createCharacter(
-    @Body()
-    body: Parameters<CharactersService["createCharacter"]>[0],
-  ) {
+  createCharacter(@Body() body: CreateCharacterDto) {
     return this.charactersService.createCharacter(body);
   }
 
   @Patch(":id/status")
   updateCharacterStatus(
     @Param("id") characterId: string,
-    @Body()
-    body: Omit<
-      Parameters<CharactersService["updateCharacterStatus"]>[0],
-      "id"
-    >,
+    @Body() body: UpdateCharacterStatusDto,
   ) {
     return this.charactersService.updateCharacterStatus({
       id: characterId,
@@ -57,8 +71,7 @@ export class CharactersController {
   @Patch(":id")
   updateCharacter(
     @Param("id") characterId: string,
-    @Body()
-    body: Omit<Parameters<CharactersService["updateCharacter"]>[0], "id">,
+    @Body() body: UpdateCharacterDto,
   ) {
     return this.charactersService.updateCharacter({ id: characterId, ...body });
   }
@@ -71,8 +84,7 @@ export class CharactersController {
   @Delete(":id")
   deleteCharacter(
     @Param("id") characterId: string,
-    @Body()
-    body: Omit<Parameters<CharactersService["deleteCharacter"]>[0], "id">,
+    @Body() body: DeleteCharacterDto,
   ) {
     return this.charactersService.deleteCharacter({ id: characterId, ...body });
   }
@@ -85,11 +97,7 @@ export class CharactersController {
   @Post(":id/personas")
   createCharacterPersona(
     @Param("id") characterId: string,
-    @Body()
-    body: Omit<
-      Parameters<CharactersService["createCharacterPersona"]>[0],
-      "characterId"
-    >,
+    @Body() body: CreateCharacterPersonaDto,
   ) {
     return this.charactersService.createCharacterPersona({
       characterId,
@@ -100,11 +108,7 @@ export class CharactersController {
   @Post(":id/personas/bulk")
   createCharacterPersonas(
     @Param("id") characterId: string,
-    @Body()
-    body: Omit<
-      Parameters<CharactersService["createCharacterPersonas"]>[0],
-      "characterId"
-    >,
+    @Body() body: CreateCharacterPersonasDto,
   ) {
     return this.charactersService.createCharacterPersonas({
       characterId,
@@ -115,11 +119,7 @@ export class CharactersController {
   @Put(":id/personas/order")
   reorderCharacterPersonas(
     @Param("id") characterId: string,
-    @Body()
-    body: Omit<
-      Parameters<CharactersService["reorderCharacterPersonas"]>[0],
-      "characterId"
-    >,
+    @Body() body: ReorderCharacterPersonasDto,
   ) {
     return this.charactersService.reorderCharacterPersonas({
       characterId,
@@ -131,11 +131,7 @@ export class CharactersController {
   updateCharacterPersona(
     @Param("id") characterId: string,
     @Param("personaId") personaId: string,
-    @Body()
-    body: Omit<
-      Parameters<CharactersService["updateCharacterPersona"]>[0],
-      "characterId" | "personaId"
-    >,
+    @Body() body: UpdateCharacterPersonaDto,
   ) {
     return this.charactersService.updateCharacterPersona({
       characterId,
@@ -163,11 +159,7 @@ export class CharactersController {
   @Post(":id/memory")
   createCharacterMemory(
     @Param("id") characterId: string,
-    @Body()
-    body: Omit<
-      Parameters<CharactersService["createCharacterMemory"]>[0],
-      "characterId"
-    >,
+    @Body() body: CreateCharacterMemoryDto,
   ) {
     return this.charactersService.createCharacterMemory({
       characterId,
@@ -178,11 +170,7 @@ export class CharactersController {
   @Post(":id/memory/bulk")
   createCharacterMemories(
     @Param("id") characterId: string,
-    @Body()
-    body: Omit<
-      Parameters<CharactersService["createCharacterMemories"]>[0],
-      "characterId"
-    >,
+    @Body() body: CreateCharacterMemoriesDto,
   ) {
     return this.charactersService.createCharacterMemories({
       characterId,
@@ -194,11 +182,7 @@ export class CharactersController {
   updateCharacterMemory(
     @Param("id") characterId: string,
     @Param("memoryId") memoryId: string,
-    @Body()
-    body: Omit<
-      Parameters<CharactersService["updateCharacterMemory"]>[0],
-      "characterId" | "memoryId"
-    >,
+    @Body() body: UpdateCharacterMemoryDto,
   ) {
     return this.charactersService.updateCharacterMemory({
       characterId,
@@ -216,5 +200,50 @@ export class CharactersController {
       characterId,
       memoryId,
     });
+  }
+
+  @Get(":id/visual-profile")
+  getVisualProfile(@Param("id") characterId: string) {
+    return this.visualProfileService.getProfile(characterId);
+  }
+
+  @Put(":id/visual-profile")
+  upsertVisualProfile(
+    @Param("id") characterId: string,
+    @Body() body: UpsertVisualProfileDto,
+  ) {
+    return this.visualProfileService.upsertProfile({ characterId, ...body });
+  }
+
+  @Put(":id/visual-profile/references")
+  setVisualProfileReferences(
+    @Param("id") characterId: string,
+    @Body() body: SetVisualProfileReferencesDto,
+  ) {
+    return this.visualProfileService.setReferences({ characterId, ...body });
+  }
+
+  @Post(":id/visual-profile/test-generation")
+  enqueueVisualProfileTestGeneration(
+    @Param("id") characterId: string,
+    @Body() body: EnqueueVisualProfileTestGenerationDto,
+  ) {
+    return this.visualProfileService.enqueueTestGeneration({
+      characterId,
+      ...body,
+    });
+  }
+
+  @Get(":id/posting-policy")
+  getPostingPolicy(@Param("id") characterId: string) {
+    return this.postingPolicyService.getPolicy(characterId);
+  }
+
+  @Put(":id/posting-policy")
+  upsertPostingPolicy(
+    @Param("id") characterId: string,
+    @Body() body: UpsertPostingPolicyDto,
+  ) {
+    return this.postingPolicyService.upsertPolicy({ characterId, ...body });
   }
 }

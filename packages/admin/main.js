@@ -33,6 +33,7 @@ const pendingForms = new WeakSet();
 export const navItems = [
   { id: "characters", label: "캐릭터" },
   { id: "posts", label: "게시물" },
+  { id: "drafts", label: "초안 검수" },
   { id: "generation", label: "생성 작업" },
   { id: "logs", label: "액션 로그" },
   { id: "users", label: "사용자" },
@@ -90,6 +91,10 @@ export function dashboardRequests() {
 export function navBadgeRequests() {
   return [
     {
+      key: "drafts",
+      path: endpoint("/api/drafts", { status: "needs_review", limit: 50 }),
+    },
+    {
       key: "generation",
       path: endpoint("/api/generation/jobs", { status: "failed", limit: 50 }),
     },
@@ -144,7 +149,7 @@ export function characterDetailRequests(characterId) {
   ];
 }
 
-const CHARACTER_TABS = ["profile", "posts", "activity"];
+const CHARACTER_TABS = ["profile", "posts", "activity", "visual", "automation"];
 
 export function characterRouteState(hash = "#characters") {
   const [routePart, query = ""] = String(hash ?? "")
@@ -796,6 +801,7 @@ const ui = {
   filters: {
     charStatus: "전체",
     jobStatus: "전체",
+    draftStatus: "needs_review",
     payStatus: "전체",
     reportStatus: "전체",
     analyticsPeriod: "7일",
@@ -803,13 +809,14 @@ const ui = {
   selUserId: null,
   selPostId: null,
   selPayId: null,
+  selDraftId: null,
   ledgerUserId: "",
   eventUserId: "",
   cache: {
     charNames: new Map(),
     userLabels: new Map(),
   },
-  badges: { moderation: 0, payments: 0 },
+  badges: { drafts: 0, moderation: 0, payments: 0 },
   toastTimer: 0,
 };
 
@@ -1049,6 +1056,20 @@ function jobStatusMeta(s) {
   return map[s] ?? ["tag-neutral", s];
 }
 
+function draftStatusMeta(s) {
+  const map = {
+    planned: ["tag-neutral", "기획 대기"],
+    generating: ["tag-accent", "생성 중"],
+    needs_review: ["tag-accent-2", "검수 필요"],
+    regenerating: ["tag-accent", "재생성 중"],
+    approved: ["tag-accent", "승인됨"],
+    rejected: ["tag-neutral", "반려"],
+    published: ["tag-accent", "게시됨"],
+    failed: ["tag-accent-2", "실패"],
+  };
+  return map[s] ?? ["tag-neutral", s];
+}
+
 // — small view partials —
 
 function segControl(scope, options, current) {
@@ -1113,6 +1134,7 @@ function optionList(items, valueKey, labelFn, selected) {
 async function renderSection(route) {
   if (route === "characters") return renderCharacters();
   if (route === "posts") return renderPosts();
+  if (route === "drafts") return renderDrafts();
   if (route === "generation") return renderGeneration();
   if (route === "users") return renderUsers();
   if (route === "credits") return renderCredits();
@@ -1269,6 +1291,8 @@ async function renderCharacterDetail(id, tab) {
         ["profile", "프로필"],
         ["posts", "게시물"],
         ["activity", "활동"],
+        ["visual", "비주얼"],
+        ["automation", "자동화"],
       ]
         .map(
           ([key, label]) =>
@@ -1373,6 +1397,163 @@ async function renderCharacterDetail(id, tab) {
         <thead><tr><th>타입</th><th>본문</th><th>해시태그</th><th>미디어</th><th style="text-align:right">댓글</th><th style="text-align:right">반응</th><th>작성</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
+  } else if (tab === "visual") {
+    const profileRes = await request(`/api/characters/${id}/visual-profile`);
+    const vp = profileRes.ok ? (profileRes.body ?? {}) : {};
+    const references = Array.isArray(vp.referenceMedia)
+      ? vp.referenceMedia
+      : [];
+    const refMediaIds = references.map((r) => r.mediaId);
+    const testJobs = jobs.filter((j) => j.mediaType === "image").slice(0, 6);
+    body = `
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:56px">
+        <div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">비주얼 프로필</span><span style="font-size:11px;color:var(--color-neutral-500)">PUT /api/characters/:id/visual-profile</span></div>
+          <form data-action="visual-profile-save" data-character-id="${attr(
+            c.id,
+          )}" style="display:flex;flex-direction:column;gap:12px">
+            <div class="field"><label>외모 프롬프트</label><textarea class="input" name="appearancePrompt" rows="3" placeholder="얼굴 · 헤어 · 체형 · 패션 톤 (항상 프롬프트 앞에 주입)">${escapeHtml(
+              vp.appearancePrompt ?? "",
+            )}</textarea></div>
+            <div class="field"><label>스타일 프롬프트</label><textarea class="input" name="stylePrompt" rows="3" placeholder="화풍 — 예: film photography, Kodak Portra, grain">${escapeHtml(
+              vp.stylePrompt ?? "",
+            )}</textarea></div>
+            <div class="field"><label>네거티브 프롬프트</label><textarea class="input" name="negativePrompt" rows="2" placeholder="blurry, deformed hands, text">${escapeHtml(
+              vp.negativePrompt ?? "",
+            )}</textarea></div>
+            <div><button class="btn btn-primary" type="submit">저장</button></div>
+          </form>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">테스트 생성</span><span style="font-size:11px;color:var(--color-neutral-500)">POST /api/characters/:id/visual-profile/test-generation</span></div>
+          <form data-action="visual-test-gen" data-character-id="${attr(
+            c.id,
+          )}" style="display:flex;gap:8px">
+            <input class="input" name="scene" placeholder="장면 설명 — 예: 노을 지는 애월 해변 산책">
+            <button class="btn btn-secondary" type="submit" style="flex:none">생성 큐 등록</button>
+          </form>
+          <p style="margin:8px 0 0;font-size:12px;color:var(--color-neutral-500)">외모 + 장면 + 스타일 프롬프트가 합쳐져 이미지 생성 잡으로 등록됩니다. 결과는 아래 최근 생성에 표시됩니다.</p>
+        </div>
+        <div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">레퍼런스 이미지</span><span style="font-size:11px;color:var(--color-neutral-500)">${references.length}/5 · PUT /api/characters/:id/visual-profile/references</span></div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            ${
+              references.length
+                ? references
+                    .map(
+                      (r) => `<div style="position:relative;width:96px">
+                        <img src="${attr(r.url)}" alt="reference" style="width:96px;height:96px;object-fit:cover;border:1px solid var(--color-divider)">
+                        <button class="btn btn-ghost" style="position:absolute;top:2px;right:2px;padding:0 6px;background:rgba(255,255,255,.85)" title="제거" data-act="visual-ref-remove" data-id="${attr(
+                          c.id,
+                        )}" data-media="${attr(r.mediaId)}" data-media-ids="${attr(
+                          refMediaIds.join(","),
+                        )}">×</button>
+                      </div>`,
+                    )
+                    .join("")
+                : `<div style="padding:8px 0;color:var(--color-neutral-600);font-style:italic">레퍼런스가 없습니다 — 테스트 생성으로 만든 이미지를 승격하거나 파일을 업로드하세요.</div>`
+            }
+          </div>
+          <form data-action="visual-ref-add" data-character-id="${attr(
+            c.id,
+          )}" data-media-ids="${attr(refMediaIds.join(","))}" style="display:flex;gap:8px;margin-top:12px">
+            <input class="input" type="file" name="referenceFile" accept="image/*" required>
+            <button class="btn btn-secondary" type="submit" style="flex:none">업로드 추가</button>
+          </form>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">최근 생성</span><span style="font-size:11px;color:var(--color-neutral-500)">GET /api/generation/jobs?characterId=</span></div>
+          <div style="font-size:13px">
+            ${
+              testJobs.length
+                ? testJobs
+                    .map((j) => {
+                      const [sc, sl] = jobStatusMeta(j.status);
+                      const thumb = j.outputMedia?.url
+                        ? `<img src="${attr(j.outputMedia.url)}" alt="output" style="width:44px;height:44px;object-fit:cover;border:1px solid var(--color-divider);flex:none">`
+                        : "";
+                      const promote =
+                        j.status === "completed" && j.outputMedia?.url
+                          ? `<button class="btn btn-ghost" style="flex:none;padding:0 8px" title="레퍼런스로 승격" data-act="visual-ref-promote" data-id="${attr(
+                              c.id,
+                            )}" data-job="${attr(j.id)}" data-media-ids="${attr(
+                              refMediaIds.join(","),
+                            )}">승격</button>`
+                          : "";
+                      return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--color-divider)">${thumb}<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(
+                        j.prompt,
+                      )}">${escapeHtml(j.prompt)}</span><span class="tag ${sc}" style="flex:none">${escapeHtml(
+                        sl,
+                      )}</span>${promote}</div>`;
+                    })
+                    .join("")
+                : `<div style="padding:8px 0;color:var(--color-neutral-600);font-style:italic">생성 이력이 없습니다.</div>`
+            }
+          </div>
+        </div>
+      </div>`;
+  } else if (tab === "automation") {
+    const [policyRes, draftsRes] = await Promise.all([
+      request(`/api/characters/${id}/posting-policy`),
+      request(endpoint("/api/drafts", { characterId: id, limit: 10 })),
+    ]);
+    const policy = policyRes.ok ? (policyRes.body ?? {}) : {};
+    const drafts = itemsFromPage(draftsRes.body);
+    body = `
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:56px">
+        <div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">포스팅 정책</span><span style="font-size:11px;color:var(--color-neutral-500)">PUT /api/characters/:id/posting-policy</span></div>
+          <form data-action="policy-save" data-character-id="${attr(
+            c.id,
+          )}" style="display:flex;flex-direction:column;gap:12px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px">
+              <input type="checkbox" name="enabled" ${policy.enabled ? "checked" : ""}>
+              자동 포스팅 활성화 (스케줄러가 초안을 자동 기획)
+            </label>
+            <div class="field"><label>주당 게시 횟수 (1~21)</label><input class="input" type="number" name="weeklyCadence" min="1" max="21" value="${attr(
+              String(policy.weeklyCadence ?? 3),
+            )}"></div>
+            <div style="display:flex;gap:12px">
+              <div class="field" style="flex:1"><label>게시 시간창 시작 (KST 시)</label><input class="input" type="number" name="hourStartKst" min="0" max="23" value="${attr(
+                String(policy.hourStartKst ?? 18),
+              )}"></div>
+              <div class="field" style="flex:1"><label>종료 (KST 시)</label><input class="input" type="number" name="hourEndKst" min="0" max="23" value="${attr(
+                String(policy.hourEndKst ?? 22),
+              )}"></div>
+            </div>
+            <div><button class="btn btn-primary" type="submit">저장</button></div>
+          </form>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">수동 초안 기획</span><span style="font-size:11px;color:var(--color-neutral-500)">POST /api/drafts</span></div>
+          <form data-action="draft-create" data-character-id="${attr(
+            c.id,
+          )}" style="display:flex;gap:8px">
+            <input class="input" name="sceneHint" placeholder="장면 힌트 (선택) — 예: 비 오는 날 창가 카페">
+            <button class="btn btn-secondary" type="submit" style="flex:none">기획 큐 등록</button>
+          </form>
+          <p style="margin:8px 0 0;font-size:12px;color:var(--color-neutral-500)">워커가 페르소나·메모리·최근 게시물을 반영해 캡션과 컷을 기획하고, 이미지 생성 후 초안 검수 큐에 올립니다.</p>
+        </div>
+        <div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">최근 초안</span><span style="font-size:11px;color:var(--color-neutral-500)">${drafts.length}건 · GET /api/drafts?characterId=</span></div>
+          <div style="font-size:13px">
+            ${
+              drafts.length
+                ? drafts
+                    .map((d) => {
+                      const [dc, dl] = draftStatusMeta(d.status);
+                      return `<div style="display:flex;align-items:baseline;gap:12px;padding:10px 0;border-bottom:1px solid var(--color-divider);cursor:pointer" data-act="go-draft" data-id="${attr(
+                        d.id,
+                      )}">
+                        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(
+                          d.caption || "(기획 전)",
+                        )}</span>
+                        <span class="tag ${dc}" style="flex:none">${escapeHtml(dl)}</span>
+                        <span style="color:var(--color-neutral-500);font-size:11px;flex:none">${
+                          d.scheduledAt ? fmtDateTime(d.scheduledAt) : "즉시"
+                        }</span>
+                      </div>`;
+                    })
+                    .join("")
+                : `<div style="padding:10px 0;color:var(--color-neutral-600);font-style:italic">초안이 없습니다 — 왼쪽에서 기획을 등록하거나 자동 포스팅을 켜세요.</div>`
+            }
+          </div>
+        </div>
+      </div>`;
   } else {
     // activity
     const logRows = logs.length
@@ -1639,6 +1820,186 @@ async function renderGeneration() {
       <thead><tr><th>캐릭터</th><th>타입</th><th>프롬프트</th><th>상태</th><th>생성</th><th style="width:200px"></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+}
+
+// ── 초안 검수 ──────────────────────────────────────────────────────────────
+
+async function renderDrafts() {
+  if (ui.selDraftId) {
+    return renderDraftDetail(ui.selDraftId);
+  }
+  await loadCharacterOptions();
+  const statusParam =
+    ui.filters.draftStatus === "전체" ? "" : ui.filters.draftStatus;
+  const res = await request(
+    endpoint("/api/drafts", { status: statusParam, limit: 50 }),
+  );
+  const drafts = itemsFromPage(res.body);
+
+  const rows = drafts.length
+    ? drafts
+        .map((d) => {
+          const [sc, sl] = draftStatusMeta(d.status);
+          return `<tr style="cursor:pointer" data-act="select-draft" data-id="${attr(
+            d.id,
+          )}">
+            <td style="font-weight:600">${escapeHtml(charName(d.characterId))}</td>
+            <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(
+              d.caption,
+            )}">${escapeHtml(d.caption || "(기획 전)")}</td>
+            <td><span class="tag ${sc}">${escapeHtml(sl)}</span></td>
+            <td style="color:var(--color-neutral-600);font-size:12.5px">${
+              d.scheduledAt ? fmtDateTime(d.scheduledAt) : "즉시"
+            }</td>
+            <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+              d.createdAt,
+            )}</td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr class="empty-row"><td colspan="5">조건에 맞는 초안이 없습니다.</td></tr>`;
+
+  return `
+    ${sectionHead(
+      "초안 검수",
+      "자동 기획된 포스트 초안 — 기획 → 생성 → 검수 → 승인 → 예약 게시",
+    )}
+    <div class="toolbar">
+      ${segControl(
+        "draftStatus",
+        [
+          { value: "needs_review", label: "검수 필요" },
+          { value: "generating", label: "생성 중" },
+          { value: "approved", label: "승인됨" },
+          { value: "published", label: "게시됨" },
+          { value: "failed", label: "실패" },
+          { value: "전체", label: "전체" },
+        ],
+        ui.filters.draftStatus,
+      )}
+      <span class="count-note">${drafts.length}건 · GET /api/drafts</span>
+    </div>
+    <table class="table">
+      <thead><tr><th>캐릭터</th><th>캡션</th><th>상태</th><th>게시 예정</th><th>생성</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function renderDraftDetail(id) {
+  const res = await request(`/api/drafts/${id}`);
+  const d = res.body;
+  if (!res.ok || !d?.id) {
+    return `<button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-drafts">← 초안 목록</button>
+      ${noticeBlock("초안을 찾을 수 없습니다.")}`;
+  }
+  await loadCharacterOptions();
+  const [sc, sl] = draftStatusMeta(d.status);
+  const reviewable = d.status === "needs_review";
+  const editable = d.status === "needs_review" || d.status === "approved";
+  const shots = Array.isArray(d.shots) ? d.shots : [];
+
+  const shotBlocks = shots.length
+    ? shots
+        .map((shot) => {
+          const [jc, jl] = jobStatusMeta(shot.status);
+          const candidates = shot.outputs.length
+            ? shot.outputs
+                .map(
+                  (o) => `<div style="position:relative">
+                    <img src="${attr(o.url)}" alt="candidate ${o.candidateIndex}"
+                      data-act="draft-pick-output" data-draft="${attr(d.id)}" data-job="${attr(shot.jobId)}" data-media="${attr(o.mediaId)}"
+                      style="width:120px;height:120px;object-fit:cover;cursor:pointer;border:3px solid ${
+                        o.selected
+                          ? "var(--color-accent-700)"
+                          : "var(--color-divider)"
+                      }">
+                    ${
+                      o.selected
+                        ? `<span class="tag tag-accent" style="position:absolute;top:4px;left:4px">선택됨</span>`
+                        : ""
+                    }
+                  </div>`,
+                )
+                .join("")
+            : `<div style="padding:6px 0;color:var(--color-neutral-600);font-style:italic">아직 후보가 없습니다.</div>`;
+          return `<div style="padding:14px 0;border-bottom:1px solid var(--color-divider)">
+            <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
+              <span style="font-weight:600">컷 ${shot.sortOrder + 1}</span>
+              <span class="tag ${jc}">${escapeHtml(jl)}</span>
+              <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--color-neutral-500)" title="${attr(
+                shot.prompt,
+              )}">${escapeHtml(shot.prompt)}</span>
+              ${
+                reviewable || d.status === "failed"
+                  ? `<button class="btn btn-ghost" style="flex:none" data-act="draft-regen" data-draft="${attr(
+                      d.id,
+                    )}" data-job="${attr(shot.jobId)}">재생성</button>`
+                  : ""
+              }
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">${candidates}</div>
+            ${
+              shot.errorMessage
+                ? `<div style="margin-top:6px;font-size:12px;color:var(--color-accent-2-700)">${escapeHtml(shot.errorMessage)}</div>`
+                : ""
+            }
+          </div>`;
+        })
+        .join("")
+    : `<div style="padding:10px 0;color:var(--color-neutral-600);font-style:italic">아직 컷이 없습니다 — 기획 대기 중.</div>`;
+
+  const scheduledLocal = d.scheduledAt
+    ? new Date(d.scheduledAt).toISOString().slice(0, 16)
+    : "";
+
+  return `
+    <button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-drafts">← 초안 목록</button>
+    <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+      <h2 style="font-size:28px;margin:0">${escapeHtml(charName(d.characterId))}의 초안</h2>
+      <span class="tag ${sc}">${escapeHtml(sl)}</span>
+      <span style="font-size:12px;color:var(--color-neutral-500)">시도 ${d.attemptCount} · ${escapeHtml(
+        d.contentType,
+      )}</span>
+    </div>
+    ${d.errorMessage ? noticeBlock(`오류: ${escapeHtml(d.errorMessage)}`) : ""}
+    <div style="display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:56px;margin-top:18px">
+      <div>
+        <div style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;margin:0 0 4px">컷 · 후보 선택</div>
+        ${shotBlocks}
+      </div>
+      <div>
+        <div style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;margin:0 0 10px">캡션 · 일정</div>
+        <form data-action="draft-edit" data-draft-id="${attr(d.id)}" style="display:flex;flex-direction:column;gap:12px">
+          <div class="field"><label>캡션</label><textarea class="input" name="caption" rows="3" ${
+            editable ? "" : "disabled"
+          }>${escapeHtml(d.caption)}</textarea></div>
+          <div class="field"><label>해시태그 (쉼표 구분)</label><input class="input" name="hashtags" value="${attr(
+            (d.hashtags ?? []).join(", "),
+          )}" ${editable ? "" : "disabled"}></div>
+          <div class="field"><label>게시 예정 (비우면 승인 즉시)</label><input class="input" type="datetime-local" name="scheduledAt" value="${attr(
+            scheduledLocal,
+          )}" ${editable ? "" : "disabled"}></div>
+          ${
+            editable
+              ? `<div><button class="btn btn-secondary" type="submit">저장</button></div>`
+              : ""
+          }
+        </form>
+        <div style="display:flex;gap:8px;margin-top:22px">
+          ${
+            reviewable
+              ? `<button class="btn btn-primary" data-act="draft-approve" data-id="${attr(d.id)}">승인</button>
+                 <button class="btn btn-secondary" data-act="draft-reject" data-id="${attr(d.id)}">반려</button>`
+              : ""
+          }
+          ${
+            d.publishedPostId
+              ? `<span class="count-note">게시됨: post ${escapeHtml(d.publishedPostId)}</span>`
+              : ""
+          }
+        </div>
+      </div>
+    </div>`;
 }
 
 // ── 사용자 ────────────────────────────────────────────────────────────────
@@ -2576,6 +2937,105 @@ async function dispatchSubmit(action, form, formData) {
     return;
   }
 
+  // — visual profile (prompts / reference upload / test generation) —
+  if (action === "visual-profile-save") {
+    const id = form.dataset.characterId;
+    await submitViaSpec(
+      jsonRequest(`/api/characters/${id}/visual-profile`, "PUT", {
+        appearancePrompt: String(formData.get("appearancePrompt") ?? "").trim(),
+        stylePrompt: String(formData.get("stylePrompt") ?? "").trim(),
+        negativePrompt: String(formData.get("negativePrompt") ?? "").trim(),
+      }),
+      "비주얼 프로필을 저장했습니다.",
+    );
+    renderApp();
+    return;
+  }
+  if (action === "visual-ref-add") {
+    const id = form.dataset.characterId;
+    const file = formData.get("referenceFile");
+    if (!(typeof File !== "undefined" && file instanceof File && file.name)) {
+      throw new Error("레퍼런스 이미지 파일을 선택하세요.");
+    }
+    const mediaId = await uploadMedia(
+      file,
+      "image",
+      request,
+      fetch,
+      `pod/reference/character/${id}`,
+    );
+    const current = String(form.dataset.mediaIds ?? "")
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+    const result = await submitViaSpec(
+      jsonRequest(`/api/characters/${id}/visual-profile/references`, "PUT", {
+        mediaIds: [...current, mediaId],
+      }),
+      "레퍼런스를 추가했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (action === "visual-test-gen") {
+    const id = form.dataset.characterId;
+    const result = await submitViaSpec(
+      jsonRequest(
+        `/api/characters/${id}/visual-profile/test-generation`,
+        "POST",
+        {
+          scene: String(formData.get("scene") ?? "").trim(),
+        },
+      ),
+      "테스트 생성 잡을 큐에 등록했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+
+  // — draft review edits / manual draft / posting policy —
+  if (action === "draft-edit") {
+    const id = form.dataset.draftId;
+    const scheduledRaw = String(formData.get("scheduledAt") ?? "").trim();
+    const result = await submitViaSpec(
+      jsonRequest(`/api/drafts/${id}`, "PATCH", {
+        caption: String(formData.get("caption") ?? "").trim(),
+        hashtags: splitCsv(formData.get("hashtags")),
+        scheduledAt: scheduledRaw ? new Date(scheduledRaw).toISOString() : null,
+      }),
+      "초안을 저장했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (action === "draft-create") {
+    const characterId = form.dataset.characterId;
+    const sceneHint = String(formData.get("sceneHint") ?? "").trim();
+    const result = await submitViaSpec(
+      jsonRequest("/api/drafts", "POST", {
+        characterId,
+        ...(sceneHint ? { sceneHint } : {}),
+      }),
+      "초안 기획을 큐에 등록했습니다. 워커가 곧 기획을 시작합니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (action === "policy-save") {
+    const characterId = form.dataset.characterId;
+    const result = await submitViaSpec(
+      jsonRequest(`/api/characters/${characterId}/posting-policy`, "PUT", {
+        enabled: formData.get("enabled") === "on",
+        weeklyCadence: Number(formData.get("weeklyCadence") ?? 3),
+        hourStartKst: Number(formData.get("hourStartKst") ?? 18),
+        hourEndKst: Number(formData.get("hourEndKst") ?? 22),
+      }),
+      "포스팅 정책을 저장했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+
   // — new post (character-authored, with hashtags) —
   if (action === "dlg-new-post") {
     const session = dialogState;
@@ -2737,6 +3197,52 @@ async function handleClick(event) {
     if (result.ok) renderApp();
     return;
   }
+  if (act === "visual-ref-remove") {
+    const remaining = String(el.dataset.mediaIds ?? "")
+      .split(",")
+      .map((v) => v.trim())
+      .filter((v) => v && v !== el.dataset.media);
+    const result = await submitViaSpec(
+      jsonRequest(
+        `/api/characters/${el.dataset.id}/visual-profile/references`,
+        "PUT",
+        { mediaIds: remaining },
+      ),
+      "레퍼런스를 제거했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (act === "visual-ref-promote") {
+    const jobRes = await request(`/api/generation/jobs/${el.dataset.job}`);
+    const outputs = Array.isArray(jobRes.body?.outputs)
+      ? jobRes.body.outputs
+      : [];
+    const mediaId =
+      outputs.find((o) => o.selected)?.mediaId ?? outputs[0]?.mediaId;
+    if (!jobRes.ok || !mediaId) {
+      showToast("승격할 출력 미디어를 찾지 못했습니다.", "", true);
+      return;
+    }
+    const current = String(el.dataset.mediaIds ?? "")
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+    if (current.includes(mediaId)) {
+      showToast("이미 레퍼런스에 등록된 이미지입니다.", "", true);
+      return;
+    }
+    const result = await submitViaSpec(
+      jsonRequest(
+        `/api/characters/${el.dataset.id}/visual-profile/references`,
+        "PUT",
+        { mediaIds: [...current, mediaId] },
+      ),
+      "레퍼런스로 승격했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
   if (act === "go-char") {
     location.hash = characterHref({ characterId: el.dataset.id });
     return;
@@ -2755,6 +3261,56 @@ async function handleClick(event) {
   if (act === "select-post" || act === "back-posts") {
     ui.selPostId = postSelectionAfterAction(act, ui.selPostId, el.dataset.id);
     renderApp();
+    return;
+  }
+  if (act === "select-draft") {
+    ui.selDraftId = el.dataset.id;
+    renderApp();
+    return;
+  }
+  if (act === "back-drafts") {
+    ui.selDraftId = null;
+    renderApp();
+    return;
+  }
+  if (act === "go-draft") {
+    ui.selDraftId = el.dataset.id;
+    location.hash = "#drafts";
+    return;
+  }
+  if (act === "draft-approve" || act === "draft-reject") {
+    const verb = act === "draft-approve" ? "approve" : "reject";
+    const result = await submitViaSpec(
+      jsonRequest(`/api/drafts/${el.dataset.id}/${verb}`, "POST", {}),
+      verb === "approve"
+        ? "초안을 승인했습니다. 예정 시각에 게시됩니다."
+        : "초안을 반려했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (act === "draft-regen") {
+    const result = await submitViaSpec(
+      jsonRequest(
+        `/api/drafts/${el.dataset.draft}/jobs/${el.dataset.job}/regenerate`,
+        "POST",
+        {},
+      ),
+      "컷 재생성을 큐에 등록했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (act === "draft-pick-output") {
+    const result = await submitViaSpec(
+      jsonRequest(
+        `/api/drafts/${el.dataset.draft}/jobs/${el.dataset.job}/select`,
+        "POST",
+        { mediaId: el.dataset.media },
+      ),
+      "후보를 선택했습니다.",
+    );
+    if (result.ok) renderApp();
     return;
   }
   if (act === "select-user") {
@@ -2981,7 +3537,10 @@ async function renderApp() {
 if (hasDocument) {
   // Surface anything that escapes local error handling.
   window.addEventListener("error", (event) => {
-    console.error(`${LOG_PREFIX} uncaught error:`, event.error ?? event.message);
+    console.error(
+      `${LOG_PREFIX} uncaught error:`,
+      event.error ?? event.message,
+    );
   });
   window.addEventListener("unhandledrejection", (event) => {
     console.error(`${LOG_PREFIX} unhandled rejection:`, event.reason);

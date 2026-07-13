@@ -18,14 +18,15 @@ function createService(initialRows: TestAdminRow[] = []) {
   const rows = [...initialRows];
   const prisma = {
     admin: {
-      findUnique: jest.fn(({ where }: { where: { id?: string; email?: string } }) =>
-        Promise.resolve(
-          rows.find(
-            (row) =>
-              (where.id && row.id === where.id) ||
-              (where.email && row.email === where.email),
-          ) ?? null,
-        ),
+      findUnique: jest.fn(
+        ({ where }: { where: { id?: string; email?: string } }) =>
+          Promise.resolve(
+            rows.find(
+              (row) =>
+                (where.id && row.id === where.id) ||
+                (where.email && row.email === where.email),
+            ) ?? null,
+          ),
       ),
       create: jest.fn(
         ({

@@ -498,9 +498,7 @@ describe("CharactersService", () => {
         title: "t".repeat(201),
         content: "fine",
       }),
-    ).rejects.toThrow(
-      "Character persona title must be at most 200 characters",
-    );
+    ).rejects.toThrow("Character persona title must be at most 200 characters");
     await expect(
       service.createCharacterPersona({
         characterId: "character-1",
