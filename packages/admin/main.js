@@ -149,7 +149,15 @@ export function characterDetailRequests(characterId) {
   ];
 }
 
-const CHARACTER_TABS = ["profile", "posts", "activity", "visual", "automation"];
+const CHARACTER_TABS = [
+  "profile",
+  "personas",
+  "memory",
+  "posts",
+  "activity",
+  "visual",
+  "automation",
+];
 
 export function characterRouteState(hash = "#characters") {
   const [routePart, query = ""] = String(hash ?? "")
@@ -187,6 +195,99 @@ export function characterHref(input = {}) {
 
   const query = params.toString();
   return query ? `#characters?${query}` : "#characters";
+}
+
+export function characterPersonasPanel(characterId, personas = []) {
+  const items = Array.isArray(personas) ? personas : [];
+  const rows = items.length
+    ? items
+        .map(
+          (persona) => `
+            <form data-action="persona-update" data-character-id="${attr(
+              characterId,
+            )}" data-persona-id="${attr(persona.id)}" style="display:flex;flex-direction:column;gap:12px;padding:18px 0;border-bottom:1px solid var(--color-divider)">
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:12px">
+                <div class="field"><label>제목</label><input class="input" name="title" value="${attr(
+                  persona.title,
+                )}" required></div>
+                <div class="field"><label>정렬 순서</label><input class="input" name="sortOrder" type="number" step="1" value="${attr(
+                  persona.sortOrder ?? "",
+                )}" required></div>
+              </div>
+              <div class="field"><label>내용</label><textarea class="input" name="content" rows="5" required>${escapeHtml(
+                persona.content,
+              )}</textarea></div>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-primary" type="submit">저장</button>
+                <button class="btn btn-ghost" type="button" data-act="persona-delete" data-character-id="${attr(
+                  characterId,
+                )}" data-persona-id="${attr(persona.id)}">삭제</button>
+              </div>
+            </form>`,
+        )
+        .join("")
+    : noticeBlock(
+        "등록된 페르소나가 없습니다 — 위에서 첫 페르소나를 추가하세요.",
+      );
+
+  return `<div style="max-width:760px">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px"><strong>페르소나</strong><span class="count-note">${items.length}건</span></div>
+    <form data-action="persona-create" data-character-id="${attr(
+      characterId,
+    )}" style="display:flex;flex-direction:column;gap:12px;padding:18px;background:var(--color-surface);border-radius:var(--radius-md);margin-bottom:24px">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:12px">
+        <div class="field"><label>새 페르소나 제목</label><input class="input" name="title" required></div>
+        <div class="field"><label>정렬 순서 (선택)</label><input class="input" name="sortOrder" type="number" step="1"></div>
+      </div>
+      <div class="field"><label>내용</label><textarea class="input" name="content" rows="5" required></textarea></div>
+      <div><button class="btn btn-secondary" type="submit">페르소나 추가</button></div>
+    </form>
+    <div>${rows}</div>
+  </div>`;
+}
+
+export function characterMemoriesPanel(characterId, memories = []) {
+  const items = Array.isArray(memories) ? memories : [];
+  const rows = items.length
+    ? items
+        .map(
+          (memory) => `
+            <form data-action="memory-update" data-character-id="${attr(
+              characterId,
+            )}" data-memory-id="${attr(memory.id)}" style="display:flex;flex-direction:column;gap:12px;padding:18px 0;border-bottom:1px solid var(--color-divider)">
+              <div class="field"><label>내용</label><textarea class="input" name="content" rows="4" required>${escapeHtml(
+                memory.content,
+              )}</textarea></div>
+              <div class="field"><label>사유</label><input class="input" name="reason" value="${attr(
+                memory.reason,
+              )}" required></div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <button class="btn btn-primary" type="submit">저장</button>
+                <button class="btn btn-ghost" type="button" data-act="memory-delete" data-character-id="${attr(
+                  characterId,
+                )}" data-memory-id="${attr(memory.id)}">삭제</button>
+                <span class="count-note" style="margin-left:auto">${escapeHtml(
+                  fmtDate(memory.createdAt),
+                )}</span>
+              </div>
+            </form>`,
+        )
+        .join("")
+    : noticeBlock(
+        "등록된 메모리가 없습니다 — 위에서 첫 메모리를 추가하세요.",
+      );
+
+  return `<div style="max-width:760px">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px"><strong>메모리</strong><span class="count-note">${items.length}건</span></div>
+    <form data-action="memory-create" data-character-id="${attr(
+      characterId,
+    )}" style="display:flex;flex-direction:column;gap:12px;padding:18px;background:var(--color-surface);border-radius:var(--radius-md);margin-bottom:24px">
+      <div class="field"><label>새 메모리 내용</label><textarea class="input" name="content" rows="4" required></textarea></div>
+      <div class="field"><label>사유</label><input class="input" name="reason" required></div>
+      <div><button class="btn btn-secondary" type="submit">메모리 추가</button></div>
+    </form>
+    <div>${rows}</div>
+  </div>`;
 }
 
 export function postSelectionAfterAction(
@@ -1234,8 +1335,6 @@ async function renderCharacterDetail(id, tab) {
   const memories = Array.isArray(c.memories) ? c.memories : [];
   const logs = itemsFromPage(logsRes.body).filter((l) => l.characterId === id);
   const jobs = itemsFromPage(jobsRes.body);
-  const primaryPersona = personas[0];
-
   const stats = [
     ["게시물", c.postCount ?? 0],
     ["팔로워", c.followerCount ?? 0],
@@ -1289,6 +1388,8 @@ async function renderCharacterDetail(id, tab) {
     <div class="tabs-row">
       ${[
         ["profile", "프로필"],
+        ["personas", "페르소나"],
+        ["memory", "메모리"],
         ["posts", "게시물"],
         ["activity", "활동"],
         ["visual", "비주얼"],
@@ -1306,57 +1407,27 @@ async function renderCharacterDetail(id, tab) {
   let body = "";
   if (tab === "profile") {
     body = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:56px">
-        <div>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">프로필 수정</span><span style="font-size:11px;color:var(--color-neutral-500)">PATCH /api/characters/:id</span></div>
-          <form data-action="char-profile" data-character-id="${attr(
-            c.id,
-          )}" data-persona-id="${attr(primaryPersona?.id ?? "")}" style="display:flex;flex-direction:column;gap:12px">
-            <div class="field"><label>표시 이름</label><input class="input" name="displayName" value="${attr(
-              c.displayName,
-            )}" required></div>
-            <div class="field"><label>Bio</label><input class="input" name="bio" value="${attr(
-              c.bio,
-            )}" required></div>
-            <div class="field"><label>페르소나 ${
-              primaryPersona ? "" : "(첫 페르소나 생성)"
-            }</label><textarea class="input" name="persona" rows="4" placeholder="말투 · 성격 · 세계관 설정">${escapeHtml(
-              primaryPersona?.content ?? "",
-            )}</textarea></div>
-            <div class="field"><label>관심사 (쉼표 구분)</label><input class="input" name="interests" value="${attr(
-              (c.interests ?? []).join(", "),
-            )}"></div>
-            <div><button class="btn btn-primary" type="submit">저장</button></div>
-          </form>
-        </div>
-        <div>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">기억</span><span style="font-size:11px;color:var(--color-neutral-500)">${
-            memories.length
-          }건 · POST /api/characters/:id/memory</span></div>
-          <div style="font-size:13.5px;line-height:1.55;color:var(--color-neutral-800)">
-            ${
-              memories.length
-                ? memories
-                    .map(
-                      (m) =>
-                        `<div style="padding:8px 0;border-bottom:1px solid var(--color-divider);display:flex;justify-content:space-between;gap:12px"><span>${escapeHtml(
-                          m.content,
-                        )}</span><span style="color:var(--color-neutral-500);font-size:11px;flex:none">${fmtDate(
-                          m.createdAt,
-                        )}</span></div>`,
-                    )
-                    .join("")
-                : `<div style="padding:8px 0;color:var(--color-neutral-600);font-style:italic">저장된 기억이 없습니다 — 아래에서 첫 기억을 추가하세요.</div>`
-            }
-          </div>
-          <form data-action="memory-add" data-character-id="${attr(
-            c.id,
-          )}" style="display:flex;gap:8px;margin-top:12px">
-            <input class="input" name="content" placeholder="새 기억 내용" required>
-            <button class="btn btn-secondary" type="submit" style="flex:none">추가</button>
-          </form>
-        </div>
+      <div style="max-width:560px">
+        <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">프로필 수정</span><span style="font-size:11px;color:var(--color-neutral-500)">PATCH /api/characters/:id</span></div>
+        <form data-action="char-profile" data-character-id="${attr(
+          c.id,
+        )}" style="display:flex;flex-direction:column;gap:12px">
+          <div class="field"><label>표시 이름</label><input class="input" name="displayName" value="${attr(
+            c.displayName,
+          )}" required></div>
+          <div class="field"><label>Bio</label><input class="input" name="bio" value="${attr(
+            c.bio,
+          )}" required></div>
+          <div class="field"><label>관심사 (쉼표 구분)</label><input class="input" name="interests" value="${attr(
+            (c.interests ?? []).join(", "),
+          )}"></div>
+          <div><button class="btn btn-primary" type="submit">저장</button></div>
+        </form>
       </div>`;
+  } else if (tab === "personas") {
+    body = characterPersonasPanel(c.id, personas);
+  } else if (tab === "memory") {
+    body = characterMemoriesPanel(c.id, memories);
   } else if (tab === "posts") {
     const postsRes = await request(
       endpoint("/api/posts", { characterId: id, limit: 50 }),

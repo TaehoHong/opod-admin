@@ -8,6 +8,8 @@ import {
   characterCreatePayload,
   characterDetailRequests,
   characterHref,
+  characterMemoriesPanel,
+  characterPersonasPanel,
   characterRouteState,
   characterStatusPayload,
   characterUpdatePayload,
@@ -642,8 +644,80 @@ test("characterRouteState parses list, create, detail, and tab states", () => {
   );
   // Unknown tabs fall back to the profile tab.
   assert.equal(
+    characterRouteState("#characters?characterId=char-1&tab=personas").tab,
+    "personas",
+  );
+  assert.equal(
     characterRouteState("#characters?characterId=char-1&tab=memory").tab,
+    "memory",
+  );
+  assert.equal(
+    characterRouteState("#characters?characterId=char-1&tab=unknown").tab,
     "profile",
+  );
+});
+
+test("characterPersonasPanel renders every editable persona safely", () => {
+  const html = characterPersonasPanel("char-1", [
+    {
+      id: "persona-1",
+      title: "Core <voice>",
+      content: "Warm & concise",
+      sortOrder: 10,
+    },
+    {
+      id: "persona-2",
+      title: "World",
+      content: "Lives in Seoul",
+      sortOrder: 20,
+    },
+  ]);
+
+  assert.equal((html.match(/data-action="persona-update"/g) ?? []).length, 2);
+  assert.match(html, /data-action="persona-create"/);
+  assert.match(html, /data-persona-id="persona-1"/);
+  assert.match(html, /data-persona-id="persona-2"/);
+  assert.match(html, /Core &lt;voice&gt;/);
+  assert.match(html, /Warm &amp; concise/);
+  assert.doesNotMatch(html, /Core <voice>/);
+});
+
+test("characterPersonasPanel shows an empty state", () => {
+  assert.match(
+    characterPersonasPanel("char-1", []),
+    /등록된 페르소나가 없습니다/,
+  );
+});
+
+test("characterMemoriesPanel renders every editable memory safely", () => {
+  const html = characterMemoriesPanel("char-1", [
+    {
+      id: "memory-1",
+      content: "Likes <film>",
+      reason: "Operator & import",
+      createdAt: "2026-07-13T00:00:00.000Z",
+    },
+    {
+      id: "memory-2",
+      content: "Lives in Seoul",
+      reason: "Profile",
+      createdAt: "2026-07-12T00:00:00.000Z",
+    },
+  ]);
+
+  assert.equal((html.match(/data-action="memory-update"/g) ?? []).length, 2);
+  assert.match(html, /data-action="memory-create"/);
+  assert.match(html, /data-memory-id="memory-1"/);
+  assert.match(html, /data-memory-id="memory-2"/);
+  assert.match(html, /Likes &lt;film&gt;/);
+  assert.match(html, /Operator &amp; import/);
+  assert.doesNotMatch(html, /Likes <film>/);
+});
+
+test("characterMemoriesPanel shows an empty state", () => {
+  assert.match(
+    characterMemoriesPanel("char-1", []),
+    /등록된 메모리가 없습니다/,
   );
 });
 
