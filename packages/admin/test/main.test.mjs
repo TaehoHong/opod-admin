@@ -10,6 +10,7 @@ import {
   characterHref,
   characterMemoriesPanel,
   characterPersonasPanel,
+  characterResourceFormRequest,
   characterRouteState,
   characterStatusPayload,
   characterUpdatePayload,
@@ -799,6 +800,40 @@ test("personaPayload includes sortOrder only when the field is filled", () => {
     title: "Core",
     content: "warm",
   });
+});
+
+test("characterResourceFormRequest selects persona and memory mutations", async () => {
+  const persona = new FormData();
+  persona.set("title", " Core ");
+  persona.set("content", " Warm ");
+  const personaSubmission = await characterResourceFormRequest(
+    "persona-create",
+    persona,
+    { characterId: "char-1" },
+  );
+  assert.equal(personaSubmission.successMessage, "페르소나를 추가했습니다.");
+  assert.equal(
+    personaSubmission.request.path,
+    "/api/characters/char-1/personas",
+  );
+
+  const memory = new FormData();
+  memory.set("content", " City night ");
+  memory.set("reason", " Operator ");
+  const memorySubmission = await characterResourceFormRequest(
+    "memory-update",
+    memory,
+    { characterId: "char-1", memoryId: "memory-1" },
+  );
+  assert.equal(memorySubmission.successMessage, "메모리를 저장했습니다.");
+  assert.equal(
+    memorySubmission.request.path,
+    "/api/characters/char-1/memory/memory-1",
+  );
+  assert.equal(
+    await characterResourceFormRequest("admin-login", new FormData()),
+    null,
+  );
 });
 
 test("personaReorderPayload parses a JSON array of persona ids", () => {

@@ -623,6 +623,26 @@ export async function formActionRequest(action, form, dataset = {}) {
   throw new Error(`Unsupported form action: ${action}`);
 }
 
+const CHARACTER_RESOURCE_FORM_MESSAGES = {
+  "persona-create": "페르소나를 추가했습니다.",
+  "persona-update": "페르소나를 저장했습니다.",
+  "memory-create": "메모리를 추가했습니다.",
+  "memory-update": "메모리를 저장했습니다.",
+};
+
+export async function characterResourceFormRequest(
+  action,
+  form,
+  dataset = {},
+) {
+  const successMessage = CHARACTER_RESOURCE_FORM_MESSAGES[action];
+  if (!successMessage) return null;
+  return {
+    request: await formActionRequest(action, form, dataset),
+    successMessage,
+  };
+}
+
 export async function generationFormActionRequest(action, form) {
   if (action !== "generation-action") return null;
   return formActionRequest(action, form);
@@ -2952,10 +2972,23 @@ async function dispatchSubmit(action, form, formData) {
     return;
   }
 
-  // — character profile save (update + persona upsert) —
+  const characterResourceSubmission = await characterResourceFormRequest(
+    action,
+    formData,
+    form.dataset,
+  );
+  if (characterResourceSubmission) {
+    const result = await submitViaSpec(
+      characterResourceSubmission.request,
+      characterResourceSubmission.successMessage,
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+
+  // — character profile save —
   if (action === "char-profile") {
     const id = form.dataset.characterId;
-    const personaId = form.dataset.personaId;
     const updated = await request(
       `/api/characters/${id}`,
       jsonRequest(
@@ -2968,42 +3001,7 @@ async function dispatchSubmit(action, form, formData) {
       showToast(errorMessage(updated.body, "프로필 저장 실패"), "", true);
       return;
     }
-    const persona = String(formData.get("persona") ?? "").trim();
-    if (persona) {
-      if (personaId) {
-        await request(
-          `/api/characters/${id}/personas/${personaId}`,
-          jsonRequest(`/api/characters/${id}/personas/${personaId}`, "PATCH", {
-            content: persona,
-          }).options,
-        );
-      } else {
-        await request(
-          `/api/characters/${id}/personas`,
-          jsonRequest(`/api/characters/${id}/personas`, "POST", {
-            title: "기본 페르소나",
-            content: persona,
-          }).options,
-        );
-      }
-    }
     showToast("프로필을 저장했습니다.", `PATCH /api/characters/${id}`);
-    renderApp();
-    return;
-  }
-
-  // — memory quick add (design has content-only; reason defaulted) —
-  if (action === "memory-add") {
-    const id = form.dataset.characterId;
-    const content = String(formData.get("content") ?? "").trim();
-    if (!content) return;
-    await submitViaSpec(
-      jsonRequest(`/api/characters/${id}/memory`, "POST", {
-        content,
-        reason: "운영 콘솔에서 추가",
-      }),
-      "기억을 추가했습니다.",
-    );
     renderApp();
     return;
   }
