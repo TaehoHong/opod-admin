@@ -6,6 +6,7 @@ import {
   analyticsRequests,
   appendPostMediaFiles,
   characterCreatePayload,
+  characterDeleteRequest,
   characterDetailRequests,
   characterHref,
   characterMemoriesPanel,
@@ -834,6 +835,34 @@ test("characterResourceFormRequest selects persona and memory mutations", async 
     await characterResourceFormRequest("admin-login", new FormData()),
     null,
   );
+});
+
+test("characterDeleteRequest cancels or builds the selected soft delete", async () => {
+  let prompt = "";
+  assert.equal(
+    await characterDeleteRequest(
+      "persona-delete",
+      { characterId: "char-1", personaId: "persona-1" },
+      (message) => {
+        prompt = message;
+        return false;
+      },
+    ),
+    null,
+  );
+  assert.match(prompt, /페르소나.*삭제/);
+
+  const submission = await characterDeleteRequest(
+    "memory-delete",
+    { characterId: "char-1", memoryId: "memory-1" },
+    () => true,
+  );
+  assert.equal(submission.successMessage, "메모리를 삭제했습니다.");
+  assert.equal(
+    submission.request.path,
+    "/api/characters/char-1/memory/memory-1",
+  );
+  assert.equal(submission.request.options.method, "DELETE");
 });
 
 test("personaReorderPayload parses a JSON array of persona ids", () => {

@@ -273,9 +273,7 @@ export function characterMemoriesPanel(characterId, memories = []) {
             </form>`,
         )
         .join("")
-    : noticeBlock(
-        "등록된 메모리가 없습니다 — 위에서 첫 메모리를 추가하세요.",
-      );
+    : noticeBlock("등록된 메모리가 없습니다 — 위에서 첫 메모리를 추가하세요.");
 
   return `<div style="max-width:760px">
     <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px"><strong>메모리</strong><span class="count-note">${items.length}건</span></div>
@@ -630,16 +628,33 @@ const CHARACTER_RESOURCE_FORM_MESSAGES = {
   "memory-update": "메모리를 저장했습니다.",
 };
 
-export async function characterResourceFormRequest(
-  action,
-  form,
-  dataset = {},
-) {
+export async function characterResourceFormRequest(action, form, dataset = {}) {
   const successMessage = CHARACTER_RESOURCE_FORM_MESSAGES[action];
   if (!successMessage) return null;
   return {
     request: await formActionRequest(action, form, dataset),
     successMessage,
+  };
+}
+
+const CHARACTER_DELETE_META = {
+  "persona-delete": {
+    label: "페르소나",
+    successMessage: "페르소나를 삭제했습니다.",
+  },
+  "memory-delete": {
+    label: "메모리",
+    successMessage: "메모리를 삭제했습니다.",
+  },
+};
+
+export async function characterDeleteRequest(action, dataset, confirmDelete) {
+  const meta = CHARACTER_DELETE_META[action];
+  if (!meta) return null;
+  if (!confirmDelete(`${meta.label}를 삭제하시겠습니까?`)) return null;
+  return {
+    request: await formActionRequest(action, new FormData(), dataset),
+    successMessage: meta.successMessage,
   };
 }
 
@@ -3308,6 +3323,20 @@ async function handleClick(event) {
         { mediaIds: [...current, mediaId] },
       ),
       "레퍼런스로 승격했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (act === "persona-delete" || act === "memory-delete") {
+    const submission = await characterDeleteRequest(
+      act,
+      el.dataset,
+      (message) => window.confirm(message),
+    );
+    if (!submission) return;
+    const result = await submitViaSpec(
+      submission.request,
+      submission.successMessage,
     );
     if (result.ok) renderApp();
     return;
