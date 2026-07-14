@@ -236,6 +236,7 @@ describe("GenerationService", () => {
   );
 
   it("selects an owned output from a completed job in one transaction", async () => {
+    const lockJob = jest.fn().mockResolvedValue([{ id: "job-1" }]);
     const findFirst = jest.fn().mockResolvedValue({
       selected: false,
       job: { characterId: "ai-1", outputMediaId: null },
@@ -247,6 +248,7 @@ describe("GenerationService", () => {
     const $transaction = jest.fn(
       async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: lockJob,
           generationJobOutput: {
             findFirst,
             updateMany: jest
@@ -284,6 +286,10 @@ describe("GenerationService", () => {
         job: { select: { characterId: true, outputMediaId: true } },
       },
     });
+    expect(lockJob).toHaveBeenCalledTimes(1);
+    expect(lockJob.mock.invocationCallOrder[0]).toBeLessThan(
+      findFirst.mock.invocationCallOrder[0],
+    );
     expect(clearSelections).toHaveBeenCalledWith({
       where: { jobId: "job-1" },
       data: { selected: false },
@@ -309,6 +315,7 @@ describe("GenerationService", () => {
   });
 
   it("does not rewrite flags or log when the output is already selected", async () => {
+    const lockJob = jest.fn().mockResolvedValue([{ id: "job-1" }]);
     const findFirst = jest.fn().mockResolvedValue({
       selected: true,
       job: { characterId: "ai-1", outputMediaId: "media-2" },
@@ -319,6 +326,7 @@ describe("GenerationService", () => {
     const $transaction = jest.fn(
       async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: lockJob,
           generationJobOutput: { findFirst, updateMany },
           generationJob: { update },
           characterActionLog: { create: createLog },
@@ -342,9 +350,11 @@ describe("GenerationService", () => {
   });
 
   it("rejects selecting media that is not owned by the completed job", async () => {
+    const lockJob = jest.fn().mockResolvedValue([{ id: "job-1" }]);
     const $transaction = jest.fn(
       async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: lockJob,
           generationJobOutput: {
             findFirst: jest.fn().mockResolvedValue(null),
           },

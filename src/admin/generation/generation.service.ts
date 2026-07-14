@@ -226,6 +226,12 @@ export class GenerationService {
 
   async selectOutput(jobId: string, mediaId: string): Promise<GenerationJob> {
     await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT id
+        FROM opod.generation_jobs
+        WHERE id = ${jobId}::uuid
+        FOR UPDATE
+      `;
       const output = await tx.generationJobOutput.findFirst({
         where: { jobId, mediaId, job: { status: "completed" } },
         select: {

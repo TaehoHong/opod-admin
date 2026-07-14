@@ -434,11 +434,22 @@ describe("generation", () => {
       expect(outputs.every((output) => output.selected === false)).toBe(true);
       expect(completed).not.toHaveProperty("outputMediaId");
 
+      await Promise.all([
+        request(app.getHttpServer())
+          .post(`/api/generation/jobs/${created.body.id}/select-output`)
+          .set(headers)
+          .send({ mediaId: outputs[1].mediaId })
+          .expect(201),
+        request(app.getHttpServer())
+          .post(`/api/generation/jobs/${created.body.id}/select-output`)
+          .set(headers)
+          .send({ mediaId: outputs[1].mediaId })
+          .expect(201),
+      ]);
       const selected = await request(app.getHttpServer())
-        .post(`/api/generation/jobs/${created.body.id}/select-output`)
+        .get(`/api/generation/jobs/${created.body.id}`)
         .set(headers)
-        .send({ mediaId: outputs[1].mediaId })
-        .expect(201);
+        .expect(200);
       expect(
         selected.body.outputs.filter(
           (output: { selected: boolean }) => output.selected,
@@ -449,6 +460,19 @@ describe("generation", () => {
           selected: true,
         }),
       ]);
+
+      const selectionLogs = await request(app.getHttpServer())
+        .get("/api/character-action-logs")
+        .set(headers)
+        .query({ characterId: character.body.id })
+        .expect(200);
+      expect(
+        selectionLogs.body.items.filter(
+          (log: { actionType: string; targetId?: string }) =>
+            log.actionType === "GENERATION_OUTPUT_SELECTED" &&
+            log.targetId === created.body.id,
+        ),
+      ).toHaveLength(1);
 
       const regenerated = await request(app.getHttpServer())
         .post(`/api/generation/jobs/${created.body.id}/regenerate`)
