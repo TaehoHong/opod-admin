@@ -60,6 +60,7 @@ enum CreditReservationStatus {
 }
 
 enum GenerationJobStatus {
+  draft
   queued
   running
   completed
@@ -553,6 +554,8 @@ model GenerationJob {
   characterId       String              @map("character_id") @db.Uuid
   mediaType         MediaType           @map("media_type")
   prompt            String
+  inputPrompt       String?             @map("input_prompt")
+  candidateCount    Int?                @map("candidate_count")
   status            GenerationJobStatus @default(queued)
   // 선택된 최종 출력 캐시. 후보 전체는 GenerationJobOutput에 기록된다.
   outputMediaId     String?             @map("output_media_id") @db.Uuid
