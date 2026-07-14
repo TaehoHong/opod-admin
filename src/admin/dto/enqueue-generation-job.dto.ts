@@ -1,9 +1,16 @@
 import { Prisma } from "@prisma/client";
-import { IsNotEmpty, IsObject, IsOptional, IsString } from "class-validator";
+import {
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from "class-validator";
 
 export class EnqueueGenerationJobDto {
   @IsString()
   @IsNotEmpty()
+  @IsUUID()
   characterId!: string;
 
   @IsString()

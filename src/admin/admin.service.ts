@@ -964,16 +964,8 @@ export class AdminService {
     return this.generationService.updateImageDraft(jobId, input);
   }
 
-  async confirmImageGenerationDraft(jobId: string) {
-    const job = await this.generationService.confirmImageDraft(jobId);
-    await this.recordCharacterActionLog({
-      characterId: job.characterId,
-      actionType: "GENERATION_DRAFT_CONFIRMED",
-      targetTable: "generation_jobs",
-      targetId: job.id,
-      reason: "generation draft confirmed",
-    });
-    return job;
+  confirmImageGenerationDraft(jobId: string) {
+    return this.generationService.confirmImageDraft(jobId);
   }
 
   selectGenerationOutput(jobId: string, mediaId: string) {

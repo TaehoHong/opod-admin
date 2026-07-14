@@ -1,8 +1,9 @@
-import { IsInt, IsNotEmpty, IsString, Max, Min } from "class-validator";
+import { IsInt, IsNotEmpty, IsString, IsUUID, Max, Min } from "class-validator";
 
 export class CreateImageGenerationDraftDto {
   @IsString()
   @IsNotEmpty()
+  @IsUUID()
   characterId!: string;
 
   @IsString()

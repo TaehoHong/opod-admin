@@ -150,12 +150,21 @@ describe("GenerationService", () => {
     },
   );
 
-  it("confirms a draft by atomically queueing it", async () => {
+  it("confirms a draft and records its action in one transaction", async () => {
     const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const findDraft = jest.fn().mockResolvedValue({ characterId: "ai-1" });
+    const createLog = jest.fn().mockResolvedValue({});
+    const $transaction = jest.fn(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          generationJob: { findUnique: findDraft, updateMany },
+          characterActionLog: { create: createLog },
+        }),
+    );
     const findUnique = jest.fn().mockResolvedValue(job({ status: "queued" }));
     const service = new (
       GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { updateMany, findUnique } });
+    )({ generationJob: { findUnique }, $transaction });
 
     await expect(service.confirmImageDraft("job-1")).resolves.toMatchObject({
       status: "queued",
@@ -164,26 +173,72 @@ describe("GenerationService", () => {
       where: { id: "job-1", status: "draft" },
       data: { status: "queued" },
     });
+    expect(createLog).toHaveBeenCalledWith({
+      data: {
+        characterId: "ai-1",
+        actionType: "GENERATION_DRAFT_CONFIRMED",
+        targetTable: "generation_jobs",
+        targetId: "job-1",
+        reason: "generation draft confirmed",
+      },
+    });
+    expect($transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("rolls back draft confirmation when its action log fails", async () => {
+    const logError = new Error("log unavailable");
+    const $transaction = jest.fn(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          generationJob: {
+            findUnique: jest.fn().mockResolvedValue({ characterId: "ai-1" }),
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+          characterActionLog: {
+            create: jest.fn().mockRejectedValue(logError),
+          },
+        }),
+    );
+    const findUnique = jest.fn();
+    const service = new (
+      GenerationService as new (prisma: unknown) => GenerationService
+    )({ generationJob: { findUnique }, $transaction });
+
+    await expect(service.confirmImageDraft("job-1")).rejects.toBe(logError);
+    expect(findUnique).not.toHaveBeenCalled();
   });
 
   it.each(["queued", "running", "completed", "failed"])(
     "returns an already %s job when confirm is retried",
     async (status) => {
       const updateMany = jest.fn().mockResolvedValue({ count: 0 });
+      const createLog = jest.fn();
+      const $transaction = jest.fn(
+        async (callback: (tx: unknown) => Promise<unknown>) =>
+          callback({
+            generationJob: {
+              findUnique: jest.fn().mockResolvedValue({ characterId: "ai-1" }),
+              updateMany,
+            },
+            characterActionLog: { create: createLog },
+          }),
+      );
       const findUnique = jest.fn().mockResolvedValue(job({ status }));
       const service = new (
         GenerationService as new (prisma: unknown) => GenerationService
-      )({ generationJob: { updateMany, findUnique } });
+      )({ generationJob: { findUnique }, $transaction });
 
       await expect(service.confirmImageDraft("job-1")).resolves.toMatchObject({
         status,
       });
+      expect(createLog).not.toHaveBeenCalled();
     },
   );
 
   it("selects an owned output from a completed job in one transaction", async () => {
     const findFirst = jest.fn().mockResolvedValue({
-      job: { characterId: "ai-1" },
+      selected: false,
+      job: { characterId: "ai-1", outputMediaId: null },
     });
     const clearSelections = jest.fn().mockResolvedValue({ count: 2 });
     const setSelection = jest.fn().mockResolvedValue({ count: 1 });
@@ -193,6 +248,7 @@ describe("GenerationService", () => {
       async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
           generationJobOutput: {
+            findFirst,
             updateMany: jest
               .fn()
               .mockImplementationOnce(clearSelections)
@@ -210,7 +266,6 @@ describe("GenerationService", () => {
     const service = new (
       GenerationService as new (prisma: unknown) => GenerationService
     )({
-      generationJobOutput: { findFirst },
       generationJob: { findUnique },
       $transaction,
     });
@@ -224,7 +279,10 @@ describe("GenerationService", () => {
         mediaId: "media-2",
         job: { status: "completed" },
       },
-      select: { job: { select: { characterId: true } } },
+      select: {
+        selected: true,
+        job: { select: { characterId: true, outputMediaId: true } },
+      },
     });
     expect(clearSelections).toHaveBeenCalledWith({
       where: { jobId: "job-1" },
@@ -250,19 +308,58 @@ describe("GenerationService", () => {
     expect($transaction).toHaveBeenCalledTimes(1);
   });
 
+  it("does not rewrite flags or log when the output is already selected", async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      selected: true,
+      job: { characterId: "ai-1", outputMediaId: "media-2" },
+    });
+    const updateMany = jest.fn();
+    const update = jest.fn();
+    const createLog = jest.fn();
+    const $transaction = jest.fn(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          generationJobOutput: { findFirst, updateMany },
+          generationJob: { update },
+          characterActionLog: { create: createLog },
+        }),
+    );
+    const findUnique = jest
+      .fn()
+      .mockResolvedValue(
+        job({ status: "completed", outputMediaId: "media-2" }),
+      );
+    const service = new (
+      GenerationService as new (prisma: unknown) => GenerationService
+    )({ generationJob: { findUnique }, $transaction });
+
+    await expect(
+      service.selectOutput("job-1", "media-2"),
+    ).resolves.toMatchObject({ outputMediaId: "media-2" });
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(createLog).not.toHaveBeenCalled();
+  });
+
   it("rejects selecting media that is not owned by the completed job", async () => {
-    const $transaction = jest.fn();
+    const $transaction = jest.fn(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          generationJobOutput: {
+            findFirst: jest.fn().mockResolvedValue(null),
+          },
+        }),
+    );
     const service = new (
       GenerationService as new (prisma: unknown) => GenerationService
     )({
-      generationJobOutput: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction,
     });
 
     await expect(
       service.selectOutput("job-1", "foreign-media"),
     ).rejects.toThrow("Generation output not found for completed job");
-    expect($transaction).not.toHaveBeenCalled();
+    expect($transaction).toHaveBeenCalledTimes(1);
   });
 
   it.each([

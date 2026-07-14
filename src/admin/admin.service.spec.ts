@@ -570,12 +570,27 @@ describe("AdminService", () => {
     });
   });
 
+  it("delegates confirmation without a duplicate action log", async () => {
+    const confirmImageDraft = jest.fn().mockResolvedValue({
+      id: "job-1",
+      characterId: "ai-1",
+    });
+    const createLog = jest.fn();
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { characterActionLog: { create: createLog } },
+      { confirmImageDraft },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await service.confirmImageGenerationDraft("job-1");
+
+    expect(confirmImageDraft).toHaveBeenCalledWith("job-1");
+    expect(createLog).not.toHaveBeenCalled();
+  });
+
   it.each([
-    {
-      method: "confirmImageGenerationDraft" as const,
-      generationMethod: "confirmImageDraft" as const,
-      actionType: "GENERATION_DRAFT_CONFIRMED",
-    },
     {
       method: "regenerateImageJob" as const,
       generationMethod: "regenerateImageJob" as const,

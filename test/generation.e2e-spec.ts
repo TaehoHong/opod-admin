@@ -3,6 +3,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
+import { GenerationWorkerService } from "../src/worker/generation-worker.service";
 import { adminHeaders } from "./admin-auth";
 
 const uniqueHandle = (base: string) => `${base}-${randomUUID().slice(0, 8)}`;
@@ -351,11 +352,42 @@ describe("generation", () => {
         candidateCount: 3,
       });
 
+      await expect(
+        moduleRef.get(GenerationWorkerService).runJobNow(created.body.id),
+      ).resolves.toEqual({ jobId: null });
+      const stillDraft = await request(app.getHttpServer())
+        .get(`/api/generation/jobs/${created.body.id}`)
+        .set(headers)
+        .expect(200);
+      expect(stillDraft.body).toMatchObject({ status: "draft" });
+      expect(stillDraft.body).not.toHaveProperty("provider");
+      expect(stillDraft.body).not.toHaveProperty("costUsd");
+      expect(stillDraft.body).not.toHaveProperty("outputs");
+
       const confirmed = await request(app.getHttpServer())
         .post(`/api/generation/jobs/${created.body.id}/confirm`)
         .set(headers)
         .expect(201);
       expect(confirmed.body.status).toBe("queued");
+
+      const confirmedAgain = await request(app.getHttpServer())
+        .post(`/api/generation/jobs/${created.body.id}/confirm`)
+        .set(headers)
+        .expect(201);
+      expect(confirmedAgain.body.status).toBe("queued");
+
+      const confirmationLogs = await request(app.getHttpServer())
+        .get("/api/character-action-logs")
+        .set(headers)
+        .query({ characterId: character.body.id })
+        .expect(200);
+      expect(
+        confirmationLogs.body.items.filter(
+          (log: { actionType: string; targetId?: string }) =>
+            log.actionType === "GENERATION_DRAFT_CONFIRMED" &&
+            log.targetId === created.body.id,
+        ),
+      ).toHaveLength(1);
 
       await request(app.getHttpServer())
         .post("/api/generation/worker/run")

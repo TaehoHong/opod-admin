@@ -188,9 +188,32 @@ export class GenerationService {
   }
 
   async confirmImageDraft(jobId: string): Promise<GenerationJob> {
-    const transitioned = await this.prisma.generationJob.updateMany({
-      where: { id: jobId, status: "draft" },
-      data: { status: "queued" },
+    const transitioned = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.generationJob.updateMany({
+        where: { id: jobId, status: "draft" },
+        data: { status: "queued" },
+      });
+      if (result.count === 0) {
+        return result;
+      }
+
+      const confirmed = await tx.generationJob.findUnique({
+        where: { id: jobId },
+        select: { characterId: true },
+      });
+      if (!confirmed) {
+        throw new BadRequestException("Generation job not found");
+      }
+      await tx.characterActionLog.create({
+        data: {
+          characterId: confirmed.characterId,
+          actionType: "GENERATION_DRAFT_CONFIRMED",
+          targetTable: "generation_jobs",
+          targetId: jobId,
+          reason: "generation draft confirmed",
+        },
+      });
+      return result;
     });
     const job = await this.getJob(jobId);
     if (transitioned.count > 0 || job.status !== "draft") {
@@ -202,17 +225,23 @@ export class GenerationService {
   }
 
   async selectOutput(jobId: string, mediaId: string): Promise<GenerationJob> {
-    const output = await this.prisma.generationJobOutput.findFirst({
-      where: { jobId, mediaId, job: { status: "completed" } },
-      select: { job: { select: { characterId: true } } },
-    });
-    if (!output) {
-      throw new BadRequestException(
-        "Generation output not found for completed job",
-      );
-    }
-
     await this.prisma.$transaction(async (tx) => {
+      const output = await tx.generationJobOutput.findFirst({
+        where: { jobId, mediaId, job: { status: "completed" } },
+        select: {
+          selected: true,
+          job: { select: { characterId: true, outputMediaId: true } },
+        },
+      });
+      if (!output) {
+        throw new BadRequestException(
+          "Generation output not found for completed job",
+        );
+      }
+      if (output.selected && output.job.outputMediaId === mediaId) {
+        return;
+      }
+
       await tx.generationJobOutput.updateMany({
         where: { jobId },
         data: { selected: false },

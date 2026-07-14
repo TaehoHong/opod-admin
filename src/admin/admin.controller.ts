@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -216,7 +217,8 @@ export class AdminController {
 
   @Get("generation/jobs")
   listGenerationJobs(
-    @Query("characterId") characterId?: string,
+    @Query("characterId", new ParseUUIDPipe({ optional: true }))
+    characterId?: string,
     @Query("status") status?: string,
     @Query("mediaType") mediaType?: string,
     @Query("cursor") cursor?: string,
@@ -231,7 +233,7 @@ export class AdminController {
   }
 
   @Get("generation/jobs/:id")
-  getGenerationJob(@Param("id") jobId: string) {
+  getGenerationJob(@Param("id", ParseUUIDPipe) jobId: string) {
     return this.adminService.getGenerationJob(jobId);
   }
 
@@ -247,38 +249,38 @@ export class AdminController {
 
   @Patch("generation/jobs/:id/draft")
   updateImageGenerationDraft(
-    @Param("id") jobId: string,
+    @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: UpdateImageGenerationDraftDto,
   ) {
     return this.adminService.updateImageGenerationDraft(jobId, body);
   }
 
   @Post("generation/jobs/:id/confirm")
-  confirmImageGenerationDraft(@Param("id") jobId: string) {
+  confirmImageGenerationDraft(@Param("id", ParseUUIDPipe) jobId: string) {
     return this.adminService.confirmImageGenerationDraft(jobId);
   }
 
   @Post("generation/jobs/:id/select-output")
   selectGenerationOutput(
-    @Param("id") jobId: string,
+    @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: SelectGenerationOutputDto,
   ) {
     return this.adminService.selectGenerationOutput(jobId, body.mediaId);
   }
 
   @Post("generation/jobs/:id/regenerate")
-  regenerateImageJob(@Param("id") jobId: string) {
+  regenerateImageJob(@Param("id", ParseUUIDPipe) jobId: string) {
     return this.adminService.regenerateImageJob(jobId);
   }
 
   @Post("generation/jobs/:id/start")
-  startGenerationJob(@Param("id") jobId: string) {
+  startGenerationJob(@Param("id", ParseUUIDPipe) jobId: string) {
     return this.adminService.startGenerationJob(jobId);
   }
 
   @Post("generation/jobs/:id/run")
   runGenerationJob(
-    @Param("id") jobId: string,
+    @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: RunGenerationJobDto,
   ) {
     return this.adminService.runGenerationJob({ jobId, ...body });
@@ -286,7 +288,7 @@ export class AdminController {
 
   @Post("generation/jobs/:id/retry")
   retryGenerationJob(
-    @Param("id") jobId: string,
+    @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: RetryGenerationJobDto,
   ) {
     return this.adminService.retryGenerationJob({ jobId, ...body });
@@ -294,7 +296,7 @@ export class AdminController {
 
   @Post("generation/jobs/:id/complete")
   completeGenerationJob(
-    @Param("id") jobId: string,
+    @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: CompleteGenerationJobDto,
   ) {
     return this.adminService.completeGenerationJob({ jobId, ...body });
@@ -302,7 +304,7 @@ export class AdminController {
 
   @Post("generation/jobs/:id/fail")
   failGenerationJob(
-    @Param("id") jobId: string,
+    @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: FailGenerationJobDto,
   ) {
     return this.adminService.failGenerationJob({ jobId, ...body });
