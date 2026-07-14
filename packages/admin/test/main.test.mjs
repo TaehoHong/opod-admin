@@ -971,6 +971,43 @@ test("image draft payloads trim strings and cast candidate count", () => {
   });
 });
 
+test("image draft payloads accept candidate count boundaries", () => {
+  for (const candidateCount of ["1", "4"]) {
+    const form = new FormData();
+    form.set("characterId", "ai-1");
+    form.set("inputPrompt", "street portrait");
+    form.set("prompt", "edited portrait");
+    form.set("candidateCount", candidateCount);
+
+    assert.equal(
+      imageDraftPayload(form).candidateCount,
+      Number(candidateCount),
+    );
+    assert.equal(
+      imageDraftUpdatePayload(form).candidateCount,
+      Number(candidateCount),
+    );
+  }
+});
+
+test("image draft payloads reject invalid candidate counts", () => {
+  for (const candidateCount of ["0", "5", "1.5", "", "not-a-number"]) {
+    const form = new FormData();
+    form.set("characterId", "ai-1");
+    form.set("inputPrompt", "street portrait");
+    form.set("prompt", "edited portrait");
+    form.set("candidateCount", candidateCount);
+
+    for (const payloadBuilder of [imageDraftPayload, imageDraftUpdatePayload]) {
+      assert.throws(
+        () => payloadBuilder(form),
+        /candidateCount must be an integer between 1 and 4/,
+        `${payloadBuilder.name}: ${JSON.stringify(candidateCount)}`,
+      );
+    }
+  }
+});
+
 test("image workflow actions map to staged generation endpoints", () => {
   const createBody = {
     characterId: "ai-1",

@@ -547,15 +547,23 @@ export function imageDraftPayload(form) {
   return {
     characterId: fieldValue(form, "characterId"),
     inputPrompt: fieldValue(form, "inputPrompt"),
-    candidateCount: Number(form.get("candidateCount")),
+    candidateCount: imageCandidateCount(form.get("candidateCount")),
   };
 }
 
 export function imageDraftUpdatePayload(form) {
   return {
     prompt: fieldValue(form, "prompt"),
-    candidateCount: Number(form.get("candidateCount")),
+    candidateCount: imageCandidateCount(form.get("candidateCount")),
   };
+}
+
+function imageCandidateCount(value) {
+  const count = Number(value);
+  if (!Number.isInteger(count) || count < 1 || count > 4) {
+    throw new Error("candidateCount must be an integer between 1 and 4");
+  }
+  return count;
 }
 
 export function generationActionBody(action, form) {
