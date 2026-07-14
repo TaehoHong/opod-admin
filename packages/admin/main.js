@@ -343,9 +343,14 @@ export function generationWorkflowPanel(
         generationCharacterLabel(characters, job.characterId),
       )}" readonly></div>
       <div class="field"><label>원본 요청</label><textarea class="input" rows="3" readonly>${escapeHtml(job.inputPrompt || job.prompt)}</textarea></div>
+      ${
+        job.expandedScene
+          ? `<div class="field"><label>LLM 확장 장면 (${escapeHtml(job.plannerName || "planner")})</label><textarea class="input" rows="3" readonly>${escapeHtml(job.expandedScene)}</textarea></div>`
+          : ""
+      }
       <div class="field"><label>최종 프롬프트</label><textarea class="input" name="prompt" rows="6" required>${escapeHtml(job.prompt)}</textarea></div>
       <div class="field"><label>후보 수</label><input class="input" name="candidateCount" type="number" min="1" max="4" step="1" value="${attr(job.candidateCount ?? 1)}" data-generation-candidate-count required></div>
-      <p>negative prompt: ${escapeHtml(context.negativePrompt || "없음")} · 레퍼런스 ${escapeHtml(context.referenceImageCount ?? 0)}장 · ${escapeHtml(route)}${provider ? ` · ${escapeHtml(provider)}` : ""}</p>
+      <p>장면 확장: ${escapeHtml(job.plannerName || "LLM 미설정 — 원문 사용")} · negative prompt: ${escapeHtml(context.negativePrompt || "없음")} · 레퍼런스 ${escapeHtml(context.referenceImageCount ?? 0)}장 · ${escapeHtml(route)}${provider ? ` · ${escapeHtml(provider)}` : ""}</p>
       <p>확정 전에는 비용이 발생하지 않습니다.</p>
       <div><button class="btn btn-secondary" type="submit">프롬프트 저장</button> <button class="btn btn-primary" type="submit" data-submit-action="image-confirm" data-generation-count-button>이미지 ${escapeHtml(job.candidateCount ?? 1)}장 생성</button></div>
     </form>`;
@@ -2510,6 +2515,7 @@ async function renderDrafts() {
       ${segControl(
         "draftStatus",
         [
+          { value: "planned", label: "기획 대기" },
           { value: "needs_review", label: "검수 필요" },
           { value: "generating", label: "생성 중" },
           { value: "approved", label: "승인됨" },
@@ -2627,11 +2633,23 @@ async function renderDraftDetail(id) {
               : ""
           }
         </form>
-        <div style="display:flex;gap:8px;margin-top:22px">
+        <div style="display:flex;gap:8px;margin-top:22px;flex-wrap:wrap">
+          ${
+            d.status === "planned"
+              ? `<button class="btn btn-primary" data-act="draft-plan-now" data-id="${attr(d.id)}">지금 기획 실행</button>
+                 <span class="count-note">워커 폴링을 기다리지 않고 기획(LLM)을 즉시 실행합니다.</span>`
+              : ""
+          }
           ${
             reviewable
               ? `<button class="btn btn-primary" data-act="draft-approve" data-id="${attr(d.id)}">승인</button>
                  <button class="btn btn-secondary" data-act="draft-reject" data-id="${attr(d.id)}">반려</button>`
+              : ""
+          }
+          ${
+            d.status === "approved"
+              ? `<button class="btn btn-primary" data-act="draft-publish-now" data-id="${attr(d.id)}">지금 게시</button>
+                 <span class="count-note">예정 시각과 무관하게 즉시 게시합니다.</span>`
               : ""
           }
           ${
@@ -2640,6 +2658,17 @@ async function renderDraftDetail(id) {
               : ""
           }
         </div>
+        ${
+          d.conceptJson
+            ? `<details style="margin-top:22px"><summary style="cursor:pointer;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">기획 결과${
+                d.conceptJson.plannerName
+                  ? ` · ${escapeHtml(d.conceptJson.plannerName)}`
+                  : ""
+              }</summary><pre style="margin-top:10px;padding:14px;background:var(--color-neutral-100);font-size:12px;overflow-x:auto;white-space:pre-wrap">${escapeHtml(
+                JSON.stringify(d.conceptJson, null, 2),
+              )}</pre></details>`
+            : ""
+        }
       </div>
     </div>`;
 }
@@ -4069,6 +4098,22 @@ async function handleClick(event) {
       verb === "approve"
         ? "초안을 승인했습니다. 예정 시각에 게시됩니다."
         : "초안을 반려했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (act === "draft-plan-now") {
+    const result = await submitViaSpec(
+      jsonRequest(`/api/drafts/${el.dataset.id}/plan`, "POST", {}),
+      "기획을 실행했습니다. 결과를 확인하세요.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (act === "draft-publish-now") {
+    const result = await submitViaSpec(
+      jsonRequest(`/api/drafts/${el.dataset.id}/publish`, "POST", {}),
+      "초안을 게시했습니다.",
     );
     if (result.ok) renderApp();
     return;

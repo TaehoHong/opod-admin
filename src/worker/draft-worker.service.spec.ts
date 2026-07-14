@@ -410,6 +410,124 @@ describe("DraftWorkerService publishing", () => {
   });
 });
 
+describe("DraftWorkerService manual triggers", () => {
+  it("planDraftNow claims a planned draft of an active character and plans it", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findUnique.mockResolvedValue(plannedDraft());
+    const tx = txMock();
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+    const planner = plannerMock();
+    const service = makeService(prisma, planner);
+
+    const result = await service.planDraftNow("draft-1");
+
+    expect(result).toEqual({ planned: true });
+    expect(prisma.postDraft.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "draft-1",
+          status: "planned",
+          draftType: "post",
+          character: { status: "active" },
+        },
+        data: expect.objectContaining({
+          status: "generating",
+          attemptCount: { increment: 1 },
+        }),
+      }),
+    );
+    expect(planner.plan).toHaveBeenCalledWith(
+      expect.objectContaining({ sceneHint: "애월 해변" }),
+    );
+    expect(tx.generationJob.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("planDraftNow does not plan when the draft is not claimable", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.updateMany.mockResolvedValue({ count: 0 });
+    const planner = plannerMock();
+    const service = makeService(prisma, planner);
+
+    const result = await service.planDraftNow("draft-1");
+
+    expect(result).toEqual({ planned: false });
+    expect(planner.plan).not.toHaveBeenCalled();
+  });
+
+  it("publishDraftNow publishes an approved draft regardless of scheduledAt", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue({
+      id: "draft-1",
+      characterId: "ai-1",
+      contentType: "feed",
+      caption: "노을 산책",
+      hashtags: ["필름사진"],
+      conceptJson: null,
+    });
+    prisma.generationJob.findMany.mockResolvedValue([
+      { sortOrder: 0, status: "completed", outputMediaId: "media-a" },
+    ]);
+    const tx = txMock();
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+    const service = makeService(prisma);
+
+    const result = await service.publishDraftNow("draft-1");
+
+    expect(result).toEqual({ published: true });
+    expect(prisma.postDraft.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "draft-1",
+          status: "approved",
+          draftType: "post",
+          character: { status: "active" },
+        },
+      }),
+    );
+    expect(tx.post.create).toHaveBeenCalled();
+  });
+
+  it("publishDraftNow reports the reason and records it when publish fails", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue({
+      id: "draft-1",
+      characterId: "ai-1",
+      contentType: "feed",
+      caption: "c",
+      hashtags: [],
+      conceptJson: null,
+    });
+    prisma.generationJob.findMany.mockResolvedValue([
+      { sortOrder: 0, status: "running", outputMediaId: null },
+    ]);
+    const service = makeService(prisma);
+
+    const result = await service.publishDraftNow("draft-1");
+
+    expect(result.published).toBe(false);
+    expect(result.reason).toContain("no completed output");
+    expect(prisma.postDraft.updateMany).toHaveBeenCalledWith({
+      where: { id: "draft-1", status: "approved" },
+      data: { errorMessage: expect.stringContaining("no completed output") },
+    });
+  });
+
+  it("publishDraftNow refuses drafts that are not approved", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue(null);
+    const service = makeService(prisma);
+
+    const result = await service.publishDraftNow("draft-1");
+
+    expect(result).toEqual({ published: false });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
 describe("DraftWorkerService scheduler", () => {
   const policy = {
     characterId: "ai-1",

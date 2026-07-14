@@ -1003,6 +1003,35 @@ test("generation workflow renders the editable prompt confirmation step", () => 
   );
 });
 
+test("generation prompt step shows the LLM-expanded scene when present", () => {
+  const html = generationWorkflowPanel(
+    {
+      ...generationDraftJob,
+      expandedScene: "성수동 골목, 오후의 자연광, 필름 질감",
+      plannerName: "llm:gpt-5.6-terra",
+    },
+    [],
+    generationCharacters,
+    generationSettings,
+  );
+
+  assert.match(html, /LLM 확장 장면 \(llm:gpt-5\.6-terra\)/);
+  assert.match(html, /성수동 골목, 오후의 자연광, 필름 질감/);
+  assert.match(html, /장면 확장: llm:gpt-5\.6-terra/);
+});
+
+test("generation prompt step labels the missing planner as raw input", () => {
+  const html = generationWorkflowPanel(
+    generationDraftJob,
+    [],
+    generationCharacters,
+    generationSettings,
+  );
+
+  assert.doesNotMatch(html, /LLM 확장 장면/);
+  assert.match(html, /장면 확장: LLM 미설정 — 원문 사용/);
+});
+
 test("generation confirm saves current fields before confirming", async () => {
   const form = new FormData();
   form.set("prompt", "current edited prompt");

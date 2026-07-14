@@ -55,7 +55,8 @@ import { resolveImageGenerationProviders } from "./image-generation.provider";
       inject: [PrismaService, GenerationSettingsService],
     },
   ],
-  // admin의 수동 실행(POST /api/generation/worker/run)이 주입해 쓴다.
-  exports: [GenerationWorkerService],
+  // admin의 수동 실행이 주입해 쓴다 — 생성(generation/worker/run)과
+  // draft 즉시 기획/게시(drafts/:id/plan, drafts/:id/publish).
+  exports: [GenerationWorkerService, DraftWorkerService],
 })
 export class WorkerModule {}

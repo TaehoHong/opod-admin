@@ -377,10 +377,11 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       .map((reference) => reference.media.url);
     // 프로필의 프로바이더 기본값(providerConfig) 위에 잡별 파라미터(paramsJson)를
     // 덮어쓴다. 종횡비 등 모델별 파라미터는 코드가 아니라 이 데이터로 주입한다.
-    const extraParams = {
+    // 밑줄 접두 키(_wizard 등)는 파이프라인 메타데이터 — 프로바이더에 보내지 않는다.
+    const extraParams = stripMetaKeys({
       ...(isRecord(profile?.providerConfig) ? profile.providerConfig : {}),
       ...(isRecord(job.paramsJson) ? job.paramsJson : {}),
-    };
+    });
     return {
       prompt: job.prompt,
       negativePrompt: profile?.negativePrompt || undefined,
@@ -576,6 +577,16 @@ function errorMessage(error: unknown): string {
 function parsePositiveNumber(value: string | undefined): number | undefined {
   const parsed = Number(value?.trim());
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+// 밑줄 접두 키는 파이프라인 메타데이터(예: 위저드의 _wizard) — 프로바이더
+// API 파라미터가 아니므로 제출 전에 걸러낸다.
+function stripMetaKeys(
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(params).filter(([key]) => !key.startsWith("_")),
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

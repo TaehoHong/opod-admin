@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadGatewayException,
+  BadRequestException,
+  Injectable,
+} from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import {
   decodeCursor,
@@ -8,6 +12,7 @@ import {
 } from "../../domain/database/page";
 import { PrismaService } from "../../domain/database/prisma.service";
 import { assertUploadedMedia } from "../media/media.service";
+import { ContentPlanner } from "../../worker/content-planner";
 import { compileImagePrompt } from "../../worker/image-prompt";
 
 type MediaType = "image" | "video";
@@ -37,6 +42,9 @@ type GenerationJob = {
   mediaType: MediaType;
   prompt: string;
   inputPrompt?: string;
+  // 위저드 LLM 장면 확장 결과 (paramsJson._wizard). 없으면 원문이 그대로 장면.
+  expandedScene?: string;
+  plannerName?: string;
   candidateCount?: number;
   status: JobStatus;
   outputMediaId?: string;
@@ -83,6 +91,8 @@ type PrismaGenerationJob = Omit<
   | "errorMessage"
   | "costUsd"
   | "inputPrompt"
+  | "expandedScene"
+  | "plannerName"
   | "candidateCount"
   | "outputMediaId"
   | "generationContext"
@@ -117,7 +127,14 @@ type ImageProfile = {
 
 @Injectable()
 export class GenerationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // 위저드 장면 확장 플래너 — 자동(draft) 파이프라인의 기획 LLM과 동일한
+    // 설정을 쓴다. null이면 LLM 미설정 — 운영자 원문을 그대로 장면으로 쓴다
+    // (로컬 결정적 플래너로 대체하지 않는다: 위저드에서는 원문이 더 낫다).
+    private readonly resolveScenePlanner: () => Promise<ContentPlanner | null> = async () =>
+      null,
+  ) {}
 
   async createImageDraft(input: {
     characterId: string;
@@ -134,6 +151,25 @@ export class GenerationService {
       where: { id: input.characterId },
       select: {
         id: true,
+        displayName: true,
+        bio: true,
+        interests: true,
+        personas: {
+          where: { deletedAt: null },
+          orderBy: { sortOrder: "asc" },
+          select: { title: true, content: true },
+        },
+        memories: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: "desc" },
+          take: 20,
+          select: { content: true },
+        },
+        posts: {
+          orderBy: { createdAt: "desc" },
+          take: 20,
+          select: { content: true },
+        },
         visualProfile: {
           select: {
             appearancePrompt: true,
@@ -150,14 +186,50 @@ export class GenerationService {
       throw new BadRequestException("Character not found");
     }
 
+    // 자동(draft) 기획과 동일한 캐릭터 컨텍스트로 장면을 확장한다.
+    // 운영자 원문은 sceneHint(반영 필수)로 전달된다.
+    const planner = await this.resolveScenePlanner();
+    let scene = inputPrompt;
+    if (planner) {
+      let plan;
+      try {
+        plan = await planner.plan({
+          characterName: character.displayName,
+          bio: character.bio,
+          interests: character.interests,
+          personas: character.personas,
+          memories: character.memories.map((memory) => memory.content),
+          recentCaptions: character.posts
+            .map((post) => post.content)
+            .filter(Boolean),
+          sceneHint: inputPrompt,
+          maxShots: 1,
+        });
+      } catch (error) {
+        throw new BadGatewayException(
+          `Scene planning failed (${planner.name}): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      scene = plan.shots[0]?.scene ?? inputPrompt;
+    }
+
     const job = await this.prisma.generationJob.create({
       data: {
         characterId: input.characterId,
         mediaType: "image",
         status: "draft",
         inputPrompt,
-        prompt: compileImagePrompt(character.visualProfile, inputPrompt),
+        prompt: compileImagePrompt(character.visualProfile, scene),
         candidateCount,
+        // 밑줄 접두 키는 파이프라인 메타데이터 — 프로바이더 파라미터로
+        // 전달되지 않는다 (generation-worker가 걸러낸다).
+        ...(planner
+          ? {
+              paramsJson: {
+                _wizard: { plannerName: planner.name, expandedScene: scene },
+              },
+            }
+          : {}),
       },
       include: this.jobWithOutput,
     });
@@ -638,12 +710,16 @@ export class GenerationService {
         ? this.toGenerationContext(profile ?? null)
         : undefined;
 
+    const wizard = wizardMetaFromParams(job.paramsJson);
+
     return {
       id: job.id,
       characterId: job.characterId,
       mediaType: job.mediaType,
       prompt: job.prompt,
       ...(job.inputPrompt ? { inputPrompt: job.inputPrompt } : {}),
+      ...(wizard?.expandedScene ? { expandedScene: wizard.expandedScene } : {}),
+      ...(wizard?.plannerName ? { plannerName: wizard.plannerName } : {}),
       ...(job.candidateCount != null
         ? { candidateCount: job.candidateCount }
         : {}),
@@ -676,4 +752,30 @@ export class GenerationService {
       route: referenceImageCount > 0 ? "edit" : "t2i",
     };
   }
+}
+
+// paramsJson._wizard — 위저드 장면 확장 메타데이터를 꺼낸다.
+function wizardMetaFromParams(
+  paramsJson: Prisma.JsonValue | null | undefined,
+): { plannerName?: string; expandedScene?: string } | null {
+  if (
+    paramsJson == null ||
+    typeof paramsJson !== "object" ||
+    Array.isArray(paramsJson)
+  ) {
+    return null;
+  }
+  const wizard = (paramsJson as Record<string, unknown>)._wizard;
+  if (wizard == null || typeof wizard !== "object" || Array.isArray(wizard)) {
+    return null;
+  }
+  const record = wizard as Record<string, unknown>;
+  return {
+    ...(typeof record.plannerName === "string"
+      ? { plannerName: record.plannerName }
+      : {}),
+    ...(typeof record.expandedScene === "string"
+      ? { expandedScene: record.expandedScene }
+      : {}),
+  };
 }

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -9,6 +10,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { parsePageQuery } from "../../domain/database/page";
+import { DraftWorkerService } from "../../worker/draft-worker.service";
 import { AdminJwtGuard } from "../auth/admin-jwt.guard";
 import { DraftsService } from "./drafts.service";
 import { CreateDraftDto } from "./dto/create-draft.dto";
@@ -20,7 +22,11 @@ import { UpdateDraftDto } from "./dto/update-draft.dto";
 @Controller("api/drafts")
 @UseGuards(AdminJwtGuard)
 export class DraftsController {
-  constructor(private readonly draftsService: DraftsService) {}
+  constructor(
+    private readonly draftsService: DraftsService,
+    // 수동 실행(plan/publish)용 — 의존 방향은 admin → worker만 허용.
+    private readonly draftWorker: DraftWorkerService,
+  ) {}
 
   @Get()
   listDrafts(
@@ -49,6 +55,35 @@ export class DraftsController {
   @Patch(":id")
   updateDraft(@Param("id") draftId: string, @Body() body: UpdateDraftDto) {
     return this.draftsService.updateDraft({ draftId, ...body });
+  }
+
+  // 수동 기획 실행 — 워커 폴링을 기다리지 않고 이 draft를 즉시 기획한다.
+  // 자동 경로와 동일한 claim → planDraft를 타므로 결과(성공/실패)도 동일한
+  // 상태 전이로 나타난다. 응답은 기획 반영 후의 draft.
+  @Post(":id/plan")
+  async planDraftNow(@Param("id") draftId: string) {
+    const result = await this.draftWorker.planDraftNow(draftId);
+    if (!result.planned) {
+      await this.draftsService.getDraft(draftId); // 404를 400보다 먼저 구분한다.
+      throw new BadRequestException(
+        "Only planned drafts of active characters can be planned now",
+      );
+    }
+    return this.draftsService.getDraft(draftId);
+  }
+
+  // 수동 게시 — approved draft를 scheduledAt과 무관하게 즉시 게시한다.
+  @Post(":id/publish")
+  async publishDraftNow(@Param("id") draftId: string) {
+    const result = await this.draftWorker.publishDraftNow(draftId);
+    if (!result.published) {
+      await this.draftsService.getDraft(draftId); // 404를 400보다 먼저 구분한다.
+      throw new BadRequestException(
+        result.reason ??
+          "Only approved drafts of active characters can be published now",
+      );
+    }
+    return this.draftsService.getDraft(draftId);
   }
 
   @Post(":id/approve")

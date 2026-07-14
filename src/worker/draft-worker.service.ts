@@ -134,6 +134,71 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     await this.publishDueDrafts();
   }
 
+  // ── 수동 실행 (admin 버튼) ──────────────────────────────────────────────
+  // 자동 파이프라인과 같은 코드를 타되 타이밍만 운영자가 정한다.
+  // WORKER_ENABLED와 무관하게 동작한다 (자동 루프만 env로 제어).
+
+  // 지정 draft를 즉시 기획한다. planned가 아니거나 캐릭터가 inactive면 false.
+  // 기획 실패는 자동 경로와 동일하게 planned 복귀/failed 전이로 흡수된다.
+  async planDraftNow(draftId: string): Promise<{ planned: boolean }> {
+    const claimed = await this.prisma.postDraft.updateMany({
+      where: {
+        id: draftId,
+        status: "planned",
+        draftType: "post",
+        character: { status: "active" },
+      },
+      data: {
+        status: "generating",
+        leaseExpiresAt: new Date(
+          Date.now() + this.config.planLeaseSeconds * 1000,
+        ),
+        attemptCount: { increment: 1 },
+      },
+    });
+    if (claimed.count === 0) {
+      return { planned: false };
+    }
+    await this.planDraft(draftId);
+    return { planned: true };
+  }
+
+  // 지정 approved draft를 scheduledAt과 무관하게 즉시 게시한다.
+  async publishDraftNow(
+    draftId: string,
+  ): Promise<{ published: boolean; reason?: string }> {
+    const draft = await this.prisma.postDraft.findFirst({
+      where: {
+        id: draftId,
+        status: "approved",
+        draftType: "post",
+        character: { status: "active" },
+      },
+      select: {
+        id: true,
+        characterId: true,
+        contentType: true,
+        caption: true,
+        hashtags: true,
+        conceptJson: true,
+      },
+    });
+    if (!draft) {
+      return { published: false };
+    }
+    try {
+      await this.publishDraft(draft);
+      return { published: true };
+    } catch (error) {
+      const message = errorMessage(error).slice(0, 500);
+      await this.prisma.postDraft.updateMany({
+        where: { id: draftId, status: "approved" },
+        data: { errorMessage: message },
+      });
+      return { published: false, reason: message };
+    }
+  }
+
   // ── 기획 단계 ────────────────────────────────────────────────────────────
 
   private async sweepExpiredPlanLeases(): Promise<void> {

@@ -657,4 +657,31 @@ describe("GenerationWorkerService", () => {
       }),
     );
   });
+
+  it("strips underscore-prefixed metadata keys from provider params", async () => {
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
+    prisma.generationJob.findUnique.mockResolvedValue(
+      claimedJob({
+        // 위저드가 남긴 파이프라인 메타데이터 — 프로바이더에 전달되면 안 된다.
+        paramsJson: {
+          seed: 42,
+          _wizard: { plannerName: "llm:test", expandedScene: "장면" },
+        },
+      }),
+    );
+    mockSuccessTransaction(prisma);
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(prisma, provider);
+
+    await service.tick();
+
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extraParams: { seed: 42 },
+      }),
+    );
+  });
 });
