@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../domain/database/prisma.service";
 import { ContentPlanner } from "./content-planner";
+import { compileImagePrompt } from "./image-prompt";
 
 export type DraftWorkerConfig = {
   enabled: boolean;
@@ -269,7 +270,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
             data: {
               characterId: draft.characterId,
               mediaType: "image",
-              prompt: compileShotPrompt(profile, shot.scene),
+              prompt: compileImagePrompt(profile, shot.scene),
               draftId: draft.id,
               sortOrder: index,
             },
@@ -640,17 +641,6 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`Failed to record action log: ${errorMessage(error)}`);
     }
   }
-}
-
-// 컷 프롬프트 = 외모 + 장면 + 스타일 (비주얼 프로필 테스트 생성과 동일 규칙).
-export function compileShotPrompt(
-  profile: { appearancePrompt: string; stylePrompt: string } | null,
-  scene: string,
-): string {
-  return [profile?.appearancePrompt ?? "", scene, profile?.stylePrompt ?? ""]
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .join(", ");
 }
 
 export function publishedMemoryContent(

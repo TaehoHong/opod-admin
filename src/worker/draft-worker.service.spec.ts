@@ -1,11 +1,11 @@
 import {
-  compileShotPrompt,
   DraftWorkerConfig,
   draftWorkerConfigFromEnv,
   DraftWorkerService,
   publishedMemoryContent,
 } from "./draft-worker.service";
 import { ContentPlanner } from "./content-planner";
+import { compileImagePrompt } from "./image-prompt";
 
 const baseConfig: DraftWorkerConfig = {
   enabled: true,
@@ -474,9 +474,9 @@ describe("DraftWorkerService scheduler", () => {
 describe("helpers", () => {
   it("compiles shot prompts like the visual profile test generation", () => {
     expect(
-      compileShotPrompt({ appearancePrompt: "a", stylePrompt: "s" }, "scene"),
+      compileImagePrompt({ appearancePrompt: "a", stylePrompt: "s" }, "scene"),
     ).toBe("a, scene, s");
-    expect(compileShotPrompt(null, "scene")).toBe("scene");
+    expect(compileImagePrompt(null, "scene")).toBe("scene");
   });
 
   it("builds published memory content with scenes", () => {
