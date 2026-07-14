@@ -27,7 +27,11 @@ import {
   endpoint,
   formActionRequest,
   generationActionBody,
+  generationCandidateSelection,
   generationClickRequest,
+  generationCommitRenderState,
+  generationConfirmDraft,
+  generationReplacePollTimer,
   generationRouteState,
   generationSettingsPayload,
   generationCreatePayload,
@@ -993,6 +997,133 @@ test("generation workflow renders the editable prompt confirmation step", () => 
   assert.match(html, /후보 선택/);
   assert.match(html, /하나가 성수동을 걷는 장면/);
   assert.match(html, /이미지 3장 생성/);
+  assert.match(
+    html,
+    /<form[^>]*data-action="image-draft-update"[\s\S]*name="prompt"[\s\S]*name="candidateCount"[\s\S]*data-submit-action="image-confirm"[\s\S]*<\/form>/,
+  );
+});
+
+test("generation confirm saves current fields before confirming", async () => {
+  const form = new FormData();
+  form.set("prompt", "current edited prompt");
+  form.set("candidateCount", "4");
+  const calls = [];
+
+  const outcome = await generationConfirmDraft(
+    "job-1",
+    form,
+    async (...args) => {
+      calls.push(args);
+      return { ok: true, body: { id: "job-1" } };
+    },
+  );
+
+  assert.equal(outcome.stage, "confirm");
+  assert.deepEqual(
+    calls.map(([path, options]) => ({
+      path,
+      method: options.method,
+      body: JSON.parse(options.body),
+    })),
+    [
+      {
+        path: "/api/generation/jobs/job-1/draft",
+        method: "PATCH",
+        body: { prompt: "current edited prompt", candidateCount: 4 },
+      },
+      {
+        path: "/api/generation/jobs/job-1/confirm",
+        method: "POST",
+        body: {},
+      },
+    ],
+  );
+});
+
+test("generation confirm aborts when saving current fields fails", async () => {
+  const form = new FormData();
+  form.set("prompt", "current edited prompt");
+  form.set("candidateCount", "2");
+  const paths = [];
+
+  const outcome = await generationConfirmDraft("job-1", form, async (path) => {
+    paths.push(path);
+    return { ok: false, body: { error: "draft conflict" } };
+  });
+
+  assert.equal(outcome.stage, "update");
+  assert.deepEqual(paths, ["/api/generation/jobs/job-1/draft"]);
+});
+
+test("stale generation renders preserve selection and polling state", () => {
+  const state = {
+    generationSelectedJobId: "job-current",
+    generationSelectedMediaId: "media-current",
+    generationPollTimer: "timer-current",
+  };
+  let scheduled = 0;
+
+  assert.equal(
+    generationCommitRenderState(
+      state,
+      { id: "job-stale", status: "running" },
+      {
+        expectedToken: 7,
+        currentToken: 8,
+        route: "generation",
+        hash: "#generation?jobId=job-stale",
+      },
+      () => {
+        scheduled += 1;
+        state.generationPollTimer = "timer-stale";
+      },
+    ),
+    false,
+  );
+  assert.deepEqual(state, {
+    generationSelectedJobId: "job-current",
+    generationSelectedMediaId: "media-current",
+    generationPollTimer: "timer-current",
+  });
+  assert.equal(scheduled, 0);
+});
+
+test("generation polling clears the old timer on route or job mismatch", () => {
+  for (const runtime of [
+    { route: "posts", hash: "#posts" },
+    { route: "generation", hash: "#generation?jobId=job-new" },
+  ]) {
+    const cleared = [];
+    const state = { generationPollTimer: "timer-old" };
+    const scheduled = generationReplacePollTimer(state, "job-old", {
+      clearTimer: (timer) => cleared.push(timer),
+      setTimer: () => {
+        throw new Error("must not schedule a mismatched job");
+      },
+      currentRoute: () => runtime.route,
+      currentHash: () => runtime.hash,
+      refresh: () => {},
+    });
+
+    assert.equal(scheduled, false);
+    assert.deepEqual(cleared, ["timer-old"]);
+    assert.equal(state.generationPollTimer, 0);
+  }
+});
+
+test("candidate click remains local until final confirmation", () => {
+  assert.deepEqual(generationCandidateSelection("job-1", "media-2"), {
+    generationSelectedJobId: "job-1",
+    generationSelectedMediaId: "media-2",
+  });
+  assert.deepEqual(imageWorkflowRequest("select", "job-1", "media-2"), {
+    path: "/api/generation/jobs/job-1/select-output",
+    options: {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mediaId: "media-2" }),
+    },
+  });
 });
 
 test("generation workflow renders queued and running progress", () => {

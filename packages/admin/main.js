@@ -203,6 +203,53 @@ export function generationWorkflowStep(job = {}) {
   return "prompt";
 }
 
+export function generationCandidateSelection(jobId, mediaId) {
+  return {
+    generationSelectedJobId: String(jobId ?? ""),
+    generationSelectedMediaId: String(mediaId ?? ""),
+  };
+}
+
+export function generationCommitRenderState(
+  state,
+  job,
+  context,
+  scheduleRefresh,
+) {
+  const routeState = generationRouteState(context.hash);
+  if (
+    context.expectedToken !== context.currentToken ||
+    context.route !== "generation" ||
+    routeState.jobId !== job.id
+  ) {
+    return false;
+  }
+  if (state.generationSelectedJobId !== job.id) {
+    state.generationSelectedJobId = job.id;
+    state.generationSelectedMediaId = "";
+  }
+  if (job.status === "queued" || job.status === "running") {
+    scheduleRefresh(job.id);
+  }
+  return true;
+}
+
+export function generationReplacePollTimer(state, jobId, runtime) {
+  runtime.clearTimer(state.generationPollTimer);
+  state.generationPollTimer = 0;
+  const routeState = generationRouteState(runtime.currentHash());
+  if (runtime.currentRoute() !== "generation" || routeState.jobId !== jobId) {
+    return false;
+  }
+  state.generationPollTimer = runtime.setTimer(() => {
+    const nextState = generationRouteState(runtime.currentHash());
+    if (runtime.currentRoute() === "generation" && nextState.jobId === jobId) {
+      runtime.refresh();
+    }
+  }, 2000);
+  return true;
+}
+
 const generationStepLabels = [
   "요청 입력",
   "프롬프트 확인",
@@ -290,20 +337,18 @@ export function generationWorkflowPanel(
   let card;
 
   if (step === "prompt") {
-    card = `<div class="generation-workflow-card">
+    card = `<form class="generation-workflow-card" data-action="image-draft-update" data-job-id="${attr(job.id)}">
       <h3>최종 프롬프트 확인</h3>
-      <form data-action="image-draft-update" data-job-id="${attr(job.id)}">
       <div class="field"><label>캐릭터</label><input class="input" value="${attr(
         generationCharacterLabel(characters, job.characterId),
       )}" readonly></div>
       <div class="field"><label>원본 요청</label><textarea class="input" rows="3" readonly>${escapeHtml(job.inputPrompt || job.prompt)}</textarea></div>
       <div class="field"><label>최종 프롬프트</label><textarea class="input" name="prompt" rows="6" required>${escapeHtml(job.prompt)}</textarea></div>
-      <div class="field"><label>후보 수</label><input class="input" name="candidateCount" type="number" min="1" max="4" step="1" value="${attr(job.candidateCount ?? 1)}" required></div>
+      <div class="field"><label>후보 수</label><input class="input" name="candidateCount" type="number" min="1" max="4" step="1" value="${attr(job.candidateCount ?? 1)}" data-generation-candidate-count required></div>
       <p>negative prompt: ${escapeHtml(context.negativePrompt || "없음")} · 레퍼런스 ${escapeHtml(context.referenceImageCount ?? 0)}장 · ${escapeHtml(route)}${provider ? ` · ${escapeHtml(provider)}` : ""}</p>
-      <div><button class="btn btn-secondary" type="submit">프롬프트 저장</button></div>
-      </form>
-      <form data-action="image-confirm" data-job-id="${attr(job.id)}"><p>확정 전에는 비용이 발생하지 않습니다.</p><button class="btn btn-primary" type="submit">이미지 ${escapeHtml(job.candidateCount ?? 1)}장 생성</button></form>
-    </div>`;
+      <p>확정 전에는 비용이 발생하지 않습니다.</p>
+      <div><button class="btn btn-secondary" type="submit">프롬프트 저장</button> <button class="btn btn-primary" type="submit" data-submit-action="image-confirm" data-generation-count-button>이미지 ${escapeHtml(job.candidateCount ?? 1)}장 생성</button></div>
+    </form>`;
   } else if (step === "generating") {
     card = `<div class="generation-workflow-card"><h3>${job.status === "queued" ? "생성 대기" : "생성 중"}</h3><p>${job.status === "queued" ? "작업이 실행 순서를 기다리고 있습니다." : "이미지 후보를 생성하고 있습니다."}</p><p>${escapeHtml(job.provider || provider || "프로바이더 준비 중")}</p></div>`;
   } else if (step === "failed") {
@@ -506,6 +551,20 @@ export function imageWorkflowRequest(action, jobId, value) {
     return jsonRequest(`/api/generation/jobs/${jobId}/regenerate`, "POST", {});
   }
   return null;
+}
+
+export async function generationConfirmDraft(jobId, form, requestFn) {
+  const updateSpec = imageWorkflowRequest(
+    "update",
+    jobId,
+    imageDraftUpdatePayload(form),
+  );
+  const updated = await requestFn(updateSpec.path, updateSpec.options);
+  if (!updated.ok) return { stage: "update", result: updated };
+
+  const confirmSpec = imageWorkflowRequest("confirm", jobId);
+  const confirmed = await requestFn(confirmSpec.path, confirmSpec.options);
+  return { stage: "confirm", result: confirmed };
 }
 
 // 워커 수동 실행 — jobId를 주면 해당 queued 잡, 없으면 다음 queued 잡.
@@ -1509,11 +1568,11 @@ function optionList(items, valueKey, labelFn, selected) {
 // Section renderers
 // ═════════════════════════════════════════════════════════════════════════
 
-async function renderSection(route) {
+async function renderSection(route, renderEpoch) {
   if (route === "characters") return renderCharacters();
   if (route === "posts") return renderPosts();
   if (route === "drafts") return renderDrafts();
-  if (route === "generation") return renderGeneration();
+  if (route === "generation") return renderGeneration(renderEpoch);
   if (route === "users") return renderUsers();
   if (route === "credits") return renderCredits();
   if (route === "payments") return renderPayments();
@@ -2242,18 +2301,16 @@ function generationRequestPanel(characters) {
 }
 
 function scheduleGenerationRefresh(jobId) {
-  clearTimeout(ui.generationPollTimer);
-  const state = generationRouteState(location.hash);
-  if (currentRoute() !== "generation" || state.jobId !== jobId) return;
-  ui.generationPollTimer = setTimeout(() => {
-    const nextState = generationRouteState(location.hash);
-    if (currentRoute() === "generation" && nextState.jobId === jobId) {
-      renderApp();
-    }
-  }, 2000);
+  return generationReplacePollTimer(ui, jobId, {
+    clearTimer: clearTimeout,
+    setTimer: setTimeout,
+    currentRoute,
+    currentHash: () => location.hash,
+    refresh: renderApp,
+  });
 }
 
-async function renderGeneration() {
+async function renderGeneration(renderEpoch) {
   const routeState = generationRouteState(location.hash);
   const characters = await loadCharacterOptions();
   if (ui.generationCreating && !routeState.jobId) {
@@ -2287,13 +2344,17 @@ async function renderGeneration() {
     }
     history.reverse();
 
-    if (ui.generationSelectedJobId !== job.id) {
-      ui.generationSelectedJobId = job.id;
-      ui.generationSelectedMediaId = "";
-    }
-    if (job.status === "queued" || job.status === "running") {
-      scheduleGenerationRefresh(job.id);
-    }
+    generationCommitRenderState(
+      ui,
+      job,
+      {
+        expectedToken: renderEpoch,
+        currentToken: renderToken,
+        route: currentRoute(),
+        hash: location.hash,
+      },
+      scheduleGenerationRefresh,
+    );
 
     return `${sectionHead(
       "이미지 생성",
@@ -3382,7 +3443,7 @@ async function handleFormSubmit(event) {
   event.preventDefault();
   if (pendingForms.has(form)) return;
 
-  const action = form.dataset.action;
+  const action = event.submitter?.dataset.submitAction ?? form.dataset.action;
   const formData = new FormData(form);
   pendingForms.add(form);
   setFormSubmitting(form, true);
@@ -3662,11 +3723,25 @@ async function dispatchSubmit(action, form, formData) {
   }
   if (action === "image-confirm") {
     const jobId = form.dataset.jobId;
-    const result = await submitViaSpec(
-      imageWorkflowRequest("confirm", jobId),
-      "이미지 생성을 시작했습니다.",
-    );
-    if (result.ok) renderApp();
+    const outcome = await generationConfirmDraft(jobId, formData, request);
+    if (outcome.result.ok) {
+      showToast(
+        "최종 프롬프트를 저장하고 이미지 생성을 시작했습니다.",
+        `PATCH /api/generation/jobs/${jobId}/draft → POST /api/generation/jobs/${jobId}/confirm`,
+      );
+      renderApp();
+    } else {
+      showToast(
+        errorMessage(
+          outcome.result.body,
+          outcome.stage === "update"
+            ? "최종 프롬프트 저장 실패"
+            : "이미지 생성 시작 실패",
+        ),
+        "",
+        true,
+      );
+    }
     return;
   }
   if (action === "image-select-confirm") {
@@ -3837,8 +3912,10 @@ async function handleClick(event) {
     return;
   }
   if (act === "image-select") {
-    ui.generationSelectedJobId = el.dataset.jobId;
-    ui.generationSelectedMediaId = el.dataset.mediaId;
+    Object.assign(
+      ui,
+      generationCandidateSelection(el.dataset.jobId, el.dataset.mediaId),
+    );
     renderApp();
     return;
   }
@@ -4131,6 +4208,15 @@ function handlePostMediaDrop(event) {
 }
 
 function handleInput(event) {
+  const candidateCount = event.target.closest?.(
+    "[data-generation-candidate-count]",
+  );
+  if (candidateCount) {
+    const button = candidateCount.form?.querySelector(
+      "[data-generation-count-button]",
+    );
+    if (button) button.textContent = `이미지 ${candidateCount.value}장 생성`;
+  }
   const el = event.target.closest?.("[data-filter-input]");
   if (!el) return;
   const selector = el.dataset.filterInput;
@@ -4205,6 +4291,7 @@ let renderToken = 0;
 
 async function renderApp() {
   if (!hasDocument) return;
+  const token = ++renderToken;
   clearTimeout(ui.generationPollTimer);
   ui.generationPollTimer = 0;
   const route = currentRoute();
@@ -4225,11 +4312,10 @@ async function renderApp() {
   updateIdentity();
   highlightNav(route);
 
-  const token = ++renderToken;
   mainPanel.innerHTML = spinner();
   let html;
   try {
-    html = await renderSection(route);
+    html = await renderSection(route, token);
   } catch (error) {
     console.error(`${LOG_PREFIX} render failed for section "${route}":`, error);
     html = noticeBlock(
