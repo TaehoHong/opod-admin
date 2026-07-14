@@ -265,51 +265,64 @@ describe("GenerationService", () => {
     expect($transaction).not.toHaveBeenCalled();
   });
 
-  it("regenerates a completed image job as a draft with copied settings", async () => {
-    const findUnique = jest.fn().mockResolvedValue(
-      job({
-        status: "completed",
-        inputPrompt: "portrait request",
-        prompt: "edited prompt",
-        candidateCount: 4,
-        paramsJson: { aspect_ratio: "4:5" },
-      }),
-    );
-    const create = jest.fn().mockResolvedValue(
-      job({
-        id: "job-2",
-        status: "draft",
-        originJobId: "job-1",
-        inputPrompt: "portrait request",
-        prompt: "edited prompt",
-        candidateCount: 4,
-      }),
-    );
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique, create } });
+  it.each([
+    { sourceStatus: "completed", candidateCount: 4 },
+    { sourceStatus: "failed", candidateCount: 4 },
+    { sourceStatus: "completed", candidateCount: null },
+  ])(
+    "regenerates a $sourceStatus image job with candidateCount $candidateCount as a draft",
+    async ({ sourceStatus, candidateCount }) => {
+      const findUnique = jest.fn().mockResolvedValue(
+        job({
+          status: sourceStatus,
+          inputPrompt: "portrait request",
+          prompt: "edited prompt",
+          candidateCount,
+          paramsJson: { aspect_ratio: "4:5" },
+        }),
+      );
+      const create = jest.fn().mockResolvedValue(
+        job({
+          id: "job-2",
+          status: "draft",
+          originJobId: "job-1",
+          inputPrompt: "portrait request",
+          prompt: "edited prompt",
+          candidateCount,
+        }),
+      );
+      const service = new (
+        GenerationService as new (prisma: unknown) => GenerationService
+      )({ generationJob: { findUnique, create } });
 
-    await expect(service.regenerateImageJob("job-1")).resolves.toMatchObject({
-      status: "draft",
-      originJobId: "job-1",
-      inputPrompt: "portrait request",
-      prompt: "edited prompt",
-      candidateCount: 4,
-    });
-    expect(create).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        mediaType: "image",
+      const regenerated = await service.regenerateImageJob("job-1");
+
+      expect(regenerated).toMatchObject({
         status: "draft",
+        originJobId: "job-1",
         inputPrompt: "portrait request",
         prompt: "edited prompt",
-        candidateCount: 4,
-        paramsJson: { aspect_ratio: "4:5" },
-        originJobId: "job-1",
-      },
-      include: { outputMedia: true },
-    });
-  });
+      });
+      if (candidateCount === null) {
+        expect(regenerated).not.toHaveProperty("candidateCount");
+      } else {
+        expect(regenerated).toMatchObject({ candidateCount });
+      }
+      expect(create).toHaveBeenCalledWith({
+        data: {
+          characterId: "ai-1",
+          mediaType: "image",
+          status: "draft",
+          inputPrompt: "portrait request",
+          prompt: "edited prompt",
+          candidateCount,
+          paramsJson: { aspect_ratio: "4:5" },
+          originJobId: "job-1",
+        },
+        include: { outputMedia: true },
+      });
+    },
+  );
 
   it.each([
     ["video", "completed"],
@@ -509,9 +522,27 @@ describe("GenerationService", () => {
       characterId: "ai-1",
       mediaType: "video",
       prompt: "city reel",
+      inputPrompt: null,
+      candidateCount: null,
       status: "queued",
+      outputMediaId: null,
+      provider: null,
+      attemptCount: 0,
+      originJobId: null,
+      errorMessage: null,
+      costUsd: null,
+      paramsJson: null,
       outputMedia: null,
       outputs: [],
+      character: {
+        visualProfile: {
+          negativePrompt: "avoid artifacts",
+          referenceMedia: [
+            { media: { uploadedAt: new Date("2026-07-11T00:00:00.000Z") } },
+            { media: { uploadedAt: null } },
+          ],
+        },
+      },
       createdAt,
       updatedAt: createdAt,
     });
@@ -526,6 +557,11 @@ describe("GenerationService", () => {
       prompt: "city reel",
       status: "queued",
       attemptCount: 0,
+      generationContext: {
+        negativePrompt: "avoid artifacts",
+        referenceImageCount: 1,
+        route: "edit",
+      },
       createdAt: createdAt.toISOString(),
       updatedAt: createdAt.toISOString(),
     });
@@ -581,34 +617,6 @@ describe("GenerationService", () => {
           selected: false,
         },
       ],
-    });
-  });
-
-  it("exposes the current generation context on job detail", async () => {
-    const findUnique = jest.fn().mockResolvedValue(
-      job({
-        status: "draft",
-        character: {
-          visualProfile: {
-            negativePrompt: "blurry",
-            referenceMedia: [
-              { media: { uploadedAt: new Date() } },
-              { media: { uploadedAt: null } },
-            ],
-          },
-        },
-      }),
-    );
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique } });
-
-    await expect(service.getJob("job-1")).resolves.toMatchObject({
-      generationContext: {
-        negativePrompt: "blurry",
-        referenceImageCount: 1,
-        route: "edit",
-      },
     });
   });
 
