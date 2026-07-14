@@ -203,6 +203,139 @@ export function generationWorkflowStep(job = {}) {
   return "prompt";
 }
 
+const generationStepLabels = [
+  "요청 입력",
+  "프롬프트 확인",
+  "후보 생성",
+  "후보 선택",
+];
+
+function generationStepIndex(job) {
+  const step = generationWorkflowStep(job);
+  if (step === "prompt") return 1;
+  if (step === "generating" || step === "failed") return 2;
+  return 3;
+}
+
+function generationCharacterLabel(characters, characterId) {
+  const character = (Array.isArray(characters) ? characters : []).find(
+    (item) => item.id === characterId,
+  );
+  return character?.displayName || character?.publicId || characterId || "—";
+}
+
+function generationCandidate(candidate, selectedMediaId, final = false) {
+  const source = httpMediaUrl(candidate?.url);
+  const selected = candidate?.mediaId === selectedMediaId;
+  const preview = source
+    ? `<img src="${attr(source)}" alt="후보 ${escapeHtml(Number(candidate?.candidateIndex ?? 0) + 1)}">`
+    : `<span>미리보기 없음</span>`;
+  if (final) {
+    return `<div class="generation-candidate${selected ? " generation-candidate-selected" : ""}">${preview}</div>`;
+  }
+  return `<button class="generation-candidate${selected ? " generation-candidate-selected" : ""}" type="button" data-act="image-select" data-job-id="${attr(
+    candidate?.jobId,
+  )}" data-media-id="${attr(candidate?.mediaId)}" aria-pressed="${selected}">${preview}<strong>후보 ${escapeHtml(Number(candidate?.candidateIndex ?? 0) + 1)}</strong></button>`;
+}
+
+function generationHistory(history) {
+  const rounds = Array.isArray(history) ? history : [];
+  if (rounds.length === 0) return "";
+  return `<details class="generation-history">
+    <summary>이전 생성 회차 (${rounds.length})</summary>
+    ${rounds
+      .map((round, index) => {
+        const outputs = Array.isArray(round.outputs) ? round.outputs : [];
+        return `<div class="generation-workflow-card">
+          <strong>${escapeHtml(index + 1)}회차 · ${escapeHtml(
+            generationWorkflowLabel(round),
+          )}</strong>
+          <p>${escapeHtml(round.prompt || "—")}</p>
+          <dl><dt>후보 수</dt><dd>${escapeHtml(round.candidateCount ?? outputs.length ?? "—")}</dd><dt>선택 결과</dt><dd>${escapeHtml(round.outputMediaId || "—")}</dd><dt>비용</dt><dd>${round.costUsd != null ? `$${escapeHtml(round.costUsd)}` : "—"}</dd><dt>오류</dt><dd>${escapeHtml(round.errorMessage || "—")}</dd></dl>
+          <div class="generation-candidate-grid">${outputs
+            .map((candidate) =>
+              generationCandidate(candidate, round.outputMediaId, true),
+            )
+            .join("")}</div>
+        </div>`;
+      })
+      .join("")}
+  </details>`;
+}
+
+function generationWorkflowLabel(job) {
+  if (job?.status === "draft") return "프롬프트 확인";
+  if (job?.status === "queued") return "생성 대기";
+  if (job?.status === "running") return "생성 중";
+  if (job?.status === "failed") return "생성 실패";
+  return job?.outputMediaId ? "확정 완료" : "후보 선택";
+}
+
+export function generationWorkflowPanel(
+  job,
+  history = [],
+  characters = [],
+  settings = null,
+  selectedMediaId = "",
+) {
+  const step = generationWorkflowStep(job);
+  const currentIndex = generationStepIndex(job);
+  const outputs = (Array.isArray(job?.outputs) ? job.outputs : []).map(
+    (candidate) => ({ ...candidate, jobId: job.id }),
+  );
+  const context = job?.generationContext ?? {};
+  const route = context.route === "edit" ? "edit" : "t2i";
+  const provider =
+    settings?.resolved?.[route === "edit" ? "editProvider" : "t2iProvider"];
+  let card;
+
+  if (step === "prompt") {
+    card = `<div class="generation-workflow-card">
+      <h3>최종 프롬프트 확인</h3>
+      <form data-action="image-draft-update" data-job-id="${attr(job.id)}">
+      <div class="field"><label>캐릭터</label><input class="input" value="${attr(
+        generationCharacterLabel(characters, job.characterId),
+      )}" readonly></div>
+      <div class="field"><label>원본 요청</label><textarea class="input" rows="3" readonly>${escapeHtml(job.inputPrompt || job.prompt)}</textarea></div>
+      <div class="field"><label>최종 프롬프트</label><textarea class="input" name="prompt" rows="6" required>${escapeHtml(job.prompt)}</textarea></div>
+      <div class="field"><label>후보 수</label><input class="input" name="candidateCount" type="number" min="1" max="4" step="1" value="${attr(job.candidateCount ?? 1)}" required></div>
+      <p>negative prompt: ${escapeHtml(context.negativePrompt || "없음")} · 레퍼런스 ${escapeHtml(context.referenceImageCount ?? 0)}장 · ${escapeHtml(route)}${provider ? ` · ${escapeHtml(provider)}` : ""}</p>
+      <div><button class="btn btn-secondary" type="submit">프롬프트 저장</button></div>
+      </form>
+      <form data-action="image-confirm" data-job-id="${attr(job.id)}"><p>확정 전에는 비용이 발생하지 않습니다.</p><button class="btn btn-primary" type="submit">이미지 ${escapeHtml(job.candidateCount ?? 1)}장 생성</button></form>
+    </div>`;
+  } else if (step === "generating") {
+    card = `<div class="generation-workflow-card"><h3>${job.status === "queued" ? "생성 대기" : "생성 중"}</h3><p>${job.status === "queued" ? "작업이 실행 순서를 기다리고 있습니다." : "이미지 후보를 생성하고 있습니다."}</p><p>${escapeHtml(job.provider || provider || "프로바이더 준비 중")}</p></div>`;
+  } else if (step === "failed") {
+    card = `<div class="generation-workflow-card"><h3>생성 실패</h3><p>${escapeHtml(job.errorMessage || "이미지 생성에 실패했습니다.")}</p><form data-action="image-regenerate" data-job-id="${attr(job.id)}"><button class="btn btn-primary" type="submit">프롬프트 수정 후 새 회차</button></form></div>`;
+  } else {
+    const finalMediaId = job.outputMediaId || selectedMediaId;
+    card = `<div class="generation-workflow-card"><h3>${job.outputMediaId ? "확정 완료" : "후보 선택"}</h3>
+      <div class="generation-candidate-grid">${outputs
+        .map((candidate) =>
+          generationCandidate(
+            candidate,
+            finalMediaId,
+            Boolean(job.outputMediaId),
+          ),
+        )
+        .join("")}</div>
+      ${
+        job.outputMediaId
+          ? `<form data-action="image-regenerate" data-job-id="${attr(job.id)}"><button class="btn btn-secondary" type="submit">프롬프트 수정 후 새 회차</button></form>`
+          : `<form data-action="image-select-confirm" data-job-id="${attr(job.id)}"><input type="hidden" name="mediaId" value="${attr(selectedMediaId)}"><button class="btn btn-primary" type="submit"${selectedMediaId ? "" : " disabled"}>최종 확정</button></form>`
+      }
+    </div>`;
+  }
+
+  return `<div class="generation-stepper">${generationStepLabels
+    .map(
+      (label, index) =>
+        `<div class="generation-step${index === currentIndex ? " generation-step-current" : ""}" aria-current="${index === currentIndex ? "step" : "false"}"><span>${index + 1}</span>${escapeHtml(label)}</div>`,
+    )
+    .join("")}</div>${card}${generationHistory(history)}`;
+}
+
 export function characterHref(input = {}) {
   const params = new URLSearchParams();
   if (input.mode === "create") {
@@ -1059,6 +1192,10 @@ const ui = {
   },
   badges: { drafts: 0, moderation: 0, payments: 0 },
   toastTimer: 0,
+  generationCreating: false,
+  generationPollTimer: 0,
+  generationSelectedJobId: "",
+  generationSelectedMediaId: "",
 };
 
 // — request / auth —
@@ -2077,8 +2214,100 @@ function generationWorkerCard(settings, queuedCount) {
     </div>`;
 }
 
+function generationRequestPanel(characters) {
+  return `${sectionHead(
+    "새 이미지 생성",
+    "요청을 입력한 뒤 서버가 구성한 최종 프롬프트를 확인합니다.",
+    '<button class="btn btn-ghost" type="button" data-act="generation-back">목록으로</button>',
+  )}
+  <div class="generation-stepper">${generationStepLabels
+    .map(
+      (label, index) =>
+        `<div class="generation-step${index === 0 ? " generation-step-current" : ""}" aria-current="${index === 0 ? "step" : "false"}"><span>${index + 1}</span>${escapeHtml(label)}</div>`,
+    )
+    .join("")}</div>
+  <form class="generation-workflow-card" data-action="image-draft-create">
+    <h3>요청 입력</h3>
+    <div class="field"><label>캐릭터</label><select class="input" name="characterId" required><option value="">선택하세요</option>${optionList(
+      characters,
+      "id",
+      (character) =>
+        character.displayName || character.publicId || character.id,
+      "",
+    )}</select></div>
+    <div class="field"><label>이미지 요청</label><textarea class="input" name="inputPrompt" rows="6" required></textarea></div>
+    <div class="field"><label>후보 수</label><input class="input" name="candidateCount" type="number" min="1" max="4" step="1" value="3" required></div>
+    <div><button class="btn btn-primary" type="submit">최종 프롬프트 확인</button></div>
+  </form>`;
+}
+
+function scheduleGenerationRefresh(jobId) {
+  clearTimeout(ui.generationPollTimer);
+  const state = generationRouteState(location.hash);
+  if (currentRoute() !== "generation" || state.jobId !== jobId) return;
+  ui.generationPollTimer = setTimeout(() => {
+    const nextState = generationRouteState(location.hash);
+    if (currentRoute() === "generation" && nextState.jobId === jobId) {
+      renderApp();
+    }
+  }, 2000);
+}
+
 async function renderGeneration() {
-  await loadCharacterOptions();
+  const routeState = generationRouteState(location.hash);
+  const characters = await loadCharacterOptions();
+  if (ui.generationCreating && !routeState.jobId) {
+    return generationRequestPanel(characters);
+  }
+  if (routeState.jobId) {
+    const [jobRes, settingsRes] = await Promise.all([
+      request(`/api/generation/jobs/${routeState.jobId}`),
+      request("/api/settings/generation"),
+    ]);
+    if (!jobRes.ok || !jobRes.body?.id) {
+      return `${sectionHead(
+        "이미지 생성",
+        "작업을 불러오지 못했습니다.",
+        '<button class="btn btn-ghost" type="button" data-act="generation-back">목록으로</button>',
+      )}${noticeBlock(
+        escapeHtml(errorMessage(jobRes.body, "생성 작업을 찾을 수 없습니다.")),
+      )}`;
+    }
+
+    const job = jobRes.body;
+    const history = [];
+    const seen = new Set([job.id]);
+    let originJobId = job.originJobId;
+    while (originJobId && !seen.has(originJobId)) {
+      seen.add(originJobId);
+      const ancestorRes = await request(`/api/generation/jobs/${originJobId}`);
+      if (!ancestorRes.ok || !ancestorRes.body?.id) break;
+      history.push(ancestorRes.body);
+      originJobId = ancestorRes.body.originJobId;
+    }
+    history.reverse();
+
+    if (ui.generationSelectedJobId !== job.id) {
+      ui.generationSelectedJobId = job.id;
+      ui.generationSelectedMediaId = "";
+    }
+    if (job.status === "queued" || job.status === "running") {
+      scheduleGenerationRefresh(job.id);
+    }
+
+    return `${sectionHead(
+      "이미지 생성",
+      `${generationCharacterLabel(characters, job.characterId)} · ${generationWorkflowLabel(job)}`,
+      '<button class="btn btn-ghost" type="button" data-act="generation-back">목록으로</button>',
+    )}${generationWorkflowPanel(
+      job,
+      history,
+      characters,
+      settingsRes.ok ? settingsRes.body : null,
+      ui.generationSelectedMediaId,
+    )}`;
+  }
+
   const statusParam =
     ui.filters.jobStatus === "전체" ? "" : ui.filters.jobStatus;
   const [res, settingsRes] = await Promise.all([
@@ -2094,23 +2323,33 @@ async function renderGeneration() {
   const rows = jobs.length
     ? jobs
         .map((j) => {
-          const [sc, sl] = jobStatusMeta(j.status);
+          const [sc, rawStatusLabel] = jobStatusMeta(j.status);
+          const statusLabel =
+            j.mediaType === "image"
+              ? generationWorkflowLabel(j)
+              : rawStatusLabel;
           const actions = [];
-          if (j.status === "queued") {
+          if (j.mediaType === "image") {
+            actions.push(
+              `<button class="btn btn-ghost" data-act="generation-open" data-job-id="${attr(
+                j.id,
+              )}">열기</button>`,
+            );
+          } else if (j.status === "queued") {
             actions.push(
               `<button class="btn btn-ghost" data-act="job-run" data-id="${attr(
                 j.id,
               )}">실행</button>`,
             );
           }
-          if (j.status === "running") {
+          if (j.mediaType !== "image" && j.status === "running") {
             actions.push(
               `<button class="btn btn-ghost" data-act="open-dialog" data-dialog="complete-job" data-job-id="${attr(
                 j.id,
               )}">완료 처리</button>`,
             );
           }
-          if (j.status === "failed") {
+          if (j.mediaType !== "image" && j.status === "failed") {
             actions.push(
               `<button class="btn btn-ghost" style="color:var(--color-accent-2-700)" data-act="job-retry" data-id="${attr(
                 j.id,
@@ -2123,7 +2362,7 @@ async function renderGeneration() {
             <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(
               j.prompt,
             )}">${escapeHtml(j.prompt)}</td>
-            <td><span class="tag ${sc}">${escapeHtml(sl)}</span></td>
+            <td><span class="tag ${sc}">${escapeHtml(statusLabel)}</span></td>
             <td style="color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
               j.createdAt,
             )}</td>
@@ -2137,7 +2376,7 @@ async function renderGeneration() {
     ${sectionHead(
       "생성 작업",
       "이미지·영상 생성 job 큐 — 등록 → 실행 → 완료, 실패 시 재시도 복제",
-      `<button class="btn btn-primary" data-act="open-dialog" data-dialog="new-job">큐 등록</button>`,
+      '<button class="btn btn-primary" data-act="generation-create">새 이미지 생성</button>',
     )}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px;align-items:start">
       ${generationSettingsCard(settings)}
@@ -2148,6 +2387,7 @@ async function renderGeneration() {
         "jobStatus",
         [
           { value: "전체", label: "전체" },
+          { value: "draft", label: "draft" },
           { value: "queued", label: "queued" },
           { value: "running", label: "running" },
           { value: "completed", label: "completed" },
@@ -3398,6 +3638,61 @@ async function dispatchSubmit(action, form, formData) {
   }
 
   // — provider settings —
+  if (action === "image-draft-create") {
+    const spec = imageWorkflowRequest(
+      "create",
+      "",
+      imageDraftPayload(formData),
+    );
+    const result = await submitViaSpec(spec, "최종 프롬프트를 준비했습니다.");
+    if (result.ok && result.body?.id) {
+      ui.generationCreating = false;
+      location.hash = `#generation?jobId=${encodeURIComponent(result.body.id)}`;
+    }
+    return;
+  }
+  if (action === "image-draft-update") {
+    const jobId = form.dataset.jobId;
+    const result = await submitViaSpec(
+      imageWorkflowRequest("update", jobId, imageDraftUpdatePayload(formData)),
+      "최종 프롬프트를 저장했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (action === "image-confirm") {
+    const jobId = form.dataset.jobId;
+    const result = await submitViaSpec(
+      imageWorkflowRequest("confirm", jobId),
+      "이미지 생성을 시작했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (action === "image-select-confirm") {
+    const mediaId = String(formData.get("mediaId") ?? "").trim();
+    if (!mediaId) throw new Error("확정할 이미지 후보를 선택하세요.");
+    const result = await submitViaSpec(
+      imageWorkflowRequest("select", form.dataset.jobId, mediaId),
+      "최종 이미지를 확정했습니다.",
+    );
+    if (result.ok) {
+      ui.generationSelectedMediaId = "";
+      renderApp();
+    }
+    return;
+  }
+  if (action === "image-regenerate") {
+    const spec = imageWorkflowRequest("regenerate", form.dataset.jobId);
+    const result = await submitViaSpec(spec, "새 생성 회차를 준비했습니다.");
+    if (result.ok && result.body?.id) {
+      ui.generationSelectedJobId = "";
+      ui.generationSelectedMediaId = "";
+      location.hash = `#generation?jobId=${encodeURIComponent(result.body.id)}`;
+    }
+    return;
+  }
+
   if (action === "generation-settings") {
     const result = await submitViaSpec(
       jsonRequest(
@@ -3515,6 +3810,35 @@ async function handleClick(event) {
   }
   if (act === "set-seg") {
     ui.filters[el.dataset.scope] = el.dataset.val;
+    renderApp();
+    return;
+  }
+  if (act === "generation-create") {
+    ui.generationCreating = true;
+    ui.generationSelectedJobId = "";
+    ui.generationSelectedMediaId = "";
+    renderApp();
+    return;
+  }
+  if (act === "generation-open") {
+    ui.generationCreating = false;
+    location.hash = `#generation?jobId=${encodeURIComponent(el.dataset.jobId)}`;
+    return;
+  }
+  if (act === "generation-back") {
+    ui.generationCreating = false;
+    ui.generationSelectedJobId = "";
+    ui.generationSelectedMediaId = "";
+    if (location.hash === "#generation") {
+      renderApp();
+    } else {
+      location.hash = "#generation";
+    }
+    return;
+  }
+  if (act === "image-select") {
+    ui.generationSelectedJobId = el.dataset.jobId;
+    ui.generationSelectedMediaId = el.dataset.mediaId;
     renderApp();
     return;
   }
@@ -3881,7 +4205,12 @@ let renderToken = 0;
 
 async function renderApp() {
   if (!hasDocument) return;
+  clearTimeout(ui.generationPollTimer);
+  ui.generationPollTimer = 0;
   const route = currentRoute();
+  if (route !== "generation") {
+    ui.generationCreating = false;
+  }
 
   if (route === "login") {
     appShell.hidden = true;

@@ -34,6 +34,7 @@ import {
   generationFormActionRequest,
   generationActionRequest,
   generationWorkflowStep,
+  generationWorkflowPanel,
   imageDraftPayload,
   imageDraftUpdatePayload,
   imageWorkflowRequest,
@@ -951,6 +952,156 @@ test("generation route and job state restore the workflow step", () => {
     "complete",
   );
   assert.equal(generationWorkflowStep({ status: "failed" }), "failed");
+});
+
+const generationCharacters = [
+  { id: "ai-1", displayName: "하나" },
+  { id: "ai-2", publicId: "duna" },
+];
+const generationSettings = {
+  resolved: {
+    t2iProvider: "fal-ai/nano-banana",
+    editProvider: "fal-ai/nano-banana/edit",
+  },
+};
+const generationDraftJob = {
+  id: "job-draft",
+  characterId: "ai-1",
+  mediaType: "image",
+  inputPrompt: "성수동 산책",
+  prompt: "하나가 성수동을 걷는 장면",
+  candidateCount: 3,
+  status: "draft",
+  generationContext: {
+    negativePrompt: "blur",
+    referenceImageCount: 0,
+    route: "t2i",
+  },
+};
+
+test("generation workflow renders the editable prompt confirmation step", () => {
+  const html = generationWorkflowPanel(
+    generationDraftJob,
+    [],
+    generationCharacters,
+    generationSettings,
+  );
+
+  assert.match(html, /요청 입력/);
+  assert.match(html, /최종 프롬프트 확인/);
+  assert.match(html, /후보 생성/);
+  assert.match(html, /후보 선택/);
+  assert.match(html, /하나가 성수동을 걷는 장면/);
+  assert.match(html, /이미지 3장 생성/);
+});
+
+test("generation workflow renders queued and running progress", () => {
+  const queuedHtml = generationWorkflowPanel(
+    { ...generationDraftJob, status: "queued", provider: "fal" },
+    [],
+    generationCharacters,
+    generationSettings,
+  );
+  const runningHtml = generationWorkflowPanel(
+    { ...generationDraftJob, status: "running", provider: "fal" },
+    [],
+    generationCharacters,
+    generationSettings,
+  );
+
+  assert.match(queuedHtml, /생성 대기/);
+  assert.match(runningHtml, /생성 중/);
+});
+
+test("generation workflow renders safe candidates for local selection", () => {
+  const html = generationWorkflowPanel(
+    {
+      ...generationDraftJob,
+      status: "completed",
+      outputs: [
+        {
+          mediaId: "media-safe",
+          url: "https://cdn.example/candidate.png?a=1&b=2",
+          candidateIndex: 0,
+          selected: false,
+        },
+        {
+          mediaId: "media-unsafe",
+          url: "javascript:alert(1)",
+          candidateIndex: 1,
+          selected: false,
+        },
+      ],
+    },
+    [],
+    generationCharacters,
+    generationSettings,
+  );
+
+  assert.match(html, /최종 확정/);
+  assert.match(html, /https:\/\/cdn\.example\/candidate\.png\?a=1&amp;b=2/);
+  assert.doesNotMatch(html, /javascript:/);
+});
+
+test("generation workflow renders final selection and collapsed history", () => {
+  const history = [
+    {
+      ...generationDraftJob,
+      id: "job-previous",
+      status: "completed",
+      outputMediaId: "media-old",
+      costUsd: "0.12",
+      outputs: [
+        {
+          mediaId: "media-old",
+          url: "https://cdn.example/old.png",
+          candidateIndex: 0,
+          selected: true,
+        },
+      ],
+    },
+  ];
+  const html = generationWorkflowPanel(
+    {
+      ...generationDraftJob,
+      status: "completed",
+      outputMediaId: "media-final",
+      outputs: [
+        {
+          mediaId: "media-final",
+          url: "https://cdn.example/final.png",
+          candidateIndex: 0,
+          selected: true,
+        },
+      ],
+    },
+    history,
+    generationCharacters,
+    generationSettings,
+  );
+
+  assert.match(html, /확정 완료/);
+  assert.match(html, /프롬프트 수정 후 새 회차/);
+  assert.match(html, /<details[^>]*class="generation-history"/);
+  assert.match(html, /이전 생성 회차/);
+  assert.match(html, /후보 수/);
+  assert.match(html, /\$0\.12/);
+});
+
+test("generation workflow preserves a failed round and offers regeneration", () => {
+  const html = generationWorkflowPanel(
+    {
+      ...generationDraftJob,
+      status: "failed",
+      errorMessage: "provider rejected the prompt",
+    },
+    [],
+    generationCharacters,
+    generationSettings,
+  );
+
+  assert.match(html, /provider rejected the prompt/);
+  assert.match(html, /프롬프트 수정 후 새 회차/);
 });
 
 test("image draft payloads trim strings and cast candidate count", () => {
