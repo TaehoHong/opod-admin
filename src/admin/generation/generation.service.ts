@@ -8,9 +8,10 @@ import {
 } from "../../domain/database/page";
 import { PrismaService } from "../../domain/database/prisma.service";
 import { assertUploadedMedia } from "../media/media.service";
+import { compileImagePrompt } from "../../worker/image-prompt";
 
 type MediaType = "image" | "video";
-type JobStatus = "queued" | "running" | "completed" | "failed";
+type JobStatus = "draft" | "queued" | "running" | "completed" | "failed";
 
 // 수동 start 경로에도 lease를 걸어, 워커 스윕이 방치된 running 잡을 회수할 수 있게 한다.
 const MANUAL_START_LEASE_MS = 10 * 60 * 1000;
@@ -35,7 +36,10 @@ type GenerationJob = {
   characterId: string;
   mediaType: MediaType;
   prompt: string;
+  inputPrompt?: string;
+  candidateCount?: number;
   status: JobStatus;
+  outputMediaId?: string;
   provider?: string;
   attemptCount: number;
   originJobId?: string;
@@ -43,6 +47,11 @@ type GenerationJob = {
   costUsd?: string;
   outputMedia?: OutputMedia;
   outputs?: OutputCandidate[];
+  generationContext?: {
+    negativePrompt: string;
+    referenceImageCount: number;
+    route: "t2i" | "edit";
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -73,6 +82,10 @@ type PrismaGenerationJob = Omit<
   | "originJobId"
   | "errorMessage"
   | "costUsd"
+  | "inputPrompt"
+  | "candidateCount"
+  | "outputMediaId"
+  | "generationContext"
 > & {
   createdAt: Date;
   updatedAt: Date;
@@ -81,13 +94,184 @@ type PrismaGenerationJob = Omit<
   originJobId?: string | null;
   errorMessage?: string | null;
   costUsd?: { toString(): string } | null;
+  inputPrompt?: string | null;
+  candidateCount?: number | null;
+  outputMediaId?: string | null;
+  paramsJson?: Prisma.JsonValue | null;
   outputMedia: PrismaOutputMedia | null;
   outputs?: PrismaJobOutput[];
+  character?: {
+    visualProfile: {
+      negativePrompt: string;
+      referenceMedia: { media: { uploadedAt: Date | null } }[];
+    } | null;
+  };
+};
+
+type ImageProfile = {
+  appearancePrompt?: string;
+  stylePrompt?: string;
+  negativePrompt: string;
+  referenceMedia: { media: { uploadedAt: Date | null } }[];
 };
 
 @Injectable()
 export class GenerationService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async createImageDraft(input: {
+    characterId: string;
+    inputPrompt: string;
+    candidateCount: number;
+  }): Promise<GenerationJob> {
+    const candidateCount = this.parseCandidateCount(input.candidateCount);
+    const inputPrompt = input.inputPrompt.trim();
+    if (!inputPrompt) {
+      throw new BadRequestException("Generation prompt is required");
+    }
+
+    const character = await this.prisma.character.findUnique({
+      where: { id: input.characterId },
+      select: {
+        id: true,
+        visualProfile: {
+          select: {
+            appearancePrompt: true,
+            stylePrompt: true,
+            negativePrompt: true,
+            referenceMedia: {
+              select: { media: { select: { uploadedAt: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!character) {
+      throw new BadRequestException("Character not found");
+    }
+
+    const job = await this.prisma.generationJob.create({
+      data: {
+        characterId: input.characterId,
+        mediaType: "image",
+        status: "draft",
+        inputPrompt,
+        prompt: compileImagePrompt(character.visualProfile, inputPrompt),
+        candidateCount,
+      },
+      include: this.jobWithOutput,
+    });
+    return this.toGenerationJob(
+      job as PrismaGenerationJob,
+      character.visualProfile,
+    );
+  }
+
+  async updateImageDraft(
+    jobId: string,
+    input: { prompt: string; candidateCount: number },
+  ): Promise<GenerationJob> {
+    const prompt = input.prompt.trim();
+    if (!prompt) {
+      throw new BadRequestException("Generation prompt is required");
+    }
+    const candidateCount = this.parseCandidateCount(input.candidateCount);
+    const transitioned = await this.prisma.generationJob.updateMany({
+      where: { id: jobId, status: "draft" },
+      data: { prompt, candidateCount },
+    });
+    if (transitioned.count === 0) {
+      await this.getJob(jobId);
+      throw new BadRequestException("Only draft generation jobs can be edited");
+    }
+    return this.getJob(jobId);
+  }
+
+  async confirmImageDraft(jobId: string): Promise<GenerationJob> {
+    const transitioned = await this.prisma.generationJob.updateMany({
+      where: { id: jobId, status: "draft" },
+      data: { status: "queued" },
+    });
+    const job = await this.getJob(jobId);
+    if (transitioned.count > 0 || job.status !== "draft") {
+      return job;
+    }
+    throw new BadRequestException(
+      "Only draft generation jobs can be confirmed",
+    );
+  }
+
+  async selectOutput(jobId: string, mediaId: string): Promise<GenerationJob> {
+    const output = await this.prisma.generationJobOutput.findFirst({
+      where: { jobId, mediaId, job: { status: "completed" } },
+      select: { job: { select: { characterId: true } } },
+    });
+    if (!output) {
+      throw new BadRequestException(
+        "Generation output not found for completed job",
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.generationJobOutput.updateMany({
+        where: { jobId },
+        data: { selected: false },
+      });
+      await tx.generationJobOutput.updateMany({
+        where: { jobId, mediaId },
+        data: { selected: true },
+      });
+      await tx.generationJob.update({
+        where: { id: jobId },
+        data: { outputMediaId: mediaId },
+      });
+      await tx.characterActionLog.create({
+        data: {
+          characterId: output.job.characterId,
+          actionType: "GENERATION_OUTPUT_SELECTED",
+          targetTable: "generation_jobs",
+          targetId: jobId,
+          reason: `selected generation output ${mediaId}`,
+        },
+      });
+    });
+    return this.getJob(jobId);
+  }
+
+  async regenerateImageJob(jobId: string): Promise<GenerationJob> {
+    const source = await this.prisma.generationJob.findUnique({
+      where: { id: jobId },
+      include: this.jobWithOutput,
+    });
+    if (!source) {
+      throw new BadRequestException("Generation job not found");
+    }
+    if (
+      source.mediaType !== "image" ||
+      (source.status !== "completed" && source.status !== "failed")
+    ) {
+      throw new BadRequestException(
+        "Only completed or failed image jobs can be regenerated",
+      );
+    }
+
+    const job = await this.prisma.generationJob.create({
+      data: {
+        characterId: source.characterId,
+        mediaType: "image",
+        status: "draft",
+        inputPrompt: source.inputPrompt ?? source.prompt,
+        prompt: source.prompt,
+        candidateCount: source.candidateCount,
+        ...(source.paramsJson != null
+          ? { paramsJson: source.paramsJson as Prisma.InputJsonValue }
+          : {}),
+        originJobId: source.id,
+      },
+      include: this.jobWithOutput,
+    });
+    return this.toGenerationJob(job as PrismaGenerationJob);
+  }
 
   async listJobs(
     input: {
@@ -252,6 +436,18 @@ export class GenerationService {
       orderBy: { candidateIndex: "asc" },
       include: { media: { select: { url: true } } },
     },
+    character: {
+      select: {
+        visualProfile: {
+          select: {
+            negativePrompt: true,
+            referenceMedia: {
+              select: { media: { select: { uploadedAt: true } } },
+            },
+          },
+        },
+      },
+    },
   } as const;
 
   private async completeJobWithMediaId(
@@ -346,6 +542,7 @@ export class GenerationService {
       return undefined;
     }
     if (
+      value === "draft" ||
       value === "queued" ||
       value === "running" ||
       value === "completed" ||
@@ -354,8 +551,17 @@ export class GenerationService {
       return value;
     }
     throw new BadRequestException(
-      "Generation job status must be queued, running, completed, or failed",
+      "Generation job status must be draft, queued, running, completed, or failed",
     );
+  }
+
+  private parseCandidateCount(value: number): number {
+    if (!Number.isInteger(value) || value < 1 || value > 4) {
+      throw new BadRequestException(
+        "Candidate count must be an integer from 1 to 4",
+      );
+    }
+    return value;
   }
 
   private parseOptionalMediaType(mediaType?: string): MediaType | undefined {
@@ -371,7 +577,10 @@ export class GenerationService {
     );
   }
 
-  private toGenerationJob(job: PrismaGenerationJob): GenerationJob {
+  private toGenerationJob(
+    job: PrismaGenerationJob,
+    imageProfile?: ImageProfile | null,
+  ): GenerationJob {
     const outputMedia = job.outputMedia
       ? {
           mediaType: job.outputMedia.mediaType,
@@ -387,13 +596,24 @@ export class GenerationService {
       candidateIndex: output.candidateIndex,
       selected: output.selected,
     }));
+    const profile =
+      imageProfile !== undefined ? imageProfile : job.character?.visualProfile;
+    const generationContext =
+      imageProfile !== undefined || job.character !== undefined
+        ? this.toGenerationContext(profile ?? null)
+        : undefined;
 
     return {
       id: job.id,
       characterId: job.characterId,
       mediaType: job.mediaType,
       prompt: job.prompt,
+      ...(job.inputPrompt ? { inputPrompt: job.inputPrompt } : {}),
+      ...(job.candidateCount != null
+        ? { candidateCount: job.candidateCount }
+        : {}),
       status: job.status,
+      ...(job.outputMediaId ? { outputMediaId: job.outputMediaId } : {}),
       attemptCount: job.attemptCount ?? 0,
       ...(job.provider ? { provider: job.provider } : {}),
       ...(job.originJobId ? { originJobId: job.originJobId } : {}),
@@ -401,8 +621,24 @@ export class GenerationService {
       ...(job.costUsd != null ? { costUsd: job.costUsd.toString() } : {}),
       ...(outputMedia ? { outputMedia } : {}),
       ...(outputs && outputs.length > 0 ? { outputs } : {}),
+      ...(generationContext ? { generationContext } : {}),
       createdAt: job.createdAt.toISOString(),
       updatedAt: job.updatedAt.toISOString(),
+    };
+  }
+
+  private toGenerationContext(profile: ImageProfile | null): {
+    negativePrompt: string;
+    referenceImageCount: number;
+    route: "t2i" | "edit";
+  } {
+    const referenceImageCount = (profile?.referenceMedia ?? []).filter(
+      (reference) => reference.media.uploadedAt,
+    ).length;
+    return {
+      negativePrompt: profile?.negativePrompt ?? "",
+      referenceImageCount,
+      route: referenceImageCount > 0 ? "edit" : "t2i",
     };
   }
 }
