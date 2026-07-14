@@ -36,13 +36,17 @@ export class AdminSettingsController {
       ...("falImageT2iModel" in body
         ? { falImageT2iModel: body.falImageT2iModel ?? null }
         : {}),
+      ...("llmApiUrl" in body ? { llmApiUrl: body.llmApiUrl ?? null } : {}),
+      ...("llmApiKey" in body ? { llmApiKey: body.llmApiKey ?? null } : {}),
+      ...("llmModel" in body ? { llmModel: body.llmModel ?? null } : {}),
     });
     return this.buildView(saved);
   }
 
   private async buildView(saved: GenerationSettings) {
-    const [resolved, names, todaySpend] = await Promise.all([
+    const [resolved, plannerResolved, names, todaySpend] = await Promise.all([
       this.settings.resolveProviderSettings(),
+      this.settings.resolvePlannerSettings(),
       this.settings.resolveProviderNames(),
       this.prisma.generationJob.aggregate({
         _sum: { costUsd: true },
@@ -56,10 +60,17 @@ export class AdminSettingsController {
         : { set: false },
       falImageModel: saved.falImageModel ?? null,
       falImageT2iModel: saved.falImageT2iModel ?? null,
+      llmApiUrl: saved.llmApiUrl ?? null,
+      llmApiKey: saved.llmApiKey
+        ? { set: true, last4: saved.llmApiKey.slice(-4) }
+        : { set: false },
+      llmModel: saved.llmModel ?? null,
       resolved: {
         t2iProvider: names.t2i,
         editProvider: names.edit,
+        plannerProvider: names.planner,
         sources: resolved.sources,
+        plannerSources: plannerResolved.sources,
       },
       worker: {
         enabled: worker.enabled,

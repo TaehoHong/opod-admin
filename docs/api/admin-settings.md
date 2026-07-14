@@ -43,6 +43,13 @@ GET /api/settings/generation
 - Each `sources` entry is `db`, `env`, or `none`.
 - `worker` reflects env-driven worker config plus today's (KST) `costUsd` sum.
 
+The same document also carries the **content-planner LLM** settings
+(OpenAI-compatible chat completions, used by the draft worker):
+`llmApiUrl`, `llmApiKey` (masked the same way), `llmModel`,
+`resolved.plannerProvider` (`llm:<model>` or `local`), and
+`resolved.plannerSources`. The LLM planner activates only when URL, key, and
+model all resolve; otherwise the deterministic local planner runs.
+
 ## Update generation provider settings
 
 ```http
@@ -56,6 +63,9 @@ Body (all fields optional):
 | `falApiKey` | omit = keep, `null`/blank = delete (fall back to env), string = save |
 | `falImageModel` | same semantics; the reference-conditioning (edit) model |
 | `falImageT2iModel` | same semantics; the cold-start text-to-image model |
+| `llmApiUrl` | same semantics; planner LLM endpoint (OpenAI-compatible) |
+| `llmApiKey` | same semantics; planner LLM key |
+| `llmModel` | same semantics; planner LLM model |
 
 ```json
 { "falApiKey": "fal-...", "falImageModel": "fal-ai/nano-banana/edit" }

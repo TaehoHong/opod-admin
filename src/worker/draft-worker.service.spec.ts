@@ -64,7 +64,7 @@ function makeService(
 ) {
   return new DraftWorkerService(
     prisma as never,
-    planner,
+    () => Promise.resolve(planner),
     { ...baseConfig, ...config },
     random,
   );

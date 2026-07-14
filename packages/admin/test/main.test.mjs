@@ -972,6 +972,8 @@ test("generationSettingsPayload keeps a blank API key and clears blank models", 
   assert.deepEqual(generationSettingsPayload(form), {
     falImageModel: "fal-ai/nano-banana/edit",
     falImageT2iModel: null,
+    llmApiUrl: null,
+    llmModel: null,
   });
 
   const withKey = new FormData();
@@ -982,7 +984,30 @@ test("generationSettingsPayload keeps a blank API key and clears blank models", 
     falApiKey: "fal-secret",
     falImageModel: "fal-ai/nano-banana/edit",
     falImageT2iModel: "fal-ai/nano-banana",
+    llmApiUrl: null,
+    llmModel: null,
   });
+});
+
+test("generationSettingsPayload carries planner LLM fields with the same semantics", () => {
+  const form = new FormData();
+  form.set("falImageModel", "");
+  form.set("falImageT2iModel", "");
+  form.set("llmApiKey", "  ");
+  form.set("llmApiUrl", " https://llm.example/v1/chat/completions ");
+  form.set("llmModel", "");
+
+  // LLM 키 비움 = 유지(생략), URL은 저장, 모델 빈 값 = 삭제(null)
+  assert.deepEqual(generationSettingsPayload(form), {
+    falImageModel: null,
+    falImageT2iModel: null,
+    llmApiUrl: "https://llm.example/v1/chat/completions",
+    llmModel: null,
+  });
+
+  const withKey = new FormData();
+  withKey.set("llmApiKey", " sk-secret ");
+  assert.equal(generationSettingsPayload(withKey).llmApiKey, "sk-secret");
 });
 
 test("dialog context carries the selected generation job id", () => {

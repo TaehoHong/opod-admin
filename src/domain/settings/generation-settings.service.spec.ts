@@ -97,15 +97,40 @@ describe("GenerationSettingsService", () => {
         // t2i 모델 미설정 → edit 모델 공용
         t2i: "fal:fal-ai/nano-banana/edit",
         edit: "fal:fal-ai/nano-banana/edit",
+        planner: "local",
       },
     );
+  });
+
+  it("resolves the LLM planner when url/key/model are all present", async () => {
+    const prisma = prismaMock([
+      { key: "planner.llmApiKey", value: "sk-db" },
+      { key: "planner.llmModel", value: "gpt-5-mini" },
+    ]);
+    const service = makeService(prisma);
+
+    const resolved = await service.resolvePlannerSettings({
+      LLM_API_URL: "https://llm.example/v1/chat/completions",
+    });
+    expect(resolved).toEqual({
+      apiUrl: "https://llm.example/v1/chat/completions",
+      apiKey: "sk-db",
+      model: "gpt-5-mini",
+      sources: { apiUrl: "env", apiKey: "db", model: "db" },
+    });
+
+    await expect(
+      service.resolveProviderNames({
+        LLM_API_URL: "https://llm.example/v1/chat/completions",
+      }),
+    ).resolves.toMatchObject({ planner: "llm:gpt-5-mini" });
   });
 
   it("falls back to the local provider without any key", async () => {
     const prisma = prismaMock();
 
     await expect(makeService(prisma).resolveProviderNames({})).resolves.toEqual(
-      { t2i: "local", edit: "local" },
+      { t2i: "local", edit: "local", planner: "local" },
     );
   });
 });

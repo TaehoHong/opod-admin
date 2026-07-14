@@ -1,18 +1,28 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../database/prisma.service";
 import {
+  PlannerProviderSettings,
+  resolveContentPlanner,
+} from "../../worker/content-planner";
+import {
   GenerationProviderSettings,
   resolveImageGenerationProviders,
 } from "../../worker/image-generation.provider";
 
-// admin_settings 키. 생성 프로바이더 외 설정이 늘면 네임스페이스만 추가한다.
+// admin_settings 키. 프로바이더 설정이 늘면 네임스페이스만 추가한다.
+// generation.* = 이미지 생성(fal), planner.* = 기획 LLM(OpenAI-compatible).
 export const GENERATION_SETTING_KEYS = {
   falApiKey: "generation.falApiKey",
   falImageModel: "generation.falImageModel",
   falImageT2iModel: "generation.falImageT2iModel",
+  llmApiUrl: "planner.llmApiUrl",
+  llmApiKey: "planner.llmApiKey",
+  llmModel: "planner.llmModel",
 } as const;
 
 type GenerationSettingField = keyof typeof GENERATION_SETTING_KEYS;
+
+type Source = "db" | "env" | "none";
 
 // DB(admin_settings)에 저장된 값만. 미설정 필드는 undefined.
 export type GenerationSettings = Partial<
@@ -26,9 +36,17 @@ export type GenerationSettingsUpdate = Partial<
 
 export type ResolvedProviderSettings = GenerationProviderSettings & {
   sources: {
-    apiKey: "db" | "env" | "none";
-    editModel: "db" | "env" | "none";
-    t2iModel: "db" | "env" | "none";
+    apiKey: Source;
+    editModel: Source;
+    t2iModel: Source;
+  };
+};
+
+export type ResolvedPlannerSettings = PlannerProviderSettings & {
+  sources: {
+    apiUrl: Source;
+    apiKey: Source;
+    model: Source;
   };
 };
 
@@ -38,6 +56,9 @@ const ENV_KEYS: Record<GenerationSettingField, string> = {
   falApiKey: "FAL_API_KEY",
   falImageModel: "FAL_IMAGE_MODEL",
   falImageT2iModel: "FAL_IMAGE_T2I_MODEL",
+  llmApiUrl: "LLM_API_URL",
+  llmApiKey: "LLM_API_KEY",
+  llmModel: "LLM_MODEL",
 };
 
 @Injectable()
@@ -92,20 +113,9 @@ export class GenerationSettingsService {
     env: SettingsEnv = process.env,
   ): Promise<ResolvedProviderSettings> {
     const db = await this.getSettings();
-    const pick = (field: GenerationSettingField) => {
-      const dbValue = db[field]?.trim();
-      if (dbValue) {
-        return { value: dbValue, source: "db" as const };
-      }
-      const envValue = env[ENV_KEYS[field]]?.trim();
-      if (envValue) {
-        return { value: envValue, source: "env" as const };
-      }
-      return { value: undefined, source: "none" as const };
-    };
-    const apiKey = pick("falApiKey");
-    const editModel = pick("falImageModel");
-    const t2iModel = pick("falImageT2iModel");
+    const apiKey = pick(db, env, "falApiKey");
+    const editModel = pick(db, env, "falImageModel");
+    const t2iModel = pick(db, env, "falImageT2iModel");
     return {
       apiKey: apiKey.value,
       editModel: editModel.value,
@@ -118,12 +128,55 @@ export class GenerationSettingsService {
     };
   }
 
-  // 현재 설정으로 실제 라우팅될 프로바이더 이름 (UI 상태 표시용).
+  // 기획 LLM 설정 — 동일한 DB > env 우선순위.
+  async resolvePlannerSettings(
+    env: SettingsEnv = process.env,
+  ): Promise<ResolvedPlannerSettings> {
+    const db = await this.getSettings();
+    const apiUrl = pick(db, env, "llmApiUrl");
+    const apiKey = pick(db, env, "llmApiKey");
+    const model = pick(db, env, "llmModel");
+    return {
+      apiUrl: apiUrl.value,
+      apiKey: apiKey.value,
+      model: model.value,
+      sources: {
+        apiUrl: apiUrl.source,
+        apiKey: apiKey.source,
+        model: model.source,
+      },
+    };
+  }
+
+  // 현재 설정으로 실제 라우팅될 프로바이더/플래너 이름 (UI 상태 표시용).
   async resolveProviderNames(
     env: SettingsEnv = process.env,
-  ): Promise<{ t2i: string; edit: string }> {
-    const resolved = await this.resolveProviderSettings(env);
+  ): Promise<{ t2i: string; edit: string; planner: string }> {
+    const [resolved, plannerResolved] = await Promise.all([
+      this.resolveProviderSettings(env),
+      this.resolvePlannerSettings(env),
+    ]);
     const providers = resolveImageGenerationProviders(resolved);
-    return { t2i: providers.t2i.name, edit: providers.edit.name };
+    return {
+      t2i: providers.t2i.name,
+      edit: providers.edit.name,
+      planner: resolveContentPlanner(plannerResolved).name,
+    };
   }
+}
+
+function pick(
+  db: GenerationSettings,
+  env: SettingsEnv,
+  field: GenerationSettingField,
+): { value: string | undefined; source: Source } {
+  const dbValue = db[field]?.trim();
+  if (dbValue) {
+    return { value: dbValue, source: "db" };
+  }
+  const envValue = env[ENV_KEYS[field]]?.trim();
+  if (envValue) {
+    return { value: envValue, source: "env" };
+  }
+  return { value: undefined, source: "none" };
 }

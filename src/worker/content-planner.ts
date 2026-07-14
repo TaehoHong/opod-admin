@@ -35,17 +35,41 @@ const HASHTAG_MAX = 5;
 
 type PlannerEnv = Record<string, string | undefined>;
 
-export function createContentPlanner(
-  env: PlannerEnv = process.env,
+// 플래너 구성 값 — 출처는 env 또는 admin_settings(DB)이며 이 계층은 출처를
+// 모른다. 병합/우선순위는 GenerationSettingsService가 담당한다.
+export type PlannerProviderSettings = {
+  apiUrl?: string;
+  apiKey?: string;
+  model?: string;
+};
+
+// 세 값이 모두 있어야 LLM 플래너, 하나라도 없으면 로컬 결정적 플래너.
+export function resolveContentPlanner(
+  settings: PlannerProviderSettings,
   fetchFn: typeof fetch = fetch,
 ): ContentPlanner {
-  const apiUrl = env.LLM_API_URL?.trim();
-  const apiKey = env.LLM_API_KEY?.trim();
-  const model = env.LLM_MODEL?.trim();
+  const apiUrl = settings.apiUrl?.trim();
+  const apiKey = settings.apiKey?.trim();
+  const model = settings.model?.trim();
   if (!apiUrl || !apiKey || !model) {
     return localContentPlanner;
   }
   return createLlmContentPlanner({ apiUrl, apiKey, model }, fetchFn);
+}
+
+// env 전용 진입점 (DB 설정 없이 쓰는 테스트/스크립트용).
+export function createContentPlanner(
+  env: PlannerEnv = process.env,
+  fetchFn: typeof fetch = fetch,
+): ContentPlanner {
+  return resolveContentPlanner(
+    {
+      apiUrl: env.LLM_API_URL,
+      apiKey: env.LLM_API_KEY,
+      model: env.LLM_MODEL,
+    },
+    fetchFn,
+  );
 }
 
 // 개발용 결정적 플래너. LLM 없이도 파이프라인 전 구간이 돈다.

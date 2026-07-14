@@ -375,7 +375,7 @@ Media:               + isAiGenerated Boolean  // AI 기본법 표시 의무. Pha
 | `FAL_IMAGE_MODEL` | (없음) | 레퍼런스 컨디셔닝(edit) 모델. 예: `fal-ai/nano-banana/edit` |
 | `FAL_IMAGE_T2I_MODEL` | (없음) | 콜드스타트 text-to-image 모델. 예: `fal-ai/nano-banana`. 미설정 시 `FAL_IMAGE_MODEL`을 그대로 사용 — edit 전용 모델을 쓴다면 반드시 함께 설정 |
 | `S3_BUCKET` 등 기존 S3 변수 | — | 미설정 시 data-URL 저장(개발 전용, 1MB 상한) |
-| `LLM_API_URL` / `LLM_API_KEY` / `LLM_MODEL` | (없음) | 기획 플래너. 미설정 시 로컬 결정적 플래너 |
+| `LLM_API_URL` / `LLM_API_KEY` / `LLM_MODEL` | (없음) | 기획 플래너. 미설정 시 로컬 결정적 플래너. admin UI(생성 작업 > 프로바이더 설정)의 DB 값이 env보다 우선 |
 | `DRAFT_PLAN_LEASE_SECONDS` | 120 | 기획 단계 lease |
 | `DRAFT_MAX_ATTEMPTS` | 3 | 기획 재시도 상한 |
 | `DRAFT_MAX_SHOTS` | 2 | draft당 컷 수 (상한 3) |

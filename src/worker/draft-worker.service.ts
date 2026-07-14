@@ -68,7 +68,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly planner: ContentPlanner,
+    // 기획 시마다 재해석한다 — admin 설정(UI)에서 LLM URL/키/모델을 바꾸면
+    // 프로세스 재시작 없이 다음 기획부터 반영된다.
+    private readonly resolvePlanner: () => Promise<ContentPlanner>,
     private readonly config: DraftWorkerConfig,
     private readonly random: () => number = Math.random,
   ) {}
@@ -77,9 +79,17 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     if (!this.config.enabled) {
       return;
     }
-    this.logger.log(
-      `Draft worker enabled (planner=${this.planner.name}, scheduler=${this.config.schedulerEnabled})`,
-    );
+    void this.resolvePlanner()
+      .then((planner) =>
+        this.logger.log(
+          `Draft worker enabled (planner=${planner.name}, scheduler=${this.config.schedulerEnabled})`,
+        ),
+      )
+      .catch(() =>
+        this.logger.log(
+          `Draft worker enabled (scheduler=${this.config.schedulerEnabled})`,
+        ),
+      );
     this.scheduleNext();
   }
 
@@ -221,7 +231,8 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       const sceneHint = isRecord(draft.conceptJson)
         ? String(draft.conceptJson.sceneHint ?? "").trim() || undefined
         : undefined;
-      const plan = await this.planner.plan({
+      const planner = await this.resolvePlanner();
+      const plan = await planner.plan({
         characterName: draft.character.displayName,
         bio: draft.character.bio,
         interests: draft.character.interests,
@@ -243,7 +254,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
             hashtags: plan.hashtags,
             conceptJson: {
               ...(sceneHint ? { sceneHint } : {}),
-              plannerName: this.planner.name,
+              plannerName: planner.name,
               plan: plan as unknown as Record<string, unknown>,
             } as never,
             leaseExpiresAt: null,
@@ -270,7 +281,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
             actionType: "DRAFT_PLANNED",
             targetTable: "post_drafts",
             targetId: draft.id,
-            reason: `draft planned via ${this.planner.name} (${plan.shots.length} shot(s))`,
+            reason: `draft planned via ${planner.name} (${plan.shots.length} shot(s))`,
           },
         });
       });

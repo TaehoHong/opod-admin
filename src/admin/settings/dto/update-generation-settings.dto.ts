@@ -17,4 +17,20 @@ export class UpdateGenerationSettingsDto {
   @IsString()
   @MaxLength(200)
   falImageT2iModel?: string | null;
+
+  // 기획 LLM (OpenAI-compatible chat completions)
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  llmApiUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  llmApiKey?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  llmModel?: string | null;
 }

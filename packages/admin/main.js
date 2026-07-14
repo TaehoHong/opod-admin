@@ -360,6 +360,14 @@ export function generationSettingsPayload(form) {
   payload.falImageModel = model || null;
   const t2iModel = String(form.get("falImageT2iModel") ?? "").trim();
   payload.falImageT2iModel = t2iModel || null;
+  const llmApiKey = String(form.get("llmApiKey") ?? "").trim();
+  if (llmApiKey) {
+    payload.llmApiKey = llmApiKey;
+  }
+  const llmApiUrl = String(form.get("llmApiUrl") ?? "").trim();
+  payload.llmApiUrl = llmApiUrl || null;
+  const llmModel = String(form.get("llmModel") ?? "").trim();
+  payload.llmModel = llmModel || null;
   return payload;
 }
 
@@ -1892,6 +1900,14 @@ function generationSettingsCard(settings) {
   }
   const key = settings.falApiKey ?? { set: false };
   const sources = settings.resolved?.sources ?? {};
+  const llmKey = settings.llmApiKey ?? { set: false };
+  const plannerSources = settings.resolved?.plannerSources ?? {};
+  const llmKeyStatus = llmKey.set
+    ? `<span class="tag tag-accent">저장됨 ····${escapeHtml(llmKey.last4 ?? "")}</span>
+       <button class="btn btn-ghost" type="button" style="color:var(--color-accent-2-700)" data-act="settings-clear-llm-key">키 삭제</button>`
+    : plannerSources.apiKey === "env"
+      ? '<span class="tag tag-neutral">env 키 사용 중</span>'
+      : '<span class="tag tag-accent-2">키 없음 — 로컬 플래너</span>';
   const keyStatus = key.set
     ? `<span class="tag tag-accent">저장됨 ····${escapeHtml(key.last4 ?? "")}</span>
        <button class="btn btn-ghost" type="button" style="color:var(--color-accent-2-700)" data-act="settings-clear-key">키 삭제</button>`
@@ -1925,7 +1941,32 @@ function generationSettingsCard(settings) {
           sources.t2iModel === "env" ? " (현재 env 값 사용 중)" : ""
         }">
       </div>
-      <p style="margin:0;font-size:12px;color:var(--color-neutral-600)">DB 설정이 env보다 우선하며 다음 잡부터 즉시 적용됩니다. 모델을 비우고 저장하면 env 값으로 되돌아갑니다.</p>
+      <div style="border-top:1px solid var(--color-divider);padding-top:12px;margin-top:2px">
+        <h6 style="margin:0 0 10px;color:var(--color-neutral-600)">기획 LLM (OpenAI-compatible)</h6>
+        <div class="field" style="margin-bottom:10px">
+          <label>LLM API 키</label>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">${llmKeyStatus}</div>
+          <input class="input" name="llmApiKey" type="password" autocomplete="off"
+            placeholder="${llmKey.set ? "변경할 때만 입력 (비워두면 유지)" : "sk-..."}">
+        </div>
+        <div class="field" style="margin-bottom:10px">
+          <label>API URL</label>
+          <input class="input" name="llmApiUrl" value="${attr(
+            settings.llmApiUrl ?? "",
+          )}" placeholder="https://api.openai.com/v1/chat/completions${
+            plannerSources.apiUrl === "env" ? " (현재 env 값 사용 중)" : ""
+          }">
+        </div>
+        <div class="field">
+          <label>모델</label>
+          <input class="input" name="llmModel" value="${attr(
+            settings.llmModel ?? "",
+          )}" placeholder="gpt-5-mini${
+            plannerSources.model === "env" ? " (현재 env 값 사용 중)" : ""
+          }">
+        </div>
+      </div>
+      <p style="margin:0;font-size:12px;color:var(--color-neutral-600)">DB 설정이 env보다 우선하며 다음 잡/기획부터 즉시 적용됩니다. 값을 비우고 저장하면 env 값으로 되돌아갑니다. LLM은 URL·키·모델이 모두 있어야 켜지고, 없으면 로컬 결정적 플래너로 동작합니다.</p>
       <div><button class="btn btn-primary" type="submit">저장</button></div>
     </form>`;
 }
@@ -1957,6 +1998,8 @@ function generationWorkerCard(settings, queuedCount) {
         <span style="word-break:break-all">${escapeHtml(resolved.t2iProvider ?? "—")}</span>
         <span class="stat-label" style="margin:0">edit</span>
         <span style="word-break:break-all">${escapeHtml(resolved.editProvider ?? "—")}</span>
+        <span class="stat-label" style="margin:0">기획 LLM</span>
+        <span style="word-break:break-all">${escapeHtml(resolved.plannerProvider ?? "—")}</span>
         <span class="stat-label" style="margin:0">오늘 지출</span>
         <span>${escapeHtml(budgetLabel)} <span style="color:var(--color-neutral-500);font-size:12px">(잡당 추정 $${Number(
           worker.jobCostEstimateUsd ?? 0,
@@ -3434,6 +3477,14 @@ async function handleClick(event) {
     const result = await submitViaSpec(
       jsonRequest("/api/settings/generation", "PUT", { falApiKey: null }),
       "API 키를 삭제했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+  if (act === "settings-clear-llm-key") {
+    const result = await submitViaSpec(
+      jsonRequest("/api/settings/generation", "PUT", { llmApiKey: null }),
+      "LLM API 키를 삭제했습니다.",
     );
     if (result.ok) renderApp();
     return;

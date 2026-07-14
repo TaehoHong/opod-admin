@@ -3,7 +3,7 @@ import { PrismaModule } from "../domain/database/prisma.module";
 import { PrismaService } from "../domain/database/prisma.service";
 import { GenerationSettingsService } from "../domain/settings/generation-settings.service";
 import { SettingsModule } from "../domain/settings/settings.module";
-import { createContentPlanner } from "./content-planner";
+import { resolveContentPlanner } from "./content-planner";
 import {
   DraftWorkerService,
   draftWorkerConfigFromEnv,
@@ -41,13 +41,18 @@ import { resolveImageGenerationProviders } from "./image-generation.provider";
     },
     {
       provide: DraftWorkerService,
-      useFactory: (prisma: PrismaService) =>
+      // 플래너도 기획 시마다 재해석 — admin 설정(DB)이 env보다 우선.
+      useFactory: (
+        prisma: PrismaService,
+        settings: GenerationSettingsService,
+      ) =>
         new DraftWorkerService(
           prisma,
-          createContentPlanner(),
+          async () =>
+            resolveContentPlanner(await settings.resolvePlannerSettings()),
           draftWorkerConfigFromEnv(),
         ),
-      inject: [PrismaService],
+      inject: [PrismaService, GenerationSettingsService],
     },
   ],
   // admin의 수동 실행(POST /api/generation/worker/run)이 주입해 쓴다.
