@@ -1,4 +1,5 @@
-import { Test } from "@nestjs/testing";
+import { INestApplication } from "@nestjs/common";
+import { Test, TestingModule } from "@nestjs/testing";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
@@ -294,21 +295,23 @@ describe("generation", () => {
       FAL_IMAGE_MODEL: process.env.FAL_IMAGE_MODEL,
       FAL_IMAGE_T2I_MODEL: process.env.FAL_IMAGE_T2I_MODEL,
     };
-    delete process.env.S3_BUCKET;
-    delete process.env.AWS_REGION;
-    delete process.env.AWS_ACCESS_KEY_ID;
-    delete process.env.AWS_SECRET_ACCESS_KEY;
-    delete process.env.S3_PUBLIC_BASE_URL;
-    delete process.env.FAL_API_KEY;
-    delete process.env.FAL_IMAGE_MODEL;
-    delete process.env.FAL_IMAGE_T2I_MODEL;
-
-    const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-    const app = moduleRef.createNestApplication();
+    let moduleRef: TestingModule | undefined;
+    let app: INestApplication | undefined;
 
     try {
+      delete process.env.S3_BUCKET;
+      delete process.env.AWS_REGION;
+      delete process.env.AWS_ACCESS_KEY_ID;
+      delete process.env.AWS_SECRET_ACCESS_KEY;
+      delete process.env.S3_PUBLIC_BASE_URL;
+      delete process.env.FAL_API_KEY;
+      delete process.env.FAL_IMAGE_MODEL;
+      delete process.env.FAL_IMAGE_T2I_MODEL;
+
+      moduleRef = await Test.createTestingModule({
+        imports: [AppModule],
+      }).compile();
+      app = moduleRef.createNestApplication();
       await app.init();
       const headers = await adminHeaders(app);
       const character = await request(app.getHttpServer())
@@ -363,24 +366,35 @@ describe("generation", () => {
 
       const deadline = Date.now() + 10_000;
       let completed: Record<string, unknown> | undefined;
+      let lastObserved: Record<string, unknown> | undefined;
       while (Date.now() < deadline) {
         const response = await request(app.getHttpServer())
           .get(`/api/generation/jobs/${created.body.id}`)
           .set(headers)
           .expect(200);
+        lastObserved = response.body;
         if (response.body.status === "completed") {
           completed = response.body;
           break;
         }
+        if (response.body.status === "failed") {
+          throw new Error(
+            `Generation job failed: ${response.body.errorMessage ?? "unknown error"}`,
+          );
+        }
         await wait(50);
       }
 
-      expect(completed).toBeDefined();
+      if (!completed) {
+        throw new Error(
+          `Generation job did not complete before deadline (last status=${String(lastObserved?.status ?? "unknown")}, error=${String(lastObserved?.errorMessage ?? "none")})`,
+        );
+      }
       expect(completed).toMatchObject({
         status: "completed",
         provider: "local",
       });
-      const outputs = completed?.outputs as Array<{
+      const outputs = completed.outputs as Array<{
         mediaId: string;
         selected: boolean;
       }>;
@@ -413,14 +427,21 @@ describe("generation", () => {
         originJobId: created.body.id,
       });
     } finally {
-      await app.close();
-      Object.entries(generationEnv).forEach(([key, value]) => {
-        if (value === undefined) {
-          delete process.env[key];
-        } else {
-          process.env[key] = value;
+      try {
+        if (app) {
+          await app.close();
+        } else if (moduleRef) {
+          await moduleRef.close();
         }
-      });
+      } finally {
+        Object.entries(generationEnv).forEach(([key, value]) => {
+          if (value === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = value;
+          }
+        });
+      }
     }
   });
 

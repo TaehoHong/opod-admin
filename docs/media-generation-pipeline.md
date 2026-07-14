@@ -379,7 +379,7 @@ Media:               + isAiGenerated Boolean  // AI 기본법 표시 의무. Pha
 | `DRAFT_PLAN_LEASE_SECONDS` | 120 | 기획 단계 lease |
 | `DRAFT_MAX_ATTEMPTS` | 3 | 기획 재시도 상한 |
 | `DRAFT_MAX_SHOTS` | 2 | draft당 컷 수 (상한 3) |
-| `DRAFT_SCHEDULER_ENABLED` | true | 포스팅 정책 스케줄러 온오프 |
+| `DRAFT_SCHEDULER_ENABLED` | false | 포스팅 정책 스케줄러 온오프 (`true`/`1`일 때만 활성화) |
 
 생성 출력의 스토리지 키는 `pod/generated/character/{characterId}/` 아래에 쌓인다
 (기존 업로드 컨벤션 `pod/*`와 동일 트리 — 버킷 정책/수명주기 규칙 공유).

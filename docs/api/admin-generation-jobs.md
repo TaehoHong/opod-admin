@@ -149,7 +149,9 @@ Only a completed or failed image job can be regenerated. This creates a new
 `draft` with the same character, prompt, input prompt, candidate count, and
 provider parameters. The new response has `originJobId` equal to the source
 job ID; the source job is unchanged. The regenerated draft must be confirmed
-before any provider work begins.
+before any provider work begins. A draft regenerated from a legacy job whose
+candidate count is `null` omits `candidateCount`; the worker's configured
+default applies when that draft is confirmed and processed.
 
 ### Generation job response fields
 
@@ -157,7 +159,8 @@ before any provider work begins.
 | ----- | -------------------- |
 | `id`, `characterId`, `mediaType`, `prompt`, `status` | Always present |
 | `attemptCount`, `createdAt`, `updatedAt` | Always present |
-| `inputPrompt`, `candidateCount` | Present for staged image jobs |
+| `inputPrompt` | Present for staged image jobs |
+| `candidateCount` | Present for newly created or edited staged jobs; may be absent on drafts regenerated from legacy null-count jobs, in which case the worker default applies |
 | `generationContext` | Present when the character visual profile was loaded |
 | `outputs` | Present after candidates have been persisted; each item has `mediaId`, `url`, `candidateIndex`, `selected` |
 | `outputMediaId`, `outputMedia` | Present only after selecting or otherwise assigning an output |
@@ -278,7 +281,7 @@ character, media type, prompt, provider) linked to the source via
 | ----------------------------------------------- | ------ | ------------------------------------------------------------------------ |
 | `status` is unsupported                         | 400    | `Generation job status must be draft, queued, running, completed, or failed` |
 | `mediaType` is unsupported                      | 400    | `Generation media type must be image or video`                           |
-| `candidateCount` is not an integer from 1 to 4 | 400    | `Candidate count must be an integer from 1 to 4`                         |
+| `candidateCount` is not an integer from 1 to 4 | 400    | ValidationPipe response identifying the failed integer/minimum/maximum constraint |
 | `limit` is not a positive integer               | 400    | `limit must be a positive integer`                                       |
 | `cursor` is malformed or outside active filters | 400    | `Invalid cursor`                                                         |
 | transition from the wrong status                | 400    | `Only queued generation jobs can start` (and equivalents per transition) |
