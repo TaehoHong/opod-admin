@@ -50,8 +50,9 @@ generation worker가 claim하지 않는다. 관리자가 생성 버튼을 누를
 
 - `inputPrompt String?`: 관리자가 처음 입력한 요청. 기존 잡과 draft 파이프라인 잡을
   호환하기 위해 nullable로 둔다.
-- `candidateCount Int`: 해당 회차가 요청할 후보 수. 기존 잡의 동작을 보존하기 위해
-  생성 시 worker 기본값을 명시해서 저장하고, 단계형 UI에서는 1~4만 허용한다.
+- `candidateCount Int?`: 해당 회차가 요청할 후보 수. 단계형 UI에서는 1~4를 반드시
+  저장한다. 기존 잡과 자동 draft 잡의 `null`은 `WORKER_CANDIDATE_COUNT`를 사용해
+  현재 환경별 동작을 보존한다.
 
 `prompt`는 관리자가 확인한 최종 프롬프트를 저장한다. 프로바이더별 자유 파라미터인
 `paramsJson`에는 워크플로 메타데이터를 섞지 않는다.
@@ -201,7 +202,7 @@ queued와 running 상태, 프로바이더, 대기 또는 진행 문구를 표시
 
 - job별 candidateCount가 provider 요청에 전달됨
 - 완료 시 후보를 자동 선택하지 않음
-- 기존 queued 잡은 저장된 worker 기본 후보 수로 기존 동작 유지
+- 기존 queued 잡의 null 후보 수는 worker 환경 기본값으로 기존 동작 유지
 - draft 잡은 claim하지 않음
 
 ### admin UI 테스트
