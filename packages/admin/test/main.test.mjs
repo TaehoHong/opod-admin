@@ -28,10 +28,15 @@ import {
   formActionRequest,
   generationActionBody,
   generationClickRequest,
+  generationRouteState,
   generationSettingsPayload,
   generationCreatePayload,
   generationFormActionRequest,
   generationActionRequest,
+  generationWorkflowStep,
+  imageDraftPayload,
+  imageDraftUpdatePayload,
+  imageWorkflowRequest,
   itemsFromPage,
   memoryBulkPayload,
   memoryPayload,
@@ -925,6 +930,96 @@ test("generationActionRequest builds existing job action endpoints", () => {
       },
     },
   );
+});
+
+test("generation route and job state restore the workflow step", () => {
+  assert.deepEqual(generationRouteState("#generation?jobId=job-1"), {
+    jobId: "job-1",
+  });
+  assert.equal(generationWorkflowStep({ status: "draft" }), "prompt");
+  assert.equal(generationWorkflowStep({ status: "queued" }), "generating");
+  assert.equal(generationWorkflowStep({ status: "running" }), "generating");
+  assert.equal(
+    generationWorkflowStep({ status: "completed", outputMediaId: null }),
+    "select",
+  );
+  assert.equal(
+    generationWorkflowStep({
+      status: "completed",
+      outputMediaId: "media-1",
+    }),
+    "complete",
+  );
+  assert.equal(generationWorkflowStep({ status: "failed" }), "failed");
+});
+
+test("image draft payloads trim strings and cast candidate count", () => {
+  const form = new FormData();
+  form.set("characterId", " ai-1 ");
+  form.set("inputPrompt", " street portrait ");
+  form.set("prompt", " edited street portrait ");
+  form.set("candidateCount", "3");
+
+  assert.deepEqual(imageDraftPayload(form), {
+    characterId: "ai-1",
+    inputPrompt: "street portrait",
+    candidateCount: 3,
+  });
+  assert.deepEqual(imageDraftUpdatePayload(form), {
+    prompt: "edited street portrait",
+    candidateCount: 3,
+  });
+});
+
+test("image workflow actions map to staged generation endpoints", () => {
+  const createBody = {
+    characterId: "ai-1",
+    inputPrompt: "street portrait",
+    candidateCount: 3,
+  };
+  const updateBody = { prompt: "edited portrait", candidateCount: 2 };
+  const jsonHeaders = { "content-type": "application/json" };
+
+  assert.deepEqual(imageWorkflowRequest("create", "", createBody), {
+    path: "/api/generation/image-jobs/draft",
+    options: {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(createBody),
+    },
+  });
+  assert.deepEqual(imageWorkflowRequest("update", "job-1", updateBody), {
+    path: "/api/generation/jobs/job-1/draft",
+    options: {
+      method: "PATCH",
+      headers: jsonHeaders,
+      body: JSON.stringify(updateBody),
+    },
+  });
+  assert.deepEqual(imageWorkflowRequest("confirm", "job-1"), {
+    path: "/api/generation/jobs/job-1/confirm",
+    options: {
+      method: "POST",
+      headers: jsonHeaders,
+      body: "{}",
+    },
+  });
+  assert.deepEqual(imageWorkflowRequest("select", "job-1", "media-2"), {
+    path: "/api/generation/jobs/job-1/select-output",
+    options: {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ mediaId: "media-2" }),
+    },
+  });
+  assert.deepEqual(imageWorkflowRequest("regenerate", "job-1"), {
+    path: "/api/generation/jobs/job-1/regenerate",
+    options: {
+      method: "POST",
+      headers: jsonHeaders,
+      body: "{}",
+    },
+  });
 });
 
 test("generation click actions map to runnable job endpoints", () => {

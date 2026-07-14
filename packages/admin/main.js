@@ -182,6 +182,27 @@ export function characterRouteState(hash = "#characters") {
   };
 }
 
+export function generationRouteState(hash = "#generation") {
+  const [, query = ""] = String(hash ?? "")
+    .replace(/^#/, "")
+    .split("?");
+  const params = new URLSearchParams(query);
+  return { jobId: String(params.get("jobId") ?? "").trim() };
+}
+
+export function generationWorkflowStep(job = {}) {
+  if (job.status === "queued" || job.status === "running") {
+    return "generating";
+  }
+  if (job.status === "completed") {
+    return job.outputMediaId ? "complete" : "select";
+  }
+  if (job.status === "failed") {
+    return "failed";
+  }
+  return "prompt";
+}
+
 export function characterHref(input = {}) {
   const params = new URLSearchParams();
   if (input.mode === "create") {
@@ -331,6 +352,27 @@ export function generationActionRequest(jobId, action, body = {}) {
       body: JSON.stringify(body),
     },
   };
+}
+
+export function imageWorkflowRequest(action, jobId, value) {
+  if (action === "create") {
+    return jsonRequest("/api/generation/image-jobs/draft", "POST", value);
+  }
+  if (action === "update") {
+    return jsonRequest(`/api/generation/jobs/${jobId}/draft`, "PATCH", value);
+  }
+  if (action === "confirm") {
+    return jsonRequest(`/api/generation/jobs/${jobId}/confirm`, "POST", {});
+  }
+  if (action === "select") {
+    return jsonRequest(`/api/generation/jobs/${jobId}/select-output`, "POST", {
+      mediaId: value,
+    });
+  }
+  if (action === "regenerate") {
+    return jsonRequest(`/api/generation/jobs/${jobId}/regenerate`, "POST", {});
+  }
+  return null;
 }
 
 // 워커 수동 실행 — jobId를 주면 해당 queued 잡, 없으면 다음 queued 잡.
@@ -498,6 +540,21 @@ export function generationCreatePayload(form) {
     characterId: fieldValue(form, "characterId"),
     mediaType: fieldValue(form, "mediaType"),
     prompt: fieldValue(form, "prompt"),
+  };
+}
+
+export function imageDraftPayload(form) {
+  return {
+    characterId: fieldValue(form, "characterId"),
+    inputPrompt: fieldValue(form, "inputPrompt"),
+    candidateCount: Number(form.get("candidateCount")),
+  };
+}
+
+export function imageDraftUpdatePayload(form) {
+  return {
+    prompt: fieldValue(form, "prompt"),
+    candidateCount: Number(form.get("candidateCount")),
   };
 }
 
