@@ -1,6 +1,7 @@
-import { INestApplication } from "@nestjs/common";
+import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
+import { GenerationWorkerService } from "../worker/generation-worker.service";
 import { AdminController } from "./admin.controller";
 import { AdminService } from "./admin.service";
 import { AdminJwtGuard } from "./auth/admin-jwt.guard";
@@ -16,6 +17,7 @@ describe("AdminController reads", () => {
   const listGenerationJobs = jest.fn();
   const getGenerationJob = jest.fn();
   const listTopHashtags = jest.fn();
+  const runJobNow = jest.fn();
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({
@@ -35,12 +37,19 @@ describe("AdminController reads", () => {
             listTopHashtags,
           },
         },
+        {
+          provide: GenerationWorkerService,
+          useValue: { runJobNow },
+        },
       ],
     })
       .overrideGuard(AdminJwtGuard)
       .useValue({ canActivate: () => true })
       .compile();
     app = module.createNestApplication();
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
   });
 
@@ -54,6 +63,7 @@ describe("AdminController reads", () => {
     listGenerationJobs.mockReset();
     getGenerationJob.mockReset();
     listTopHashtags.mockReset();
+    runJobNow.mockReset();
   });
 
   afterAll(async () => {
@@ -200,5 +210,50 @@ describe("AdminController reads", () => {
       .expect({ items: [] });
 
     expect(listTopHashtags).toHaveBeenCalledWith({ limit: 7 });
+  });
+
+  it("runs the next queued generation job via the worker", async () => {
+    runJobNow.mockResolvedValue({ jobId: "job-1" });
+
+    await request(app.getHttpServer())
+      .post("/api/generation/worker/run")
+      .send({})
+      .expect(201)
+      .expect({ jobId: "job-1" });
+
+    expect(runJobNow).toHaveBeenCalledWith(undefined);
+  });
+
+  it("runs a specific queued generation job via the worker", async () => {
+    runJobNow.mockResolvedValue({
+      jobId: "0190d8d1-463b-7e36-a9ef-0242ac120002",
+    });
+
+    await request(app.getHttpServer())
+      .post("/api/generation/worker/run")
+      .send({ jobId: "0190d8d1-463b-7e36-a9ef-0242ac120002" })
+      .expect(201);
+
+    expect(runJobNow).toHaveBeenCalledWith(
+      "0190d8d1-463b-7e36-a9ef-0242ac120002",
+    );
+  });
+
+  it("rejects a manual run for a job that is not queued", async () => {
+    runJobNow.mockResolvedValue({ jobId: null });
+
+    await request(app.getHttpServer())
+      .post("/api/generation/worker/run")
+      .send({ jobId: "0190d8d1-463b-7e36-a9ef-0242ac120002" })
+      .expect(400);
+  });
+
+  it("rejects a malformed manual run jobId", async () => {
+    await request(app.getHttpServer())
+      .post("/api/generation/worker/run")
+      .send({ jobId: "not-a-uuid" })
+      .expect(400);
+
+    expect(runJobNow).not.toHaveBeenCalled();
   });
 });

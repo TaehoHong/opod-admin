@@ -9,6 +9,8 @@ import { GeneratedMediaStore } from "./generated-media-store";
 import {
   GeneratedImage,
   ImageGenerationProvider,
+  ImageGenerationProviders,
+  ImageGenerationRequest,
 } from "./image-generation.provider";
 
 export type WorkerConfig = {
@@ -69,6 +71,7 @@ type ClaimedJob = {
   character: {
     visualProfile: {
       negativePrompt: string;
+      providerConfig: unknown;
       referenceMedia: {
         media: { url: string; uploadedAt: Date | null };
       }[];
@@ -90,9 +93,14 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
   private consecutiveFailures = 0;
   private circuitOpenUntil = 0;
 
+  // 수동 실행(runJobNow)이 백그라운드로 돌린 처리들. 셧다운 시 대기한다.
+  private readonly manualRuns = new Set<Promise<void>>();
+
   constructor(
     private readonly prisma: PrismaService,
-    private readonly provider: ImageGenerationProvider,
+    // 잡 처리 시마다 재해석한다 — admin 설정(UI)에서 키/모델을 바꾸면
+    // 프로세스 재시작 없이 다음 잡부터 반영된다.
+    private readonly resolveProviders: () => Promise<ImageGenerationProviders>,
     private readonly store: GeneratedMediaStore,
     private readonly config: WorkerConfig,
     private readonly sleep: (ms: number) => Promise<void> = defaultSleep,
@@ -104,9 +112,17 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       this.logger.log("Generation worker is disabled (WORKER_ENABLED)");
       return;
     }
-    this.logger.log(
-      `Generation worker enabled (provider=${this.provider.name}, interval=${this.config.pollIntervalMs}ms)`,
-    );
+    void this.resolveProviders()
+      .then((providers) =>
+        this.logger.log(
+          `Generation worker enabled (t2i=${providers.t2i.name}, edit=${providers.edit.name}, interval=${this.config.pollIntervalMs}ms)`,
+        ),
+      )
+      .catch(() =>
+        this.logger.log(
+          `Generation worker enabled (interval=${this.config.pollIntervalMs}ms)`,
+        ),
+      );
     this.scheduleNext();
   }
 
@@ -116,6 +132,41 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       clearTimeout(this.timer);
     }
     await this.activeTick;
+    await Promise.allSettled(this.manualRuns);
+  }
+
+  // admin의 수동 실행. 지정 잡(또는 다음 queued 잡)을 claim만 하고
+  // 처리는 백그라운드로 넘긴다 — HTTP 응답이 생성 완료를 기다리지 않는다.
+  // WORKER_ENABLED와 무관하게 동작한다 (자동 루프만 env로 제어).
+  async runJobNow(jobId?: string): Promise<{ jobId: string | null }> {
+    const claimed = jobId
+      ? await this.claimSpecificJob(jobId)
+      : await this.claimNextJob();
+    if (!claimed) {
+      return { jobId: null };
+    }
+    const run = this.processJob(claimed)
+      .catch((error) =>
+        this.logger.error(
+          `Manual run ${claimed} failed: ${errorMessage(error)}`,
+        ),
+      )
+      .finally(() => this.manualRuns.delete(run));
+    this.manualRuns.add(run);
+    return { jobId: claimed };
+  }
+
+  // 특정 queued 이미지 잡을 조건부 전이로 claim한다. queued가 아니면 null.
+  private async claimSpecificJob(jobId: string): Promise<string | undefined> {
+    const claimed = await this.prisma.generationJob.updateMany({
+      where: { id: jobId, status: "queued", mediaType: "image" },
+      data: {
+        status: "running",
+        leaseExpiresAt: new Date(Date.now() + this.config.leaseSeconds * 1000),
+        attemptCount: { increment: 1 },
+      },
+    });
+    return claimed.count > 0 ? jobId : undefined;
   }
 
   private scheduleNext(): void {
@@ -262,32 +313,44 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    // 레퍼런스가 있으면 edit(컨디셔닝) 모델, 없으면(콜드스타트) t2i 모델.
+    // edit 계열은 image_urls가 필수라 레퍼런스 없는 잡을 보낼 수 없다.
+    const request = this.buildRequest(job);
+    const providers = await this.resolveProviders();
+    const provider =
+      request.referenceImageUrls.length > 0 ? providers.edit : providers.t2i;
+
     try {
-      const result = await this.generate(job);
-      await this.persistSuccess(job, result);
+      const result = await this.generate(job, provider, request);
+      await this.persistSuccess(job, result, provider.name);
       this.consecutiveFailures = 0;
-      this.logger.log(`Job ${job.id} completed via ${this.provider.name}`);
+      this.logger.log(`Job ${job.id} completed via ${provider.name}`);
     } catch (error) {
       await this.handleFailure(job, error);
     }
   }
 
-  private async generate(job: ClaimedJob): Promise<CompletedGeneration> {
+  private async generate(
+    job: ClaimedJob,
+    provider: ImageGenerationProvider,
+    request: ImageGenerationRequest,
+  ): Promise<CompletedGeneration> {
     let requestId = job.providerRequestId ?? undefined;
     // 이전 시도가 다른 프로바이더로 제출했던 잡은 이어받을 수 없으므로 새로 제출한다.
-    if (!requestId || job.provider !== this.provider.name) {
-      const submitted = await this.provider.submit(this.buildRequest(job));
+    // (시도 사이에 레퍼런스가 승격되어 라우팅이 바뀐 경우도 여기에 해당한다.)
+    if (!requestId || job.provider !== provider.name) {
+      const submitted = await provider.submit(request);
       requestId = submitted.requestId;
       // 제출 직후 기록해야 크래시 후 재수용 시 이중 제출을 막는다.
       await this.prisma.generationJob.updateMany({
         where: { id: job.id, status: "running" },
-        data: { providerRequestId: requestId, provider: this.provider.name },
+        data: { providerRequestId: requestId, provider: provider.name },
       });
     }
 
     const deadline = Date.now() + this.config.providerTimeoutMs;
     for (;;) {
-      const result = await this.provider.poll(requestId);
+      const result = await provider.poll(requestId);
       if (result.status === "completed") {
         return result;
       }
@@ -295,6 +358,8 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
         throw new ProviderJobFailedError(result.errorMessage);
       }
       if (Date.now() >= deadline) {
+        // 아직 큐에서 시작 전이라면 과금 전에 취소를 시도한다 (베스트에포트).
+        await provider.cancel?.(requestId);
         throw new Error(
           `provider polling timed out after ${this.config.providerTimeoutMs}ms`,
         );
@@ -304,17 +369,24 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private buildRequest(job: ClaimedJob) {
+  private buildRequest(job: ClaimedJob): ImageGenerationRequest {
     const profile = job.character.visualProfile;
     const referenceImageUrls = (profile?.referenceMedia ?? [])
       .filter((reference) => reference.media.uploadedAt)
       .map((reference) => reference.media.url);
+    // 프로필의 프로바이더 기본값(providerConfig) 위에 잡별 파라미터(paramsJson)를
+    // 덮어쓴다. 종횡비 등 모델별 파라미터는 코드가 아니라 이 데이터로 주입한다.
+    const extraParams = {
+      ...(isRecord(profile?.providerConfig) ? profile.providerConfig : {}),
+      ...(isRecord(job.paramsJson) ? job.paramsJson : {}),
+    };
     return {
       prompt: job.prompt,
       negativePrompt: profile?.negativePrompt || undefined,
       referenceImageUrls,
       candidateCount: this.config.candidateCount,
-      extraParams: isRecord(job.paramsJson) ? job.paramsJson : undefined,
+      extraParams:
+        Object.keys(extraParams).length > 0 ? extraParams : undefined,
     };
   }
 
@@ -323,6 +395,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
   private async persistSuccess(
     job: ClaimedJob,
     result: CompletedGeneration,
+    providerName: string,
   ): Promise<void> {
     const stored: {
       image: GeneratedImage;
@@ -395,7 +468,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
           actionType: "GENERATION_JOB_COMPLETED",
           targetTable: "generation_jobs",
           targetId: job.id,
-          reason: `generation worker completed job via ${this.provider.name}`,
+          reason: `generation worker completed job via ${providerName}`,
         },
       });
     });
@@ -475,7 +548,8 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
-function startOfKstDay(now: Date = new Date()): Date {
+// 예산 게이트/오늘 지출 집계의 KST 자정 기준 (설정 API에서도 재사용).
+export function startOfKstDay(now: Date = new Date()): Date {
   const kstOffsetMs = 9 * 60 * 60 * 1000;
   const kst = new Date(now.getTime() + kstOffsetMs);
   kst.setUTCHours(0, 0, 0, 0);

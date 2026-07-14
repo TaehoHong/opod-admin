@@ -310,9 +310,23 @@ Media:               + isAiGenerated Boolean  // AI 기본법 표시 의무. Pha
 
 ### 다음 단계 A — 실서비스 전환 준비 (코드보다 운영 작업, Phase 3 전에)
 
-1. **실제 프로바이더 연결**: `FAL_API_KEY` + `FAL_IMAGE_MODEL`(이미지),
-   `LLM_API_URL/KEY/MODEL`(기획) 설정. `WORKER_DAILY_BUDGET_USD` 필수 설정,
-   `WORKER_JOB_COST_ESTIMATE_USD`를 실제 모델 단가 × 후보 수로 보정.
+1. **실제 프로바이더 연결** (fal.ai 어댑터 구현 완료 — 2026-07-14):
+   `FAL_API_KEY` + `FAL_IMAGE_MODEL`(레퍼런스 컨디셔닝 edit 모델, 권장
+   `fal-ai/nano-banana/edit` ~$0.039/장) + `FAL_IMAGE_T2I_MODEL`(콜드스타트
+   text-to-image, 권장 `fal-ai/nano-banana`), `LLM_API_URL/KEY/MODEL`(기획) 설정.
+   `WORKER_DAILY_BUDGET_USD` 필수 설정, `WORKER_JOB_COST_ESTIMATE_USD`를
+   실제 모델 단가 × 후보 수로 보정(nano-banana × 후보 2 ≈ 0.08).
+   **키/모델은 admin UI(생성 작업 > 프로바이더 설정)에서 DB로도 관리할 수 있고,
+   DB 값이 env보다 우선하며 재시작 없이 다음 잡부터 적용된다**
+   (`docs/api/admin-settings.md`). 수동 실행은 `POST /api/generation/worker/run`.
+   워커는 레퍼런스 유무로 t2i/edit 모델을 라우팅한다 — edit 계열은
+   `image_urls`가 필수라 콜드스타트 잡을 받을 수 없기 때문.
+   `visualProfile.providerConfig`(기본값) ← `job.paramsJson`(우선) 순으로
+   모델별 파라미터(nano-banana `aspect_ratio`, seedream `image_size` 등)를 주입.
+   **주의**: 레퍼런스 이미지 URL은 fal이 밖에서 fetch할 수 있어야 한다 —
+   `S3_PUBLIC_BASE_URL`(공개 CDN/버킷) 설정이 전제. negative prompt는
+   SD 계열 외 모델(nano-banana·seedream·flux)이 입력으로 받지 않아 전달하지
+   않는다(필요 시 paramsJson의 `negative_prompt`로 강제).
 2. **한소이(@soi_film) 온보딩**: 비주얼 프로필(외모/스타일/네거티브) 작성 →
    테스트 생성 루프로 레퍼런스 3~5장 큐레이션·승격 → 페르소나/메모리 정비 →
    포스팅 정책 활성화(주 3~4회, 18~22 KST). 첫 몇 주는 전량 검수 유지.
@@ -357,7 +371,9 @@ Media:               + isAiGenerated Boolean  // AI 기본법 표시 의무. Pha
 | `WORKER_JOB_COST_ESTIMATE_USD` | 0.2 | 비용 미보고 프로바이더의 잡당 추정 단가 (기록·예산 계산) |
 | `WORKER_CIRCUIT_BREAKER_THRESHOLD` | 5 | 연속 실패 임계치 |
 | `WORKER_CIRCUIT_BREAKER_COOLDOWN_MS` | 300000 | 서킷 오픈 시간 |
-| `FAL_API_KEY` / `FAL_IMAGE_MODEL` | (없음) | 미설정 시 로컬 플레이스홀더 프로바이더 |
+| `FAL_API_KEY` | (없음) | 미설정 시 로컬 플레이스홀더 프로바이더 (t2i/edit 모두) |
+| `FAL_IMAGE_MODEL` | (없음) | 레퍼런스 컨디셔닝(edit) 모델. 예: `fal-ai/nano-banana/edit` |
+| `FAL_IMAGE_T2I_MODEL` | (없음) | 콜드스타트 text-to-image 모델. 예: `fal-ai/nano-banana`. 미설정 시 `FAL_IMAGE_MODEL`을 그대로 사용 — edit 전용 모델을 쓴다면 반드시 함께 설정 |
 | `S3_BUCKET` 등 기존 S3 변수 | — | 미설정 시 data-URL 저장(개발 전용, 1MB 상한) |
 | `LLM_API_URL` / `LLM_API_KEY` / `LLM_MODEL` | (없음) | 기획 플래너. 미설정 시 로컬 결정적 플래너 |
 | `DRAFT_PLAN_LEASE_SECONDS` | 120 | 기획 단계 lease |

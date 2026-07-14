@@ -333,9 +333,41 @@ export function generationActionRequest(jobId, action, body = {}) {
   };
 }
 
+// 워커 수동 실행 — jobId를 주면 해당 queued 잡, 없으면 다음 queued 잡.
+// WORKER_ENABLED와 무관하게 동작한다 (자동 루프만 env로 제어).
+export function workerRunRequest(jobId) {
+  const id = String(jobId ?? "").trim();
+  return {
+    path: "/api/generation/worker/run",
+    options: {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(id ? { jobId: id } : {}),
+    },
+  };
+}
+
+// 프로바이더 설정 저장 페이로드.
+// - API 키: 비워두면 필드 생략(기존 값 유지) — 삭제는 별도 버튼(null 전송).
+// - 모델: 항상 전송, 빈 값은 null(삭제 → env 폴백 복귀).
+export function generationSettingsPayload(form) {
+  const payload = {};
+  const apiKey = String(form.get("falApiKey") ?? "").trim();
+  if (apiKey) {
+    payload.falApiKey = apiKey;
+  }
+  const model = String(form.get("falImageModel") ?? "").trim();
+  payload.falImageModel = model || null;
+  const t2iModel = String(form.get("falImageT2iModel") ?? "").trim();
+  payload.falImageT2iModel = t2iModel || null;
+  return payload;
+}
+
 export function generationClickRequest(clickAction, jobId) {
   if (clickAction === "job-run") {
-    return generationActionRequest(jobId, "run");
+    // 수동 실행은 워커 경로를 쓴다 — 레거시 /run은 프로바이더 호출 없이
+    // 상태만 바꾸는 껍데기라 UI에서는 더 이상 쓰지 않는다.
+    return workerRunRequest(jobId);
   }
   if (clickAction === "job-retry") {
     return generationActionRequest(jobId, "retry");
@@ -1851,14 +1883,105 @@ async function renderPostDetail(id) {
 
 // ── 생성 작업 ──────────────────────────────────────────────────────────────
 
+// 설정 카드 — fal 키/모델 관리 + 적용 상태. 값 원문은 서버가 마스킹해 준다.
+function generationSettingsCard(settings) {
+  if (!settings) {
+    return `<div class="card">${noticeBlock(
+      "프로바이더 설정을 불러오지 못했습니다.",
+    )}</div>`;
+  }
+  const key = settings.falApiKey ?? { set: false };
+  const sources = settings.resolved?.sources ?? {};
+  const keyStatus = key.set
+    ? `<span class="tag tag-accent">저장됨 ····${escapeHtml(key.last4 ?? "")}</span>
+       <button class="btn btn-ghost" type="button" style="color:var(--color-accent-2-700)" data-act="settings-clear-key">키 삭제</button>`
+    : sources.apiKey === "env"
+      ? '<span class="tag tag-neutral">env 키 사용 중</span>'
+      : '<span class="tag tag-accent-2">키 없음 — 로컬 플레이스홀더</span>';
+  return `
+    <form class="card" data-action="generation-settings" style="gap:12px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+        <h6 style="margin:0;color:var(--color-neutral-600)">프로바이더 설정 — PUT /api/settings/generation</h6>
+      </div>
+      <div class="field">
+        <label>fal.ai API 키</label>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">${keyStatus}</div>
+        <input class="input" name="falApiKey" type="password" autocomplete="off"
+          placeholder="${key.set ? "변경할 때만 입력 (비워두면 유지)" : "fal.ai 대시보드에서 발급한 키"}">
+      </div>
+      <div class="field">
+        <label>edit 모델 (레퍼런스 컨디셔닝)</label>
+        <input class="input" name="falImageModel" value="${attr(
+          settings.falImageModel ?? "",
+        )}" placeholder="fal-ai/nano-banana/edit${
+          sources.editModel === "env" ? " (현재 env 값 사용 중)" : ""
+        }">
+      </div>
+      <div class="field">
+        <label>t2i 모델 (콜드스타트)</label>
+        <input class="input" name="falImageT2iModel" value="${attr(
+          settings.falImageT2iModel ?? "",
+        )}" placeholder="fal-ai/nano-banana${
+          sources.t2iModel === "env" ? " (현재 env 값 사용 중)" : ""
+        }">
+      </div>
+      <p style="margin:0;font-size:12px;color:var(--color-neutral-600)">DB 설정이 env보다 우선하며 다음 잡부터 즉시 적용됩니다. 모델을 비우고 저장하면 env 값으로 되돌아갑니다.</p>
+      <div><button class="btn btn-primary" type="submit">저장</button></div>
+    </form>`;
+}
+
+// 워커 상태 카드 — 적용 프로바이더/예산/오늘 지출 + 수동 실행.
+function generationWorkerCard(settings, queuedCount) {
+  if (!settings) {
+    return "";
+  }
+  const worker = settings.worker ?? {};
+  const resolved = settings.resolved ?? {};
+  const budgetLabel =
+    worker.dailyBudgetUsd != null
+      ? `$${Number(worker.todaySpendUsd ?? 0).toFixed(2)} / $${Number(
+          worker.dailyBudgetUsd,
+        ).toFixed(2)}`
+      : `$${Number(worker.todaySpendUsd ?? 0).toFixed(2)} (예산 미설정)`;
+  return `
+    <div class="card" style="gap:12px">
+      <h6 style="margin:0;color:var(--color-neutral-600)">워커 — POST /api/generation/worker/run</h6>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13.5px;align-items:baseline">
+        <span class="stat-label" style="margin:0">자동 루프</span>
+        <span>${
+          worker.enabled
+            ? '<span class="tag tag-accent">켜짐</span>'
+            : '<span class="tag tag-neutral">꺼짐 (WORKER_ENABLED)</span>'
+        }</span>
+        <span class="stat-label" style="margin:0">t2i</span>
+        <span style="word-break:break-all">${escapeHtml(resolved.t2iProvider ?? "—")}</span>
+        <span class="stat-label" style="margin:0">edit</span>
+        <span style="word-break:break-all">${escapeHtml(resolved.editProvider ?? "—")}</span>
+        <span class="stat-label" style="margin:0">오늘 지출</span>
+        <span>${escapeHtml(budgetLabel)} <span style="color:var(--color-neutral-500);font-size:12px">(잡당 추정 $${Number(
+          worker.jobCostEstimateUsd ?? 0,
+        ).toFixed(2)})</span></span>
+      </div>
+      <p style="margin:0;font-size:12px;color:var(--color-neutral-600)">수동 실행은 자동 루프가 꺼져 있어도 동작합니다. 대기 중인 다음 작업 하나를 즉시 처리합니다.</p>
+      <div><button class="btn btn-secondary" type="button" data-act="worker-run">대기 작업 실행${
+        queuedCount > 0 ? ` (${queuedCount}건 대기)` : ""
+      }</button></div>
+    </div>`;
+}
+
 async function renderGeneration() {
   await loadCharacterOptions();
   const statusParam =
     ui.filters.jobStatus === "전체" ? "" : ui.filters.jobStatus;
-  const res = await request(
-    endpoint("/api/generation/jobs", { status: statusParam, limit: 50 }),
-  );
+  const [res, settingsRes] = await Promise.all([
+    request(
+      endpoint("/api/generation/jobs", { status: statusParam, limit: 50 }),
+    ),
+    request("/api/settings/generation"),
+  ]);
   const jobs = itemsFromPage(res.body);
+  const settings = settingsRes.ok ? settingsRes.body : null;
+  const queuedCount = jobs.filter((j) => j.status === "queued").length;
 
   const rows = jobs.length
     ? jobs
@@ -1908,6 +2031,10 @@ async function renderGeneration() {
       "이미지·영상 생성 job 큐 — 등록 → 실행 → 완료, 실패 시 재시도 복제",
       `<button class="btn btn-primary" data-act="open-dialog" data-dialog="new-job">큐 등록</button>`,
     )}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px;align-items:start">
+      ${generationSettingsCard(settings)}
+      ${generationWorkerCard(settings, queuedCount)}
+    </div>
     <div class="toolbar">
       ${segControl(
         "jobStatus",
@@ -3162,6 +3289,20 @@ async function dispatchSubmit(action, form, formData) {
     return;
   }
 
+  // — provider settings —
+  if (action === "generation-settings") {
+    const result = await submitViaSpec(
+      jsonRequest(
+        "/api/settings/generation",
+        "PUT",
+        generationSettingsPayload(formData),
+      ),
+      "프로바이더 설정을 저장했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
+
   // — new generation job —
   const generationFormRequest = await generationFormActionRequest(
     action,
@@ -3269,13 +3410,41 @@ async function handleClick(event) {
     renderApp();
     return;
   }
+  if (act === "worker-run") {
+    const spec = workerRunRequest();
+    const result = await request(spec.path, spec.options);
+    if (!result.ok) {
+      showToast(
+        errorMessage(result.body, "실행 요청이 실패했습니다."),
+        "",
+        true,
+      );
+      return;
+    }
+    showToast(
+      result.body?.jobId
+        ? "작업 실행을 시작했습니다 — 잠시 후 상태가 갱신됩니다."
+        : "대기 중인 작업이 없습니다.",
+      `POST ${spec.path}`,
+    );
+    renderApp();
+    return;
+  }
+  if (act === "settings-clear-key") {
+    const result = await submitViaSpec(
+      jsonRequest("/api/settings/generation", "PUT", { falApiKey: null }),
+      "API 키를 삭제했습니다.",
+    );
+    if (result.ok) renderApp();
+    return;
+  }
   const generationRequest = generationClickRequest(act, el.dataset.id);
   if (generationRequest) {
     event.stopPropagation();
     const result = await submitViaSpec(
       generationRequest,
       act === "job-run"
-        ? "생성 작업을 실행했습니다."
+        ? "작업 실행을 시작했습니다 — 잠시 후 상태가 갱신됩니다."
         : "생성 작업을 재시도 큐에 등록했습니다.",
     );
     if (result.ok) renderApp();

@@ -28,6 +28,7 @@ import {
   formActionRequest,
   generationActionBody,
   generationClickRequest,
+  generationSettingsPayload,
   generationCreatePayload,
   generationFormActionRequest,
   generationActionRequest,
@@ -52,6 +53,7 @@ import {
   storyPayload,
   submitNewPost,
   userDetailRequests,
+  workerRunRequest,
 } from "../main.js";
 
 test("postMediaGallery renders image and video previews with escaped URLs", () => {
@@ -926,12 +928,13 @@ test("generationActionRequest builds existing job action endpoints", () => {
 });
 
 test("generation click actions map to runnable job endpoints", () => {
+  // 실행 버튼은 워커 수동 실행을 쓴다 — 레거시 /run(프로바이더 미호출)이 아니라.
   assert.deepEqual(generationClickRequest("job-run", "job-1"), {
-    path: "/api/generation/jobs/job-1/run",
+    path: "/api/generation/worker/run",
     options: {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: "{}",
+      body: JSON.stringify({ jobId: "job-1" }),
     },
   });
   assert.deepEqual(generationClickRequest("job-retry", "job-2"), {
@@ -943,6 +946,43 @@ test("generation click actions map to runnable job endpoints", () => {
     },
   });
   assert.equal(generationClickRequest("job-complete", "job-3"), null);
+});
+
+test("workerRunRequest targets the next or a specific queued job", () => {
+  assert.deepEqual(workerRunRequest(), {
+    path: "/api/generation/worker/run",
+    options: {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    },
+  });
+  assert.deepEqual(JSON.parse(workerRunRequest(" job-9 ").options.body), {
+    jobId: "job-9",
+  });
+});
+
+test("generationSettingsPayload keeps a blank API key and clears blank models", () => {
+  const form = new FormData();
+  form.set("falApiKey", "   ");
+  form.set("falImageModel", " fal-ai/nano-banana/edit ");
+  form.set("falImageT2iModel", "");
+
+  // 키 비움 = 필드 생략(기존 값 유지), 모델 빈 값 = null(env 폴백 복귀)
+  assert.deepEqual(generationSettingsPayload(form), {
+    falImageModel: "fal-ai/nano-banana/edit",
+    falImageT2iModel: null,
+  });
+
+  const withKey = new FormData();
+  withKey.set("falApiKey", " fal-secret ");
+  withKey.set("falImageModel", "fal-ai/nano-banana/edit");
+  withKey.set("falImageT2iModel", "fal-ai/nano-banana");
+  assert.deepEqual(generationSettingsPayload(withKey), {
+    falApiKey: "fal-secret",
+    falImageModel: "fal-ai/nano-banana/edit",
+    falImageT2iModel: "fal-ai/nano-banana",
+  });
 });
 
 test("dialog context carries the selected generation job id", () => {

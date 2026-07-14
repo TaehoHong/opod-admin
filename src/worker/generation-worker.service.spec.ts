@@ -6,6 +6,7 @@ import {
 import {
   GenerationPollResult,
   ImageGenerationProvider,
+  ImageGenerationProviders,
 } from "./image-generation.provider";
 
 const baseConfig: WorkerConfig = {
@@ -81,23 +82,36 @@ function prismaMock(): PrismaMock {
   };
 }
 
+type ProviderMock = ImageGenerationProvider & {
+  submit: jest.Mock;
+  poll: jest.Mock;
+  cancel: jest.Mock;
+};
+
 function providerMock(
   pollResults: GenerationPollResult[],
-): ImageGenerationProvider & { submit: jest.Mock; poll: jest.Mock } {
+  name = "test-provider",
+): ProviderMock {
   const poll = jest.fn();
   for (const result of pollResults) {
     poll.mockResolvedValueOnce(result);
   }
   return {
-    name: "test-provider",
+    name,
     submit: jest.fn().mockResolvedValue({ requestId: "req-1" }),
     poll,
+    cancel: jest.fn().mockResolvedValue(undefined),
   };
+}
+
+// 대부분의 테스트는 라우팅과 무관하므로 같은 목을 t2i/edit 양쪽에 쓴다.
+function bothProviders(provider: ImageGenerationProvider) {
+  return { t2i: provider, edit: provider };
 }
 
 function makeService(
   prisma: PrismaMock,
-  provider: ImageGenerationProvider,
+  providers: ImageGenerationProvider | ImageGenerationProviders,
   config: Partial<WorkerConfig> = {},
   store = jest.fn().mockResolvedValue({
     url: "https://cdn.local/stored.png",
@@ -105,15 +119,35 @@ function makeService(
   }),
   downloadBytes = jest.fn().mockResolvedValue(Buffer.from("png-bytes")),
 ) {
+  const pair =
+    "t2i" in providers && "edit" in providers
+      ? providers
+      : bothProviders(providers as ImageGenerationProvider);
   const service = new GenerationWorkerService(
     prisma as never,
-    provider,
+    // 프로덕션에서는 잡마다 DB 설정을 재해석하는 resolver가 들어간다.
+    () => Promise.resolve(pair),
     store,
     { ...baseConfig, ...config },
     () => Promise.resolve(),
     downloadBytes,
   );
   return { service, store, downloadBytes };
+}
+
+// persistSuccess 경로용 트랜잭션 목.
+function mockSuccessTransaction(prisma: PrismaMock) {
+  prisma.$transaction.mockImplementation(
+    async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        media: { create: jest.fn().mockResolvedValue({ id: "media-a" }) },
+        generationJob: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        generationJobOutput: { createMany: jest.fn() },
+        characterActionLog: { create: jest.fn() },
+      }),
+  );
 }
 
 describe("workerConfigFromEnv", () => {
@@ -453,5 +487,164 @@ describe("GenerationWorkerService", () => {
         errorMessage: expect.stringContaining("timed out"),
       }),
     });
+    // 데드라인 초과 시 시작 전 요청은 과금 전에 취소를 시도한다 (베스트에포트).
+    expect(provider.cancel).toHaveBeenCalledWith("req-1");
+  });
+
+  it("routes cold-start jobs (no usable references) to the t2i provider", async () => {
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
+    prisma.generationJob.findUnique.mockResolvedValue(
+      claimedJob({
+        character: {
+          visualProfile: {
+            negativePrompt: "",
+            referenceMedia: [
+              // 업로드 미확정 레퍼런스는 걸러지므로 콜드스타트로 취급된다.
+              {
+                media: {
+                  url: "https://cdn.local/pending.png",
+                  uploadedAt: null,
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    mockSuccessTransaction(prisma);
+    const t2i = providerMock(
+      [{ status: "completed", images: [{ url: "https://p.local/a.png" }] }],
+      "fal:t2i-model",
+    );
+    const edit = providerMock([], "fal:edit-model");
+    const { service } = makeService(prisma, { t2i, edit });
+
+    await service.tick();
+
+    expect(t2i.submit).toHaveBeenCalledWith(
+      expect.objectContaining({ referenceImageUrls: [] }),
+    );
+    expect(edit.submit).not.toHaveBeenCalled();
+    // provider 컬럼에는 실제 사용된 프로바이더 이름이 기록된다.
+    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", status: "running" },
+      data: { providerRequestId: "req-1", provider: "fal:t2i-model" },
+    });
+  });
+
+  it("routes jobs with confirmed references to the edit provider", async () => {
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
+    prisma.generationJob.findUnique.mockResolvedValue(claimedJob());
+    mockSuccessTransaction(prisma);
+    const t2i = providerMock([], "fal:t2i-model");
+    const edit = providerMock(
+      [{ status: "completed", images: [{ url: "https://p.local/a.png" }] }],
+      "fal:edit-model",
+    );
+    const { service } = makeService(prisma, { t2i, edit });
+
+    await service.tick();
+
+    expect(edit.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referenceImageUrls: ["https://cdn.local/reference.png"],
+      }),
+    );
+    expect(t2i.submit).not.toHaveBeenCalled();
+  });
+
+  it("runJobNow claims a specific queued job and processes it in the background", async () => {
+    const prisma = prismaMock();
+    prisma.generationJob.findUnique.mockResolvedValue(claimedJob());
+    mockSuccessTransaction(prisma);
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(prisma, provider);
+
+    await expect(service.runJobNow("job-1")).resolves.toEqual({
+      jobId: "job-1",
+    });
+
+    // 조건부 claim: queued 이미지 잡만, lease 세팅 + attempt 증가
+    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", status: "queued", mediaType: "image" },
+      data: expect.objectContaining({
+        status: "running",
+        attemptCount: { increment: 1 },
+        leaseExpiresAt: expect.any(Date),
+      }),
+    });
+    // 처리 자체는 백그라운드 — 셧다운 훅이 완료를 기다린다.
+    await service.onModuleDestroy();
+    expect(provider.submit).toHaveBeenCalled();
+  });
+
+  it("runJobNow returns null when the job is not queued", async () => {
+    const prisma = prismaMock();
+    prisma.generationJob.updateMany.mockResolvedValue({ count: 0 });
+    const provider = providerMock([]);
+    const { service } = makeService(prisma, provider);
+
+    await expect(service.runJobNow("job-1")).resolves.toEqual({
+      jobId: null,
+    });
+    expect(prisma.generationJob.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("runJobNow without a jobId claims the next queued job", async () => {
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-7" }]);
+    prisma.generationJob.findUnique.mockResolvedValue(
+      claimedJob({ id: "job-7" }),
+    );
+    mockSuccessTransaction(prisma);
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(prisma, provider);
+
+    await expect(service.runJobNow()).resolves.toEqual({ jobId: "job-7" });
+    await service.onModuleDestroy();
+  });
+
+  it("merges visual profile providerConfig under job paramsJson", async () => {
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
+    prisma.generationJob.findUnique.mockResolvedValue(
+      claimedJob({
+        paramsJson: { seed: 42 },
+        character: {
+          visualProfile: {
+            negativePrompt: "blurry",
+            providerConfig: { aspect_ratio: "4:5", seed: 1 },
+            referenceMedia: [
+              {
+                media: {
+                  url: "https://cdn.local/reference.png",
+                  uploadedAt: new Date("2026-07-01T00:00:00.000Z"),
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    mockSuccessTransaction(prisma);
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(prisma, provider);
+
+    await service.tick();
+
+    // 프로필 기본값(aspect_ratio) 위에 잡별 파라미터(seed)가 우선한다.
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extraParams: { aspect_ratio: "4:5", seed: 42 },
+      }),
+    );
   });
 });

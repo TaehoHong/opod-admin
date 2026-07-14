@@ -218,6 +218,17 @@ model Inquiry {
   @@schema("opod")
 }
 
+// 운영 콘솔에서 관리하는 키-값 설정 (예: 생성 프로바이더 API 키/모델).
+// 쓰기는 opod-admin만 수행한다. 값은 평문 저장이므로 노출 API는 반드시 마스킹한다.
+model AdminSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("admin_settings")
+  @@schema("opod")
+}
+
 model Admin {
   id        String   @id @default(uuid(7)) @db.Uuid
   email     String   @unique

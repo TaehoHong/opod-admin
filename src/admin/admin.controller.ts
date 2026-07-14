@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -9,6 +10,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { parsePageQuery } from "../domain/database/page";
+import { GenerationWorkerService } from "../worker/generation-worker.service";
 import { AdminJwtGuard } from "./auth/admin-jwt.guard";
 import { AdminService } from "./admin.service";
 import { CompleteGenerationJobDto } from "./dto/complete-generation-job.dto";
@@ -21,13 +23,17 @@ import { FailGenerationJobDto } from "./dto/fail-generation-job.dto";
 import { GrantCreditsDto } from "./dto/grant-credits.dto";
 import { RetryGenerationJobDto } from "./dto/retry-generation-job.dto";
 import { RunGenerationJobDto } from "./dto/run-generation-job.dto";
+import { RunGenerationWorkerDto } from "./dto/run-generation-worker.dto";
 import { StartMediaUploadDto } from "./dto/start-media-upload.dto";
 import { UpdateReportDto } from "./dto/update-report.dto";
 
 @Controller("api")
 @UseGuards(AdminJwtGuard)
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly generationWorker: GenerationWorkerService,
+  ) {}
 
   @Get("posts")
   listPosts(
@@ -266,6 +272,19 @@ export class AdminController {
     @Body() body: FailGenerationJobDto,
   ) {
     return this.adminService.failGenerationJob({ jobId, ...body });
+  }
+
+  // 워커 수동 실행 — 지정(또는 다음) queued 이미지 잡을 claim하고 백그라운드로
+  // 처리한다. WORKER_ENABLED와 무관하게 동작한다 (리허설/즉시 실행용).
+  @Post("generation/worker/run")
+  async runGenerationWorker(@Body() body: RunGenerationWorkerDto) {
+    const result = await this.generationWorker.runJobNow(body.jobId);
+    if (body.jobId && !result.jobId) {
+      throw new BadRequestException(
+        "Generation job is not queued (image jobs only)",
+      );
+    }
+    return result;
   }
 
   @Get("character-action-logs")
