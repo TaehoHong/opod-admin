@@ -65,6 +65,7 @@ type ClaimedJob = {
   prompt: string;
   status: string;
   attemptCount: number;
+  candidateCount: number | null;
   provider: string | null;
   providerRequestId: string | null;
   paramsJson: unknown;
@@ -384,7 +385,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       prompt: job.prompt,
       negativePrompt: profile?.negativePrompt || undefined,
       referenceImageUrls,
-      candidateCount: this.config.candidateCount,
+      candidateCount: job.candidateCount ?? this.config.candidateCount,
       extraParams:
         Object.keys(extraParams).length > 0 ? extraParams : undefined,
     };
@@ -445,7 +446,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
         where: { id: job.id, status: "running" },
         data: {
           status: "completed",
-          outputMediaId: mediaIds[0],
+          outputMediaId: null,
           costUsd,
           leaseExpiresAt: null,
           errorMessage: null,
@@ -459,7 +460,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
           jobId: job.id,
           mediaId,
           candidateIndex: index,
-          selected: index === 0,
+          selected: false,
         })),
       });
       await tx.characterActionLog.create({

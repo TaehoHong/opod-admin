@@ -30,6 +30,7 @@ function claimedJob(overrides: Record<string, unknown> = {}) {
     prompt: "film photo of a beach",
     status: "running",
     attemptCount: 1,
+    candidateCount: 3,
     provider: null,
     providerRequestId: null,
     paramsJson: null,
@@ -222,7 +223,7 @@ describe("GenerationWorkerService", () => {
       prompt: "film photo of a beach",
       negativePrompt: "blurry",
       referenceImageUrls: ["https://cdn.local/reference.png"],
-      candidateCount: 2,
+      candidateCount: 3,
       extraParams: undefined,
     });
     expect(downloadBytes).toHaveBeenCalledTimes(2);
@@ -240,27 +241,36 @@ describe("GenerationWorkerService", () => {
       where: { id: "job-1", status: "running" },
       data: expect.objectContaining({
         status: "completed",
-        outputMediaId: "media-a",
+        outputMediaId: null,
         costUsd: 0.2,
       }),
     });
     expect(txOutputsCreateMany).toHaveBeenCalledWith({
-      data: [
-        {
-          jobId: "job-1",
-          mediaId: "media-a",
-          candidateIndex: 0,
-          selected: true,
-        },
-        {
-          jobId: "job-1",
-          mediaId: "media-b",
-          candidateIndex: 1,
-          selected: false,
-        },
-      ],
+      data: expect.arrayContaining([
+        expect.objectContaining({ candidateIndex: 0, selected: false }),
+        expect.objectContaining({ candidateIndex: 1, selected: false }),
+      ]),
     });
     expect(txActionLogCreate).toHaveBeenCalled();
+  });
+
+  it("uses the configured candidate count for legacy jobs", async () => {
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
+    prisma.generationJob.findUnique.mockResolvedValue(
+      claimedJob({ candidateCount: null }),
+    );
+    mockSuccessTransaction(prisma);
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(prisma, provider);
+
+    await service.tick();
+
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({ candidateCount: 2 }),
+    );
   });
 
   it("resumes polling with a stored provider request id instead of resubmitting", async () => {
