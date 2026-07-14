@@ -6,6 +6,9 @@ import { adminHeaders } from "./admin-auth";
 
 const uniqueHandle = (base: string) => `${base}-${randomUUID().slice(0, 8)}`;
 
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 describe("generation", () => {
   it("enqueues, starts, and completes an image generation job", async () => {
     const moduleRef = await Test.createTestingModule({
@@ -67,7 +70,7 @@ describe("generation", () => {
       .set(headers)
       .expect(200);
 
-    const actionTypes = logs.body
+    const actionTypes = logs.body.items
       .filter(
         (log: { targetId?: string; characterId: string }) =>
           log.targetId === created.body.id &&
@@ -218,7 +221,7 @@ describe("generation", () => {
       .expect(200);
 
     expect(
-      logs.body.map((log: { actionType: string }) => log.actionType),
+      logs.body.items.map((log: { actionType: string }) => log.actionType),
     ).toEqual(expect.arrayContaining(["GENERATION_JOB_RUN"]));
 
     await app.close();
@@ -255,6 +258,12 @@ describe("generation", () => {
       .expect(201);
 
     await request(app.getHttpServer())
+      .post(`/api/generation/jobs/${job.body.id}/fail`)
+      .set(headers)
+      .send({ errorMessage: "provider timeout" })
+      .expect(201);
+
+    await request(app.getHttpServer())
       .post(`/api/generation/jobs/${job.body.id}/retry`)
       .set(headers)
       .send({ reason: "provider timeout" })
@@ -272,6 +281,147 @@ describe("generation", () => {
       });
 
     await app.close();
+  });
+
+  it("runs the image draft workflow through generation and regeneration", async () => {
+    const generationEnv = {
+      S3_BUCKET: process.env.S3_BUCKET,
+      AWS_REGION: process.env.AWS_REGION,
+      AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
+      AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
+      S3_PUBLIC_BASE_URL: process.env.S3_PUBLIC_BASE_URL,
+      FAL_API_KEY: process.env.FAL_API_KEY,
+      FAL_IMAGE_MODEL: process.env.FAL_IMAGE_MODEL,
+      FAL_IMAGE_T2I_MODEL: process.env.FAL_IMAGE_T2I_MODEL,
+    };
+    delete process.env.S3_BUCKET;
+    delete process.env.AWS_REGION;
+    delete process.env.AWS_ACCESS_KEY_ID;
+    delete process.env.AWS_SECRET_ACCESS_KEY;
+    delete process.env.S3_PUBLIC_BASE_URL;
+    delete process.env.FAL_API_KEY;
+    delete process.env.FAL_IMAGE_MODEL;
+    delete process.env.FAL_IMAGE_T2I_MODEL;
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    const app = moduleRef.createNestApplication();
+
+    try {
+      await app.init();
+      const headers = await adminHeaders(app);
+      const character = await request(app.getHttpServer())
+        .post("/api/characters")
+        .set(headers)
+        .send({
+          publicId: uniqueHandle("gen-draft"),
+          displayName: "Generation Draft",
+          bio: "visual",
+          interests: ["art"],
+        })
+        .expect(201);
+
+      const created = await request(app.getHttpServer())
+        .post("/api/generation/image-jobs/draft")
+        .set(headers)
+        .send({
+          characterId: character.body.id,
+          inputPrompt: "street portrait",
+          candidateCount: 2,
+        })
+        .expect(201);
+      expect(created.body).toMatchObject({
+        status: "draft",
+        inputPrompt: "street portrait",
+        candidateCount: 2,
+      });
+
+      const edited = await request(app.getHttpServer())
+        .patch(`/api/generation/jobs/${created.body.id}/draft`)
+        .set(headers)
+        .send({ prompt: "edited final prompt", candidateCount: 3 })
+        .expect(200);
+      expect(edited.body).toMatchObject({
+        status: "draft",
+        prompt: "edited final prompt",
+        candidateCount: 3,
+      });
+
+      const confirmed = await request(app.getHttpServer())
+        .post(`/api/generation/jobs/${created.body.id}/confirm`)
+        .set(headers)
+        .expect(201);
+      expect(confirmed.body.status).toBe("queued");
+
+      await request(app.getHttpServer())
+        .post("/api/generation/worker/run")
+        .set(headers)
+        .send({ jobId: created.body.id })
+        .expect(201)
+        .expect({ jobId: created.body.id });
+
+      const deadline = Date.now() + 10_000;
+      let completed: Record<string, unknown> | undefined;
+      while (Date.now() < deadline) {
+        const response = await request(app.getHttpServer())
+          .get(`/api/generation/jobs/${created.body.id}`)
+          .set(headers)
+          .expect(200);
+        if (response.body.status === "completed") {
+          completed = response.body;
+          break;
+        }
+        await wait(50);
+      }
+
+      expect(completed).toBeDefined();
+      expect(completed).toMatchObject({
+        status: "completed",
+        provider: "local",
+      });
+      const outputs = completed?.outputs as Array<{
+        mediaId: string;
+        selected: boolean;
+      }>;
+      expect(outputs).toHaveLength(3);
+      expect(outputs.every((output) => output.selected === false)).toBe(true);
+      expect(completed).not.toHaveProperty("outputMediaId");
+
+      const selected = await request(app.getHttpServer())
+        .post(`/api/generation/jobs/${created.body.id}/select-output`)
+        .set(headers)
+        .send({ mediaId: outputs[1].mediaId })
+        .expect(201);
+      expect(
+        selected.body.outputs.filter(
+          (output: { selected: boolean }) => output.selected,
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          mediaId: outputs[1].mediaId,
+          selected: true,
+        }),
+      ]);
+
+      const regenerated = await request(app.getHttpServer())
+        .post(`/api/generation/jobs/${created.body.id}/regenerate`)
+        .set(headers)
+        .expect(201);
+      expect(regenerated.body).toMatchObject({
+        status: "draft",
+        originJobId: created.body.id,
+      });
+    } finally {
+      await app.close();
+      Object.entries(generationEnv).forEach(([key, value]) => {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      });
+    }
   });
 
   it("keeps generation jobs in the admin controller", async () => {

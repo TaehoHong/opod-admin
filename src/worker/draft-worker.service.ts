@@ -28,7 +28,9 @@ export function draftWorkerConfigFromEnv(
     planLeaseSeconds: parsePositiveNumber(env.DRAFT_PLAN_LEASE_SECONDS) ?? 120,
     maxAttempts: parsePositiveNumber(env.DRAFT_MAX_ATTEMPTS) ?? 3,
     maxShots: parsePositiveNumber(env.DRAFT_MAX_SHOTS) ?? 2,
-    schedulerEnabled: env.DRAFT_SCHEDULER_ENABLED !== "false",
+    schedulerEnabled:
+      env.DRAFT_SCHEDULER_ENABLED === "true" ||
+      env.DRAFT_SCHEDULER_ENABLED === "1",
   };
 }
 

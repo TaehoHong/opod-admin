@@ -108,7 +108,18 @@ function txMock() {
 
 describe("draftWorkerConfigFromEnv", () => {
   it("is disabled by default and parses overrides", () => {
-    expect(draftWorkerConfigFromEnv({}).enabled).toBe(false);
+    expect(draftWorkerConfigFromEnv({})).toMatchObject({
+      enabled: false,
+      schedulerEnabled: false,
+    });
+    expect(
+      draftWorkerConfigFromEnv({ DRAFT_SCHEDULER_ENABLED: "true" })
+        .schedulerEnabled,
+    ).toBe(true);
+    expect(
+      draftWorkerConfigFromEnv({ DRAFT_SCHEDULER_ENABLED: "1" })
+        .schedulerEnabled,
+    ).toBe(true);
     expect(
       draftWorkerConfigFromEnv({
         WORKER_ENABLED: "true",

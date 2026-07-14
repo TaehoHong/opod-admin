@@ -6,10 +6,12 @@ All endpoints require an admin JWT:
 Authorization: Bearer <admin-jwt>
 ```
 
-Job lifecycle: `queued → running → completed | failed`. Transitions are atomic
-(conditional on the expected current status); a transition from any other
-status returns HTTP 400. Expired-lease `running` jobs are reclaimed by the
-generation worker sweep (requeued while attempts remain, failed afterwards).
+Staged image lifecycle: `draft → queued → running → completed | failed`.
+`draft` means the prompt and candidate count are still editable; no provider
+work begins until the draft is confirmed into `queued`. Transitions are atomic
+(conditional on the expected current status). Expired-lease `running` jobs are
+reclaimed by the generation worker sweep (requeued while attempts remain,
+failed afterwards).
 
 ## List generation jobs
 
@@ -22,7 +24,7 @@ Every query parameter is optional.
 | Parameter     | Values                                     | Behavior                                  |
 | ------------- | ------------------------------------------ | ----------------------------------------- |
 | `characterId` | character UUID                             | Exact match                               |
-| `status`      | `queued`, `running`, `completed`, `failed` | Exact match                               |
+| `status`      | `draft`, `queued`, `running`, `completed`, `failed` | Exact match                       |
 | `mediaType`   | `image`, `video`                           | Exact match                               |
 | `limit`       | positive integer                           | Default 20, maximum 50                    |
 | `cursor`      | cursor returned by this endpoint           | Reads the next page with the same filters |
@@ -59,6 +61,108 @@ not contain that job returns HTTP 400 `Invalid cursor`.
 
 Optional fields appear only when set: `provider`, `originJobId` (manual-retry
 lineage), `errorMessage` (failed jobs), `costUsd` (decimal string).
+
+## Staged image generation workflow
+
+These five endpoints implement request → prompt edit → confirm → select →
+regenerate. All return the generation job shape described below. Provider work
+starts only after `confirm`; creating and editing a draft never calls a
+provider.
+
+### 1. Create an image draft
+
+```http
+POST /api/generation/image-jobs/draft
+Content-Type: application/json
+
+{
+  "characterId": "<uuid>",
+  "inputPrompt": "street portrait",
+  "candidateCount": 2
+}
+```
+
+`characterId`, non-empty `inputPrompt`, and integer `candidateCount` from 1 to
+4 are required. The response has `status: "draft"`, preserves `inputPrompt`,
+and returns the compiled `prompt` after applying the character visual profile.
+It also includes `candidateCount`, `mediaType: "image"`, `attemptCount: 0`,
+`generationContext`, `createdAt`, and `updatedAt`.
+
+### 2. Edit the draft
+
+```http
+PATCH /api/generation/jobs/:id/draft
+Content-Type: application/json
+
+{ "prompt": "edited final prompt", "candidateCount": 3 }
+```
+
+Both a non-empty final `prompt` and integer `candidateCount` from 1 to 4 are
+required. Only a `draft` job can be edited. The response remains `draft` and
+contains the updated `prompt` and `candidateCount`; the original `inputPrompt`
+is unchanged.
+
+### 3. Confirm the draft
+
+```http
+POST /api/generation/jobs/:id/confirm
+```
+
+Atomically changes `draft` to `queued`. Retrying confirm is idempotent and
+returns the job in its current post-draft state. The worker may claim the job
+only after this transition.
+
+For an immediate manual worker run, independent of `WORKER_ENABLED`:
+
+```http
+POST /api/generation/worker/run
+Content-Type: application/json
+
+{ "jobId": "<uuid>" }
+```
+
+The response is `{ "jobId": "<uuid>" }`; processing continues in the
+background. Poll `GET /api/generation/jobs/:id` until it reaches `completed` or
+`failed`.
+
+### 4. Select a completed output
+
+```http
+POST /api/generation/jobs/:id/select-output
+Content-Type: application/json
+
+{ "mediaId": "<candidate media uuid>" }
+```
+
+The media must belong to the completed job. Selection is idempotent: all of the
+job's candidates are first marked `selected: false`, then the requested one is
+marked `selected: true` and copied to `outputMediaId`. The response includes
+the updated `outputs` and `outputMedia`.
+
+### 5. Regenerate
+
+```http
+POST /api/generation/jobs/:id/regenerate
+```
+
+Only a completed or failed image job can be regenerated. This creates a new
+`draft` with the same character, prompt, input prompt, candidate count, and
+provider parameters. The new response has `originJobId` equal to the source
+job ID; the source job is unchanged. The regenerated draft must be confirmed
+before any provider work begins.
+
+### Generation job response fields
+
+| Field | Presence and meaning |
+| ----- | -------------------- |
+| `id`, `characterId`, `mediaType`, `prompt`, `status` | Always present |
+| `attemptCount`, `createdAt`, `updatedAt` | Always present |
+| `inputPrompt`, `candidateCount` | Present for staged image jobs |
+| `generationContext` | Present when the character visual profile was loaded |
+| `outputs` | Present after candidates have been persisted; each item has `mediaId`, `url`, `candidateIndex`, `selected` |
+| `outputMediaId`, `outputMedia` | Present only after selecting or otherwise assigning an output |
+| `originJobId` | Present on retry/regeneration descendants |
+| `provider`, `costUsd`, `errorMessage` | Present only when recorded |
 
 ## Get a generation job
 
@@ -172,8 +276,9 @@ character, media type, prompt, provider) linked to the source via
 
 | Condition                                       | Status | Message                                                                  |
 | ----------------------------------------------- | ------ | ------------------------------------------------------------------------ |
-| `status` is unsupported                         | 400    | `Generation job status must be queued, running, completed, or failed`    |
+| `status` is unsupported                         | 400    | `Generation job status must be draft, queued, running, completed, or failed` |
 | `mediaType` is unsupported                      | 400    | `Generation media type must be image or video`                           |
+| `candidateCount` is not an integer from 1 to 4 | 400    | `Candidate count must be an integer from 1 to 4`                         |
 | `limit` is not a positive integer               | 400    | `limit must be a positive integer`                                       |
 | `cursor` is malformed or outside active filters | 400    | `Invalid cursor`                                                         |
 | transition from the wrong status                | 400    | `Only queued generation jobs can start` (and equivalents per transition) |
