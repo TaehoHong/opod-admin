@@ -943,6 +943,55 @@ export class AdminService {
     return this.generationService.getJob(jobId);
   }
 
+  async createImageGenerationDraft(
+    input: Parameters<GenerationService["createImageDraft"]>[0],
+  ) {
+    const job = await this.generationService.createImageDraft(input);
+    await this.recordCharacterActionLog({
+      characterId: job.characterId,
+      actionType: "GENERATION_DRAFT_CREATED",
+      targetTable: "generation_jobs",
+      targetId: job.id,
+      reason: "generation draft created",
+    });
+    return job;
+  }
+
+  updateImageGenerationDraft(
+    jobId: string,
+    input: Parameters<GenerationService["updateImageDraft"]>[1],
+  ) {
+    return this.generationService.updateImageDraft(jobId, input);
+  }
+
+  async confirmImageGenerationDraft(jobId: string) {
+    const job = await this.generationService.confirmImageDraft(jobId);
+    await this.recordCharacterActionLog({
+      characterId: job.characterId,
+      actionType: "GENERATION_DRAFT_CONFIRMED",
+      targetTable: "generation_jobs",
+      targetId: job.id,
+      reason: "generation draft confirmed",
+    });
+    return job;
+  }
+
+  selectGenerationOutput(jobId: string, mediaId: string) {
+    return this.generationService.selectOutput(jobId, mediaId);
+  }
+
+  async regenerateImageJob(jobId: string) {
+    const job = await this.generationService.regenerateImageJob(jobId);
+    await this.recordCharacterActionLog({
+      characterId: job.characterId,
+      actionType: "GENERATION_JOB_REGENERATED",
+      targetTable: "generation_jobs",
+      targetId: job.id,
+      reason: `generation job regenerated from ${jobId}`,
+    });
+    return job;
+  }
+
   async enqueueGenerationJob(
     input: Parameters<GenerationService["enqueueJob"]>[0],
   ) {

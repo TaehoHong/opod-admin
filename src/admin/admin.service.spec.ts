@@ -537,6 +537,103 @@ describe("AdminService", () => {
     expect(getJob).toHaveBeenCalledWith("job-1");
   });
 
+  it("creates an image draft and records the creation action", async () => {
+    const createImageDraft = jest.fn().mockResolvedValue({
+      id: "job-1",
+      characterId: "ai-1",
+    });
+    const createLog = jest.fn().mockResolvedValue(undefined);
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { characterActionLog: { create: createLog } },
+      { createImageDraft },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await service.createImageGenerationDraft({
+      characterId: "ai-1",
+      inputPrompt: "portrait",
+      candidateCount: 3,
+    });
+
+    expect(createImageDraft).toHaveBeenCalledWith({
+      characterId: "ai-1",
+      inputPrompt: "portrait",
+      candidateCount: 3,
+    });
+    expect(createLog).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actionType: "GENERATION_DRAFT_CREATED",
+        targetId: "job-1",
+      }),
+    });
+  });
+
+  it.each([
+    {
+      method: "confirmImageGenerationDraft" as const,
+      generationMethod: "confirmImageDraft" as const,
+      actionType: "GENERATION_DRAFT_CONFIRMED",
+    },
+    {
+      method: "regenerateImageJob" as const,
+      generationMethod: "regenerateImageJob" as const,
+      actionType: "GENERATION_JOB_REGENERATED",
+    },
+  ])("delegates $method and records $actionType", async (testCase) => {
+    const delegate = jest.fn().mockResolvedValue({
+      id: "job-2",
+      characterId: "ai-1",
+    });
+    const createLog = jest.fn().mockResolvedValue(undefined);
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { characterActionLog: { create: createLog } },
+      { [testCase.generationMethod]: delegate },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await service[testCase.method]("job-1");
+
+    expect(delegate).toHaveBeenCalledWith("job-1");
+    expect(createLog).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        characterId: "ai-1",
+        actionType: testCase.actionType,
+        targetTable: "generation_jobs",
+        targetId: "job-2",
+      }),
+    });
+  });
+
+  it("delegates draft updates and output selection without duplicate logs", async () => {
+    const updateImageDraft = jest.fn().mockResolvedValue({ id: "job-1" });
+    const selectOutput = jest.fn().mockResolvedValue({ id: "job-1" });
+    const createLog = jest.fn();
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      { characterActionLog: { create: createLog } },
+      { updateImageDraft, selectOutput },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await service.updateImageGenerationDraft("job-1", {
+      prompt: "edited",
+      candidateCount: 2,
+    });
+    await service.selectGenerationOutput("job-1", "media-2");
+
+    expect(updateImageDraft).toHaveBeenCalledWith("job-1", {
+      prompt: "edited",
+      candidateCount: 2,
+    });
+    expect(selectOutput).toHaveBeenCalledWith("job-1", "media-2");
+    expect(createLog).not.toHaveBeenCalled();
+  });
+
   it("lists filtered posts with cursor pagination", async () => {
     const createdAt = new Date("2026-07-12T00:00:00.000Z");
     const cursor = Buffer.from(

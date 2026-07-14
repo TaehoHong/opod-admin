@@ -14,6 +14,7 @@ import { GenerationWorkerService } from "../worker/generation-worker.service";
 import { AdminJwtGuard } from "./auth/admin-jwt.guard";
 import { AdminService } from "./admin.service";
 import { CompleteGenerationJobDto } from "./dto/complete-generation-job.dto";
+import { CreateImageGenerationDraftDto } from "./dto/create-image-generation-draft.dto";
 import { CreatePostCommentDto } from "./dto/create-post-comment.dto";
 import { CreatePostReactionDto } from "./dto/create-post-reaction.dto";
 import { CreatePostDto } from "./dto/create-post.dto";
@@ -24,7 +25,9 @@ import { GrantCreditsDto } from "./dto/grant-credits.dto";
 import { RetryGenerationJobDto } from "./dto/retry-generation-job.dto";
 import { RunGenerationJobDto } from "./dto/run-generation-job.dto";
 import { RunGenerationWorkerDto } from "./dto/run-generation-worker.dto";
+import { SelectGenerationOutputDto } from "./dto/select-generation-output.dto";
 import { StartMediaUploadDto } from "./dto/start-media-upload.dto";
+import { UpdateImageGenerationDraftDto } from "./dto/update-image-generation-draft.dto";
 import { UpdateReportDto } from "./dto/update-report.dto";
 
 @Controller("api")
@@ -235,6 +238,37 @@ export class AdminController {
   @Post("generation/jobs")
   enqueueGenerationJob(@Body() body: EnqueueGenerationJobDto) {
     return this.adminService.enqueueGenerationJob(body);
+  }
+
+  @Post("generation/image-jobs/draft")
+  createImageGenerationDraft(@Body() body: CreateImageGenerationDraftDto) {
+    return this.adminService.createImageGenerationDraft(body);
+  }
+
+  @Patch("generation/jobs/:id/draft")
+  updateImageGenerationDraft(
+    @Param("id") jobId: string,
+    @Body() body: UpdateImageGenerationDraftDto,
+  ) {
+    return this.adminService.updateImageGenerationDraft(jobId, body);
+  }
+
+  @Post("generation/jobs/:id/confirm")
+  confirmImageGenerationDraft(@Param("id") jobId: string) {
+    return this.adminService.confirmImageGenerationDraft(jobId);
+  }
+
+  @Post("generation/jobs/:id/select-output")
+  selectGenerationOutput(
+    @Param("id") jobId: string,
+    @Body() body: SelectGenerationOutputDto,
+  ) {
+    return this.adminService.selectGenerationOutput(jobId, body.mediaId);
+  }
+
+  @Post("generation/jobs/:id/regenerate")
+  regenerateImageJob(@Param("id") jobId: string) {
+    return this.adminService.regenerateImageJob(jobId);
   }
 
   @Post("generation/jobs/:id/start")

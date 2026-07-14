@@ -18,6 +18,11 @@ describe("AdminController reads", () => {
   const getGenerationJob = jest.fn();
   const listTopHashtags = jest.fn();
   const runJobNow = jest.fn();
+  const createImageGenerationDraft = jest.fn();
+  const updateImageGenerationDraft = jest.fn();
+  const confirmImageGenerationDraft = jest.fn();
+  const selectGenerationOutput = jest.fn();
+  const regenerateImageJob = jest.fn();
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({
@@ -35,6 +40,11 @@ describe("AdminController reads", () => {
             listGenerationJobs,
             getGenerationJob,
             listTopHashtags,
+            createImageGenerationDraft,
+            updateImageGenerationDraft,
+            confirmImageGenerationDraft,
+            selectGenerationOutput,
+            regenerateImageJob,
           },
         },
         {
@@ -64,6 +74,11 @@ describe("AdminController reads", () => {
     getGenerationJob.mockReset();
     listTopHashtags.mockReset();
     runJobNow.mockReset();
+    createImageGenerationDraft.mockReset();
+    updateImageGenerationDraft.mockReset();
+    confirmImageGenerationDraft.mockReset();
+    selectGenerationOutput.mockReset();
+    regenerateImageJob.mockReset();
   });
 
   afterAll(async () => {
@@ -188,6 +203,116 @@ describe("AdminController reads", () => {
 
     expect(getGenerationJob).toHaveBeenCalledWith("job-1");
   });
+
+  it("creates an image generation draft", async () => {
+    createImageGenerationDraft.mockResolvedValue({ id: "job-1" });
+
+    await request(app.getHttpServer())
+      .post("/api/generation/image-jobs/draft")
+      .send({
+        characterId: "ai-1",
+        inputPrompt: "portrait",
+        candidateCount: 3,
+      })
+      .expect(201)
+      .expect({ id: "job-1" });
+
+    expect(createImageGenerationDraft).toHaveBeenCalledWith({
+      characterId: "ai-1",
+      inputPrompt: "portrait",
+      candidateCount: 3,
+    });
+  });
+
+  it("updates an image generation draft", async () => {
+    updateImageGenerationDraft.mockResolvedValue({ id: "job-1" });
+
+    await request(app.getHttpServer())
+      .patch("/api/generation/jobs/job-1/draft")
+      .send({ prompt: "edited", candidateCount: 2 })
+      .expect(200)
+      .expect({ id: "job-1" });
+
+    expect(updateImageGenerationDraft).toHaveBeenCalledWith("job-1", {
+      prompt: "edited",
+      candidateCount: 2,
+    });
+  });
+
+  it("confirms an image generation draft", async () => {
+    confirmImageGenerationDraft.mockResolvedValue({ id: "job-1" });
+
+    await request(app.getHttpServer())
+      .post("/api/generation/jobs/job-1/confirm")
+      .expect(201)
+      .expect({ id: "job-1" });
+
+    expect(confirmImageGenerationDraft).toHaveBeenCalledWith("job-1");
+  });
+
+  it("selects a generation output", async () => {
+    selectGenerationOutput.mockResolvedValue({ id: "job-1" });
+
+    await request(app.getHttpServer())
+      .post("/api/generation/jobs/job-1/select-output")
+      .send({ mediaId: "media-2" })
+      .expect(201)
+      .expect({ id: "job-1" });
+
+    expect(selectGenerationOutput).toHaveBeenCalledWith("job-1", "media-2");
+  });
+
+  it("regenerates an image generation job", async () => {
+    regenerateImageJob.mockResolvedValue({ id: "job-2" });
+
+    await request(app.getHttpServer())
+      .post("/api/generation/jobs/job-1/regenerate")
+      .expect(201)
+      .expect({ id: "job-2" });
+
+    expect(regenerateImageJob).toHaveBeenCalledWith("job-1");
+  });
+
+  it.each([
+    { characterId: "", inputPrompt: "portrait", candidateCount: 3 },
+    { characterId: "ai-1", inputPrompt: "", candidateCount: 3 },
+    { characterId: "ai-1", inputPrompt: "portrait", candidateCount: 1.5 },
+    { characterId: "ai-1", inputPrompt: "portrait", candidateCount: 0 },
+    { characterId: "ai-1", inputPrompt: "portrait", candidateCount: 5 },
+  ])("rejects invalid image draft creation input %#", async (body) => {
+    await request(app.getHttpServer())
+      .post("/api/generation/image-jobs/draft")
+      .send(body)
+      .expect(400);
+
+    expect(createImageGenerationDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { prompt: "", candidateCount: 2 },
+    { prompt: "edited", candidateCount: 1.5 },
+    { prompt: "edited", candidateCount: 0 },
+    { prompt: "edited", candidateCount: 5 },
+  ])("rejects invalid image draft update input %#", async (body) => {
+    await request(app.getHttpServer())
+      .patch("/api/generation/jobs/job-1/draft")
+      .send(body)
+      .expect(400);
+
+    expect(updateImageGenerationDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([{}, { mediaId: "" }])(
+    "rejects invalid output selection input %#",
+    async (body) => {
+      await request(app.getHttpServer())
+        .post("/api/generation/jobs/job-1/select-output")
+        .send(body)
+        .expect(400);
+
+      expect(selectGenerationOutput).not.toHaveBeenCalled();
+    },
+  );
 
   it("uses the default top hashtag limit", async () => {
     listTopHashtags.mockResolvedValue({ items: [] });
