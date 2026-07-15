@@ -1,4 +1,9 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 
 export type StoredGeneratedFile = {
@@ -57,6 +62,35 @@ export function createGeneratedMediaStore(
       .join("/");
     return { url: `${base}/${encodedKey}`, storageKey };
   };
+}
+
+// 레퍼런스 이미지 전달용 presigned GET URL 서명자. 버킷을 공개로 열지 않고도
+// 프로바이더(fal)가 우리 S3 객체를 받을 수 있다. storageKey 없는 미디어
+// (외부 URL)나 S3 미설정 환경에서는 null을 반환해 원본 URL을 그대로 쓴다.
+export type ReferenceUrlSigner = (storageKey: string) => Promise<string>;
+
+const REFERENCE_URL_TTL_SECONDS = 60 * 60;
+
+export function createReferenceUrlSigner(
+  env: StoreEnv = process.env,
+): ReferenceUrlSigner | null {
+  const bucket = env.S3_BUCKET?.trim();
+  const region = env.AWS_REGION?.trim();
+  const accessKeyId = env.AWS_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = env.AWS_SECRET_ACCESS_KEY?.trim();
+  if (!bucket || !region || !accessKeyId || !secretAccessKey) {
+    return null;
+  }
+  const client = new S3Client({
+    region,
+    credentials: { accessKeyId, secretAccessKey },
+  });
+  return (storageKey) =>
+    getSignedUrl(
+      client,
+      new GetObjectCommand({ Bucket: bucket, Key: storageKey }),
+      { expiresIn: REFERENCE_URL_TTL_SECONDS },
+    );
 }
 
 // S3 미설정 시(로컬 개발) 데이터 URL로 저장한다. 실서비스 경로 아님.

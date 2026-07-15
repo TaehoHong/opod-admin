@@ -41,12 +41,14 @@ function claimedJob(overrides: Record<string, unknown> = {}) {
           {
             media: {
               url: "https://cdn.local/reference.png",
+              storageKey: "pod/reference/a.png",
               uploadedAt: new Date("2026-07-01T00:00:00.000Z"),
             },
           },
           {
             media: {
               url: "https://cdn.local/unconfirmed.png",
+              storageKey: null,
               uploadedAt: null,
             },
           },
@@ -119,6 +121,7 @@ function makeService(
     storageKey: "generated/image/a.png",
   }),
   downloadBytes = jest.fn().mockResolvedValue(Buffer.from("png-bytes")),
+  signReferenceUrl: ((storageKey: string) => Promise<string>) | null = null,
 ) {
   const pair =
     "t2i" in providers && "edit" in providers
@@ -132,6 +135,7 @@ function makeService(
     { ...baseConfig, ...config },
     () => Promise.resolve(),
     downloadBytes,
+    signReferenceUrl,
   );
   return { service, store, downloadBytes };
 }
@@ -704,6 +708,37 @@ describe("GenerationWorkerService", () => {
           "https://cdn.local/r2.png",
           "https://cdn.local/r3.png",
         ],
+      }),
+    );
+  });
+
+  it("presigns S3-backed reference urls before sending them to the provider", async () => {
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
+    prisma.generationJob.findUnique.mockResolvedValue(claimedJob());
+    mockSuccessTransaction(prisma);
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const sign = jest
+      .fn()
+      .mockResolvedValue("https://cdn.local/reference.png?signed=1");
+    const { service } = makeService(
+      prisma,
+      provider,
+      {},
+      undefined,
+      undefined,
+      sign,
+    );
+
+    await service.tick();
+
+    // storageKey 있는 레퍼런스는 서명된 URL로 전송된다 (비공개 버킷 접근).
+    expect(sign).toHaveBeenCalledWith("pod/reference/a.png");
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referenceImageUrls: ["https://cdn.local/reference.png?signed=1"],
       }),
     );
   });

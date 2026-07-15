@@ -8,7 +8,10 @@ import {
   DraftWorkerService,
   draftWorkerConfigFromEnv,
 } from "./draft-worker.service";
-import { createGeneratedMediaStore } from "./generated-media-store";
+import {
+  createGeneratedMediaStore,
+  createReferenceUrlSigner,
+} from "./generated-media-store";
 import {
   GenerationWorkerService,
   workerConfigFromEnv,
@@ -36,6 +39,10 @@ import { resolveImageGenerationProviders } from "./image-generation.provider";
             ),
           createGeneratedMediaStore(),
           workerConfigFromEnv(),
+          undefined,
+          undefined,
+          // 비공개 S3 레퍼런스를 프로바이더가 받을 수 있게 presigned URL로 서명.
+          createReferenceUrlSigner() ?? undefined,
         ),
       inject: [PrismaService, GenerationSettingsService],
     },

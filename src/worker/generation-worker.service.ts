@@ -5,7 +5,10 @@ import {
   OnModuleInit,
 } from "@nestjs/common";
 import { PrismaService } from "../domain/database/prisma.service";
-import { GeneratedMediaStore } from "./generated-media-store";
+import {
+  GeneratedMediaStore,
+  ReferenceUrlSigner,
+} from "./generated-media-store";
 import {
   GeneratedImage,
   ImageGenerationProvider,
@@ -102,7 +105,11 @@ type ClaimedJob = {
       providerConfig: unknown;
       referenceMedia: {
         mediaId: string;
-        media: { url: string; uploadedAt: Date | null };
+        media: {
+          url: string;
+          storageKey: string | null;
+          uploadedAt: Date | null;
+        };
       }[];
     } | null;
   };
@@ -134,6 +141,9 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly config: WorkerConfig,
     private readonly sleep: (ms: number) => Promise<void> = defaultSleep,
     private readonly downloadBytes: (url: string) => Promise<Buffer> = download,
+    // 자사 S3 레퍼런스를 프로바이더가 받을 수 있게 서명한다(버킷 비공개 유지).
+    // null이면 원본 URL 그대로 전송 (공개 버킷/외부 URL 전제).
+    private readonly signReferenceUrl: ReferenceUrlSigner | null = null,
   ) {}
 
   onModuleInit(): void {
@@ -329,7 +339,9 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
                 referenceMedia: {
                   orderBy: { sortOrder: "asc" },
                   include: {
-                    media: { select: { url: true, uploadedAt: true } },
+                    media: {
+                      select: { url: true, storageKey: true, uploadedAt: true },
+                    },
                   },
                 },
               },
@@ -344,7 +356,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
 
     // 레퍼런스가 있으면 edit(컨디셔닝) 모델, 없으면(콜드스타트) t2i 모델.
     // edit 계열은 image_urls가 필수라 레퍼런스 없는 잡을 보낼 수 없다.
-    const request = this.buildRequest(job);
+    const request = await this.buildRequest(job);
     const providers = await this.resolveProviders();
     const provider =
       request.referenceImageUrls.length > 0 ? providers.edit : providers.t2i;
@@ -401,7 +413,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private buildRequest(job: ClaimedJob): ImageGenerationRequest {
+  private async buildRequest(job: ClaimedJob): Promise<ImageGenerationRequest> {
     const profile = job.character.visualProfile;
     // sortOrder 순 업로드 완료 레퍼런스.
     const uploaded = (profile?.referenceMedia ?? []).filter(
@@ -432,9 +444,17 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
         `Job ${job.id}: ${ordered.length} reference images exceed the provider limit; sending first ${MAX_REFERENCE_IMAGES}`,
       );
     }
-    const referenceImageUrls = ordered
-      .slice(0, MAX_REFERENCE_IMAGES)
-      .map((reference) => reference.media.url);
+    // 자사 S3 객체(storageKey 있음)는 presigned URL로 서명해 보낸다 —
+    // 버킷을 공개로 열지 않아도 프로바이더가 다운로드할 수 있다.
+    const referenceImageUrls = await Promise.all(
+      ordered
+        .slice(0, MAX_REFERENCE_IMAGES)
+        .map((reference) =>
+          this.signReferenceUrl && reference.media.storageKey
+            ? this.signReferenceUrl(reference.media.storageKey)
+            : Promise.resolve(reference.media.url),
+        ),
+    );
     // 프로필의 프로바이더 기본값(providerConfig) 위에 잡별 파라미터(paramsJson)를
     // 덮어쓴다. 종횡비 등 모델별 파라미터는 코드가 아니라 이 데이터로 주입한다.
     // 밑줄 접두 키(_wizard 등)는 파이프라인 메타데이터 — 프로바이더에 보내지 않는다.
