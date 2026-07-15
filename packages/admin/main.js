@@ -2750,9 +2750,9 @@ function draftShotCard(d, shot) {
         <div style="display:flex;gap:6px;flex-wrap:wrap">${shotReferences
           .map(
             (r) =>
-              `<img src="${attr(
+              `<img src="${attr(r.url)}" alt="reference" data-act="zoom-image" data-url="${attr(
                 r.url,
-              )}" alt="reference" style="width:52px;height:52px;object-fit:cover;border:1px solid var(--color-divider)">`,
+              )}" style="width:52px;height:52px;object-fit:cover;border:1px solid var(--color-divider);cursor:zoom-in">`,
           )
           .join("")}</div>
       </div>`
@@ -2783,28 +2783,24 @@ function draftShotCard(d, shot) {
     )}</div>${regenBtn}`;
   } else {
     const outputs = Array.isArray(shot.outputs) ? shot.outputs : [];
+    // 이미지 클릭 = 확대(라이트박스), 선택 = 이미지 아래 별도 컨트롤.
     const candidates = outputs.length
       ? outputs
-          .map(
-            (o) => `<div style="position:relative">
-              <img src="${attr(o.url)}" alt="candidate ${escapeHtml(
-                o.candidateIndex,
-              )}"
-                data-act="draft-pick-output" data-draft="${attr(
+          .map((o) => {
+            const selectControl = o.selected
+              ? `<span class="tag tag-accent" style="text-align:center">✓ 선택됨</span>`
+              : `<button class="btn btn-ghost" style="padding:4px 0" data-act="draft-pick-output" data-draft="${attr(
                   d.id,
-                )}" data-job="${attr(shot.jobId)}" data-media="${attr(o.mediaId)}"
-                style="width:120px;height:120px;object-fit:cover;cursor:pointer;border:3px solid ${
-                  o.selected
-                    ? "var(--color-accent-700)"
-                    : "var(--color-divider)"
-                }">
-              ${
-                o.selected
-                  ? `<span class="tag tag-accent" style="position:absolute;top:4px;left:4px">선택됨</span>`
-                  : ""
-              }
-            </div>`,
-          )
+                )}" data-job="${attr(shot.jobId)}" data-media="${attr(
+                  o.mediaId,
+                )}">이 컷 선택</button>`;
+            return `<div class="candidate">
+              <img class="candidate-thumb${o.selected ? " is-selected" : ""}"
+                src="${attr(o.url)}" alt="candidate ${escapeHtml(o.candidateIndex)}"
+                data-act="zoom-image" data-url="${attr(o.url)}">
+              ${selectControl}
+            </div>`;
+          })
           .join("")
       : `<div style="padding:6px 0;color:var(--color-neutral-600);font-style:italic">아직 후보가 없습니다.</div>`;
     bodyHtml = `<div style="display:flex;gap:10px;flex-wrap:wrap">${candidates}</div>${regenBtn}`;
@@ -3784,6 +3780,42 @@ function paintDialog() {
   if (first) setTimeout(() => first.focus(), 40);
 }
 
+// 이미지 라이트박스 — 후보/레퍼런스 이미지를 크게 본다. 폼 세션(dialog)과
+// 분리된 가벼운 오버레이. 배경/닫기/Esc로 닫는다.
+let lightboxUrl = null;
+
+function lightboxRootEl() {
+  let el = document.getElementById("lightboxRoot");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "lightboxRoot";
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function paintLightbox() {
+  const root = lightboxRootEl();
+  root.innerHTML = lightboxUrl
+    ? `<div class="lightbox-backdrop" data-act="lightbox-backdrop">
+        <button class="lightbox-close" type="button" data-act="lightbox-backdrop" aria-label="닫기">×</button>
+        <img class="lightbox-img" src="${attr(lightboxUrl)}" alt="확대 이미지">
+      </div>`
+    : "";
+}
+
+function openLightbox(url) {
+  lightboxUrl = url;
+  paintLightbox();
+}
+
+function closeLightbox() {
+  if (!lightboxUrl) return false;
+  lightboxUrl = null;
+  paintLightbox();
+  return true;
+}
+
 function charSelect(name, characters, selected = "") {
   return `<select class="input" name="${name}">${optionList(
     characters ?? [],
@@ -4408,6 +4440,15 @@ async function handleClick(event) {
     renderPostMediaSelection();
     return;
   }
+  if (act === "zoom-image") {
+    if (el.dataset.url) openLightbox(el.dataset.url);
+    return;
+  }
+  if (act === "lightbox-backdrop") {
+    // 이미지 자체 클릭은 닫지 않는다 (버튼/배경만).
+    if (event.target === el) closeLightbox();
+    return;
+  }
   if (act === "dialog-backdrop") {
     if (event.target === el) closeDialog();
     return;
@@ -4916,11 +4957,15 @@ if (hasDocument) {
   document.body.addEventListener("drop", handlePostMediaDrop);
 
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && dialogState) closeDialog();
+    if (event.key !== "Escape") return;
+    // 라이트박스가 열려 있으면 먼저 닫는다 (dialog 위에 뜨는 오버레이).
+    if (closeLightbox()) return;
+    if (dialogState) closeDialog();
   });
 
   window.addEventListener("hashchange", () => {
     // Navigating dismisses any open modal so it can't linger over a new section.
+    closeLightbox();
     if (dialogState) closeDialog();
     renderApp();
   });

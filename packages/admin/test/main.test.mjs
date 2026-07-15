@@ -2041,3 +2041,55 @@ test("draft timeline shows planner-selected references only for cuts that have t
   // 선별 없이 전체 레퍼런스를 쓰는 컷(폴백)은 별도 표시가 없다.
   assert.doesNotMatch(withoutRefs, /선별 레퍼런스/);
 });
+
+test("candidate images zoom on click; selection is a separate control", () => {
+  const draftBase = {
+    id: "draft-x",
+    characterId: "ai-1",
+    contentType: "feed",
+    status: "needs_review",
+    attemptCount: 1,
+    caption: "c",
+    hashtags: [],
+    createdAt: "2026-07-12T00:00:00.000Z",
+    conceptJson: { source: "manual", mode: "manual" },
+  };
+  const shot = {
+    sortOrder: 0,
+    jobId: "job-x",
+    status: "completed",
+    prompt: "p",
+    outputs: [
+      {
+        candidateIndex: 0,
+        mediaId: "m-sel",
+        url: "https://cdn.test/sel.jpg",
+        selected: true,
+      },
+      {
+        candidateIndex: 1,
+        mediaId: "m-unsel",
+        url: "https://cdn.test/unsel.jpg",
+        selected: false,
+      },
+    ],
+  };
+  const html = draftDetailMarkup({ ...draftBase, shots: [shot] }, "한소이");
+
+  // 이미지는 클릭 시 확대(zoom-image), 선택 액션은 이미지에 붙지 않는다.
+  assert.match(
+    html,
+    /data-act="zoom-image"[^>]*data-url="https:\/\/cdn\.test\/unsel\.jpg"/,
+  );
+  assert.doesNotMatch(html, /data-act="draft-pick-output"[^>]*<img/);
+  // 미선택 후보는 "이 컷 선택" 버튼, 선택된 후보는 선택됨 표시.
+  assert.match(
+    html,
+    /<button[^>]*data-act="draft-pick-output"[^>]*data-media="m-unsel"[^>]*>이 컷 선택<\/button>/,
+  );
+  assert.match(html, /✓ 선택됨/);
+  assert.doesNotMatch(
+    html,
+    /data-act="draft-pick-output"[^>]*data-media="m-sel"/,
+  );
+});

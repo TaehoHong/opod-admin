@@ -491,6 +491,56 @@ select.input {
   margin-top: var(--space-2);
 }
 
+/* — image lightbox — click a candidate/reference to view it large — */
+.lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: var(--space-5);
+  background: color-mix(in srgb, var(--color-neutral-900) 82%, transparent);
+  cursor: zoom-out;
+}
+.lightbox-img {
+  max-width: 100%;
+  max-height: 92vh;
+  object-fit: contain;
+  box-shadow: var(--shadow-lg);
+  cursor: default;
+}
+.lightbox-close {
+  position: fixed;
+  top: var(--space-4);
+  right: var(--space-4);
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-neutral-900) 55%, transparent);
+  color: var(--color-neutral-50);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+/* candidate grid — image zooms on click, selection is a separate control */
+.candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 120px;
+}
+.candidate-thumb {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  cursor: zoom-in;
+  border: 3px solid var(--color-divider);
+}
+.candidate-thumb.is-selected {
+  border-color: var(--color-accent-700);
+}
+
 /* — cmyk numerals (analytics) — three-plate misregistered process print — */
 .cmyk-num {
   --cmyk-num-ground: var(--color-bg);
