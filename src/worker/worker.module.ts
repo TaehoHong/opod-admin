@@ -17,6 +17,7 @@ import {
   workerConfigFromEnv,
 } from "./generation-worker.service";
 import { resolveImageGenerationProviders } from "./image-generation.provider";
+import { resolveImagePromptBuilder } from "./image-prompt-builder";
 
 // 미디어 생성/드래프트 워커. 당분간 opod-admin 프로세스에서 함께 실행한다
 // (docs/media-generation-pipeline.md D1). admin HTTP 모듈에 대한 역참조를
@@ -57,6 +58,17 @@ import { resolveImageGenerationProviders } from "./image-generation.provider";
           prisma,
           async () =>
             resolveContentPlanner(await settings.resolvePlannerSettings()),
+          // 프롬프트 빌더는 기획 LLM 설정을 재사용한다 (캡셔너·위저드 전례).
+          // 대상 모델은 edit 우선 — 레퍼런스 있는 캐릭터가 일반 경로.
+          async () => {
+            const [planner, provider] = await Promise.all([
+              settings.resolvePlannerSettings(),
+              settings.resolveProviderSettings(),
+            ]);
+            return resolveImagePromptBuilder(planner, {
+              targetModelId: provider.editModel ?? provider.t2iModel,
+            });
+          },
           draftWorkerConfigFromEnv(),
         ),
       inject: [PrismaService, GenerationSettingsService],

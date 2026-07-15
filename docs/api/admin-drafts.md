@@ -7,8 +7,8 @@ Authorization: Bearer <admin-jwt>
 ```
 
 A draft is one unit of the automated content pipeline
-(`docs/media-generation-pipeline.md`): concept planning → shot generation →
-review → publish. Status machine:
+(`docs/media-generation-pipeline.md`): concept planning → prompt build →
+shot generation → review → publish. Status machine:
 
 ```text
 planned → generating → needs_review → approved → published
@@ -91,6 +91,33 @@ Content-Type: application/json
 
 Only `characterId` is required. Creates a `planned` draft; the worker plans it
 on the next tick. `sceneHint` is passed to the planner as a mandatory hint.
+`mode: "manual"` opts out of the automatic pipeline — the operator drives each
+step with the endpoints below.
+
+## Manual pipeline steps
+
+```http
+POST /api/drafts/:id/plan
+POST /api/drafts/:id/build-prompts
+POST /api/drafts/:id/jobs/:jobId/generate   { "prompt": "...", "candidateCount": 2 }
+POST /api/drafts/:id/publish
+```
+
+Each mirrors one automatic step (manual = step-execution mode of the automatic
+pipeline) and returns the updated draft; failures are HTTP 400 with a reason
+(404 when the draft does not exist).
+
+- `plan` claims a `planned` draft and runs the planner. In manual mode the shot
+  jobs are created in `draft` status with an **empty prompt**.
+- `build-prompts` converts the planned Korean scenes (`paramsJson._shot.scene`)
+  of all `draft`-state shots into image-model prompts in one batched builder
+  call (planner LLM settings reused; deterministic fallback without them).
+  Re-running while shots are still `draft` overwrites the prompts. Records
+  `conceptJson.builderName`.
+- `generate` (optionally) overrides the prompt/candidate count, then queues the
+  shot and runs it immediately. Queuing a shot whose stored prompt is empty
+  without providing one is rejected (400) — build prompts first.
+- `publish` publishes an `approved` draft regardless of `scheduledAt`.
 
 ## Edit a draft
 

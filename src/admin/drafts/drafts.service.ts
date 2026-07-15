@@ -385,6 +385,19 @@ export class DraftsService {
     if (input.prompt !== undefined && !prompt) {
       throw new BadRequestException("Shot prompt cannot be empty");
     }
+    // 프롬프트 빌드 전(빈 프롬프트) 컷은 생성 실행을 막는다 — 운영자가
+    // 직접 프롬프트를 넘긴 경우는 예외.
+    if (!prompt) {
+      const existing = await this.prisma.generationJob.findFirst({
+        where: { id: input.jobId, draftId: input.draftId, status: "draft" },
+        select: { prompt: true },
+      });
+      if (existing && !existing.prompt.trim()) {
+        throw new BadRequestException(
+          "Shot prompt is empty — run prompt build first or provide a prompt",
+        );
+      }
+    }
     const transitioned = await this.prisma.generationJob.updateMany({
       where: { id: input.jobId, draftId: input.draftId, status: "draft" },
       data: {

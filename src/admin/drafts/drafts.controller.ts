@@ -88,6 +88,21 @@ export class DraftsController {
     return this.draftsService.getDraft(draftId);
   }
 
+  // 수동 프롬프트 빌드 — 기획과 컷 생성 사이의 별도 스텝. draft 상태 컷의
+  // 장면(_shot.scene)을 이미지 프롬프트로 변환해 채운다. 재실행 시 덮어쓴다.
+  @Post(":id/build-prompts")
+  async buildPromptsNow(@Param("id") draftId: string) {
+    const result = await this.draftWorker.buildDraftPromptsNow(draftId);
+    if (!result.built) {
+      await this.draftsService.getDraft(draftId); // 404를 400보다 먼저 구분한다.
+      throw new BadRequestException(
+        result.reason ??
+          "Only drafts with draft-state shots can build prompts now",
+      );
+    }
+    return this.draftsService.getDraft(draftId);
+  }
+
   // 수동 게시 — approved draft를 scheduledAt과 무관하게 즉시 게시한다.
   @Post(":id/publish")
   async publishDraftNow(@Param("id") draftId: string) {

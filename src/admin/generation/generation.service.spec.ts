@@ -161,6 +161,8 @@ describe("GenerationService", () => {
           paramsJson: {
             _wizard: {
               plannerName: "llm:test",
+              // 빌더 기본값은 결정적 폴백 — 이름 "local"이 기록된다.
+              builderName: "local",
               expandedScene: "비 오는 오후 창가 카페, 얕은 심도",
             },
             _shot: { scene: "비 오는 오후 창가 카페, 얕은 심도" },
@@ -168,6 +170,107 @@ describe("GenerationService", () => {
         }),
       }),
     );
+  });
+
+  it("builds the final prompt with the injected prompt builder", async () => {
+    const findUnique = jest.fn().mockResolvedValue({
+      id: "ai-1",
+      displayName: "한소이",
+      bio: "",
+      interests: [],
+      personas: [],
+      memories: [],
+      posts: [],
+      visualProfile: {
+        appearancePrompt: "same face",
+        stylePrompt: "film grain",
+        negativePrompt: "",
+        referenceMedia: [],
+      },
+    });
+    const create = jest
+      .fn()
+      .mockResolvedValue(job({ status: "draft", prompt: "english prompt" }));
+    const build = jest.fn().mockResolvedValue({ prompts: ["english prompt"] });
+    const service = new (
+      GenerationService as new (
+        prisma: unknown,
+        resolveScenePlanner: unknown,
+        resolvePromptBuilder: unknown,
+      ) => GenerationService
+    )(
+      { character: { findUnique }, generationJob: { create } },
+      () =>
+        Promise.resolve({
+          name: "llm:test",
+          plan: jest.fn().mockResolvedValue({
+            caption: "무시됨",
+            hashtags: [],
+            shots: [{ scene: "확장된 장면" }],
+          }),
+        }),
+      () => Promise.resolve({ name: "llm:builder", build }),
+    );
+
+    await service.createImageDraft({
+      characterId: "ai-1",
+      inputPrompt: "따듯한 카페",
+      candidateCount: 1,
+    });
+
+    expect(build).toHaveBeenCalledWith({
+      appearancePrompt: "same face",
+      stylePrompt: "film grain",
+      shots: [{ scene: "확장된 장면" }],
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          prompt: "english prompt",
+          paramsJson: expect.objectContaining({
+            _wizard: expect.objectContaining({ builderName: "llm:builder" }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("fails the draft creation with 502 when prompt building fails", async () => {
+    const findUnique = jest.fn().mockResolvedValue({
+      id: "ai-1",
+      displayName: "한소이",
+      bio: "",
+      interests: [],
+      personas: [],
+      memories: [],
+      posts: [],
+      visualProfile: null,
+    });
+    const create = jest.fn();
+    const service = new (
+      GenerationService as new (
+        prisma: unknown,
+        resolveScenePlanner: unknown,
+        resolvePromptBuilder: unknown,
+      ) => GenerationService
+    )(
+      { character: { findUnique }, generationJob: { create } },
+      () => Promise.resolve(null),
+      () =>
+        Promise.resolve({
+          name: "llm:builder",
+          build: jest.fn().mockRejectedValue(new Error("builder timeout")),
+        }),
+    );
+
+    await expect(
+      service.createImageDraft({
+        characterId: "ai-1",
+        inputPrompt: "따듯한 카페",
+        candidateCount: 1,
+      }),
+    ).rejects.toThrow("Prompt build failed (llm:builder): builder timeout");
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("fails the draft creation with 502 when scene planning fails", async () => {

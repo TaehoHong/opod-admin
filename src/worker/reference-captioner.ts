@@ -1,10 +1,15 @@
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  CAPTION_SYSTEM_PROMPT,
+  CAPTION_USER_PROMPT,
+} from "../../prompts/reference-captioner";
 import { contentFromChatCompletion } from "./content-planner";
 
 // 레퍼런스 이미지 캡셔닝 — 비전 LLM(기획 LLM과 동일 설정)으로 장면·구도·의상·
 // 조명 서술을 생성한다. 이 서술이 기획 LLM의 샷별 레퍼런스 선별 카탈로그가
 // 된다 (docs/media-generation-pipeline.md "컨텍스트 선별").
 // 이미지 전달은 S3 버킷 공개 정책과 무관하도록 base64 data URL로 한다.
+// 프롬프트 텍스트는 prompts/reference-captioner.ts에서 관리한다.
 
 const HTTP_TIMEOUT_MS = 60_000;
 const CAPTION_MAX_LENGTH = 600;
@@ -72,16 +77,6 @@ export function createMediaBytesReader(
   };
 }
 
-const CAPTION_SYSTEM_PROMPT = [
-  "너는 이미지 생성 레퍼런스 카탈로그를 만드는 사진 아키비스트다.",
-  "주어진 인물 사진을 '어떤 장면에 레퍼런스로 쓸 수 있는지' 기준으로 서술한다.",
-  "규칙:",
-  "- 장소·장면, 구도(전신/상반신/클로즈업, 각도), 포즈, 의상, 조명, 분위기를 담는다.",
-  "- 인물의 이름·정체성 추정은 금지. 외모 묘사는 최소화한다 (외모는 별도 프롬프트로 주입됨).",
-  "- 한국어 2~3문장, 검색·대조하기 쉽게 구체적으로.",
-  "- 서술 문장만 출력한다 (머리말·마크다운 금지).",
-].join("\n");
-
 export function createLlmReferenceCaptioner(
   config: { apiUrl: string; apiKey: string; model: string },
   readBytes: MediaBytesReader,
@@ -104,7 +99,7 @@ export function createLlmReferenceCaptioner(
             {
               role: "user",
               content: [
-                { type: "text", text: "이 레퍼런스 이미지를 서술하라." },
+                { type: "text", text: CAPTION_USER_PROMPT },
                 {
                   type: "image_url",
                   image_url: {

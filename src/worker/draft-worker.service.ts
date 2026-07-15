@@ -6,7 +6,7 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../domain/database/prisma.service";
 import { ContentPlanner } from "./content-planner";
-import { compileImagePrompt } from "./image-prompt";
+import { ImagePromptBuilder } from "./image-prompt-builder";
 import { errorMessage, isRecord, parsePositiveNumber } from "./value-utils";
 
 export type DraftWorkerConfig = {
@@ -76,6 +76,8 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     // 기획 시마다 재해석한다 — admin 설정(UI)에서 LLM URL/키/모델을 바꾸면
     // 프로세스 재시작 없이 다음 기획부터 반영된다.
     private readonly resolvePlanner: () => Promise<ContentPlanner>,
+    // 프롬프트 빌더도 실행 시마다 재해석 (플래너와 동일한 이유).
+    private readonly resolvePromptBuilder: () => Promise<ImagePromptBuilder>,
     private readonly config: DraftWorkerConfig,
     private readonly random: () => number = Math.random,
   ) {}
@@ -199,6 +201,107 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       });
       return { published: false, reason: message };
     }
+  }
+
+  // 수동 초안의 draft 상태 컷 프롬프트를 빌더로 생성해 채운다.
+  // 기획(planDraftNow)과 컷 생성 실행 사이의 별도 스텝 — 수동 = 자동의 스텝
+  // 실행 모드. 컷이 draft 상태인 동안은 재실행(덮어쓰기)해도 안전하다.
+  async buildDraftPromptsNow(
+    draftId: string,
+  ): Promise<{ built: boolean; reason?: string }> {
+    const draft = await this.prisma.postDraft.findFirst({
+      where: { id: draftId, draftType: "post" },
+      select: {
+        id: true,
+        characterId: true,
+        conceptJson: true,
+        character: {
+          select: {
+            visualProfile: {
+              select: { appearancePrompt: true, stylePrompt: true },
+            },
+          },
+        },
+      },
+    });
+    if (!draft) {
+      return { built: false };
+    }
+    const jobs = await this.prisma.generationJob.findMany({
+      where: { draftId, mediaType: "image" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { id: true, sortOrder: true, status: true, paramsJson: true },
+    });
+    // 컷별 최신 잡만 대상 — 재생성 이력이 있어도 현행 잡만 빌드한다.
+    const latestPerShot = new Map<number, (typeof jobs)[number]>();
+    for (const job of jobs) {
+      if (!latestPerShot.has(job.sortOrder)) {
+        latestPerShot.set(job.sortOrder, job);
+      }
+    }
+    const targets = [...latestPerShot.values()]
+      .filter((job) => job.status === "draft")
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    if (targets.length === 0) {
+      return {
+        built: false,
+        reason: "draft has no draft-state shots to build prompts for",
+      };
+    }
+    const shots: { scene: string }[] = [];
+    for (const job of targets) {
+      const scene = shotSceneOf(job.paramsJson);
+      if (!scene) {
+        return {
+          built: false,
+          reason: `shot ${job.sortOrder} has no planned scene`,
+        };
+      }
+      shots.push({ scene });
+    }
+    const profile = draft.character.visualProfile;
+    const builder = await this.resolvePromptBuilder();
+    let prompts: string[];
+    try {
+      prompts = (
+        await builder.build({
+          appearancePrompt: profile?.appearancePrompt ?? "",
+          stylePrompt: profile?.stylePrompt ?? "",
+          shots,
+        })
+      ).prompts;
+    } catch (error) {
+      return { built: false, reason: errorMessage(error).slice(0, 500) };
+    }
+    const concept = isRecord(draft.conceptJson) ? draft.conceptJson : {};
+    await this.prisma.$transaction(async (tx) => {
+      for (const [index, job] of targets.entries()) {
+        // 빌드 중 큐잉된 잡은 조건 불일치로 건드리지 않는다 (재실행 안전).
+        await tx.generationJob.updateMany({
+          where: { id: job.id, status: "draft" },
+          data: { prompt: prompts[index] },
+        });
+      }
+      await tx.postDraft.update({
+        where: { id: draft.id },
+        data: {
+          conceptJson: { ...concept, builderName: builder.name } as never,
+        },
+      });
+      await tx.characterActionLog.create({
+        data: {
+          characterId: draft.characterId,
+          actionType: "DRAFT_PROMPTS_BUILT",
+          targetTable: "post_drafts",
+          targetId: draft.id,
+          reason: `shot prompts built via ${builder.name} (${targets.length} shot(s))`,
+        },
+      });
+    });
+    this.logger.log(
+      `Draft ${draft.id} prompts built (${targets.length} shot(s))`,
+    );
+    return { built: true };
   }
 
   // ── 기획 단계 ────────────────────────────────────────────────────────────
@@ -338,7 +441,30 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       };
       const plan = await planner.plan(planInput);
 
+      // 기획·빌드 LLM을 직렬로 부르면 기본 리스(120s)를 넘길 수 있어,
+      // 스윕이 중간에 회수해 이중 기획하지 않도록 리스를 연장한다.
+      await this.prisma.postDraft.updateMany({
+        where: { id: draft.id, status: "generating" },
+        data: {
+          leaseExpiresAt: new Date(
+            Date.now() + this.config.planLeaseSeconds * 1000,
+          ),
+        },
+      });
+
+      // 자동 모드는 기획 직후 프롬프트 빌드까지 한 시도로 진행한다 (빌드
+      // 실패 = 기획 실패, 같은 재시도 경로). 수동 모드는 컷 프롬프트를 비워
+      // 두고 운영자가 "프롬프트 빌드" 버튼으로 별도 진행한다.
       const profile = draft.character.visualProfile;
+      const builder = manualMode ? null : await this.resolvePromptBuilder();
+      const built = builder
+        ? await builder.build({
+            appearancePrompt: profile?.appearancePrompt ?? "",
+            stylePrompt: profile?.stylePrompt ?? "",
+            shots: plan.shots.map((shot) => ({ scene: shot.scene })),
+          })
+        : null;
+
       await this.prisma.$transaction(async (tx) => {
         const transitioned = await tx.postDraft.updateMany({
           where: { id: draft.id, status: "generating" },
@@ -350,6 +476,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
             conceptJson: {
               ...concept,
               plannerName: planner.name,
+              ...(builder ? { builderName: builder.name } : {}),
               planInput: planInput as unknown as Record<string, unknown>,
               plan: plan as unknown as Record<string, unknown>,
             } as never,
@@ -367,7 +494,8 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
             data: {
               characterId: draft.characterId,
               mediaType: "image",
-              prompt: compileImagePrompt(profile, shot.scene),
+              // 수동 모드는 빈 프롬프트 — "프롬프트 빌드" 단계에서 채운다.
+              prompt: built ? built.prompts[index] : "",
               draftId: draft.id,
               sortOrder: index,
               ...(manualMode ? { status: "draft" as const } : {}),
@@ -391,7 +519,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
             actionType: "DRAFT_PLANNED",
             targetTable: "post_drafts",
             targetId: draft.id,
-            reason: `draft planned via ${planner.name} (${plan.shots.length} shot(s))`,
+            reason: `draft planned via ${planner.name}${
+              builder ? `, prompts via ${builder.name}` : ""
+            } (${plan.shots.length} shot(s))`,
           },
         });
       });
@@ -761,6 +891,15 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`Failed to record action log: ${errorMessage(error)}`);
     }
   }
+}
+
+// 잡 paramsJson._shot.scene — 기획이 남긴 컷 장면 원문 (프롬프트 빌드 입력).
+function shotSceneOf(paramsJson: unknown): string | null {
+  if (!isRecord(paramsJson) || !isRecord(paramsJson._shot)) {
+    return null;
+  }
+  const scene = paramsJson._shot.scene;
+  return typeof scene === "string" && scene.trim() ? scene.trim() : null;
 }
 
 export function publishedMemoryContent(

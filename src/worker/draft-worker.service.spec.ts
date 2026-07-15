@@ -6,7 +6,7 @@ import {
   publishedMemoryContent,
 } from "./draft-worker.service";
 import { ContentPlanner } from "./content-planner";
-import { compileImagePrompt } from "./image-prompt";
+import { ImagePromptBuilder } from "./image-prompt-builder";
 
 const baseConfig: DraftWorkerConfig = {
   enabled: true,
@@ -57,15 +57,26 @@ function plannerMock(
   return { name: "test-planner", plan: jest.fn().mockResolvedValue(plan) };
 }
 
+function builderMock(
+  prompts = ["built shot prompt 0", "built shot prompt 1"],
+): ImagePromptBuilder & { build: jest.Mock } {
+  return {
+    name: "test-builder",
+    build: jest.fn().mockResolvedValue({ prompts }),
+  };
+}
+
 function makeService(
   prisma: PrismaMock,
   planner: ContentPlanner = plannerMock(),
   config: Partial<DraftWorkerConfig> = {},
   random: () => number = () => 0.5,
+  builder: ImagePromptBuilder = builderMock(),
 ) {
   return new DraftWorkerService(
     prisma as never,
     () => Promise.resolve(planner),
+    () => Promise.resolve(builder),
     { ...baseConfig, ...config },
     random,
   );
@@ -100,7 +111,10 @@ function txMock() {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       update: jest.fn().mockResolvedValue({}),
     },
-    generationJob: { create: jest.fn().mockResolvedValue({}) },
+    generationJob: {
+      create: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
     post: { create: jest.fn().mockResolvedValue({ id: "post-1" }) },
     characterActionLog: { create: jest.fn().mockResolvedValue({}) },
     characterMemory: { create: jest.fn().mockResolvedValue({}) },
@@ -132,7 +146,7 @@ describe("draftWorkerConfigFromEnv", () => {
 });
 
 describe("DraftWorkerService planning", () => {
-  it("plans a claimed draft and creates shot jobs with compiled prompts", async () => {
+  it("plans a claimed draft and creates shot jobs with built prompts", async () => {
     const prisma = prismaMock();
     prisma.$queryRaw.mockResolvedValueOnce([{ id: "draft-1" }]);
     prisma.postDraft.findUnique.mockResolvedValue(plannedDraft());
@@ -141,7 +155,8 @@ describe("DraftWorkerService planning", () => {
       async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
     );
     const planner = plannerMock();
-    const service = makeService(prisma, planner);
+    const builder = builderMock();
+    const service = makeService(prisma, planner, {}, () => 0.5, builder);
 
     await service.tick();
 
@@ -153,6 +168,12 @@ describe("DraftWorkerService planning", () => {
         maxShots: 2,
       }),
     );
+    // 자동 모드: 기획된 컷 장면이 프롬프트 빌더로 배치 전달된다.
+    expect(builder.build).toHaveBeenCalledWith({
+      appearancePrompt: "young woman, short hair",
+      stylePrompt: "film photography",
+      shots: [{ scene: "해변 역광" }, { scene: "카메라 클로즈업" }],
+    });
     expect(tx.postDraft.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "draft-1", status: "generating" },
@@ -160,6 +181,10 @@ describe("DraftWorkerService planning", () => {
           caption: "노을 산책",
           hashtags: ["필름사진"],
           leaseExpiresAt: null,
+          conceptJson: expect.objectContaining({
+            plannerName: "test-planner",
+            builderName: "test-builder",
+          }),
         }),
       }),
     );
@@ -168,7 +193,7 @@ describe("DraftWorkerService planning", () => {
       data: {
         characterId: "ai-1",
         mediaType: "image",
-        prompt: "young woman, short hair, 해변 역광, film photography",
+        prompt: "built shot prompt 0",
         draftId: "draft-1",
         sortOrder: 0,
         // 장면 원문은 프롬프트 추적용 메타데이터로 저장된다.
@@ -177,6 +202,28 @@ describe("DraftWorkerService planning", () => {
     });
     expect(tx.characterActionLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ actionType: "DRAFT_PLANNED" }),
+    });
+  });
+
+  it("returns the draft to planned when prompt building fails with attempts left", async () => {
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "draft-1" }]);
+    prisma.postDraft.findUnique.mockResolvedValue(
+      plannedDraft({ attemptCount: 1 }),
+    );
+    const builder = builderMock();
+    builder.build.mockRejectedValue(new Error("builder down"));
+    const service = makeService(prisma, plannerMock(), {}, () => 0.5, builder);
+
+    await service.tick();
+
+    expect(prisma.postDraft.updateMany).toHaveBeenCalledWith({
+      where: { id: "draft-1", status: "generating" },
+      data: {
+        status: "planned",
+        errorMessage: "builder down",
+        leaseExpiresAt: null,
+      },
     });
   });
 
@@ -523,16 +570,20 @@ describe("DraftWorkerService manual triggers", () => {
     prisma.$transaction.mockImplementation(
       async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
     );
-    const service = makeService(prisma, plannerMock());
+    const builder = builderMock();
+    const service = makeService(prisma, plannerMock(), {}, () => 0.5, builder);
 
     const result = await service.planDraftNow("draft-1");
 
     expect(result).toEqual({ planned: true });
     // 수동 진행 컷 잡은 status "draft"로 만들어 생성 워커가 자동으로 집지 않는다.
+    // 프롬프트는 비워 두고 "프롬프트 빌드" 단계에서 채운다 — 빌더 미호출.
+    expect(builder.build).not.toHaveBeenCalled();
     expect(tx.generationJob.create).toHaveBeenCalledTimes(2);
     expect(tx.generationJob.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         status: "draft",
+        prompt: "",
         sortOrder: 0,
         paramsJson: { _shot: { scene: "해변 역광" } },
       }),
@@ -553,6 +604,161 @@ describe("DraftWorkerService manual triggers", () => {
       }),
     });
     expect(conceptJson.plan).toBeDefined();
+  });
+
+  it("buildDraftPromptsNow builds prompts for the latest draft-state shots", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue({
+      id: "draft-1",
+      characterId: "ai-1",
+      conceptJson: { source: "manual", mode: "manual", plannerName: "p" },
+      character: {
+        visualProfile: {
+          appearancePrompt: "young woman, short hair",
+          stylePrompt: "film photography",
+        },
+      },
+    });
+    // 최신순 정렬 — shot 0은 최신 draft 잡이 옛 failed 잡을 대체한다.
+    prisma.generationJob.findMany.mockResolvedValue([
+      {
+        id: "job-1",
+        sortOrder: 0,
+        status: "draft",
+        paramsJson: { _shot: { scene: "해변 역광" } },
+      },
+      {
+        id: "job-2",
+        sortOrder: 1,
+        status: "draft",
+        paramsJson: { _shot: { scene: "카메라 클로즈업" } },
+      },
+      {
+        id: "job-0",
+        sortOrder: 0,
+        status: "failed",
+        paramsJson: { _shot: { scene: "옛 장면" } },
+      },
+    ]);
+    const tx = txMock();
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+    const builder = builderMock(["english prompt 0", "english prompt 1"]);
+    const service = makeService(prisma, plannerMock(), {}, () => 0.5, builder);
+
+    const result = await service.buildDraftPromptsNow("draft-1");
+
+    expect(result).toEqual({ built: true });
+    expect(builder.build).toHaveBeenCalledWith({
+      appearancePrompt: "young woman, short hair",
+      stylePrompt: "film photography",
+      shots: [{ scene: "해변 역광" }, { scene: "카메라 클로즈업" }],
+    });
+    // draft 상태 조건부 갱신 — 빌드 중 큐잉된 잡은 건드리지 않는다.
+    expect(tx.generationJob.updateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", status: "draft" },
+      data: { prompt: "english prompt 0" },
+    });
+    expect(tx.generationJob.updateMany).toHaveBeenCalledWith({
+      where: { id: "job-2", status: "draft" },
+      data: { prompt: "english prompt 1" },
+    });
+    // 기존 conceptJson 키는 보존하고 빌더 이름을 기록한다.
+    expect(tx.postDraft.update).toHaveBeenCalledWith({
+      where: { id: "draft-1" },
+      data: {
+        conceptJson: {
+          source: "manual",
+          mode: "manual",
+          plannerName: "p",
+          builderName: "test-builder",
+        },
+      },
+    });
+    expect(tx.characterActionLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ actionType: "DRAFT_PROMPTS_BUILT" }),
+    });
+  });
+
+  it("buildDraftPromptsNow reports when there are no draft-state shots", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue({
+      id: "draft-1",
+      characterId: "ai-1",
+      conceptJson: {},
+      character: { visualProfile: null },
+    });
+    prisma.generationJob.findMany.mockResolvedValue([
+      { id: "job-1", sortOrder: 0, status: "queued", paramsJson: null },
+    ]);
+    const builder = builderMock();
+    const service = makeService(prisma, plannerMock(), {}, () => 0.5, builder);
+
+    const result = await service.buildDraftPromptsNow("draft-1");
+
+    expect(result).toEqual({
+      built: false,
+      reason: "draft has no draft-state shots to build prompts for",
+    });
+    expect(builder.build).not.toHaveBeenCalled();
+  });
+
+  it("buildDraftPromptsNow reports a shot without a planned scene", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue({
+      id: "draft-1",
+      characterId: "ai-1",
+      conceptJson: {},
+      character: { visualProfile: null },
+    });
+    prisma.generationJob.findMany.mockResolvedValue([
+      { id: "job-1", sortOrder: 0, status: "draft", paramsJson: {} },
+    ]);
+    const service = makeService(prisma);
+
+    const result = await service.buildDraftPromptsNow("draft-1");
+
+    expect(result).toEqual({
+      built: false,
+      reason: "shot 0 has no planned scene",
+    });
+  });
+
+  it("buildDraftPromptsNow reports a builder failure without state changes", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue({
+      id: "draft-1",
+      characterId: "ai-1",
+      conceptJson: {},
+      character: { visualProfile: null },
+    });
+    prisma.generationJob.findMany.mockResolvedValue([
+      {
+        id: "job-1",
+        sortOrder: 0,
+        status: "draft",
+        paramsJson: { _shot: { scene: "해변 역광" } },
+      },
+    ]);
+    const builder = builderMock();
+    builder.build.mockRejectedValue(new Error("builder LLM down"));
+    const service = makeService(prisma, plannerMock(), {}, () => 0.5, builder);
+
+    const result = await service.buildDraftPromptsNow("draft-1");
+
+    expect(result).toEqual({ built: false, reason: "builder LLM down" });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("buildDraftPromptsNow returns false for a missing draft", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue(null);
+    const service = makeService(prisma);
+
+    await expect(service.buildDraftPromptsNow("nope")).resolves.toEqual({
+      built: false,
+    });
   });
 
   it("publishDraftNow publishes an approved draft regardless of scheduledAt", async () => {
@@ -700,13 +906,6 @@ describe("DraftWorkerService scheduler", () => {
 });
 
 describe("helpers", () => {
-  it("compiles shot prompts like the visual profile test generation", () => {
-    expect(
-      compileImagePrompt({ appearancePrompt: "a", stylePrompt: "s" }, "scene"),
-    ).toBe("a, scene, s");
-    expect(compileImagePrompt(null, "scene")).toBe("scene");
-  });
-
   it("builds published memory content with scenes", () => {
     const content = publishedMemoryContent("노을 산책", {
       plan: { shots: [{ scene: "해변" }, { scene: "골목" }, { scene: "셋" }] },

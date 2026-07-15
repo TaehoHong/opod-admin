@@ -201,6 +201,19 @@ describe("DraftsService", () => {
     });
   });
 
+  it("refuses to generate a shot whose prompt is empty and none is provided", async () => {
+    const prisma = prismaMock();
+    prisma.generationJob.findFirst.mockResolvedValue({ prompt: "" });
+    const service = makeService(prisma);
+
+    await expect(
+      service.queueShot({ draftId: "draft-1", jobId: "job-1" }),
+    ).rejects.toThrow(
+      "Shot prompt is empty — run prompt build first or provide a prompt",
+    );
+    expect(prisma.generationJob.updateMany).not.toHaveBeenCalled();
+  });
+
   it("refuses to generate a shot that is not in draft state", async () => {
     const prisma = prismaMock();
     prisma.generationJob.updateMany.mockResolvedValue({ count: 0 });

@@ -13,7 +13,10 @@ import {
 import { PrismaService } from "../../domain/database/prisma.service";
 import { assertUploadedMedia } from "../media/media.service";
 import { ContentPlanner } from "../../worker/content-planner";
-import { compileImagePrompt } from "../../worker/image-prompt";
+import {
+  ImagePromptBuilder,
+  localImagePromptBuilder,
+} from "../../worker/image-prompt-builder";
 
 type MediaType = "image" | "video";
 type JobStatus = "draft" | "queued" | "running" | "completed" | "failed";
@@ -138,6 +141,10 @@ export class GenerationService {
     // (로컬 결정적 플래너로 대체하지 않는다: 위저드에서는 원문이 더 낫다).
     private readonly resolveScenePlanner: () => Promise<ContentPlanner | null> = async () =>
       null,
+    // 이미지 프롬프트 빌더 — 자동 파이프라인과 동일 단계. 기본값은 결정적
+    // 폴백(외모·장면·스타일 연결)이라 LLM 미설정 시 기존 동작과 같다.
+    private readonly resolvePromptBuilder: () => Promise<ImagePromptBuilder> = async () =>
+      localImagePromptBuilder,
   ) {}
 
   async createImageDraft(input: {
@@ -232,20 +239,42 @@ export class GenerationService {
       referenceMediaIds = plan.shots[0]?.referenceIds ?? [];
     }
 
+    // 장면을 이미지 모델용 프롬프트로 변환 — 자동 파이프라인과 같은 빌드 단계.
+    // 운영자는 이어지는 프롬프트 확인 카드에서 결과를 검토·수정한다.
+    const builder = await this.resolvePromptBuilder();
+    let prompt: string;
+    try {
+      prompt = (
+        await builder.build({
+          appearancePrompt: character.visualProfile?.appearancePrompt ?? "",
+          stylePrompt: character.visualProfile?.stylePrompt ?? "",
+          shots: [{ scene }],
+        })
+      ).prompts[0];
+    } catch (error) {
+      throw new BadGatewayException(
+        `Prompt build failed (${builder.name}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
     const job = await this.prisma.generationJob.create({
       data: {
         characterId: input.characterId,
         mediaType: "image",
         status: "draft",
         inputPrompt,
-        prompt: compileImagePrompt(character.visualProfile, scene),
+        prompt,
         candidateCount,
         // 밑줄 접두 키는 파이프라인 메타데이터 — 프로바이더 파라미터로
         // 전달되지 않는다 (generation-worker가 걸러낸다).
         ...(planner
           ? {
               paramsJson: {
-                _wizard: { plannerName: planner.name, expandedScene: scene },
+                _wizard: {
+                  plannerName: planner.name,
+                  builderName: builder.name,
+                  expandedScene: scene,
+                },
                 _shot: {
                   scene,
                   ...(referenceMediaIds.length > 0

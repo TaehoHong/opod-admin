@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { compileImagePrompt } from "../../prompts/image-prompt";
 import { assertUploadedMedia } from "../admin/media/media.service";
 import { PrismaService } from "../domain/database/prisma.service";
 import { ReferenceCaptioner } from "../worker/reference-captioner";
@@ -246,10 +247,7 @@ export class VisualProfileService {
       );
     }
     const profile = await this.getProfile(input.characterId);
-    const prompt = [profile.appearancePrompt, scene, profile.stylePrompt]
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .join(", ");
+    const prompt = compileImagePrompt(profile, scene);
     if (!prompt) {
       throw new BadRequestException(
         "Visual profile prompts or a test scene are required",

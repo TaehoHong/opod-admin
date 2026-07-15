@@ -1,5 +1,5 @@
+import { buildPlannerUserPrompt } from "../../prompts/content-planner";
 import {
-  buildPlannerUserPrompt,
   createContentPlanner,
   createLlmContentPlanner,
   localContentPlanner,

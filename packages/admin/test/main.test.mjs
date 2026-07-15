@@ -1024,6 +1024,16 @@ test("draft detail snapshot changes only on pipeline-visible state", () => {
     draftDetailSnapshot(base),
     draftDetailSnapshot({ ...base, status: "needs_review" }),
   );
+  // 프롬프트 빌드가 컷 프롬프트를 채우면 스냅샷이 바뀌어 리렌더가 일어난다.
+  assert.notEqual(
+    draftDetailSnapshot(base),
+    draftDetailSnapshot({
+      ...base,
+      shots: [
+        { jobId: "job-1", status: "queued", prompt: "built", outputs: [] },
+      ],
+    }),
+  );
 });
 
 test("generation prompt step labels the missing planner as raw input", () => {
@@ -1409,6 +1419,21 @@ test("simple click actions map to their request and success message", () => {
     },
     successMessage: "API 키를 삭제했습니다.",
   });
+  assert.deepEqual(
+    simpleClickAction("draft-build-prompts", { id: "draft-1" }),
+    {
+      request: {
+        path: "/api/drafts/draft-1/build-prompts",
+        options: {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      },
+      successMessage:
+        "프롬프트를 빌드했습니다. 각 컷에서 확인·수정 후 실행하세요.",
+    },
+  );
   assert.deepEqual(simpleClickAction("draft-approve", { id: "draft-1" }), {
     request: {
       path: "/api/drafts/draft-1/approve",
@@ -1951,6 +1976,60 @@ test("draft timeline offers a per-shot generation form for manual draft-state cu
   assert.match(html, /이미지 생성 실행/);
   // 기획 입력 스냅샷 요약이 추적용으로 표시된다.
   assert.match(html, /페르소나 1 · 메모리 1 · 최근 캡션 1/);
+});
+
+test("draft timeline offers the prompt-build button for manual draft-state cuts", () => {
+  const draft = {
+    id: "draft-1",
+    characterId: "ai-1",
+    contentType: "feed",
+    status: "generating",
+    attemptCount: 1,
+    caption: "노을 산책",
+    hashtags: ["필름사진"],
+    createdAt: "2026-07-12T00:00:00.000Z",
+    conceptJson: {
+      source: "manual",
+      mode: "manual",
+      plan: { caption: "노을 산책", hashtags: [], shots: [{ scene: "해변" }] },
+    },
+    shots: [
+      {
+        sortOrder: 0,
+        jobId: "job-1",
+        status: "draft",
+        prompt: "",
+        scene: "해변",
+        outputs: [],
+      },
+    ],
+  };
+
+  // 빌드 전: "프롬프트 빌드" 버튼 + 빈 프롬프트 안내가 노출된다.
+  const before = draftDetailMarkup(draft, "한소이");
+  assert.match(before, /data-act="draft-build-prompts"[^>]*data-id="draft-1"/);
+  assert.match(before, />프롬프트 빌드</);
+  assert.match(before, /프롬프트가 비어 있습니다/);
+
+  // 빌드 후: 재빌드 라벨 + 빌더 이름이 표시된다.
+  const after = draftDetailMarkup(
+    {
+      ...draft,
+      conceptJson: { ...draft.conceptJson, builderName: "llm:test" },
+      shots: [{ ...draft.shots[0], prompt: "sunset walk, film look" }],
+    },
+    "한소이",
+  );
+  assert.match(after, />프롬프트 다시 빌드</);
+  assert.match(after, /빌더: llm:test/);
+  assert.doesNotMatch(after, /프롬프트가 비어 있습니다/);
+
+  // 자동 모드에는 빌드 버튼이 없다 (워커가 기획과 함께 빌드).
+  const auto = draftDetailMarkup(
+    { ...draft, conceptJson: { ...draft.conceptJson, mode: "auto" } },
+    "한소이",
+  );
+  assert.doesNotMatch(auto, /data-act="draft-build-prompts"/);
 });
 
 test("draft timeline shows the plan-now button for a planned draft with no cuts yet", () => {

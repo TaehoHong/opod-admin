@@ -608,6 +608,11 @@ const simpleClickActions = {
     path: ({ id }) => `/api/drafts/${id}/plan`,
     successMessage: "기획을 실행했습니다. 결과를 확인하세요.",
   },
+  "draft-build-prompts": {
+    path: ({ id }) => `/api/drafts/${id}/build-prompts`,
+    successMessage:
+      "프롬프트를 빌드했습니다. 각 컷에서 확인·수정 후 실행하세요.",
+  },
   "draft-publish-now": {
     path: ({ id }) => `/api/drafts/${id}/publish`,
     successMessage: "초안을 게시했습니다.",
@@ -2767,7 +2772,11 @@ function draftShotCard(d, shot) {
       <div class="field" style="margin:0"><label>최종 프롬프트</label><textarea class="input" name="prompt" rows="4">${escapeHtml(
         shot.prompt,
       )}</textarea></div>
-      <p class="count-note" style="margin:0">실행 전 프롬프트를 수정할 수 있습니다.</p>
+      <p class="count-note" style="margin:0">${
+        shot.prompt
+          ? "실행 전 프롬프트를 수정할 수 있습니다."
+          : "프롬프트가 비어 있습니다 — 상단 '프롬프트 빌드'를 먼저 실행하거나 직접 입력하세요."
+      }</p>
       <div class="field" style="width:150px;margin:0"><label>후보 수</label><input class="input" type="number" name="candidateCount" min="1" max="4" value="${attr(
         shot.candidateCount ?? 2,
       )}"></div>
@@ -2926,13 +2935,32 @@ export function draftDetailMarkup(d, characterName) {
     stage3Tone = "current";
     stage3Status = ["tag-accent", `${completedCount}/${shotCount} 완료`];
   }
+  // 수동 모드: draft 상태 컷이 남아 있으면 프롬프트 빌드(재빌드) 버튼 노출.
+  // 빌드 = 기획된 한국어 장면을 이미지 모델용 프롬프트로 변환하는 별도 스텝.
+  const draftShots = shots.filter((s) => s.status === "draft");
+  const stage3Action =
+    mode === "manual" && draftShots.length
+      ? `<button class="btn btn-secondary" data-act="draft-build-prompts" data-id="${attr(
+          d.id,
+        )}">${
+          draftShots.some((s) => !s.prompt)
+            ? "프롬프트 빌드"
+            : "프롬프트 다시 빌드"
+        }</button>`
+      : "";
+  const builderNote = concept.builderName
+    ? `<p class="count-note" style="margin:0 0 8px">빌더: ${escapeHtml(
+        concept.builderName,
+      )}</p>`
+    : "";
   const stage3 = draftStage({
     num: 3,
     tone: stage3Tone,
     label: `③ 이미지 생성 — 컷 ${shotCount || "?"}`,
     statusMeta: stage3Status,
+    actionHtml: stage3Action,
     bodyHtml: shots.length
-      ? shots.map((shot) => draftShotCard(d, shot)).join("")
+      ? builderNote + shots.map((shot) => draftShotCard(d, shot)).join("")
       : `<p class="count-note" style="margin:0">기획이 완료되면 컷이 생성됩니다.</p>`,
   });
 
@@ -3098,6 +3126,8 @@ export function draftDetailSnapshot(d) {
     shots: shots.map((s) => [
       s.jobId,
       s.status,
+      // 프롬프트 빌드(build-prompts)가 채운 프롬프트도 리렌더를 태운다.
+      s.prompt ?? null,
       s.errorMessage ?? null,
       (s.outputs ?? []).map((o) => [o.mediaId, o.selected]),
     ]),
@@ -4198,6 +4228,15 @@ async function dispatchSubmit(action, form, formData) {
   }
   if (action === "draft-shot-generate") {
     const prompt = String(formData.get("prompt") ?? "").trim();
+    // 빈 프롬프트 사전 차단 (서버 가드가 최종) — 빌드 또는 직접 입력 유도.
+    if (!prompt) {
+      showToast(
+        "프롬프트가 비어 있습니다 — '프롬프트 빌드'를 먼저 실행하거나 직접 입력하세요.",
+        "",
+        true,
+      );
+      return;
+    }
     const candidateRaw = String(formData.get("candidateCount") ?? "").trim();
     const candidateCount = candidateRaw ? Number(candidateRaw) : undefined;
     const result = await submitViaSpec(
