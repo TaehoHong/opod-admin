@@ -7,7 +7,6 @@ import {
   appendPostMediaFiles,
   characterCreatePayload,
   characterDeleteRequest,
-  characterDetailRequests,
   characterHref,
   characterMemoriesPanel,
   characterPersonasPanel,
@@ -20,7 +19,6 @@ import {
   adminRequestOptions,
   creditGrantPayload,
   currentRouteFromHash,
-  dashboardRequests,
   dialogSessionAllows,
   dialogContextFromDataset,
   dialogBody,
@@ -59,10 +57,9 @@ import {
   postPayload,
   reportUpdatePayload,
   removePostMediaFile,
-  selectedOption,
+  simpleClickAction,
   storyPayload,
   submitNewPost,
-  userDetailRequests,
   workerRunRequest,
 } from "../main.js";
 
@@ -533,21 +530,6 @@ test("endpoint appends defined query params only", () => {
   );
 });
 
-test("dashboardRequests uses existing admin endpoints", () => {
-  assert.deepEqual(dashboardRequests(), [
-    { key: "analytics", path: "/api/analytics" },
-    { key: "logs", path: "/api/character-action-logs" },
-    {
-      key: "reports",
-      path: "/api/moderation/reports?status=submitted&limit=10",
-    },
-    {
-      key: "payments",
-      path: "/api/payments/reconciliation?status=mismatch",
-    },
-  ]);
-});
-
 test("navBadgeRequests covers every badge shown in the design", () => {
   assert.deepEqual(navBadgeRequests(), [
     { key: "drafts", path: "/api/drafts?status=needs_review&limit=50" },
@@ -572,15 +554,6 @@ test("analyticsRequests applies the selected reporting period", () => {
   assert.deepEqual(analyticsRequests("30일", now), [
     "/api/analytics?from=2026-06-12T12%3A00%3A00.000Z&to=2026-07-12T12%3A00%3A00.000Z",
     "/api/analytics/hashtags?limit=10",
-  ]);
-});
-
-test("userDetailRequests targets the selected user", () => {
-  assert.deepEqual(userDetailRequests("user-1"), [
-    { key: "user", path: "/api/users/user-1" },
-    { key: "events", path: "/api/events?userId=user-1&limit=20" },
-    { key: "hashtags", path: "/api/hashtag-preferences?userId=user-1" },
-    { key: "credits", path: "/api/credits/ledger?userId=user-1&limit=20" },
   ]);
 });
 
@@ -623,15 +596,6 @@ test("parseResponseBody preserves plain text backend errors", () => {
     },
   );
   assert.deepEqual(parseResponseBody("", { status: 204 }), { status: 204 });
-});
-
-test("characterDetailRequests fetches memory and logs for selected character", () => {
-  assert.deepEqual(characterDetailRequests("char-1"), [
-    { key: "character", path: "/api/characters/char-1" },
-    { key: "personas", path: "/api/characters/char-1/personas" },
-    { key: "memory", path: "/api/characters/char-1/memory" },
-    { key: "logs", path: "/api/character-action-logs" },
-  ]);
 });
 
 test("characterRouteState parses list, create, detail, and tab states", () => {
@@ -1391,6 +1355,32 @@ test("generation click actions map to runnable job endpoints", () => {
   assert.equal(generationClickRequest("job-complete", "job-3"), null);
 });
 
+test("simple click actions map to their request and success message", () => {
+  assert.deepEqual(simpleClickAction("settings-clear-key", {}), {
+    request: {
+      path: "/api/settings/generation",
+      options: {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ falApiKey: null }),
+      },
+    },
+    successMessage: "API 키를 삭제했습니다.",
+  });
+  assert.deepEqual(simpleClickAction("draft-approve", { id: "draft-1" }), {
+    request: {
+      path: "/api/drafts/draft-1/approve",
+      options: {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      },
+    },
+    successMessage: "초안을 승인했습니다. 예정 시각에 게시됩니다.",
+  });
+  assert.equal(simpleClickAction("generation-open", {}), null);
+});
+
 test("workerRunRequest targets the next or a specific queued job", () => {
   assert.deepEqual(workerRunRequest(), {
     path: "/api/generation/worker/run",
@@ -1580,11 +1570,6 @@ test("reportUpdatePayload trims resolution", () => {
     status: "resolved",
     resolution: "handled by operator",
   });
-});
-
-test("selectedOption marks only the current value", () => {
-  assert.equal(selectedOption("inactive", "inactive"), " selected");
-  assert.equal(selectedOption("active", "inactive"), "");
 });
 
 test("creditGrantPayload trims fields and casts amount", () => {

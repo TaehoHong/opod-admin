@@ -5,6 +5,8 @@ import { GenerationWorkerService } from "../worker/generation-worker.service";
 import { AdminController } from "./admin.controller";
 import { AdminService } from "./admin.service";
 import { AdminJwtGuard } from "./auth/admin-jwt.guard";
+import { GenerationService } from "./generation/generation.service";
+import { MediaService } from "./media/media.service";
 
 const CHARACTER_ID = "11111111-1111-4111-8111-111111111111";
 const JOB_ID = "22222222-2222-4222-8222-222222222222";
@@ -41,15 +43,24 @@ describe("AdminController reads", () => {
             listPostReactions,
             listStories,
             getStory,
-            listGenerationJobs,
-            getGenerationJob,
             listTopHashtags,
             createImageGenerationDraft,
-            updateImageGenerationDraft,
-            confirmImageGenerationDraft,
-            selectGenerationOutput,
             regenerateImageJob,
           },
+        },
+        {
+          provide: GenerationService,
+          useValue: {
+            listJobs: listGenerationJobs,
+            getJob: getGenerationJob,
+            updateImageDraft: updateImageGenerationDraft,
+            confirmImageDraft: confirmImageGenerationDraft,
+            selectOutput: selectGenerationOutput,
+          },
+        },
+        {
+          provide: MediaService,
+          useValue: { startUpload: jest.fn(), confirmUpload: jest.fn() },
         },
         {
           provide: GenerationWorkerService,

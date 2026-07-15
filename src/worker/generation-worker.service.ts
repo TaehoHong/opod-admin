@@ -12,6 +12,7 @@ import {
   ImageGenerationProviders,
   ImageGenerationRequest,
 } from "./image-generation.provider";
+import { errorMessage, isRecord, parsePositiveNumber } from "./value-utils";
 
 export type WorkerConfig = {
   enabled: boolean;
@@ -570,15 +571,6 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function parsePositiveNumber(value: string | undefined): number | undefined {
-  const parsed = Number(value?.trim());
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 // 밑줄 접두 키는 파이프라인 메타데이터(예: 위저드의 _wizard) — 프로바이더
 // API 파라미터가 아니므로 제출 전에 걸러낸다.
 function stripMetaKeys(
@@ -587,8 +579,4 @@ function stripMetaKeys(
   return Object.fromEntries(
     Object.entries(params).filter(([key]) => !key.startsWith("_")),
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

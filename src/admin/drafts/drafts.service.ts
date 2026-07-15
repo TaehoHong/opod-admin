@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import {
   decodeCursor,
   Page,
@@ -68,37 +69,29 @@ type AdminDraft = {
   updatedAt: string;
 };
 
-type PrismaDraftRow = {
-  id: string;
-  characterId: string;
-  draftType: string;
-  contentType: string;
-  caption: string;
-  hashtags: string[];
-  status: DraftStatus;
-  attemptCount: number;
-  errorMessage: string | null;
-  scheduledAt: Date | null;
-  publishedPostId: string | null;
-  conceptJson: unknown;
-  createdAt: Date;
-  updatedAt: Date;
-};
+type PrismaDraftRow = Prisma.PostDraftGetPayload<Prisma.PostDraftDefaultArgs>;
 
-type PrismaDraftJob = {
-  id: string;
-  sortOrder: number;
-  status: string;
-  prompt: string;
-  errorMessage: string | null;
-  createdAt: Date;
+const draftJobFields = {
+  id: true,
+  sortOrder: true,
+  status: true,
+  prompt: true,
+  errorMessage: true,
+  createdAt: true,
   outputs: {
-    mediaId: string;
-    candidateIndex: number;
-    selected: boolean;
-    media: { url: string };
-  }[];
-};
+    orderBy: { candidateIndex: "asc" as const },
+    select: {
+      mediaId: true,
+      candidateIndex: true,
+      selected: true,
+      media: { select: { url: true } },
+    },
+  },
+} as const;
+
+type PrismaDraftJob = Prisma.GenerationJobGetPayload<{
+  select: typeof draftJobFields;
+}>;
 
 @Injectable()
 export class DraftsService {
@@ -143,27 +136,11 @@ export class DraftsService {
     if (!draft) {
       throw new BadRequestException("Draft not found");
     }
-    const jobs = (await this.prisma.generationJob.findMany({
+    const jobs = await this.prisma.generationJob.findMany({
       where: { draftId },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: {
-        id: true,
-        sortOrder: true,
-        status: true,
-        prompt: true,
-        errorMessage: true,
-        createdAt: true,
-        outputs: {
-          orderBy: { candidateIndex: "asc" },
-          select: {
-            mediaId: true,
-            candidateIndex: true,
-            selected: true,
-            media: { select: { url: true } },
-          },
-        },
-      },
-    })) as PrismaDraftJob[];
+      select: draftJobFields,
+    });
 
     // 컷별 최신 잡만 노출한다 (재생성 이력은 최신이 대체).
     const latestPerShot = new Map<number, PrismaDraftJob>();

@@ -7,6 +7,7 @@ import {
 import { PrismaService } from "../domain/database/prisma.service";
 import { ContentPlanner } from "./content-planner";
 import { compileImagePrompt } from "./image-prompt";
+import { errorMessage, isRecord, parsePositiveNumber } from "./value-utils";
 
 export type DraftWorkerConfig = {
   enabled: boolean;
@@ -738,17 +739,4 @@ function clampHour(value: number, fallback: number): number {
   return Number.isInteger(value) && value >= 0 && value <= 23
     ? value
     : fallback;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function parsePositiveNumber(value: string | undefined): number | undefined {
-  const parsed = Number(value?.trim());
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -251,6 +251,34 @@ describe("AdminService", () => {
     });
   });
 
+  it("returns every analytics metric in dashboard order", async () => {
+    const aggregate = jest
+      .fn()
+      .mockResolvedValueOnce({ _sum: { amount: 3 } })
+      .mockResolvedValueOnce({ _sum: { amount: 4 } });
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        creditLedgerEntry: { aggregate },
+        generationJob: { count: jest.fn().mockResolvedValue(5) },
+        message: { count: jest.fn().mockResolvedValue(2) },
+        userEvent: { count: jest.fn().mockResolvedValue(1) },
+      },
+      {},
+    );
+
+    await expect(service.getAnalytics({})).resolves.toEqual({
+      metrics: [
+        { name: "events.count", value: 1 },
+        { name: "messages.count", value: 2 },
+        { name: "credits.granted", value: 3 },
+        { name: "credits.debited", value: 4 },
+        { name: "generation_jobs.count", value: 5 },
+      ],
+    });
+  });
+
   it("lists payment reconciliation mismatches", async () => {
     const createdAt = new Date("2026-07-02T00:00:00.000Z");
     const paidWithoutGrant = {
@@ -516,27 +544,6 @@ describe("AdminService", () => {
     });
   });
 
-  it("delegates generation job reads without recording action logs", async () => {
-    const listJobs = jest.fn().mockResolvedValue({ items: [] });
-    const getJob = jest.fn().mockResolvedValue({ id: "job-1" });
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {},
-      { listJobs, getJob },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listGenerationJobs({ status: "queued", limit: 20 }),
-    ).resolves.toEqual({ items: [] });
-    await expect(service.getGenerationJob("job-1")).resolves.toEqual({
-      id: "job-1",
-    });
-    expect(listJobs).toHaveBeenCalledWith({ status: "queued", limit: 20 });
-    expect(getJob).toHaveBeenCalledWith("job-1");
-  });
-
   it("creates an image draft and records the creation action", async () => {
     const createImageDraft = jest.fn().mockResolvedValue({
       id: "job-1",
@@ -570,26 +577,6 @@ describe("AdminService", () => {
     });
   });
 
-  it("delegates confirmation without a duplicate action log", async () => {
-    const confirmImageDraft = jest.fn().mockResolvedValue({
-      id: "job-1",
-      characterId: "ai-1",
-    });
-    const createLog = jest.fn();
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { characterActionLog: { create: createLog } },
-      { confirmImageDraft },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await service.confirmImageGenerationDraft("job-1");
-
-    expect(confirmImageDraft).toHaveBeenCalledWith("job-1");
-    expect(createLog).not.toHaveBeenCalled();
-  });
-
   it.each([
     {
       method: "regenerateImageJob" as const,
@@ -621,32 +608,6 @@ describe("AdminService", () => {
         targetId: "job-2",
       }),
     });
-  });
-
-  it("delegates draft updates and output selection without duplicate logs", async () => {
-    const updateImageDraft = jest.fn().mockResolvedValue({ id: "job-1" });
-    const selectOutput = jest.fn().mockResolvedValue({ id: "job-1" });
-    const createLog = jest.fn();
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { characterActionLog: { create: createLog } },
-      { updateImageDraft, selectOutput },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await service.updateImageGenerationDraft("job-1", {
-      prompt: "edited",
-      candidateCount: 2,
-    });
-    await service.selectGenerationOutput("job-1", "media-2");
-
-    expect(updateImageDraft).toHaveBeenCalledWith("job-1", {
-      prompt: "edited",
-      candidateCount: 2,
-    });
-    expect(selectOutput).toHaveBeenCalledWith("job-1", "media-2");
-    expect(createLog).not.toHaveBeenCalled();
   });
 
   it("lists filtered posts with cursor pagination", async () => {

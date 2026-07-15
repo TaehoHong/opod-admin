@@ -14,6 +14,8 @@ import { parsePageQuery } from "../domain/database/page";
 import { GenerationWorkerService } from "../worker/generation-worker.service";
 import { AdminJwtGuard } from "./auth/admin-jwt.guard";
 import { AdminService } from "./admin.service";
+import { GenerationService } from "./generation/generation.service";
+import { MediaService } from "./media/media.service";
 import { CompleteGenerationJobDto } from "./dto/complete-generation-job.dto";
 import { CreateImageGenerationDraftDto } from "./dto/create-image-generation-draft.dto";
 import { CreatePostCommentDto } from "./dto/create-post-comment.dto";
@@ -36,6 +38,8 @@ import { UpdateReportDto } from "./dto/update-report.dto";
 export class AdminController {
   constructor(
     private readonly adminService: AdminService,
+    private readonly generationService: GenerationService,
+    private readonly mediaService: MediaService,
     private readonly generationWorker: GenerationWorkerService,
   ) {}
 
@@ -133,7 +137,7 @@ export class AdminController {
 
   @Post("media/uploads")
   startMediaUpload(@Body() body: StartMediaUploadDto) {
-    return this.adminService.startMediaUpload(body);
+    return this.mediaService.startUpload(body);
   }
 
   @Get("media")
@@ -157,7 +161,7 @@ export class AdminController {
 
   @Post("media/:id/confirm-upload")
   confirmMediaUpload(@Param("id") mediaId: string) {
-    return this.adminService.confirmMediaUpload(mediaId);
+    return this.mediaService.confirmUpload(mediaId);
   }
 
   @Post("credits/grants")
@@ -224,7 +228,7 @@ export class AdminController {
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
   ) {
-    return this.adminService.listGenerationJobs({
+    return this.generationService.listJobs({
       characterId,
       status,
       mediaType,
@@ -234,7 +238,7 @@ export class AdminController {
 
   @Get("generation/jobs/:id")
   getGenerationJob(@Param("id", ParseUUIDPipe) jobId: string) {
-    return this.adminService.getGenerationJob(jobId);
+    return this.generationService.getJob(jobId);
   }
 
   @Post("generation/jobs")
@@ -252,12 +256,12 @@ export class AdminController {
     @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: UpdateImageGenerationDraftDto,
   ) {
-    return this.adminService.updateImageGenerationDraft(jobId, body);
+    return this.generationService.updateImageDraft(jobId, body);
   }
 
   @Post("generation/jobs/:id/confirm")
   confirmImageGenerationDraft(@Param("id", ParseUUIDPipe) jobId: string) {
-    return this.adminService.confirmImageGenerationDraft(jobId);
+    return this.generationService.confirmImageDraft(jobId);
   }
 
   @Post("generation/jobs/:id/select-output")
@@ -265,7 +269,7 @@ export class AdminController {
     @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: SelectGenerationOutputDto,
   ) {
-    return this.adminService.selectGenerationOutput(jobId, body.mediaId);
+    return this.generationService.selectOutput(jobId, body.mediaId);
   }
 
   @Post("generation/jobs/:id/regenerate")

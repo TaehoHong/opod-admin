@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import {
   decodeCursor,
   Page,
@@ -29,16 +30,9 @@ type AdminCharacterDetail = AdminCharacterListItem & {
   memories: CharacterMemory[];
 };
 
-type PrismaCharacterListItem = Omit<
-  AdminCharacterListItem,
-  "createdAt" | "postCount" | "followerCount"
-> & {
-  createdAt: Date;
-  _count: {
-    posts: number;
-    userFollowers: number;
-  };
-};
+type PrismaCharacterListItem = Prisma.CharacterGetPayload<{
+  select: typeof characterListFields;
+}>;
 
 type CharacterStatusReceipt = {
   id: string;
@@ -56,14 +50,9 @@ type CharacterMemory = {
   deletedAt?: string;
 };
 
-type PrismaCharacterMemory = Omit<
-  CharacterMemory,
-  "createdAt" | "updatedAt" | "deletedAt"
-> & {
-  createdAt: Date;
-  updatedAt: Date;
-  deletedAt: Date | null;
-};
+type PrismaCharacterMemory = Prisma.CharacterMemoryGetPayload<{
+  select: typeof characterMemoryFields;
+}>;
 
 type CharacterPersona = {
   id: string;
@@ -76,14 +65,9 @@ type CharacterPersona = {
   deletedAt?: string;
 };
 
-type PrismaCharacterPersona = Omit<
-  CharacterPersona,
-  "createdAt" | "updatedAt" | "deletedAt"
-> & {
-  createdAt: Date;
-  updatedAt: Date;
-  deletedAt: Date | null;
-};
+type PrismaCharacterPersona = Prisma.CharacterPersonaGetPayload<{
+  select: typeof characterPersonaFields;
+}>;
 
 type SoftDeleteReceipt = {
   id: string;

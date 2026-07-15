@@ -70,24 +70,6 @@ export function endpoint(path, params = {}) {
   return `${url.pathname}${url.search}`;
 }
 
-export function dashboardRequests() {
-  return [
-    { key: "analytics", path: "/api/analytics" },
-    { key: "logs", path: "/api/character-action-logs" },
-    {
-      key: "reports",
-      path: endpoint("/api/moderation/reports", {
-        status: "submitted",
-        limit: 10,
-      }),
-    },
-    {
-      key: "payments",
-      path: endpoint("/api/payments/reconciliation", { status: "mismatch" }),
-    },
-  ];
-}
-
 export function navBadgeRequests() {
   return [
     {
@@ -125,27 +107,6 @@ export function analyticsRequests(period = "7일", now = new Date()) {
   return [
     endpoint("/api/analytics", range),
     "/api/analytics/hashtags?limit=10",
-  ];
-}
-
-export function userDetailRequests(userId) {
-  return [
-    { key: "user", path: `/api/users/${userId}` },
-    { key: "events", path: endpoint("/api/events", { userId, limit: 20 }) },
-    { key: "hashtags", path: endpoint("/api/hashtag-preferences", { userId }) },
-    {
-      key: "credits",
-      path: endpoint("/api/credits/ledger", { userId, limit: 20 }),
-    },
-  ];
-}
-
-export function characterDetailRequests(characterId) {
-  return [
-    { key: "character", path: `/api/characters/${characterId}` },
-    { key: "personas", path: `/api/characters/${characterId}/personas` },
-    { key: "memory", path: `/api/characters/${characterId}/memory` },
-    { key: "logs", path: "/api/character-action-logs" },
   ];
 }
 
@@ -622,6 +583,47 @@ export function generationClickRequest(clickAction, jobId) {
   return null;
 }
 
+const simpleClickActions = {
+  "settings-clear-key": {
+    path: "/api/settings/generation",
+    method: "PUT",
+    body: { falApiKey: null },
+    successMessage: "API 키를 삭제했습니다.",
+  },
+  "settings-clear-llm-key": {
+    path: "/api/settings/generation",
+    method: "PUT",
+    body: { llmApiKey: null },
+    successMessage: "LLM API 키를 삭제했습니다.",
+  },
+  "draft-approve": {
+    path: ({ id }) => `/api/drafts/${id}/approve`,
+    successMessage: "초안을 승인했습니다. 예정 시각에 게시됩니다.",
+  },
+  "draft-reject": {
+    path: ({ id }) => `/api/drafts/${id}/reject`,
+    successMessage: "초안을 반려했습니다.",
+  },
+  "draft-plan-now": {
+    path: ({ id }) => `/api/drafts/${id}/plan`,
+    successMessage: "기획을 실행했습니다. 결과를 확인하세요.",
+  },
+  "draft-publish-now": {
+    path: ({ id }) => `/api/drafts/${id}/publish`,
+    successMessage: "초안을 게시했습니다.",
+  },
+};
+
+export function simpleClickAction(action, dataset) {
+  const spec = simpleClickActions[action];
+  if (!spec) return null;
+  const path = typeof spec.path === "function" ? spec.path(dataset) : spec.path;
+  return {
+    request: jsonRequest(path, spec.method ?? "POST", spec.body ?? {}),
+    successMessage: spec.successMessage,
+  };
+}
+
 export function paymentDetailRequest(paymentId) {
   return `/api/payments/${paymentId}`;
 }
@@ -680,10 +682,6 @@ export function characterStatusPayload(form) {
     status: String(form.get("status") ?? "").trim(),
     reason: String(form.get("reason") ?? "").trim(),
   };
-}
-
-export function selectedOption(value, expected) {
-  return value === expected ? " selected" : "";
 }
 
 export function memoryPayload(form) {
@@ -3968,18 +3966,11 @@ async function handleClick(event) {
     renderApp();
     return;
   }
-  if (act === "settings-clear-key") {
+  const simpleAction = simpleClickAction(act, el.dataset);
+  if (simpleAction) {
     const result = await submitViaSpec(
-      jsonRequest("/api/settings/generation", "PUT", { falApiKey: null }),
-      "API 키를 삭제했습니다.",
-    );
-    if (result.ok) renderApp();
-    return;
-  }
-  if (act === "settings-clear-llm-key") {
-    const result = await submitViaSpec(
-      jsonRequest("/api/settings/generation", "PUT", { llmApiKey: null }),
-      "LLM API 키를 삭제했습니다.",
+      simpleAction.request,
+      simpleAction.successMessage,
     );
     if (result.ok) renderApp();
     return;
@@ -4089,33 +4080,6 @@ async function handleClick(event) {
   if (act === "go-draft") {
     ui.selDraftId = el.dataset.id;
     location.hash = "#drafts";
-    return;
-  }
-  if (act === "draft-approve" || act === "draft-reject") {
-    const verb = act === "draft-approve" ? "approve" : "reject";
-    const result = await submitViaSpec(
-      jsonRequest(`/api/drafts/${el.dataset.id}/${verb}`, "POST", {}),
-      verb === "approve"
-        ? "초안을 승인했습니다. 예정 시각에 게시됩니다."
-        : "초안을 반려했습니다.",
-    );
-    if (result.ok) renderApp();
-    return;
-  }
-  if (act === "draft-plan-now") {
-    const result = await submitViaSpec(
-      jsonRequest(`/api/drafts/${el.dataset.id}/plan`, "POST", {}),
-      "기획을 실행했습니다. 결과를 확인하세요.",
-    );
-    if (result.ok) renderApp();
-    return;
-  }
-  if (act === "draft-publish-now") {
-    const result = await submitViaSpec(
-      jsonRequest(`/api/drafts/${el.dataset.id}/publish`, "POST", {}),
-      "초안을 게시했습니다.",
-    );
-    if (result.ok) renderApp();
     return;
   }
   if (act === "draft-regen") {

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import {
   decodeCursor,
   Page,
@@ -7,7 +8,7 @@ import {
 } from "../domain/database/page";
 import { PrismaService } from "../domain/database/prisma.service";
 import { GenerationService } from "./generation/generation.service";
-import { Media, MediaService } from "./media/media.service";
+import { Media } from "./media/media.service";
 
 const freeCreditTtlDays = 30;
 
@@ -21,12 +22,14 @@ type CreditPurchaseStatus =
   "pending" | "paid" | "failed" | "canceled" | "refunded";
 type ReconciliationStatus = "mismatch" | "pending" | "resolved";
 type LedgerStatus = "granted" | "missing_grant" | "not_granted";
-type AnalyticsMetricName =
-  | "events.count"
-  | "messages.count"
-  | "credits.granted"
-  | "credits.debited"
-  | "generation_jobs.count";
+const analyticsMetricNames = [
+  "events.count",
+  "messages.count",
+  "credits.granted",
+  "credits.debited",
+  "generation_jobs.count",
+] as const;
+type AnalyticsMetricName = (typeof analyticsMetricNames)[number];
 
 type AdminUser = {
   id: string;
@@ -39,35 +42,9 @@ type AdminUser = {
 
 type AdminUserDetail = AdminUser;
 
-type PrismaAdminUser = Omit<
-  AdminUser,
-  "createdAt" | "email" | "followCount" | "creditBalance"
-> & {
-  email: string | null;
-  createdAt: Date;
-  _count: {
-    characterFollows: number;
-  };
-};
+type PrismaAdminUser = Prisma.UserGetPayload<{ select: typeof userFields }>;
 
-type PrismaAdminMedia = Omit<
-  Media,
-  | "createdAt"
-  | "uploadedAt"
-  | "contentType"
-  | "byteSize"
-  | "width"
-  | "height"
-  | "durationSeconds"
-> & {
-  contentType: string | null;
-  byteSize: number | null;
-  width: number | null;
-  height: number | null;
-  durationSeconds: number | null;
-  uploadedAt: Date | null;
-  createdAt: Date;
-};
+type PrismaAdminMedia = Prisma.MediaGetPayload<{ select: typeof mediaFields }>;
 
 type AdminUserEvent = {
   id: string;
@@ -79,10 +56,7 @@ type AdminUserEvent = {
   createdAt: string;
 };
 
-type PrismaUserEvent = Omit<AdminUserEvent, "createdAt" | "metadata"> & {
-  metadata: unknown | null;
-  createdAt: Date;
-};
+type PrismaUserEvent = Prisma.UserEventGetPayload<Prisma.UserEventDefaultArgs>;
 
 type AdminHashtagPreference = {
   userId: string;
@@ -91,13 +65,9 @@ type AdminHashtagPreference = {
   updatedAt: string;
 };
 
-type PrismaHashtagPreference = Omit<
-  AdminHashtagPreference,
-  "updatedAt" | "hashtag"
-> & {
-  hashtag: { name: string };
-  updatedAt: Date;
-};
+type PrismaHashtagPreference = Prisma.UserHashtagPreferenceGetPayload<{
+  include: { hashtag: { select: { name: true } } };
+}>;
 
 type DirectMediaInput = {
   mediaType: MediaType;
@@ -123,31 +93,7 @@ type AdminPost = {
   createdAt: string;
 };
 
-type PrismaPost = {
-  id: string;
-  characterId: string;
-  contentType: PostContentType;
-  content: string;
-  createdAt: Date;
-  hashtags: Array<{
-    hashtag: {
-      name: string;
-    };
-  }>;
-  postMedia: Array<{
-    media: {
-      mediaType: MediaType;
-      url: string;
-      width?: number | null;
-      height?: number | null;
-      durationSeconds?: number | null;
-    };
-  }>;
-  _count: {
-    comments: number;
-    reactions: number;
-  };
-};
+type PrismaPost = Prisma.PostGetPayload<{ include: typeof postWithMedia }>;
 
 type AdminStory = {
   id: string;
@@ -158,17 +104,7 @@ type AdminStory = {
   expiresAt: string;
 };
 
-type PrismaStory = Omit<AdminStory, "createdAt" | "expiresAt" | "media"> & {
-  createdAt: Date;
-  expiresAt: Date;
-  media: {
-    mediaType: MediaType;
-    url: string;
-    width?: number | null;
-    height?: number | null;
-    durationSeconds?: number | null;
-  };
-};
+type PrismaStory = Prisma.StoryGetPayload<{ include: { media: true } }>;
 
 type AdminPostComment = {
   id: string;
@@ -178,9 +114,8 @@ type AdminPostComment = {
   createdAt: string;
 };
 
-type PrismaPostComment = Omit<AdminPostComment, "createdAt"> & {
-  createdAt: Date;
-};
+type PrismaPostComment =
+  Prisma.PostCommentGetPayload<Prisma.PostCommentDefaultArgs>;
 
 type AdminPostReaction = {
   id: string;
@@ -190,9 +125,8 @@ type AdminPostReaction = {
   createdAt: string;
 };
 
-type PrismaPostReaction = Omit<AdminPostReaction, "createdAt"> & {
-  createdAt: Date;
-};
+type PrismaPostReaction =
+  Prisma.PostReactionGetPayload<Prisma.PostReactionDefaultArgs>;
 
 type CreditEntryType = "grant" | "debit";
 
@@ -206,25 +140,11 @@ type CreditEntry = {
   createdAt: string;
 };
 
-type PrismaCreditEntry = Omit<
-  CreditEntry,
-  "createdAt" | "externalReference"
-> & {
-  externalReference: string | null;
-  createdAt: Date;
-};
+type PrismaCreditEntry =
+  Prisma.CreditLedgerEntryGetPayload<Prisma.CreditLedgerEntryDefaultArgs>;
 
-type PrismaCreditPurchase = {
-  id: string;
-  userId: string;
-  provider: string;
-  status: CreditPurchaseStatus;
-  creditAmount: number;
-  paidAmount: number;
-  currency: string;
-  createdAt: Date;
-  updatedAt: Date;
-};
+type PrismaCreditPurchase =
+  Prisma.CreditPurchaseGetPayload<Prisma.CreditPurchaseDefaultArgs>;
 
 type PaymentReconciliationItem = {
   paymentId: string;
@@ -267,15 +187,7 @@ type AdminReport = {
   updatedAt: string;
 };
 
-type PrismaReport = Omit<
-  AdminReport,
-  "createdAt" | "updatedAt" | "details" | "resolution"
-> & {
-  details: string | null;
-  resolution: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-};
+type PrismaReport = Prisma.ReportGetPayload<Prisma.ReportDefaultArgs>;
 
 type ReportUpdateReceipt = {
   id: string;
@@ -328,7 +240,6 @@ export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly generationService: GenerationService,
-    private readonly mediaService: MediaService,
   ) {}
 
   async listUsers(input: { q?: string } & PageInput): Promise<Page<AdminUser>> {
@@ -890,14 +801,6 @@ export class AdminService {
     return reaction;
   }
 
-  startMediaUpload(input: Parameters<MediaService["startUpload"]>[0]) {
-    return this.mediaService.startUpload(input);
-  }
-
-  confirmMediaUpload(mediaId: string) {
-    return this.mediaService.confirmUpload(mediaId);
-  }
-
   grantCredits(input: {
     userId: string;
     amount: number;
@@ -935,14 +838,6 @@ export class AdminService {
     );
   }
 
-  listGenerationJobs(input: Parameters<GenerationService["listJobs"]>[0]) {
-    return this.generationService.listJobs(input);
-  }
-
-  getGenerationJob(jobId: string) {
-    return this.generationService.getJob(jobId);
-  }
-
   async createImageGenerationDraft(
     input: Parameters<GenerationService["createImageDraft"]>[0],
   ) {
@@ -955,21 +850,6 @@ export class AdminService {
       reason: "generation draft created",
     });
     return job;
-  }
-
-  updateImageGenerationDraft(
-    jobId: string,
-    input: Parameters<GenerationService["updateImageDraft"]>[1],
-  ) {
-    return this.generationService.updateImageDraft(jobId, input);
-  }
-
-  confirmImageGenerationDraft(jobId: string) {
-    return this.generationService.confirmImageDraft(jobId);
-  }
-
-  selectGenerationOutput(jobId: string, mediaId: string) {
-    return this.generationService.selectOutput(jobId, mediaId);
   }
 
   async regenerateImageJob(jobId: string) {
@@ -1118,48 +998,31 @@ export class AdminService {
   }> {
     const metric = this.parseAnalyticsMetric(input.metric);
     const where = this.parseCreatedAtWhere(input.from, input.to);
-    const metrics: Array<{ name: AnalyticsMetricName; value: number }> = [];
-
-    if (!metric || metric === "events.count") {
-      metrics.push({
-        name: "events.count",
-        value: await this.prisma.userEvent.count({ where }),
-      });
-    }
-    if (!metric || metric === "messages.count") {
-      metrics.push({
-        name: "messages.count",
-        value: await this.prisma.message.count({ where }),
-      });
-    }
-    if (!metric || metric === "credits.granted") {
-      const grant = await this.prisma.creditLedgerEntry.aggregate({
-        where: { entryType: "grant", ...where },
+    const creditTotal = async (entryType: CreditEntryType) => {
+      const result = await this.prisma.creditLedgerEntry.aggregate({
+        where: { entryType, ...where },
         _sum: { amount: true },
       });
-      metrics.push({
-        name: "credits.granted",
-        value: grant._sum.amount ?? 0,
-      });
-    }
-    if (!metric || metric === "credits.debited") {
-      const debit = await this.prisma.creditLedgerEntry.aggregate({
-        where: { entryType: "debit", ...where },
-        _sum: { amount: true },
-      });
-      metrics.push({
-        name: "credits.debited",
-        value: debit._sum.amount ?? 0,
-      });
-    }
-    if (!metric || metric === "generation_jobs.count") {
-      metrics.push({
-        name: "generation_jobs.count",
-        value: await this.prisma.generationJob.count({ where }),
-      });
-    }
-
-    return { metrics };
+      return result._sum.amount ?? 0;
+    };
+    const descriptors: Array<[AnalyticsMetricName, () => Promise<number>]> = [
+      ["events.count", () => this.prisma.userEvent.count({ where })],
+      ["messages.count", () => this.prisma.message.count({ where })],
+      ["credits.granted", () => creditTotal("grant")],
+      ["credits.debited", () => creditTotal("debit")],
+      [
+        "generation_jobs.count",
+        () => this.prisma.generationJob.count({ where }),
+      ],
+    ];
+    const selected = metric
+      ? descriptors.filter(([name]) => name === metric)
+      : descriptors;
+    return {
+      metrics: await Promise.all(
+        selected.map(async ([name, read]) => ({ name, value: await read() })),
+      ),
+    };
   }
 
   async listPaymentReconciliation(input: {
@@ -1647,14 +1510,8 @@ export class AdminService {
     if (!value) {
       return undefined;
     }
-    if (
-      value === "events.count" ||
-      value === "messages.count" ||
-      value === "credits.granted" ||
-      value === "credits.debited" ||
-      value === "generation_jobs.count"
-    ) {
-      return value;
+    if (analyticsMetricNames.includes(value as AnalyticsMetricName)) {
+      return value as AnalyticsMetricName;
     }
     throw new BadRequestException("Invalid analytics metric");
   }
