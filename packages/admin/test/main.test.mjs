@@ -23,6 +23,7 @@ import {
   dialogContextFromDataset,
   dialogBody,
   draftDetailMarkup,
+  draftDetailSnapshot,
   endpoint,
   formActionRequest,
   generationActionBody,
@@ -983,6 +984,46 @@ test("generation prompt step shows the LLM-expanded scene when present", () => {
   assert.match(html, /LLM 확장 장면 \(llm:gpt-5\.6-terra\)/);
   assert.match(html, /성수동 골목, 오후의 자연광, 필름 질감/);
   assert.match(html, /장면 확장: llm:gpt-5\.6-terra/);
+});
+
+test("draft detail snapshot changes only on pipeline-visible state", () => {
+  const base = {
+    status: "generating",
+    updatedAt: "2026-07-15T00:00:00.000Z",
+    caption: "캡션",
+    hashtags: ["태그"],
+    shots: [
+      {
+        jobId: "job-1",
+        status: "queued",
+        outputs: [],
+      },
+    ],
+  };
+
+  // 파이프라인과 무관한 필드(conceptJson 등)는 스냅샷을 바꾸지 않는다.
+  assert.equal(
+    draftDetailSnapshot(base),
+    draftDetailSnapshot({ ...base, conceptJson: { plan: {} } }),
+  );
+  // 컷 상태·후보·선택이 바뀌면 스냅샷이 바뀌어 리렌더가 일어난다.
+  assert.notEqual(
+    draftDetailSnapshot(base),
+    draftDetailSnapshot({
+      ...base,
+      shots: [
+        {
+          jobId: "job-1",
+          status: "completed",
+          outputs: [{ mediaId: "m-1", selected: false }],
+        },
+      ],
+    }),
+  );
+  assert.notEqual(
+    draftDetailSnapshot(base),
+    draftDetailSnapshot({ ...base, status: "needs_review" }),
+  );
 });
 
 test("generation prompt step labels the missing planner as raw input", () => {

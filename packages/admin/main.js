@@ -3043,24 +3043,64 @@ export function draftDetailMarkup(d, characterName) {
   `;
 }
 
-// 진행 중(생성 대기/실행 중)이면 5초 후 자동 새로고침이 필요하다.
-function draftNeedsRefresh(d) {
+// 실시간 추적 — 터미널 상태가 아니면 3초 간격으로 폴링해, 워커·다른 탭·수동
+// 실행이 만든 상태 변화를 즉시 반영한다. 렌더 파괴를 막는 두 가지 가드:
+// (1) 파이프라인에 영향 주는 필드가 실제로 바뀌었을 때만 다시 그린다,
+// (2) 운영자가 폼 입력 중이면 다시 그리지 않고 다음 틱으로 미룬다.
+const DRAFT_POLL_TERMINAL = new Set(["published", "rejected"]);
+const DRAFT_POLL_INTERVAL_MS = 3000;
+
+// 리렌더 필요 여부 판정용 스냅샷 — 화면에 보이는 파이프라인 상태의 요약.
+export function draftDetailSnapshot(d) {
   const shots = Array.isArray(d.shots) ? d.shots : [];
+  return JSON.stringify({
+    status: d.status,
+    updatedAt: d.updatedAt,
+    error: d.errorMessage ?? null,
+    caption: d.caption,
+    hashtags: d.hashtags ?? [],
+    scheduledAt: d.scheduledAt ?? null,
+    publishedPostId: d.publishedPostId ?? null,
+    shots: shots.map((s) => [
+      s.jobId,
+      s.status,
+      s.errorMessage ?? null,
+      (s.outputs ?? []).map((o) => [o.mediaId, o.selected]),
+    ]),
+  });
+}
+
+// 운영자가 타임라인 안에서 입력 중인가 (프롬프트 수정 등).
+function isEditingDraftDetail() {
+  const active = document.activeElement;
   return (
-    shots.some((s) => s.status === "queued" || s.status === "running") ||
-    (d.status === "generating" && shots.length === 0)
+    !!active &&
+    /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) &&
+    !!active.closest("#mainPanel")
   );
 }
 
 function scheduleDraftRefresh(d) {
   clearTimeout(ui.draftPollTimer);
   ui.draftPollTimer = 0;
-  if (!draftNeedsRefresh(d)) return;
-  ui.draftPollTimer = setTimeout(() => {
-    if (currentRoute() === "drafts" && ui.selDraftId === d.id) {
-      renderApp();
+  if (DRAFT_POLL_TERMINAL.has(d.status)) return;
+  const snapshot = draftDetailSnapshot(d);
+  ui.draftPollTimer = setTimeout(async () => {
+    if (currentRoute() !== "drafts" || ui.selDraftId !== d.id) return;
+    const res = await request(`/api/drafts/${d.id}`);
+    if (currentRoute() !== "drafts" || ui.selDraftId !== d.id) return;
+    const next = res.ok && res.body?.id ? res.body : null;
+    if (
+      next &&
+      draftDetailSnapshot(next) !== snapshot &&
+      !isEditingDraftDetail()
+    ) {
+      renderApp(); // 다시 그리면 renderDraftDetail이 폴링을 재설정한다.
+      return;
     }
-  }, 5000);
+    // 변화 없음/입력 중/일시적 오류 — 기존 스냅샷 기준으로 계속 감시한다.
+    scheduleDraftRefresh(d);
+  }, DRAFT_POLL_INTERVAL_MS);
 }
 
 async function renderDraftDetail(id) {
