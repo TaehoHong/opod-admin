@@ -56,9 +56,22 @@ export function workerConfigFromEnv(
   };
 }
 
+// fal edit 계열(nano-banana/edit 등)의 image_urls 상한 — 초과 시 422
+// value_error. 장면별 레퍼런스 선별(LLM 선별)이 들어와도 전송 직전 안전판으로
+// 유지한다 (docs/media-generation-pipeline.md "컨텍스트 선별").
+const MAX_REFERENCE_IMAGES = 10;
+
 // 프로바이더가 잡 자체를 거부/실패 처리한 경우. 재시도 시 requestId를 버리고
 // 새로 제출해야 한다 (transient 오류는 requestId를 유지해 폴링을 이어받는다).
-export class ProviderJobFailedError extends Error {}
+// permanent = 입력 검증 실패(422 등) — 재시도 없이 즉시 failed 처리한다.
+export class ProviderJobFailedError extends Error {
+  constructor(
+    message: string,
+    readonly permanent: boolean = false,
+  ) {
+    super(message);
+  }
+}
 
 type ClaimedJob = {
   id: string;
@@ -357,7 +370,10 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
         return result;
       }
       if (result.status === "failed") {
-        throw new ProviderJobFailedError(result.errorMessage);
+        throw new ProviderJobFailedError(
+          result.errorMessage,
+          result.permanent === true,
+        );
       }
       if (Date.now() >= deadline) {
         // 아직 큐에서 시작 전이라면 과금 전에 취소를 시도한다 (베스트에포트).
@@ -373,9 +389,21 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
 
   private buildRequest(job: ClaimedJob): ImageGenerationRequest {
     const profile = job.character.visualProfile;
-    const referenceImageUrls = (profile?.referenceMedia ?? [])
+    const uploadedReferenceUrls = (profile?.referenceMedia ?? [])
       .filter((reference) => reference.media.uploadedAt)
       .map((reference) => reference.media.url);
+    // fal edit 계열의 image_urls 상한(10장 초과 시 422 value_error). 초과분은
+    // sortOrder 우선순위로 자른다 — 장면별 관련 레퍼런스 선별(벡터 검색)이
+    // 들어오기 전까지의 안전판.
+    if (uploadedReferenceUrls.length > MAX_REFERENCE_IMAGES) {
+      this.logger.warn(
+        `Job ${job.id}: ${uploadedReferenceUrls.length} reference images exceed the provider limit; sending first ${MAX_REFERENCE_IMAGES}`,
+      );
+    }
+    const referenceImageUrls = uploadedReferenceUrls.slice(
+      0,
+      MAX_REFERENCE_IMAGES,
+    );
     // 프로필의 프로바이더 기본값(providerConfig) 위에 잡별 파라미터(paramsJson)를
     // 덮어쓴다. 종횡비 등 모델별 파라미터는 코드가 아니라 이 데이터로 주입한다.
     // 밑줄 접두 키(_wizard 등)는 파이프라인 메타데이터 — 프로바이더에 보내지 않는다.
@@ -483,16 +511,23 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       `Job ${job.id} attempt ${job.attemptCount} failed: ${message}`,
     );
 
-    this.consecutiveFailures += 1;
-    if (this.consecutiveFailures >= this.config.circuitBreakerThreshold) {
-      this.circuitOpenUntil = Date.now() + this.config.circuitBreakerCooldownMs;
-      this.consecutiveFailures = 0;
-      this.logger.error(
-        `Circuit breaker opened for ${this.config.circuitBreakerCooldownMs}ms after consecutive failures`,
-      );
+    // 입력 검증 실패(permanent)는 프로바이더 장애가 아니다 — 재시도해도 항상
+    // 같은 결과이므로 즉시 실패 처리하고, 서킷브레이커에도 집계하지 않는다.
+    const permanent =
+      error instanceof ProviderJobFailedError && error.permanent;
+    if (!permanent) {
+      this.consecutiveFailures += 1;
+      if (this.consecutiveFailures >= this.config.circuitBreakerThreshold) {
+        this.circuitOpenUntil =
+          Date.now() + this.config.circuitBreakerCooldownMs;
+        this.consecutiveFailures = 0;
+        this.logger.error(
+          `Circuit breaker opened for ${this.config.circuitBreakerCooldownMs}ms after consecutive failures`,
+        );
+      }
     }
 
-    if (job.attemptCount >= this.config.maxAttempts) {
+    if (permanent || job.attemptCount >= this.config.maxAttempts) {
       const transitioned = await this.prisma.generationJob.updateMany({
         where: { id: job.id, status: "running" },
         data: { status: "failed", errorMessage: message, leaseExpiresAt: null },

@@ -191,7 +191,7 @@ describe("createFalImageGenerationProvider", () => {
     );
   });
 
-  it("treats a failed result fetch as a provider failure with detail", async () => {
+  it("marks a 422 result as a permanent provider failure", async () => {
     const fetchFn = jest
       .fn()
       .mockResolvedValueOnce(jsonResponse({ status: "COMPLETED" }))
@@ -200,9 +200,24 @@ describe("createFalImageGenerationProvider", () => {
       );
     const provider = createFalImageGenerationProvider(config, fetchFn);
 
+    // 422 = 입력 검증 실패 — 같은 입력 재시도가 무의미하므로 permanent.
     await expect(provider.poll("req-1")).resolves.toEqual({
       status: "failed",
       errorMessage: expect.stringContaining("422"),
+      permanent: true,
+    });
+  });
+
+  it("keeps non-422 result failures retryable", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ status: "COMPLETED" }))
+      .mockResolvedValueOnce(jsonResponse({ detail: "internal" }, 500));
+    const provider = createFalImageGenerationProvider(config, fetchFn);
+
+    await expect(provider.poll("req-1")).resolves.toEqual({
+      status: "failed",
+      errorMessage: expect.stringContaining("500"),
     });
   });
 

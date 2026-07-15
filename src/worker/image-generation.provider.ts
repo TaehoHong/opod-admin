@@ -22,7 +22,8 @@ export type GeneratedImage = {
 export type GenerationPollResult =
   | { status: "pending" }
   | { status: "completed"; images: GeneratedImage[]; costUsd?: number }
-  | { status: "failed"; errorMessage: string };
+  // permanent: 입력 검증 실패(422 등) — 같은 입력으로 재시도해도 항상 실패한다.
+  | { status: "failed"; errorMessage: string; permanent?: boolean };
 
 // 제출과 결과 수령이 분리된 비동기 프로바이더 계약.
 // submit 직후 requestId를 DB에 기록해야 재시작 후 poll로 이어받을 수 있다.
@@ -238,6 +239,9 @@ export function createFalImageGenerationProvider(
         return {
           status: "failed",
           errorMessage: `fal result failed (${resultResponse.status}): ${await safeText(resultResponse)}`,
+          // 422 = 입력 검증 실패(레퍼런스 수 초과, 금지 프롬프트 등).
+          // 같은 입력을 다시 보내도 항상 실패하므로 재시도하지 않는다.
+          ...(resultResponse.status === 422 ? { permanent: true } : {}),
         };
       }
       const images = imagesFromFalResult(await resultResponse.json());
