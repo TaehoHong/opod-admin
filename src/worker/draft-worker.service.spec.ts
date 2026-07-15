@@ -1,3 +1,4 @@
+import { Logger } from "@nestjs/common";
 import {
   DraftWorkerConfig,
   draftWorkerConfigFromEnv,
@@ -199,6 +200,30 @@ describe("DraftWorkerService planning", () => {
         leaseExpiresAt: null,
       },
     });
+  });
+
+  it("logs planning failures as errors with the original stack trace", async () => {
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "draft-1" }]);
+    prisma.postDraft.findUnique.mockResolvedValue(plannedDraft());
+    const planningError = new Error("fetch failed");
+    const planner = plannerMock();
+    planner.plan.mockRejectedValue(planningError);
+    const errorSpy = jest.spyOn(Logger.prototype, "error").mockImplementation();
+    const warnSpy = jest.spyOn(Logger.prototype, "warn").mockImplementation();
+    const service = makeService(prisma, planner);
+
+    await service.tick();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Draft draft-1 planning failed: fetch failed",
+      planningError.stack,
+    );
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      "Draft draft-1 planning failed: fetch failed",
+    );
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it("fails the draft when planning attempts are exhausted", async () => {

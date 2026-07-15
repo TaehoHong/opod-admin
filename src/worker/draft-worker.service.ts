@@ -377,7 +377,10 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     error: unknown,
   ): Promise<void> {
     const message = errorMessage(error).slice(0, 500);
-    this.logger.warn(`Draft ${draft.id} planning failed: ${message}`);
+    this.logger.error(
+      `Draft ${draft.id} planning failed: ${message}`,
+      error instanceof Error ? error.stack : undefined,
+    );
     if (draft.attemptCount >= this.config.maxAttempts) {
       const transitioned = await this.prisma.postDraft.updateMany({
         where: { id: draft.id, status: "generating" },
