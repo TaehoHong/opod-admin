@@ -49,6 +49,8 @@ type DraftShot = {
   prompt: string;
   // 기획이 만든 장면 원문 (paramsJson._shot.scene) — 프롬프트 추적용.
   scene?: string;
+  // 기획 LLM이 이 샷에 고른 레퍼런스 (URL은 표시용으로 해석).
+  references?: { mediaId: string; url: string }[];
   candidateCount?: number;
   provider?: string;
   costUsd?: string;
@@ -102,16 +104,27 @@ type PrismaDraftJob = Prisma.GenerationJobGetPayload<{
   select: typeof draftJobFields;
 }>;
 
-function shotScene(paramsJson: unknown): string | undefined {
+// paramsJson._shot — 기획이 남긴 샷 메타데이터(장면 원문, 선별 레퍼런스).
+function shotMeta(paramsJson: unknown): {
+  scene?: string;
+  referenceMediaIds: string[];
+} {
   if (typeof paramsJson !== "object" || paramsJson === null) {
-    return undefined;
+    return { referenceMediaIds: [] };
   }
   const shot = (paramsJson as Record<string, unknown>)._shot;
   if (typeof shot !== "object" || shot === null) {
-    return undefined;
+    return { referenceMediaIds: [] };
   }
-  const scene = (shot as Record<string, unknown>).scene;
-  return typeof scene === "string" && scene ? scene : undefined;
+  const record = shot as Record<string, unknown>;
+  const scene =
+    typeof record.scene === "string" && record.scene ? record.scene : undefined;
+  const ids = Array.isArray(record.referenceMediaIds)
+    ? record.referenceMediaIds.filter(
+        (id): id is string => typeof id === "string",
+      )
+    : [];
+  return { ...(scene ? { scene } : {}), referenceMediaIds: ids };
 }
 
 @Injectable()
@@ -170,16 +183,41 @@ export class DraftsService {
         latestPerShot.set(job.sortOrder, job);
       }
     }
+    // 샷별 선별 레퍼런스의 표시용 URL을 한 번에 해석한다.
+    const latestJobs = [...latestPerShot.values()];
+    const referenceIds = [
+      ...new Set(
+        latestJobs.flatMap((job) => shotMeta(job.paramsJson).referenceMediaIds),
+      ),
+    ];
+    const referenceUrls = new Map(
+      referenceIds.length > 0
+        ? (
+            await this.prisma.media.findMany({
+              where: { id: { in: referenceIds } },
+              select: { id: true, url: true },
+            })
+          ).map((media) => [media.id, media.url] as const)
+        : [],
+    );
+
     const shots = [...latestPerShot.entries()]
       .sort(([a], [b]) => a - b)
       .map(([sortOrder, job]) => {
-        const scene = shotScene(job.paramsJson);
+        const meta = shotMeta(job.paramsJson);
+        const references = meta.referenceMediaIds
+          .filter((mediaId) => referenceUrls.has(mediaId))
+          .map((mediaId) => ({
+            mediaId,
+            url: referenceUrls.get(mediaId) as string,
+          }));
         return {
           sortOrder,
           jobId: job.id,
           status: job.status,
           prompt: job.prompt,
-          ...(scene ? { scene } : {}),
+          ...(meta.scene ? { scene: meta.scene } : {}),
+          ...(references.length > 0 ? { references } : {}),
           ...(job.candidateCount != null
             ? { candidateCount: job.candidateCount }
             : {}),

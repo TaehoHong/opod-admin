@@ -180,7 +180,12 @@ export class GenerationService {
             stylePrompt: true,
             negativePrompt: true,
             referenceMedia: {
-              select: { media: { select: { uploadedAt: true } } },
+              orderBy: { sortOrder: "asc" },
+              select: {
+                mediaId: true,
+                description: true,
+                media: { select: { uploadedAt: true } },
+              },
             },
           },
         },
@@ -194,7 +199,15 @@ export class GenerationService {
     // 운영자 원문은 sceneHint(반영 필수)로 전달된다.
     const planner = await this.resolveScenePlanner();
     let scene = inputPrompt;
+    let referenceMediaIds: string[] = [];
     if (planner) {
+      // 캡션 있는 레퍼런스만 카탈로그로 — 장면과 함께 레퍼런스도 고른다.
+      const referenceCatalog = (character.visualProfile?.referenceMedia ?? [])
+        .filter((reference) => reference.description)
+        .map((reference) => ({
+          id: reference.mediaId,
+          description: reference.description,
+        }));
       let plan;
       try {
         plan = await planner.plan({
@@ -208,6 +221,7 @@ export class GenerationService {
             .filter(Boolean),
           sceneHint: inputPrompt,
           maxShots: 1,
+          ...(referenceCatalog.length > 0 ? { referenceCatalog } : {}),
         });
       } catch (error) {
         throw new BadGatewayException(
@@ -215,6 +229,7 @@ export class GenerationService {
         );
       }
       scene = plan.shots[0]?.scene ?? inputPrompt;
+      referenceMediaIds = plan.shots[0]?.referenceIds ?? [];
     }
 
     const job = await this.prisma.generationJob.create({
@@ -231,6 +246,12 @@ export class GenerationService {
           ? {
               paramsJson: {
                 _wizard: { plannerName: planner.name, expandedScene: scene },
+                _shot: {
+                  scene,
+                  ...(referenceMediaIds.length > 0
+                    ? { referenceMediaIds }
+                    : {}),
+                },
               },
             }
           : {}),

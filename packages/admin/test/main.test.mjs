@@ -1976,3 +1976,68 @@ test("draft timeline shows the plan-now button for a planned draft with no cuts 
   // 아직 기획 전이라 컷 생성 폼은 없어야 한다.
   assert.doesNotMatch(html, /data-action="draft-shot-generate"/);
 });
+
+test("draft timeline shows planner-selected references only for cuts that have them", () => {
+  const shotBase = {
+    sortOrder: 0,
+    jobId: "job-ref",
+    status: "completed",
+    prompt: "young woman, 해변",
+    scene: "해변 역광",
+    outputs: [
+      {
+        candidateIndex: 0,
+        mediaId: "out-media",
+        url: "https://cdn.test/out-1.jpg",
+        selected: true,
+      },
+    ],
+  };
+  const draftBase = {
+    id: "draft-ref",
+    characterId: "ai-1",
+    contentType: "feed",
+    status: "needs_review",
+    attemptCount: 1,
+    caption: "노을 산책",
+    hashtags: ["필름사진"],
+    createdAt: "2026-07-12T00:00:00.000Z",
+    conceptJson: {
+      source: "manual",
+      mode: "manual",
+      sceneHint: "애월 해변",
+      plan: {
+        caption: "노을 산책",
+        hashtags: ["필름사진"],
+        shots: [{ scene: "해변 역광" }],
+      },
+    },
+  };
+
+  const withRefs = draftDetailMarkup(
+    {
+      ...draftBase,
+      shots: [
+        {
+          ...shotBase,
+          references: [
+            { mediaId: "ref-1", url: "https://cdn.test/ref-1.jpg" },
+            { mediaId: "ref-2", url: "https://cdn.test/ref-2.jpg" },
+          ],
+        },
+      ],
+    },
+    "한소이",
+  );
+  // 선별 소제목 + 장수 + 각 썸네일 URL이 운영자 추적용으로 노출된다.
+  assert.match(withRefs, /선별 레퍼런스 2장/);
+  assert.ok(withRefs.includes("https://cdn.test/ref-1.jpg"));
+  assert.ok(withRefs.includes("https://cdn.test/ref-2.jpg"));
+
+  const withoutRefs = draftDetailMarkup(
+    { ...draftBase, shots: [shotBase] },
+    "한소이",
+  );
+  // 선별 없이 전체 레퍼런스를 쓰는 컷(폴백)은 별도 표시가 없다.
+  assert.doesNotMatch(withoutRefs, /선별 레퍼런스/);
+});

@@ -55,6 +55,7 @@ type PlannedDraft = {
     visualProfile: {
       appearancePrompt: string;
       stylePrompt: string;
+      referenceMedia: { mediaId: string; description: string }[];
     } | null;
   };
 };
@@ -289,7 +290,14 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
               select: { content: true },
             },
             visualProfile: {
-              select: { appearancePrompt: true, stylePrompt: true },
+              select: {
+                appearancePrompt: true,
+                stylePrompt: true,
+                referenceMedia: {
+                  orderBy: { sortOrder: "asc" },
+                  select: { mediaId: true, description: true },
+                },
+              },
             },
           },
         },
@@ -306,6 +314,15 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       // 자동으로 집지 않게 한다 — 운영자가 컷별 "이미지 생성 실행"으로 진행.
       const manualMode = concept.mode === "manual";
       const planner = await this.resolvePlanner();
+      // 캡션 있는 레퍼런스만 카탈로그로 — LLM이 샷별로 어울리는 컷을 고른다.
+      const referenceCatalog = (
+        draft.character.visualProfile?.referenceMedia ?? []
+      )
+        .filter((reference) => reference.description)
+        .map((reference) => ({
+          id: reference.mediaId,
+          description: reference.description,
+        }));
       const planInput = {
         characterName: draft.character.displayName,
         bio: draft.character.bio,
@@ -317,6 +334,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           .filter(Boolean),
         sceneHint,
         maxShots: this.config.maxShots,
+        ...(referenceCatalog.length > 0 ? { referenceCatalog } : {}),
       };
       const plan = await planner.plan(planInput);
 
@@ -343,6 +361,8 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           throw new Error("draft left the generating state during planning");
         }
         for (const [index, shot] of plan.shots.entries()) {
+          // 커스텀/구버전 플래너가 referenceIds를 생략해도 동작해야 한다.
+          const referenceIds = shot.referenceIds ?? [];
           await tx.generationJob.create({
             data: {
               characterId: draft.characterId,
@@ -351,8 +371,17 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
               draftId: draft.id,
               sortOrder: index,
               ...(manualMode ? { status: "draft" as const } : {}),
-              // 장면 원문은 프롬프트 추적용 메타데이터 (프로바이더 미전달).
-              paramsJson: { _shot: { scene: shot.scene } },
+              // _shot: 파이프라인 메타데이터 (프로바이더 미전달) —
+              // scene은 프롬프트 추적용, referenceMediaIds는 LLM이 이 샷에
+              // 고른 레퍼런스로 buildRequest가 image_urls를 구성할 때 쓴다.
+              paramsJson: {
+                _shot: {
+                  scene: shot.scene,
+                  ...(referenceIds.length > 0
+                    ? { referenceMediaIds: referenceIds }
+                    : {}),
+                },
+              },
             },
           });
         }

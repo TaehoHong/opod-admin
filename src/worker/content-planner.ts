@@ -15,12 +15,16 @@ export type ContentPlanInput = {
   // 수동 draft 생성 시 운영자가 준 장면 힌트.
   sceneHint?: string;
   maxShots?: number;
+  // 레퍼런스 이미지 카탈로그 (캡션 있는 것만). LLM이 샷별로 어울리는
+  // 레퍼런스를 고른다 — docs/media-generation-pipeline.md "컨텍스트 선별".
+  referenceCatalog?: { id: string; description: string }[];
 };
 
 export type ContentPlan = {
   caption: string;
   hashtags: string[];
-  shots: { scene: string }[];
+  // referenceIds: 카탈로그에서 고른 샷별 레퍼런스 (카탈로그 없으면 빈 배열).
+  shots: { scene: string; referenceIds: string[] }[];
 };
 
 export type ContentPlanner = {
@@ -32,6 +36,8 @@ const HTTP_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_SHOTS = 2;
 const SHOTS_HARD_CAP = 3;
 const HASHTAG_MAX = 5;
+// 샷당 선별 레퍼런스 상한 — 앵커 2장과 합쳐도 프로바이더 한도(10)에 여유.
+const SHOT_REFERENCES_MAX = 3;
 
 type PlannerEnv = Record<string, string | undefined>;
 
@@ -83,6 +89,7 @@ export const localContentPlanner: ContentPlanner = {
         index === 0
           ? `${subject}의 한 장면`
           : `${subject}의 다른 각도, 디테일 컷`,
+      referenceIds: [] as string[],
     }));
     return Promise.resolve({
       caption: `${subject} 기록 — ${input.characterName}의 하루`,
@@ -124,7 +131,11 @@ export function createLlmContentPlanner(
       if (!content) {
         throw new Error("content planner LLM returned no content");
       }
-      return parseContentPlan(content, clampShots(input.maxShots));
+      return parseContentPlan(
+        content,
+        clampShots(input.maxShots),
+        (input.referenceCatalog ?? []).map((reference) => reference.id),
+      );
     },
   };
 }
@@ -136,9 +147,10 @@ const PLANNER_SYSTEM_PROMPT = [
   "- 캐릭터의 확정 세계관(메모리)과 모순되는 장소·시점·사건을 만들지 않는다.",
   "- 최근 게시물과 소재가 겹치지 않게 한다.",
   "- shots의 scene은 이미지 생성 프롬프트로 쓸 수 있게 장면·구도·분위기를 구체적으로 쓴다 (인물 외모 묘사는 제외 — 별도 주입됨).",
+  "- 레퍼런스 카탈로그가 주어지면, 각 shot에 그 장면(구도·포즈·의상·분위기)과 어울리는 이미지 id를 최대 3개 고른다. 어울리는 것이 없으면 빈 배열.",
   "- 캡션은 캐릭터의 말투로, 1~3문장.",
   "반드시 아래 JSON만 출력한다 (설명·마크다운 금지):",
-  '{"caption": "...", "hashtags": ["태그1", "태그2"], "shots": [{"scene": "..."}]}',
+  '{"caption": "...", "hashtags": ["태그1", "태그2"], "shots": [{"scene": "...", "referenceIds": ["id1"]}]}',
 ].join("\n");
 
 export function buildPlannerUserPrompt(input: ContentPlanInput): string {
@@ -171,6 +183,15 @@ export function buildPlannerUserPrompt(input: ContentPlanInput): string {
   if (input.sceneHint?.trim()) {
     sections.push(`## 운영자 장면 힌트 (반영 필수)\n${input.sceneHint.trim()}`);
   }
+  if ((input.referenceCatalog ?? []).length > 0) {
+    sections.push(
+      `## 레퍼런스 카탈로그 (shot별로 어울리는 id 선택)\n${input
+        .referenceCatalog!.map(
+          (reference) => `- [${reference.id}] ${reference.description}`,
+        )
+        .join("\n")}`,
+    );
+  }
   sections.push(
     `## 요청\n샷(이미지 컷) ${clampShots(input.maxShots)}개짜리 피드 포스트 1건을 기획하라.`,
   );
@@ -178,7 +199,12 @@ export function buildPlannerUserPrompt(input: ContentPlanInput): string {
 }
 
 // LLM 출력에서 JSON을 견고하게 추출·검증한다 (마크다운 펜스 허용).
-export function parseContentPlan(raw: string, maxShots: number): ContentPlan {
+// referenceIds는 카탈로그에 실재하는 id만 통과시킨다 (환각 방지).
+export function parseContentPlan(
+  raw: string,
+  maxShots: number,
+  allowedReferenceIds: string[] = [],
+): ContentPlan {
   const text = raw.trim();
   const jsonText = text.startsWith("{")
     ? text
@@ -196,14 +222,18 @@ export function parseContentPlan(raw: string, maxShots: number): ContentPlan {
   if (!caption) {
     throw new Error("content plan is missing a caption");
   }
+  const allowed = new Set(allowedReferenceIds);
   const shots = (Array.isArray(parsed.shots) ? parsed.shots : [])
     .filter(
-      (shot): shot is { scene: string } =>
+      (shot): shot is { scene: string; referenceIds?: unknown } =>
         isRecord(shot) &&
         typeof shot.scene === "string" &&
         Boolean(shot.scene.trim()),
     )
-    .map((shot) => ({ scene: shot.scene.trim() }))
+    .map((shot) => ({
+      scene: shot.scene.trim(),
+      referenceIds: cleanReferenceIds(shot.referenceIds, allowed),
+    }))
     .slice(0, maxShots);
   if (shots.length === 0) {
     throw new Error("content plan has no usable shots");
@@ -215,6 +245,26 @@ export function parseContentPlan(raw: string, maxShots: number): ContentPlan {
     ),
     shots,
   };
+}
+
+function cleanReferenceIds(values: unknown, allowed: Set<string>): string[] {
+  if (!Array.isArray(values) || allowed.size === 0) {
+    return [];
+  }
+  const cleaned: string[] = [];
+  for (const value of values) {
+    if (
+      typeof value === "string" &&
+      allowed.has(value) &&
+      !cleaned.includes(value)
+    ) {
+      cleaned.push(value);
+    }
+    if (cleaned.length >= SHOT_REFERENCES_MAX) {
+      break;
+    }
+  }
+  return cleaned;
 }
 
 function cleanHashtags(values: unknown[]): string[] {
@@ -241,7 +291,9 @@ function clampShots(value: number | undefined): number {
   return Math.min(value, SHOTS_HARD_CAP);
 }
 
-function contentFromChatCompletion(value: unknown): string | null {
+// OpenAI-compatible chat completions 응답에서 본문 텍스트를 꺼낸다.
+// 캡셔닝(reference-captioner) 등 다른 LLM 호출도 재사용한다.
+export function contentFromChatCompletion(value: unknown): string | null {
   if (!isRecord(value) || !Array.isArray(value.choices)) {
     return null;
   }

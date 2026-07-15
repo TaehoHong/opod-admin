@@ -106,10 +106,12 @@ type AdminStory = {
 
 type PrismaStory = Prisma.StoryGetPayload<{ include: { media: true } }>;
 
+// 댓글/리액션 액터는 캐릭터 또는 사용자다 (canonical 스키마의 nullable 쌍).
 type AdminPostComment = {
   id: string;
   postId: string;
-  characterId: string;
+  characterId?: string;
+  userId?: string;
   body: string;
   createdAt: string;
 };
@@ -120,7 +122,8 @@ type PrismaPostComment =
 type AdminPostReaction = {
   id: string;
   postId: string;
-  characterId: string;
+  characterId?: string;
+  userId?: string;
   reactionType: string;
   createdAt: string;
 };
@@ -716,7 +719,7 @@ export class AdminService {
       }),
     );
     await this.recordCharacterActionLog({
-      characterId: comment.characterId,
+      characterId: input.characterId,
       actionType: "POST_COMMENT_CREATED",
       targetTable: "post_comments",
       targetId: comment.id,
@@ -792,7 +795,7 @@ export class AdminService {
       }),
     );
     await this.recordCharacterActionLog({
-      characterId: reaction.characterId,
+      characterId: input.characterId,
       actionType: "POST_REACTION_CREATED",
       targetTable: "post_reactions",
       targetId: reaction.id,
@@ -1329,7 +1332,8 @@ export class AdminService {
     return {
       id: comment.id,
       postId: comment.postId,
-      characterId: comment.characterId,
+      ...(comment.characterId ? { characterId: comment.characterId } : {}),
+      ...(comment.userId ? { userId: comment.userId } : {}),
       body: comment.body,
       createdAt: comment.createdAt.toISOString(),
     };
@@ -1339,7 +1343,8 @@ export class AdminService {
     return {
       id: reaction.id,
       postId: reaction.postId,
-      characterId: reaction.characterId,
+      ...(reaction.characterId ? { characterId: reaction.characterId } : {}),
+      ...(reaction.userId ? { userId: reaction.userId } : {}),
       reactionType: reaction.reactionType,
       createdAt: reaction.createdAt.toISOString(),
     };

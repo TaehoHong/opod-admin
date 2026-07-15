@@ -163,6 +163,7 @@ describe("GenerationService", () => {
               plannerName: "llm:test",
               expandedScene: "비 오는 오후 창가 카페, 얕은 심도",
             },
+            _shot: { scene: "비 오는 오후 창가 카페, 얕은 심도" },
           },
         }),
       }),

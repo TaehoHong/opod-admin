@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { assertUploadedMedia } from "../admin/media/media.service";
 import { PrismaService } from "../domain/database/prisma.service";
+import { ReferenceCaptioner } from "../worker/reference-captioner";
 
 const PROMPT_MAX_LENGTH = 4000;
 const REFERENCE_MAX_COUNT = 5;
@@ -11,6 +12,15 @@ type VisualProfileReference = {
   mediaId: string;
   url: string;
   sortOrder: number;
+  // 비전 LLM 캡션 — 기획 LLM의 샷별 레퍼런스 선별에 쓰인다. 빈 값 = 캡셔닝 전.
+  description: string;
+};
+
+type CaptionReferencesResult = {
+  captioned: number;
+  failed: { mediaId: string; error: string }[];
+  // 이번 호출 이후에도 캡션이 비어 있는 레퍼런스 수.
+  pending: number;
 };
 
 type VisualProfile = {
@@ -34,6 +44,7 @@ type PrismaVisualProfile = {
   referenceMedia: {
     mediaId: string;
     sortOrder: number;
+    description: string;
     media: { url: string };
   }[];
 };
@@ -49,7 +60,75 @@ const profileInclude = {
 // 워커가 생성 요청을 만들 때 이 프로필을 주입한다 (docs/media-generation-pipeline.md D4).
 @Injectable()
 export class VisualProfileService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // 레퍼런스 캡셔닝용 비전 LLM — 기획 LLM(planner.*) 설정을 재사용하며
+    // 호출 시마다 재해석한다. null이면 LLM 미설정.
+    private readonly resolveCaptioner: () => Promise<ReferenceCaptioner | null> = async () =>
+      null,
+  ) {}
+
+  // 캡션이 비어 있는 레퍼런스를 순차 캡셔닝한다 (수동 버튼 전용 — 자동 아님).
+  // 개별 실패는 건너뛰고 수집한다: 부분 성공도 저장된다.
+  async captionReferences(
+    characterId: string,
+  ): Promise<CaptionReferencesResult> {
+    await this.assertCharacter(characterId);
+    const captioner = await this.resolveCaptioner();
+    if (!captioner) {
+      throw new BadRequestException(
+        "Planner LLM settings are required for reference captioning",
+      );
+    }
+    const references =
+      await this.prisma.characterVisualProfileReference.findMany({
+        where: {
+          profile: { characterId },
+          description: "",
+          media: { uploadedAt: { not: null } },
+        },
+        orderBy: { sortOrder: "asc" },
+        select: {
+          profileId: true,
+          mediaId: true,
+          media: { select: { url: true, storageKey: true, contentType: true } },
+        },
+      });
+
+    let captioned = 0;
+    const failed: { mediaId: string; error: string }[] = [];
+    for (const reference of references) {
+      try {
+        const description = await captioner.caption(reference.media);
+        await this.prisma.characterVisualProfileReference.update({
+          where: {
+            profileId_mediaId: {
+              profileId: reference.profileId,
+              mediaId: reference.mediaId,
+            },
+          },
+          data: { description },
+        });
+        captioned += 1;
+      } catch (error) {
+        failed.push({
+          mediaId: reference.mediaId,
+          error: (error instanceof Error ? error.message : String(error)).slice(
+            0,
+            200,
+          ),
+        });
+      }
+    }
+    if (captioned > 0) {
+      await this.recordActionLog(
+        characterId,
+        "VISUAL_PROFILE_REFERENCES_CAPTIONED",
+        `reference captions generated via ${captioner.name} (${captioned} image(s))`,
+      );
+    }
+    return { captioned, failed, pending: failed.length };
+  }
 
   async getProfile(characterId: string): Promise<VisualProfile> {
     await this.assertCharacter(characterId);
@@ -247,6 +326,7 @@ export class VisualProfileService {
         mediaId: reference.mediaId,
         url: reference.media.url,
         sortOrder: reference.sortOrder,
+        description: reference.description,
       })),
       updatedAt: profile.updatedAt.toISOString(),
     };

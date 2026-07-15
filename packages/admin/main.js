@@ -1815,6 +1815,7 @@ async function renderCharacterDetail(id, tab) {
       ? vp.referenceMedia
       : [];
     const refMediaIds = references.map((r) => r.mediaId);
+    const missingCaptions = references.filter((r) => !r.description).length;
     const testJobs = jobs.filter((j) => j.mediaType === "image").slice(0, 6);
     body = `
       <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:56px">
@@ -1844,7 +1845,17 @@ async function renderCharacterDetail(id, tab) {
           <p style="margin:8px 0 0;font-size:12px;color:var(--color-neutral-500)">외모 + 장면 + 스타일 프롬프트가 합쳐져 이미지 생성 잡으로 등록됩니다. 결과는 아래 최근 생성에 표시됩니다.</p>
         </div>
         <div>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">레퍼런스 이미지</span><span style="font-size:11px;color:var(--color-neutral-500)">${references.length}/5 · PUT /api/characters/:id/visual-profile/references</span></div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px;flex-wrap:wrap"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">레퍼런스 이미지</span><span style="font-size:11px;color:var(--color-neutral-500)">${references.length}/5 · PUT /api/characters/:id/visual-profile/references</span><span style="flex:1;min-width:0"></span>${
+            references.length
+              ? `${
+                  missingCaptions
+                    ? `<span style="font-size:11px;color:var(--color-neutral-500)">캡션 없음 ${missingCaptions}장</span>`
+                    : ""
+                }<button class="btn btn-secondary" type="button" style="flex:none" data-act="visual-profile-caption" data-id="${attr(
+                  c.id,
+                )}">캡션 생성</button>`
+              : ""
+          }</div>
           <div style="display:flex;gap:10px;flex-wrap:wrap">
             ${
               references.length
@@ -1857,6 +1868,15 @@ async function renderCharacterDetail(id, tab) {
                         )}" data-media="${attr(r.mediaId)}" data-media-ids="${attr(
                           refMediaIds.join(","),
                         )}">×</button>
+                        ${
+                          r.description
+                            ? `<div title="${attr(
+                                r.description,
+                              )}" style="margin-top:4px;font-size:12px;color:var(--color-neutral-500);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escapeHtml(
+                                r.description,
+                              )}</div>`
+                            : `<div style="margin-top:4px;font-size:12px;color:var(--color-neutral-500);font-style:italic">캡션 없음 — 기획 선별에서 제외됨</div>`
+                        }
                       </div>`,
                     )
                     .join("")
@@ -2720,6 +2740,23 @@ function draftShotCard(d, shot) {
         shot.scene,
       )}</div>`
     : "";
+  // 기획 LLM이 이 컷에 고른 레퍼런스(있을 때만). 없으면 전체 레퍼런스 폴백 — 표시 없음.
+  const shotReferences = Array.isArray(shot.references) ? shot.references : [];
+  const referencesRow = shotReferences.length
+    ? `<div style="margin-bottom:8px">
+        <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-500);margin-bottom:4px">선별 레퍼런스 ${
+          shotReferences.length
+        }장 — 기획 LLM이 장면에 맞게 골랐습니다</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${shotReferences
+          .map(
+            (r) =>
+              `<img src="${attr(
+                r.url,
+              )}" alt="reference" style="width:52px;height:52px;object-fit:cover;border:1px solid var(--color-divider)">`,
+          )
+          .join("")}</div>
+      </div>`
+    : "";
   let bodyHtml;
   if (shot.status === "draft") {
     bodyHtml = `<form data-action="draft-shot-generate" data-draft-id="${attr(
@@ -2775,6 +2812,7 @@ function draftShotCard(d, shot) {
   return `<div style="background:var(--color-neutral-100);padding:14px;margin-bottom:12px;border-radius:4px">
     ${header}
     ${sceneRow}
+    ${referencesRow}
     ${bodyHtml}
   </div>`;
 }
@@ -4463,6 +4501,33 @@ async function handleClick(event) {
         : "생성 작업을 재시도 큐에 등록했습니다.",
     );
     if (result.ok) renderApp();
+    return;
+  }
+  if (act === "visual-profile-caption") {
+    // 캡션 없는 레퍼런스를 순차 캡셔닝 — 장수에 따라 수십 초 걸릴 수 있어 중복 클릭을 막는다.
+    el.disabled = true;
+    const result = await request(
+      `/api/characters/${el.dataset.id}/visual-profile/captions`,
+      { method: "POST" },
+    );
+    if (!result.ok) {
+      el.disabled = false;
+      showToast(
+        errorMessage(result.body, "캡션 생성이 실패했습니다."),
+        "",
+        true,
+      );
+      return;
+    }
+    const body = result.body ?? {};
+    const failed = Array.isArray(body.failed) ? body.failed : [];
+    showToast(
+      `캡션 ${body.captioned ?? 0}장 생성${
+        failed.length ? `, 실패 ${failed.length}장` : ""
+      }`,
+      `POST /api/characters/${el.dataset.id}/visual-profile/captions`,
+    );
+    renderApp();
     return;
   }
   if (act === "visual-ref-remove") {

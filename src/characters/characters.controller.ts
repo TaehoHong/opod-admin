@@ -223,6 +223,13 @@ export class CharactersController {
     return this.visualProfileService.setReferences({ characterId, ...body });
   }
 
+  // 캡션이 비어 있는 레퍼런스를 비전 LLM으로 캡셔닝한다 (수동 버튼 전용).
+  // 신규 승격분·백필 모두 이 엔드포인트로 처리한다.
+  @Post(":id/visual-profile/captions")
+  captionVisualProfileReferences(@Param("id") characterId: string) {
+    return this.visualProfileService.captionReferences(characterId);
+  }
+
   @Post(":id/visual-profile/test-generation")
   enqueueVisualProfileTestGeneration(
     @Param("id") characterId: string,

@@ -90,6 +90,37 @@ describe("parseContentPlan", () => {
     expect(plan.shots).toHaveLength(3);
   });
 
+  it("keeps only catalog reference ids, deduped and capped at 3", () => {
+    const plan = parseContentPlan(
+      JSON.stringify({
+        caption: "c",
+        hashtags: [],
+        shots: [
+          {
+            scene: "장면",
+            // 환각 id(ghost)와 중복은 걸러지고 3개까지만 남는다.
+            referenceIds: ["r1", "ghost", "r2", "r2", "r3", "r4"],
+          },
+        ],
+      }),
+      1,
+      ["r1", "r2", "r3", "r4"],
+    );
+    expect(plan.shots[0].referenceIds).toEqual(["r1", "r2", "r3"]);
+  });
+
+  it("returns empty referenceIds without a catalog", () => {
+    const plan = parseContentPlan(
+      JSON.stringify({
+        caption: "c",
+        hashtags: [],
+        shots: [{ scene: "장면", referenceIds: ["r1"] }],
+      }),
+      1,
+    );
+    expect(plan.shots[0].referenceIds).toEqual([]);
+  });
+
   it("rejects output without usable shots", () => {
     expect(() =>
       parseContentPlan(JSON.stringify({ caption: "c", shots: [] }), 2),

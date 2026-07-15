@@ -658,6 +658,56 @@ describe("GenerationWorkerService", () => {
     );
   });
 
+  it("sends anchors plus the shot's selected references", async () => {
+    const reference = (mediaId: string) => ({
+      mediaId,
+      media: {
+        url: `https://cdn.local/${mediaId}.png`,
+        uploadedAt: new Date("2026-07-01T00:00:00.000Z"),
+      },
+    });
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
+    prisma.generationJob.findUnique.mockResolvedValue(
+      claimedJob({
+        // 기획 LLM이 이 샷에 고른 레퍼런스 — r3는 앵커와 중복되지 않는 선별분.
+        paramsJson: {
+          _shot: { scene: "장면", referenceMediaIds: ["r3", "r1"] },
+        },
+        character: {
+          visualProfile: {
+            negativePrompt: "",
+            providerConfig: null,
+            referenceMedia: [
+              reference("r1"),
+              reference("r2"),
+              reference("r3"),
+              reference("r4"),
+            ],
+          },
+        },
+      }),
+    );
+    mockSuccessTransaction(prisma);
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(prisma, provider);
+
+    await service.tick();
+
+    // 앵커(r1, r2)가 앞, 선별분 중 앵커 제외(r3)가 뒤. r4는 미선택이라 제외.
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referenceImageUrls: [
+          "https://cdn.local/r1.png",
+          "https://cdn.local/r2.png",
+          "https://cdn.local/r3.png",
+        ],
+      }),
+    );
+  });
+
   it("strips underscore-prefixed metadata keys from provider params", async () => {
     const prisma = prismaMock();
     prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);

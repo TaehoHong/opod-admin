@@ -60,6 +60,19 @@ export function workerConfigFromEnv(
 // value_error. 장면별 레퍼런스 선별(LLM 선별)이 들어와도 전송 직전 안전판으로
 // 유지한다 (docs/media-generation-pipeline.md "컨텍스트 선별").
 const MAX_REFERENCE_IMAGES = 10;
+// 정체성 고정용 앵커 — 선별 결과와 무관하게 항상 포함하는 대표컷 수.
+const REFERENCE_ANCHOR_COUNT = 2;
+
+// 잡 paramsJson._shot.referenceMediaIds — 기획 LLM이 이 샷에 고른 레퍼런스.
+function shotReferenceMediaIds(paramsJson: unknown): string[] {
+  if (!isRecord(paramsJson) || !isRecord(paramsJson._shot)) {
+    return [];
+  }
+  const ids = paramsJson._shot.referenceMediaIds;
+  return Array.isArray(ids)
+    ? ids.filter((id): id is string => typeof id === "string")
+    : [];
+}
 
 // 프로바이더가 잡 자체를 거부/실패 처리한 경우. 재시도 시 requestId를 버리고
 // 새로 제출해야 한다 (transient 오류는 requestId를 유지해 폴링을 이어받는다).
@@ -88,6 +101,7 @@ type ClaimedJob = {
       negativePrompt: string;
       providerConfig: unknown;
       referenceMedia: {
+        mediaId: string;
         media: { url: string; uploadedAt: Date | null };
       }[];
     } | null;
@@ -389,21 +403,38 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
 
   private buildRequest(job: ClaimedJob): ImageGenerationRequest {
     const profile = job.character.visualProfile;
-    const uploadedReferenceUrls = (profile?.referenceMedia ?? [])
-      .filter((reference) => reference.media.uploadedAt)
-      .map((reference) => reference.media.url);
-    // fal edit 계열의 image_urls 상한(10장 초과 시 422 value_error). 초과분은
-    // sortOrder 우선순위로 자른다 — 장면별 관련 레퍼런스 선별(벡터 검색)이
-    // 들어오기 전까지의 안전판.
-    if (uploadedReferenceUrls.length > MAX_REFERENCE_IMAGES) {
+    // sortOrder 순 업로드 완료 레퍼런스.
+    const uploaded = (profile?.referenceMedia ?? []).filter(
+      (reference) => reference.media.uploadedAt,
+    );
+    // 기획 LLM이 이 샷에 고른 레퍼런스 (docs/media-generation-pipeline.md
+    // "컨텍스트 선별"). 앵커(sortOrder 상위 2장 — 정체성 고정)는 항상 포함하고,
+    // 선별분을 뒤에 붙인다. 선별이 없으면 전체(폴백)를 쓴다.
+    const selectedIds = shotReferenceMediaIds(job.paramsJson);
+    let ordered = uploaded;
+    if (selectedIds.length > 0) {
+      const anchors = uploaded.slice(0, REFERENCE_ANCHOR_COUNT);
+      const anchorIds = new Set(anchors.map((reference) => reference.mediaId));
+      const selected = selectedIds
+        .filter((mediaId) => !anchorIds.has(mediaId))
+        .map((mediaId) =>
+          uploaded.find((reference) => reference.mediaId === mediaId),
+        )
+        .filter(
+          (reference): reference is (typeof uploaded)[number] =>
+            reference !== undefined,
+        );
+      ordered = [...anchors, ...selected];
+    }
+    // fal edit 계열의 image_urls 상한(10장 초과 시 422 value_error) 안전판.
+    if (ordered.length > MAX_REFERENCE_IMAGES) {
       this.logger.warn(
-        `Job ${job.id}: ${uploadedReferenceUrls.length} reference images exceed the provider limit; sending first ${MAX_REFERENCE_IMAGES}`,
+        `Job ${job.id}: ${ordered.length} reference images exceed the provider limit; sending first ${MAX_REFERENCE_IMAGES}`,
       );
     }
-    const referenceImageUrls = uploadedReferenceUrls.slice(
-      0,
-      MAX_REFERENCE_IMAGES,
-    );
+    const referenceImageUrls = ordered
+      .slice(0, MAX_REFERENCE_IMAGES)
+      .map((reference) => reference.media.url);
     // 프로필의 프로바이더 기본값(providerConfig) 위에 잡별 파라미터(paramsJson)를
     // 덮어쓴다. 종횡비 등 모델별 파라미터는 코드가 아니라 이 데이터로 주입한다.
     // 밑줄 접두 키(_wizard 등)는 파이프라인 메타데이터 — 프로바이더에 보내지 않는다.

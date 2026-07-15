@@ -134,7 +134,11 @@ model User {
   passwordHash         String?                 @map("password_hash")
   passwordSalt         String?                 @map("password_salt")
   displayName          String                  @map("display_name")
+  bio                  String                  @default("")
+  profileImageUrl      String?                 @map("profile_image_url")
   createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt            DateTime?               @map("deleted_at") @db.Timestamptz(6)
   characterFollows     UserCharacterFollow[]
   creditCheckIns       CreditCheckIn[]
   creditLedgerEntries  CreditLedgerEntry[]
@@ -144,6 +148,8 @@ model User {
   inquiries            Inquiry[]
   messageConversations MessageConversation[]
   notifications        Notification[]
+  postComments         PostComment[]
+  postReactions        PostReaction[]
   refreshTokens        UserRefreshToken[]
   reports              Report[]
   hashtagPreferences   UserHashtagPreference[]
@@ -380,14 +386,17 @@ model Story {
 model PostComment {
   id          String    @id @default(uuid(7)) @db.Uuid
   postId      String    @map("post_id") @db.Uuid
-  characterId String    @map("character_id") @db.Uuid
+  characterId String?   @map("character_id") @db.Uuid
+  userId      String?   @map("user_id") @db.Uuid
   body        String
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
-  character   Character @relation(fields: [characterId], references: [id])
+  character   Character? @relation(fields: [characterId], references: [id])
+  user        User?     @relation(fields: [userId], references: [id])
 
   @@index([postId, createdAt])
   @@index([characterId, createdAt])
+  @@index([userId, createdAt])
   @@map("post_comments")
   @@schema("opod")
 }
@@ -395,14 +404,18 @@ model PostComment {
 model PostReaction {
   id           String    @id @default(uuid(7)) @db.Uuid
   postId       String    @map("post_id") @db.Uuid
-  characterId  String    @map("character_id") @db.Uuid
+  characterId  String?   @map("character_id") @db.Uuid
+  userId       String?   @map("user_id") @db.Uuid
   reactionType String    @map("reaction_type")
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   post         Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
-  character    Character @relation(fields: [characterId], references: [id])
+  character    Character? @relation(fields: [characterId], references: [id])
+  user         User?     @relation(fields: [userId], references: [id])
 
+  @@unique([postId, userId, reactionType])
   @@index([postId, createdAt])
   @@index([characterId, createdAt])
+  @@index([userId, createdAt])
   @@map("post_reactions")
   @@schema("opod")
 }
@@ -681,6 +694,9 @@ model CharacterVisualProfileReference {
   profileId String                 @map("profile_id") @db.Uuid
   mediaId   String                 @map("media_id") @db.Uuid
   sortOrder Int                    @default(0) @map("sort_order")
+  // 비전 LLM이 생성한 이미지 서술(장면·구도·의상·조명) — 기획 LLM이 샷별로
+  // 관련 레퍼런스를 선별하는 데 쓴다. 빈 값은 캡셔닝 전(백필 대상).
+  description String               @default("")
   profile   CharacterVisualProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
   media     Media                  @relation(fields: [mediaId], references: [id])
 
