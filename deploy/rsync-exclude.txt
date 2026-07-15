@@ -1,4 +1,6 @@
 .git/
+.gstack/
+.superpowers/
 node_modules/
 dist/
 .env
