@@ -22,6 +22,7 @@ import {
   dialogSessionAllows,
   dialogContextFromDataset,
   dialogBody,
+  draftDetailMarkup,
   endpoint,
   formActionRequest,
   generationActionBody,
@@ -1855,4 +1856,82 @@ test("formActionRequest maps generation job actions", async () => {
       body: JSON.stringify({ mediaId: "media-1" }),
     },
   });
+});
+
+test("draft timeline offers a per-shot generation form for manual draft-state cuts", () => {
+  const html = draftDetailMarkup(
+    {
+      id: "draft-1",
+      characterId: "ai-1",
+      contentType: "feed",
+      status: "generating",
+      attemptCount: 1,
+      caption: "노을 산책",
+      hashtags: ["필름사진"],
+      createdAt: "2026-07-12T00:00:00.000Z",
+      conceptJson: {
+        source: "manual",
+        mode: "manual",
+        sceneHint: "애월 해변",
+        plannerName: "test-planner",
+        planInput: {
+          personas: [{ title: "말투", content: "차분한 존댓말" }],
+          memories: ["제주 애월 여행"],
+          recentCaptions: ["지난 게시물"],
+          sceneHint: "애월 해변",
+        },
+        plan: {
+          caption: "노을 산책",
+          hashtags: ["필름사진"],
+          shots: [{ scene: "해변 역광" }],
+        },
+      },
+      shots: [
+        {
+          sortOrder: 0,
+          jobId: "job-1",
+          status: "draft",
+          prompt: "young woman, 해변 역광",
+          scene: "해변 역광",
+          candidateCount: 2,
+          outputs: [],
+        },
+      ],
+    },
+    "한소이",
+  );
+
+  // 수동 진행 태그 + 컷별 "이미지 생성 실행" 폼이 노출된다.
+  assert.match(html, /수동 진행/);
+  assert.match(
+    html,
+    /<form[^>]*data-action="draft-shot-generate"[^>]*data-job-id="job-1"/,
+  );
+  assert.match(html, /이미지 생성 실행/);
+  // 기획 입력 스냅샷 요약이 추적용으로 표시된다.
+  assert.match(html, /페르소나 1 · 메모리 1 · 최근 캡션 1/);
+});
+
+test("draft timeline shows the plan-now button for a planned draft with no cuts yet", () => {
+  const html = draftDetailMarkup(
+    {
+      id: "draft-2",
+      characterId: "ai-1",
+      contentType: "feed",
+      status: "planned",
+      attemptCount: 0,
+      caption: "",
+      hashtags: [],
+      createdAt: "2026-07-12T00:00:00.000Z",
+      conceptJson: { source: "manual", mode: "manual", sceneHint: "카페" },
+      shots: [],
+    },
+    "한소이",
+  );
+
+  assert.match(html, /data-act="draft-plan-now"[^>]*data-id="draft-2"/);
+  assert.match(html, /지금 기획 실행/);
+  assert.match(html, /기획이 완료되면 컷이 생성됩니다/);
+  // 아직 기획 전이라 컷 생성 폼은 없어야 한다.
+  assert.doesNotMatch(html, /data-action="draft-shot-generate"/);
 });

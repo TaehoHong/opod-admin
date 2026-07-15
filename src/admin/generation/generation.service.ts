@@ -50,6 +50,8 @@ type GenerationJob = {
   outputMediaId?: string;
   provider?: string;
   attemptCount: number;
+  // 초안 파이프라인 소속 컷이면 해당 초안 id (추적 링크용).
+  draftId?: string;
   originJobId?: string;
   errorMessage?: string;
   costUsd?: string;
@@ -87,6 +89,7 @@ type PrismaGenerationJob = Omit<
   | "outputs"
   | "provider"
   | "attemptCount"
+  | "draftId"
   | "originJobId"
   | "errorMessage"
   | "costUsd"
@@ -101,6 +104,7 @@ type PrismaGenerationJob = Omit<
   updatedAt: Date;
   provider?: string | null;
   attemptCount?: number | null;
+  draftId?: string | null;
   originJobId?: string | null;
   errorMessage?: string | null;
   costUsd?: { toString(): string } | null;
@@ -727,6 +731,7 @@ export class GenerationService {
       ...(job.outputMediaId ? { outputMediaId: job.outputMediaId } : {}),
       attemptCount: job.attemptCount ?? 0,
       ...(job.provider ? { provider: job.provider } : {}),
+      ...(job.draftId ? { draftId: job.draftId } : {}),
       ...(job.originJobId ? { originJobId: job.originJobId } : {}),
       ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
       ...(job.costUsd != null ? { costUsd: job.costUsd.toString() } : {}),

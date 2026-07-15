@@ -47,6 +47,11 @@ type DraftShot = {
   jobId: string;
   status: string;
   prompt: string;
+  // 기획이 만든 장면 원문 (paramsJson._shot.scene) — 프롬프트 추적용.
+  scene?: string;
+  candidateCount?: number;
+  provider?: string;
+  costUsd?: string;
   errorMessage?: string;
   outputs: DraftShotOutput[];
 };
@@ -76,6 +81,10 @@ const draftJobFields = {
   sortOrder: true,
   status: true,
   prompt: true,
+  paramsJson: true,
+  candidateCount: true,
+  provider: true,
+  costUsd: true,
   errorMessage: true,
   createdAt: true,
   outputs: {
@@ -92,6 +101,18 @@ const draftJobFields = {
 type PrismaDraftJob = Prisma.GenerationJobGetPayload<{
   select: typeof draftJobFields;
 }>;
+
+function shotScene(paramsJson: unknown): string | undefined {
+  if (typeof paramsJson !== "object" || paramsJson === null) {
+    return undefined;
+  }
+  const shot = (paramsJson as Record<string, unknown>)._shot;
+  if (typeof shot !== "object" || shot === null) {
+    return undefined;
+  }
+  const scene = (shot as Record<string, unknown>).scene;
+  return typeof scene === "string" && scene ? scene : undefined;
+}
 
 @Injectable()
 export class DraftsService {
@@ -151,29 +172,41 @@ export class DraftsService {
     }
     const shots = [...latestPerShot.entries()]
       .sort(([a], [b]) => a - b)
-      .map(([sortOrder, job]) => ({
-        sortOrder,
-        jobId: job.id,
-        status: job.status,
-        prompt: job.prompt,
-        ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
-        outputs: job.outputs.map((output) => ({
-          mediaId: output.mediaId,
-          url: output.media.url,
-          candidateIndex: output.candidateIndex,
-          selected: output.selected,
-        })),
-      }));
+      .map(([sortOrder, job]) => {
+        const scene = shotScene(job.paramsJson);
+        return {
+          sortOrder,
+          jobId: job.id,
+          status: job.status,
+          prompt: job.prompt,
+          ...(scene ? { scene } : {}),
+          ...(job.candidateCount != null
+            ? { candidateCount: job.candidateCount }
+            : {}),
+          ...(job.provider ? { provider: job.provider } : {}),
+          ...(job.costUsd != null ? { costUsd: job.costUsd.toString() } : {}),
+          ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
+          outputs: job.outputs.map((output) => ({
+            mediaId: output.mediaId,
+            url: output.media.url,
+            candidateIndex: output.candidateIndex,
+            selected: output.selected,
+          })),
+        };
+      });
 
     return { ...this.toDraft(draft as PrismaDraftRow), shots };
   }
 
-  // 수동 기획 트리거 — planned draft를 만들면 워커가 집어간다.
+  // 운영자 초안 생성. mode='manual'이면 어떤 단계도 자동으로 넘어가지 않는다 —
+  // 기획은 POST :id/plan, 컷 생성은 :id/jobs/:jobId/generate, 게시는 :id/publish
+  // 버튼으로만 진행된다. mode='auto'(기본)는 기존처럼 워커가 끝까지 진행한다.
   async createDraft(input: {
     characterId: string;
     sceneHint?: string;
     scheduledAt?: string;
     contentType?: string;
+    mode?: string;
   }): Promise<AdminDraft> {
     const character = await this.prisma.character.findUnique({
       where: { id: input.characterId },
@@ -186,6 +219,10 @@ export class DraftsService {
     if (contentType !== "feed" && contentType !== "reel") {
       throw new BadRequestException("Draft content type must be feed or reel");
     }
+    const mode = input.mode?.trim() || "auto";
+    if (mode !== "manual" && mode !== "auto") {
+      throw new BadRequestException("Draft mode must be manual or auto");
+    }
     const scheduledAt = this.parseOptionalDate(input.scheduledAt);
     const sceneHint = input.sceneHint?.trim();
 
@@ -195,6 +232,7 @@ export class DraftsService {
         contentType: contentType as never,
         conceptJson: {
           source: "manual",
+          mode,
           ...(sceneHint ? { sceneHint } : {}),
         },
         ...(scheduledAt ? { scheduledAt } : {}),
@@ -204,9 +242,7 @@ export class DraftsService {
       input.characterId,
       draft.id,
       "DRAFT_CREATED",
-      sceneHint
-        ? `manual draft created (hint: ${sceneHint.slice(0, 100)})`
-        : "manual draft created",
+      `manual draft created (mode: ${mode}${sceneHint ? `, hint: ${sceneHint.slice(0, 100)}` : ""})`,
     );
     return this.toDraft(draft as PrismaDraftRow);
   }
@@ -297,6 +333,48 @@ export class DraftsService {
       input.reason?.trim() || "draft rejected",
     );
     return draft;
+  }
+
+  // 수동 진행 컷 실행 준비 — draft 상태 컷의 프롬프트/후보 수를 반영하고
+  // queued로 전환한다. 실제 실행(runJobNow)은 컨트롤러가 이어서 호출한다.
+  async queueShot(input: {
+    draftId: string;
+    jobId: string;
+    prompt?: string;
+    candidateCount?: number;
+  }): Promise<void> {
+    const prompt = input.prompt?.trim();
+    if (input.prompt !== undefined && !prompt) {
+      throw new BadRequestException("Shot prompt cannot be empty");
+    }
+    const transitioned = await this.prisma.generationJob.updateMany({
+      where: { id: input.jobId, draftId: input.draftId, status: "draft" },
+      data: {
+        status: "queued",
+        ...(prompt ? { prompt } : {}),
+        ...(input.candidateCount != null
+          ? { candidateCount: input.candidateCount }
+          : {}),
+      },
+    });
+    if (transitioned.count === 0) {
+      await this.assertDraftExists(input.draftId);
+      throw new BadRequestException(
+        "Only draft-state shots of this draft can start generation",
+      );
+    }
+    const job = await this.prisma.generationJob.findUnique({
+      where: { id: input.jobId },
+      select: { characterId: true, sortOrder: true },
+    });
+    if (job) {
+      await this.recordActionLog(
+        job.characterId,
+        input.draftId,
+        "DRAFT_SHOT_GENERATION_STARTED",
+        `shot ${job.sortOrder} generation started manually`,
+      );
+    }
   }
 
   // 컷 재생성: 같은 (draftId, sortOrder)로 새 잡을 만들고 draft를 regenerating으로.

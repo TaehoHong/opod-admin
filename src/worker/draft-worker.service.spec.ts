@@ -170,6 +170,8 @@ describe("DraftWorkerService planning", () => {
         prompt: "young woman, short hair, 해변 역광, film photography",
         draftId: "draft-1",
         sortOrder: 0,
+        // 장면 원문은 프롬프트 추적용 메타데이터로 저장된다.
+        paramsJson: { _shot: { scene: "해변 역광" } },
       },
     });
     expect(tx.characterActionLog.create).toHaveBeenCalledWith({
@@ -408,6 +410,31 @@ describe("DraftWorkerService publishing", () => {
       },
     });
   });
+
+  it("does not auto-publish manual-mode approved drafts", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: "draft-manual",
+        characterId: "ai-1",
+        contentType: "feed",
+        caption: "노을 산책",
+        hashtags: ["필름사진"],
+        conceptJson: { source: "manual", mode: "manual" },
+      },
+    ]);
+    const tx = txMock();
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+    const service = makeService(prisma);
+
+    await service.tick();
+
+    // 수동 진행 초안은 "지금 게시" 버튼 전용 — 자동 게시에서 제외된다.
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.post.create).not.toHaveBeenCalled();
+  });
 });
 
 describe("DraftWorkerService manual triggers", () => {
@@ -454,6 +481,53 @@ describe("DraftWorkerService manual triggers", () => {
 
     expect(result).toEqual({ planned: false });
     expect(planner.plan).not.toHaveBeenCalled();
+  });
+
+  it("planDraftNow keeps manual-mode shots in draft status and preserves concept + planInput", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findUnique.mockResolvedValue(
+      plannedDraft({
+        conceptJson: {
+          source: "manual",
+          mode: "manual",
+          sceneHint: "애월 해변",
+        },
+      }),
+    );
+    const tx = txMock();
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+    const service = makeService(prisma, plannerMock());
+
+    const result = await service.planDraftNow("draft-1");
+
+    expect(result).toEqual({ planned: true });
+    // 수동 진행 컷 잡은 status "draft"로 만들어 생성 워커가 자동으로 집지 않는다.
+    expect(tx.generationJob.create).toHaveBeenCalledTimes(2);
+    expect(tx.generationJob.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        status: "draft",
+        sortOrder: 0,
+        paramsJson: { _shot: { scene: "해변 역광" } },
+      }),
+    });
+    // source/mode는 보존하고 기획 입력 스냅샷(planInput)을 기록한다.
+    const conceptJson = tx.postDraft.updateMany.mock.calls[0][0].data
+      .conceptJson as Record<string, unknown>;
+    expect(conceptJson).toMatchObject({
+      source: "manual",
+      mode: "manual",
+      sceneHint: "애월 해변",
+      plannerName: "test-planner",
+      planInput: expect.objectContaining({
+        personas: [{ title: "말투", content: "차분한 존댓말" }],
+        memories: ["제주 애월 여행 (2026-07)"],
+        recentCaptions: ["지난 게시물"],
+        sceneHint: "애월 해변",
+      }),
+    });
+    expect(conceptJson.plan).toBeDefined();
   });
 
   it("publishDraftNow publishes an approved draft regardless of scheduledAt", async () => {

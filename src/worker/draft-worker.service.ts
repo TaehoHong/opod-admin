@@ -240,6 +240,8 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
   }
 
   // planned draft를 SKIP LOCKED으로 집는다. inactive 캐릭터의 draft는 보류.
+  // 수동 진행 초안(conceptJson.mode = 'manual')은 자동 기획이 집지 않는다 —
+  // 운영자가 단계마다 버튼으로 진행하며(planDraftNow), 자동으로 넘어가지 않는다.
   private async claimPlannedDraft(): Promise<string | undefined> {
     const rows = await this.prisma.$queryRaw<{ id: string }[]>`
       UPDATE opod.post_drafts
@@ -251,6 +253,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         SELECT d.id FROM opod.post_drafts d
         JOIN opod.characters c ON c.id = d.character_id AND c.status = 'active'
         WHERE d.status = 'planned' AND d.draft_type = 'post'
+          AND (d.concept_json->>'mode') IS DISTINCT FROM 'manual'
         ORDER BY d.created_at, d.id
         LIMIT 1
         FOR UPDATE OF d SKIP LOCKED
@@ -297,11 +300,13 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      const sceneHint = isRecord(draft.conceptJson)
-        ? String(draft.conceptJson.sceneHint ?? "").trim() || undefined
-        : undefined;
+      const concept = isRecord(draft.conceptJson) ? draft.conceptJson : {};
+      const sceneHint = String(concept.sceneHint ?? "").trim() || undefined;
+      // 수동 진행 초안: 컷 잡을 draft(비claim) 상태로 만들어 생성 워커가
+      // 자동으로 집지 않게 한다 — 운영자가 컷별 "이미지 생성 실행"으로 진행.
+      const manualMode = concept.mode === "manual";
       const planner = await this.resolvePlanner();
-      const plan = await planner.plan({
+      const planInput = {
         characterName: draft.character.displayName,
         bio: draft.character.bio,
         interests: draft.character.interests,
@@ -312,7 +317,8 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           .filter(Boolean),
         sceneHint,
         maxShots: this.config.maxShots,
-      });
+      };
+      const plan = await planner.plan(planInput);
 
       const profile = draft.character.visualProfile;
       await this.prisma.$transaction(async (tx) => {
@@ -321,9 +327,12 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           data: {
             caption: plan.caption,
             hashtags: plan.hashtags,
+            // 기존 키(source/mode/sceneHint)는 보존하고 기획 산출물을 덧쓴다.
+            // planInput은 "기획이 어떤 데이터를 받았는지" 추적용 스냅샷.
             conceptJson: {
-              ...(sceneHint ? { sceneHint } : {}),
+              ...concept,
               plannerName: planner.name,
+              planInput: planInput as unknown as Record<string, unknown>,
               plan: plan as unknown as Record<string, unknown>,
             } as never,
             leaseExpiresAt: null,
@@ -341,6 +350,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
               prompt: compileImagePrompt(profile, shot.scene),
               draftId: draft.id,
               sortOrder: index,
+              ...(manualMode ? { status: "draft" as const } : {}),
+              // 장면 원문은 프롬프트 추적용 메타데이터 (프로바이더 미전달).
+              paramsJson: { _shot: { scene: shot.scene } },
             },
           });
         }
@@ -463,7 +475,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
 
   private async publishDueDrafts(): Promise<void> {
     const now = new Date();
-    const due = await this.prisma.postDraft.findMany({
+    const candidates = await this.prisma.postDraft.findMany({
       where: {
         status: "approved",
         draftType: "post",
@@ -471,7 +483,8 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         character: { status: "active" },
       },
       orderBy: { scheduledAt: "asc" },
-      take: PUBLISH_BATCH,
+      // 수동 진행 초안을 JS에서 걸러내므로 배치보다 넉넉히 읽는다.
+      take: PUBLISH_BATCH * 4,
       select: {
         id: true,
         characterId: true,
@@ -481,6 +494,13 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         conceptJson: true,
       },
     });
+    // 수동 진행 초안(mode='manual')은 자동 게시하지 않는다 — "지금 게시" 버튼 전용.
+    const due = candidates
+      .filter(
+        (draft) =>
+          !(isRecord(draft.conceptJson) && draft.conceptJson.mode === "manual"),
+      )
+      .slice(0, PUBLISH_BATCH);
 
     for (const draft of due) {
       try {

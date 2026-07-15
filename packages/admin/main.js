@@ -1256,6 +1256,7 @@ const ui = {
   toastTimer: 0,
   generationCreating: false,
   generationPollTimer: 0,
+  draftPollTimer: 0,
   generationSelectedJobId: "",
   generationSelectedMediaId: "",
 };
@@ -2420,6 +2421,13 @@ async function renderGeneration(renderEpoch) {
               )}">재시도</button>`,
             );
           }
+          if (j.draftId) {
+            actions.push(
+              `<button class="btn btn-ghost" data-act="go-draft" data-id="${attr(
+                j.draftId,
+              )}">초안 보기</button>`,
+            );
+          }
           return `<tr>
             <td style="font-weight:600">${escapeHtml(charName(j.characterId))}</td>
             <td>${escapeHtml(j.mediaType)}</td>
@@ -2473,7 +2481,7 @@ async function renderDrafts() {
   if (ui.selDraftId) {
     return renderDraftDetail(ui.selDraftId);
   }
-  await loadCharacterOptions();
+  const characters = await loadCharacterOptions();
   const statusParam =
     ui.filters.draftStatus === "전체" ? "" : ui.filters.draftStatus;
   const res = await request(
@@ -2507,8 +2515,20 @@ async function renderDrafts() {
   return `
     ${sectionHead(
       "초안 검수",
-      "자동 기획된 포스트 초안 — 기획 → 생성 → 검수 → 승인 → 예약 게시",
+      "포스트 초안 파이프라인 — 기획 → 생성 → 검수 → 승인 → 게시. 수동 초안은 단계마다 버튼으로 진행합니다.",
     )}
+    <form data-action="draft-create" style="display:flex;gap:10px;align-items:flex-end;margin:0 0 20px;padding:16px;background:var(--color-neutral-100)">
+      <div class="field" style="width:220px;margin:0"><label>캐릭터</label><select class="input" name="characterId" required><option value="">선택하세요</option>${optionList(
+        characters,
+        "id",
+        (character) =>
+          character.displayName || character.publicId || character.id,
+        "",
+      )}</select></div>
+      <div class="field" style="flex:1;margin:0"><label>장면 힌트 (선택)</label><input class="input" name="sceneHint" placeholder="예: 비 오는 날 창가 카페에서 필름 카메라를 닦는 장면"></div>
+      <div class="field" style="width:230px;margin:0"><label>진행 방식</label><select class="input" name="mode"><option value="manual">수동 — 단계별 버튼으로 진행</option><option value="auto">자동 — 워커가 끝까지 진행</option></select></div>
+      <button class="btn btn-primary" type="submit" style="flex:none">초안 만들기</button>
+    </form>
     <div class="toolbar">
       ${segControl(
         "draftStatus",
@@ -2531,6 +2551,518 @@ async function renderDrafts() {
     </table>`;
 }
 
+// 진행 방식 태그 — 수동/자동 구분.
+function draftModeMeta(mode) {
+  return mode === "manual"
+    ? ["tag-accent-2", "수동 진행"]
+    : ["tag-neutral", "자동 진행"];
+}
+
+// 타임라인 단계 번호 원형: done=채움, current=강조 테두리, failed=경고, future=흐리게.
+const DRAFT_STAGE_TONES = {
+  done: "background:var(--color-accent-700);color:var(--color-bg);border:2px solid var(--color-accent-700);font-weight:600",
+  current:
+    "background:var(--color-bg);color:var(--color-accent-700);border:2px solid var(--color-accent-700);font-weight:700",
+  failed:
+    "background:var(--color-accent-2-700);color:var(--color-bg);border:2px solid var(--color-accent-2-700);font-weight:600",
+  future:
+    "background:transparent;color:var(--color-neutral-500);border:1px solid var(--color-divider)",
+};
+
+function draftStageCircle(num, tone) {
+  return `<div style="flex:none;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;${
+    DRAFT_STAGE_TONES[tone] ?? DRAFT_STAGE_TONES.future
+  }">${num}</div>`;
+}
+
+function draftStage({
+  num,
+  tone,
+  label,
+  statusMeta,
+  actionHtml = "",
+  bodyHtml = "",
+  last = false,
+}) {
+  const [tc, tl] = statusMeta;
+  return `<div style="display:flex;gap:16px;padding:20px 0${
+    last ? "" : ";border-bottom:1px solid var(--color-divider)"
+  }">
+    ${draftStageCircle(num, tone)}
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:${
+        bodyHtml ? "12px" : "0"
+      }">
+        <span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">${escapeHtml(
+          label,
+        )}</span>
+        <span class="tag ${tc}">${escapeHtml(tl)}</span>
+        <span style="flex:1"></span>
+        ${actionHtml}
+      </div>
+      ${bodyHtml}
+    </div>
+  </div>`;
+}
+
+function draftMetaRow(label, valueHtml) {
+  return `<div style="display:flex;gap:12px;font-size:13px;padding:3px 0">
+    <span style="flex:none;width:88px;color:var(--color-neutral-500)">${escapeHtml(
+      label,
+    )}</span>
+    <span style="flex:1;min-width:0">${valueHtml}</span>
+  </div>`;
+}
+
+function draftListBlock(label, items) {
+  const list = (Array.isArray(items) ? items : []).filter(Boolean);
+  if (!list.length) {
+    return `<div style="margin-top:8px;color:var(--color-neutral-500);font-size:12px">${escapeHtml(
+      label,
+    )}: —</div>`;
+  }
+  return `<div style="margin-top:8px">
+    <div style="color:var(--color-neutral-500);font-size:11px;text-transform:uppercase;letter-spacing:.08em">${escapeHtml(
+      label,
+    )}</div>
+    <ul style="margin:2px 0 0;padding-left:16px">${list
+      .map((it) => `<li style="padding:1px 0">${escapeHtml(it)}</li>`)
+      .join("")}</ul>
+  </div>`;
+}
+
+// ② 기획 완료 본문: 입력 스냅샷 요약/상세 + 출력(캡션·해시태그·컷 장면).
+function draftPlanBody(plan, planInput, plannerName) {
+  const shots = Array.isArray(plan?.shots) ? plan.shots : [];
+  const inputSummary = planInput
+    ? `페르소나 ${(planInput.personas ?? []).length} · 메모리 ${
+        (planInput.memories ?? []).length
+      } · 최근 캡션 ${(planInput.recentCaptions ?? []).length} · 장면 힌트 ${
+        planInput.sceneHint ? "있음" : "없음"
+      }`
+    : "입력 스냅샷 없음";
+  const inputDetails = planInput
+    ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--color-neutral-600)">입력 상세 보기</summary>
+        <div style="margin-top:6px">
+          ${draftListBlock(
+            "페르소나",
+            (planInput.personas ?? []).map((p) => p?.title),
+          )}
+          ${draftListBlock("메모리", planInput.memories ?? [])}
+          ${draftListBlock("최근 캡션", planInput.recentCaptions ?? [])}
+        </div>
+      </details>`
+    : "";
+  const hashtags = (plan?.hashtags ?? [])
+    .map(
+      (t) =>
+        `<span class="tag tag-accent" style="margin:0 4px 4px 0">#${escapeHtml(
+          t,
+        )}</span>`,
+    )
+    .join("");
+  const sceneList = shots.length
+    ? `<ol style="margin:6px 0 0;padding-left:18px;font-size:13px">${shots
+        .map(
+          (s) => `<li style="padding:2px 0">${escapeHtml(s?.scene || "")}</li>`,
+        )
+        .join("")}</ol>`
+    : "";
+  return `<div>
+    <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-500);margin-bottom:4px">입력</div>
+    <div style="font-size:13px">${escapeHtml(inputSummary)}</div>
+    ${inputDetails}
+    <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-500);margin:14px 0 4px">출력</div>
+    <div style="font-size:14px;margin-bottom:6px">“${escapeHtml(
+      plan?.caption || "",
+    )}”</div>
+    <div style="display:flex;flex-wrap:wrap;margin-bottom:2px">${hashtags}</div>
+    ${sceneList}
+    ${
+      plannerName
+        ? `<p class="count-note" style="margin:8px 0 0">플래너: ${escapeHtml(
+            plannerName,
+          )}</p>`
+        : ""
+    }
+  </div>`;
+}
+
+// ③ 컷 서브카드 — draft(수동 대기)는 생성 실행 폼, completed는 후보 그리드 등.
+function draftShotCard(d, shot) {
+  const [jc, jl] = jobStatusMeta(shot.status);
+  const canRegen = d.status === "needs_review" || d.status === "failed";
+  const regenBtn = canRegen
+    ? `<div style="margin-top:8px"><button class="btn btn-ghost" data-act="draft-regen" data-draft="${attr(
+        d.id,
+      )}" data-job="${attr(shot.jobId)}">재생성</button></div>`
+    : "";
+  const header = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+    <span style="font-weight:600">컷 ${shot.sortOrder + 1}</span>
+    <span class="tag ${jc}">${escapeHtml(jl)}</span>
+    ${
+      shot.provider
+        ? `<span style="font-size:12px;color:var(--color-neutral-500)">${escapeHtml(
+            shot.provider,
+          )}</span>`
+        : ""
+    }
+    ${
+      shot.costUsd != null
+        ? `<span style="font-size:12px;color:var(--color-neutral-500)">$${escapeHtml(
+            shot.costUsd,
+          )}</span>`
+        : ""
+    }
+  </div>`;
+  const sceneRow = shot.scene
+    ? `<div style="font-size:12.5px;color:var(--color-neutral-700);margin-bottom:8px"><span style="color:var(--color-neutral-500)">장면 · </span>${escapeHtml(
+        shot.scene,
+      )}</div>`
+    : "";
+  let bodyHtml;
+  if (shot.status === "draft") {
+    bodyHtml = `<form data-action="draft-shot-generate" data-draft-id="${attr(
+      d.id,
+    )}" data-job-id="${attr(
+      shot.jobId,
+    )}" style="display:flex;flex-direction:column;gap:8px">
+      <div class="field" style="margin:0"><label>최종 프롬프트</label><textarea class="input" name="prompt" rows="4">${escapeHtml(
+        shot.prompt,
+      )}</textarea></div>
+      <p class="count-note" style="margin:0">실행 전 프롬프트를 수정할 수 있습니다.</p>
+      <div class="field" style="width:150px;margin:0"><label>후보 수</label><input class="input" type="number" name="candidateCount" min="1" max="4" value="${attr(
+        shot.candidateCount ?? 2,
+      )}"></div>
+      <div><button class="btn btn-primary" type="submit">이미지 생성 실행</button></div>
+    </form>`;
+  } else if (shot.status === "queued" || shot.status === "running") {
+    bodyHtml = `<p class="count-note" style="margin:0">이미지를 생성하는 중입니다…${
+      shot.provider ? ` · ${escapeHtml(shot.provider)}` : ""
+    }</p>`;
+  } else if (shot.status === "failed") {
+    bodyHtml = `<div style="font-size:12.5px;color:var(--color-accent-2-700)">${escapeHtml(
+      shot.errorMessage || "생성에 실패했습니다.",
+    )}</div>${regenBtn}`;
+  } else {
+    const outputs = Array.isArray(shot.outputs) ? shot.outputs : [];
+    const candidates = outputs.length
+      ? outputs
+          .map(
+            (o) => `<div style="position:relative">
+              <img src="${attr(o.url)}" alt="candidate ${escapeHtml(
+                o.candidateIndex,
+              )}"
+                data-act="draft-pick-output" data-draft="${attr(
+                  d.id,
+                )}" data-job="${attr(shot.jobId)}" data-media="${attr(o.mediaId)}"
+                style="width:120px;height:120px;object-fit:cover;cursor:pointer;border:3px solid ${
+                  o.selected
+                    ? "var(--color-accent-700)"
+                    : "var(--color-divider)"
+                }">
+              ${
+                o.selected
+                  ? `<span class="tag tag-accent" style="position:absolute;top:4px;left:4px">선택됨</span>`
+                  : ""
+              }
+            </div>`,
+          )
+          .join("")
+      : `<div style="padding:6px 0;color:var(--color-neutral-600);font-style:italic">아직 후보가 없습니다.</div>`;
+    bodyHtml = `<div style="display:flex;gap:10px;flex-wrap:wrap">${candidates}</div>${regenBtn}`;
+  }
+  return `<div style="background:var(--color-neutral-100);padding:14px;margin-bottom:12px;border-radius:4px">
+    ${header}
+    ${sceneRow}
+    ${bodyHtml}
+  </div>`;
+}
+
+// 단계 타임라인 마크업 (순수 함수, 네트워크 비의존 — 테스트 대상).
+// d = GET /api/drafts/:id 응답, characterName = 표시용 캐릭터명.
+export function draftDetailMarkup(d, characterName) {
+  const [sc, sl] = draftStatusMeta(d.status);
+  const concept =
+    d.conceptJson && typeof d.conceptJson === "object" ? d.conceptJson : {};
+  const mode = concept.mode === "manual" ? "manual" : "auto";
+  const [mc, ml] = draftModeMeta(mode);
+  const source = concept.source;
+  const sourceLabel =
+    source === "manual" ? "운영자" : source === "scheduler" ? "스케줄러" : "—";
+  const plan =
+    concept.plan && typeof concept.plan === "object" ? concept.plan : null;
+  const planInput =
+    concept.planInput && typeof concept.planInput === "object"
+      ? concept.planInput
+      : null;
+  const shots = Array.isArray(d.shots) ? d.shots : [];
+  const planShots = Array.isArray(plan?.shots) ? plan.shots : [];
+
+  // ── ① 초안 생성 (항상 완료) ──
+  const stage1 = draftStage({
+    num: 1,
+    tone: "done",
+    label: "① 초안 생성",
+    statusMeta: ["tag-accent", "완료"],
+    bodyHtml: `<div>
+      ${draftMetaRow("장면 힌트", escapeHtml(concept.sceneHint || "—"))}
+      ${draftMetaRow(
+        "진행 방식",
+        mode === "manual"
+          ? "수동 — 단계별 버튼으로 진행"
+          : "자동 — 워커가 끝까지 진행",
+      )}
+      ${draftMetaRow("출처", escapeHtml(sourceLabel))}
+      ${draftMetaRow(
+        "게시 예정",
+        d.scheduledAt ? escapeHtml(fmtDateTime(d.scheduledAt)) : "승인 즉시",
+      )}
+    </div>`,
+  });
+
+  // ── ② 기획 · LLM ──
+  let stage2;
+  if (plan) {
+    stage2 = draftStage({
+      num: 2,
+      tone: "done",
+      label: "② 기획 · LLM",
+      statusMeta: ["tag-accent", "완료"],
+      bodyHtml: draftPlanBody(plan, planInput, concept.plannerName),
+    });
+  } else if (d.status === "planned") {
+    stage2 = draftStage({
+      num: 2,
+      tone: "current",
+      label: "② 기획 · LLM",
+      statusMeta: ["tag-neutral", "대기"],
+      actionHtml: `<button class="btn btn-primary" data-act="draft-plan-now" data-id="${attr(
+        d.id,
+      )}">지금 기획 실행</button>`,
+      bodyHtml: `<p class="count-note" style="margin:0">페르소나·메모리·최근 게시물을 입력으로 LLM이 캡션과 컷 장면을 기획합니다.</p>`,
+    });
+  } else if (d.status === "generating") {
+    stage2 = draftStage({
+      num: 2,
+      tone: "current",
+      label: "② 기획 · LLM",
+      statusMeta: ["tag-accent", "실행 중"],
+      bodyHtml: `<p class="count-note" style="margin:0">기획(LLM)을 실행하는 중입니다…</p>`,
+    });
+  } else if (d.status === "failed") {
+    stage2 = draftStage({
+      num: 2,
+      tone: "failed",
+      label: "② 기획 · LLM",
+      statusMeta: ["tag-accent-2", "실패"],
+      bodyHtml: `<p class="count-note" style="margin:0">기획에 실패했습니다. ${escapeHtml(
+        d.errorMessage || "",
+      )}</p>`,
+    });
+  } else {
+    stage2 = draftStage({
+      num: 2,
+      tone: "future",
+      label: "② 기획 · LLM",
+      statusMeta: ["tag-neutral", "대기"],
+      bodyHtml: `<p class="count-note" style="margin:0">페르소나·메모리·최근 게시물을 입력으로 LLM이 캡션과 컷 장면을 기획합니다.</p>`,
+    });
+  }
+
+  // ── ③ 이미지 생성 ──
+  const shotCount = shots.length || planShots.length;
+  const completedCount = shots.filter((s) => s.status === "completed").length;
+  const hasActiveShot = shots.some((s) =>
+    ["draft", "queued", "running"].includes(s.status),
+  );
+  const hasFailedShot = shots.some((s) => s.status === "failed");
+  let stage3Tone;
+  let stage3Status;
+  if (shots.length && shots.every((s) => s.status === "completed")) {
+    stage3Tone = "done";
+    stage3Status = ["tag-accent", "완료"];
+  } else if (shots.length === 0) {
+    stage3Tone = plan ? "current" : "future";
+    stage3Status = ["tag-neutral", "대기"];
+  } else if (hasFailedShot && !hasActiveShot) {
+    stage3Tone = "failed";
+    stage3Status = ["tag-accent-2", `${completedCount}/${shotCount}`];
+  } else {
+    stage3Tone = "current";
+    stage3Status = ["tag-accent", `${completedCount}/${shotCount} 완료`];
+  }
+  const stage3 = draftStage({
+    num: 3,
+    tone: stage3Tone,
+    label: `③ 이미지 생성 — 컷 ${shotCount || "?"}`,
+    statusMeta: stage3Status,
+    bodyHtml: shots.length
+      ? shots.map((shot) => draftShotCard(d, shot)).join("")
+      : `<p class="count-note" style="margin:0">기획이 완료되면 컷이 생성됩니다.</p>`,
+  });
+
+  // ── ④ 검수 · 승인 ──
+  const reviewable = d.status === "needs_review";
+  const editable = d.status === "needs_review" || d.status === "approved";
+  const scheduledLocal = d.scheduledAt
+    ? new Date(d.scheduledAt).toISOString().slice(0, 16)
+    : "";
+  let stage4Tone;
+  let stage4Status;
+  let stage4Action = "";
+  if (reviewable) {
+    stage4Tone = "current";
+    stage4Status = ["tag-accent-2", "검수 필요"];
+    stage4Action = `<button class="btn btn-primary" data-act="draft-approve" data-id="${attr(
+      d.id,
+    )}">승인</button>
+      <button class="btn btn-secondary" data-act="draft-reject" data-id="${attr(
+        d.id,
+      )}">반려</button>`;
+  } else if (d.status === "approved" || d.status === "published") {
+    stage4Tone = "done";
+    stage4Status = ["tag-accent", "승인됨"];
+  } else if (d.status === "rejected") {
+    stage4Tone = "failed";
+    stage4Status = ["tag-neutral", "반려됨"];
+  } else {
+    stage4Tone = "future";
+    stage4Status = ["tag-neutral", "대기"];
+  }
+  const stage4Body = editable
+    ? `<form data-action="draft-edit" data-draft-id="${attr(
+        d.id,
+      )}" style="display:flex;flex-direction:column;gap:12px">
+        <div class="field" style="margin:0"><label>캡션</label><textarea class="input" name="caption" rows="3">${escapeHtml(
+          d.caption,
+        )}</textarea></div>
+        <div class="field" style="margin:0"><label>해시태그 (쉼표 구분)</label><input class="input" name="hashtags" value="${attr(
+          (d.hashtags ?? []).join(", "),
+        )}"></div>
+        <div class="field" style="margin:0"><label>게시 예정 (비우면 승인 즉시)</label><input class="input" type="datetime-local" name="scheduledAt" value="${attr(
+          scheduledLocal,
+        )}"></div>
+        <div><button class="btn btn-secondary" type="submit">저장</button></div>
+      </form>`
+    : `<div>
+        <div style="font-size:14px;margin-bottom:6px">${
+          d.caption
+            ? `“${escapeHtml(d.caption)}”`
+            : `<span style="color:var(--color-neutral-500)">캡션 없음</span>`
+        }</div>
+        <div style="display:flex;flex-wrap:wrap">${(d.hashtags ?? [])
+          .map(
+            (t) =>
+              `<span class="tag tag-neutral" style="margin:0 4px 4px 0">#${escapeHtml(
+                t,
+              )}</span>`,
+          )
+          .join("")}</div>
+      </div>`;
+  const stage4 = draftStage({
+    num: 4,
+    tone: stage4Tone,
+    label: "④ 검수 · 승인",
+    statusMeta: stage4Status,
+    actionHtml: stage4Action,
+    bodyHtml: stage4Body,
+  });
+
+  // ── ⑤ 게시 ──
+  let stage5;
+  if (d.status === "published") {
+    stage5 = draftStage({
+      num: 5,
+      tone: "done",
+      label: "⑤ 게시",
+      statusMeta: ["tag-accent", "게시됨"],
+      bodyHtml: `<div style="font-size:13px">게시됨 · post ${escapeHtml(
+        d.publishedPostId || "—",
+      )}</div>
+        <p class="count-note" style="margin:6px 0 0">게시 시 캐릭터 메모리에 자동 역반영되었습니다.</p>`,
+      last: true,
+    });
+  } else if (d.status === "approved") {
+    stage5 = draftStage({
+      num: 5,
+      tone: "current",
+      label: "⑤ 게시",
+      statusMeta: ["tag-neutral", "게시 대기"],
+      actionHtml: `<button class="btn btn-primary" data-act="draft-publish-now" data-id="${attr(
+        d.id,
+      )}">지금 게시</button>`,
+      bodyHtml: `<p class="count-note" style="margin:0">예정 시각(${
+        d.scheduledAt ? escapeHtml(fmtDateTime(d.scheduledAt)) : "승인 즉시"
+      })과 무관하게 즉시 게시합니다.</p>`,
+      last: true,
+    });
+  } else if (d.status === "rejected") {
+    stage5 = draftStage({
+      num: 5,
+      tone: "failed",
+      label: "⑤ 게시",
+      statusMeta: ["tag-neutral", "반려됨"],
+      bodyHtml: `<p class="count-note" style="margin:0">반려된 초안은 게시되지 않습니다.</p>`,
+      last: true,
+    });
+  } else {
+    stage5 = draftStage({
+      num: 5,
+      tone: "future",
+      label: "⑤ 게시",
+      statusMeta: ["tag-neutral", "대기"],
+      bodyHtml: `<p class="count-note" style="margin:0">승인 후 게시할 수 있습니다.</p>`,
+      last: true,
+    });
+  }
+
+  return `
+    <button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-drafts">← 초안 목록</button>
+    <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+      <h2 style="font-size:28px;margin:0">${escapeHtml(characterName)}의 초안</h2>
+      <span class="tag ${sc}">${escapeHtml(sl)}</span>
+      <span class="tag ${mc}">${escapeHtml(ml)}</span>
+    </div>
+    <div style="font-size:12px;color:var(--color-neutral-500);margin-bottom:8px">시도 ${escapeHtml(
+      d.attemptCount,
+    )} · ${escapeHtml(d.contentType)} · 생성 ${escapeHtml(
+      fmtDateTime(d.createdAt),
+    )}</div>
+    ${d.errorMessage ? noticeBlock(`오류: ${escapeHtml(d.errorMessage)}`) : ""}
+    <div style="margin-top:14px;border-top:1px solid var(--color-divider)">
+      ${stage1}${stage2}${stage3}${stage4}${stage5}
+    </div>
+    ${
+      d.conceptJson
+        ? `<details style="margin-top:22px"><summary style="cursor:pointer;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;color:var(--color-neutral-600)">원본 데이터 (conceptJson)</summary><pre style="margin-top:10px;padding:14px;background:var(--color-neutral-100);font-size:12px;overflow-x:auto;white-space:pre-wrap">${escapeHtml(
+            JSON.stringify(d.conceptJson, null, 2),
+          )}</pre></details>`
+        : ""
+    }
+  `;
+}
+
+// 진행 중(생성 대기/실행 중)이면 5초 후 자동 새로고침이 필요하다.
+function draftNeedsRefresh(d) {
+  const shots = Array.isArray(d.shots) ? d.shots : [];
+  return (
+    shots.some((s) => s.status === "queued" || s.status === "running") ||
+    (d.status === "generating" && shots.length === 0)
+  );
+}
+
+function scheduleDraftRefresh(d) {
+  clearTimeout(ui.draftPollTimer);
+  ui.draftPollTimer = 0;
+  if (!draftNeedsRefresh(d)) return;
+  ui.draftPollTimer = setTimeout(() => {
+    if (currentRoute() === "drafts" && ui.selDraftId === d.id) {
+      renderApp();
+    }
+  }, 5000);
+}
+
 async function renderDraftDetail(id) {
   const res = await request(`/api/drafts/${id}`);
   const d = res.body;
@@ -2539,136 +3071,10 @@ async function renderDraftDetail(id) {
       ${noticeBlock("초안을 찾을 수 없습니다.")}`;
   }
   await loadCharacterOptions();
-  const [sc, sl] = draftStatusMeta(d.status);
-  const reviewable = d.status === "needs_review";
-  const editable = d.status === "needs_review" || d.status === "approved";
-  const shots = Array.isArray(d.shots) ? d.shots : [];
-
-  const shotBlocks = shots.length
-    ? shots
-        .map((shot) => {
-          const [jc, jl] = jobStatusMeta(shot.status);
-          const candidates = shot.outputs.length
-            ? shot.outputs
-                .map(
-                  (o) => `<div style="position:relative">
-                    <img src="${attr(o.url)}" alt="candidate ${o.candidateIndex}"
-                      data-act="draft-pick-output" data-draft="${attr(d.id)}" data-job="${attr(shot.jobId)}" data-media="${attr(o.mediaId)}"
-                      style="width:120px;height:120px;object-fit:cover;cursor:pointer;border:3px solid ${
-                        o.selected
-                          ? "var(--color-accent-700)"
-                          : "var(--color-divider)"
-                      }">
-                    ${
-                      o.selected
-                        ? `<span class="tag tag-accent" style="position:absolute;top:4px;left:4px">선택됨</span>`
-                        : ""
-                    }
-                  </div>`,
-                )
-                .join("")
-            : `<div style="padding:6px 0;color:var(--color-neutral-600);font-style:italic">아직 후보가 없습니다.</div>`;
-          return `<div style="padding:14px 0;border-bottom:1px solid var(--color-divider)">
-            <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
-              <span style="font-weight:600">컷 ${shot.sortOrder + 1}</span>
-              <span class="tag ${jc}">${escapeHtml(jl)}</span>
-              <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--color-neutral-500)" title="${attr(
-                shot.prompt,
-              )}">${escapeHtml(shot.prompt)}</span>
-              ${
-                reviewable || d.status === "failed"
-                  ? `<button class="btn btn-ghost" style="flex:none" data-act="draft-regen" data-draft="${attr(
-                      d.id,
-                    )}" data-job="${attr(shot.jobId)}">재생성</button>`
-                  : ""
-              }
-            </div>
-            <div style="display:flex;gap:10px;flex-wrap:wrap">${candidates}</div>
-            ${
-              shot.errorMessage
-                ? `<div style="margin-top:6px;font-size:12px;color:var(--color-accent-2-700)">${escapeHtml(shot.errorMessage)}</div>`
-                : ""
-            }
-          </div>`;
-        })
-        .join("")
-    : `<div style="padding:10px 0;color:var(--color-neutral-600);font-style:italic">아직 컷이 없습니다 — 기획 대기 중.</div>`;
-
-  const scheduledLocal = d.scheduledAt
-    ? new Date(d.scheduledAt).toISOString().slice(0, 16)
-    : "";
-
-  return `
-    <button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-drafts">← 초안 목록</button>
-    <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px">
-      <h2 style="font-size:28px;margin:0">${escapeHtml(charName(d.characterId))}의 초안</h2>
-      <span class="tag ${sc}">${escapeHtml(sl)}</span>
-      <span style="font-size:12px;color:var(--color-neutral-500)">시도 ${d.attemptCount} · ${escapeHtml(
-        d.contentType,
-      )}</span>
-    </div>
-    ${d.errorMessage ? noticeBlock(`오류: ${escapeHtml(d.errorMessage)}`) : ""}
-    <div style="display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:56px;margin-top:18px">
-      <div>
-        <div style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;margin:0 0 4px">컷 · 후보 선택</div>
-        ${shotBlocks}
-      </div>
-      <div>
-        <div style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;margin:0 0 10px">캡션 · 일정</div>
-        <form data-action="draft-edit" data-draft-id="${attr(d.id)}" style="display:flex;flex-direction:column;gap:12px">
-          <div class="field"><label>캡션</label><textarea class="input" name="caption" rows="3" ${
-            editable ? "" : "disabled"
-          }>${escapeHtml(d.caption)}</textarea></div>
-          <div class="field"><label>해시태그 (쉼표 구분)</label><input class="input" name="hashtags" value="${attr(
-            (d.hashtags ?? []).join(", "),
-          )}" ${editable ? "" : "disabled"}></div>
-          <div class="field"><label>게시 예정 (비우면 승인 즉시)</label><input class="input" type="datetime-local" name="scheduledAt" value="${attr(
-            scheduledLocal,
-          )}" ${editable ? "" : "disabled"}></div>
-          ${
-            editable
-              ? `<div><button class="btn btn-secondary" type="submit">저장</button></div>`
-              : ""
-          }
-        </form>
-        <div style="display:flex;gap:8px;margin-top:22px;flex-wrap:wrap">
-          ${
-            d.status === "planned"
-              ? `<button class="btn btn-primary" data-act="draft-plan-now" data-id="${attr(d.id)}">지금 기획 실행</button>
-                 <span class="count-note">워커 폴링을 기다리지 않고 기획(LLM)을 즉시 실행합니다.</span>`
-              : ""
-          }
-          ${
-            reviewable
-              ? `<button class="btn btn-primary" data-act="draft-approve" data-id="${attr(d.id)}">승인</button>
-                 <button class="btn btn-secondary" data-act="draft-reject" data-id="${attr(d.id)}">반려</button>`
-              : ""
-          }
-          ${
-            d.status === "approved"
-              ? `<button class="btn btn-primary" data-act="draft-publish-now" data-id="${attr(d.id)}">지금 게시</button>
-                 <span class="count-note">예정 시각과 무관하게 즉시 게시합니다.</span>`
-              : ""
-          }
-          ${
-            d.publishedPostId
-              ? `<span class="count-note">게시됨: post ${escapeHtml(d.publishedPostId)}</span>`
-              : ""
-          }
-        </div>
-        ${
-          d.conceptJson
-            ? `<details style="margin-top:22px"><summary style="cursor:pointer;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">기획 결과${
-                d.conceptJson.plannerName
-                  ? ` · ${escapeHtml(d.conceptJson.plannerName)}`
-                  : ""
-              }</summary><pre style="margin-top:10px;padding:14px;background:var(--color-neutral-100);font-size:12px;overflow-x:auto;white-space:pre-wrap">${escapeHtml(
-                JSON.stringify(d.conceptJson, null, 2),
-              )}</pre></details>`
-            : ""
-        }
-      </div>
-    </div>`;
+  const html = draftDetailMarkup(d, charName(d.characterId));
+  // 반환 직전에 폴링 타이머를 (재)설정한다.
+  scheduleDraftRefresh(d);
+  return html;
 }
 
 // ── 사용자 ────────────────────────────────────────────────────────────────
@@ -3656,14 +4062,46 @@ async function dispatchSubmit(action, form, formData) {
     return;
   }
   if (action === "draft-create") {
-    const characterId = form.dataset.characterId;
+    const characterId =
+      form.dataset.characterId ||
+      String(formData.get("characterId") ?? "").trim();
     const sceneHint = String(formData.get("sceneHint") ?? "").trim();
+    const mode = String(formData.get("mode") ?? "manual").trim() || "manual";
     const result = await submitViaSpec(
       jsonRequest("/api/drafts", "POST", {
         characterId,
         ...(sceneHint ? { sceneHint } : {}),
+        mode,
       }),
-      "초안 기획을 큐에 등록했습니다. 워커가 곧 기획을 시작합니다.",
+      mode === "manual"
+        ? "초안을 만들었습니다. 단계별로 실행하세요."
+        : "초안을 만들었습니다. 워커가 곧 기획을 시작합니다.",
+    );
+    if (result.ok) {
+      // 초안 검수에서 만들면 바로 상세(단계 타임라인)로 진입한다.
+      if (currentRoute() === "drafts" && result.body?.id) {
+        ui.selDraftId = result.body.id;
+      }
+      renderApp();
+    }
+    return;
+  }
+  if (action === "draft-shot-generate") {
+    const prompt = String(formData.get("prompt") ?? "").trim();
+    const candidateRaw = String(formData.get("candidateCount") ?? "").trim();
+    const candidateCount = candidateRaw ? Number(candidateRaw) : undefined;
+    const result = await submitViaSpec(
+      jsonRequest(
+        `/api/drafts/${form.dataset.draftId}/jobs/${form.dataset.jobId}/generate`,
+        "POST",
+        {
+          ...(prompt ? { prompt } : {}),
+          ...(candidateCount != null && !Number.isNaN(candidateCount)
+            ? { candidateCount }
+            : {}),
+        },
+      ),
+      "컷 생성을 시작했습니다.",
     );
     if (result.ok) renderApp();
     return;
@@ -4303,6 +4741,8 @@ async function renderApp() {
   const token = ++renderToken;
   clearTimeout(ui.generationPollTimer);
   ui.generationPollTimer = 0;
+  clearTimeout(ui.draftPollTimer);
+  ui.draftPollTimer = 0;
   const route = currentRoute();
   if (route !== "generation") {
     ui.generationCreating = false;

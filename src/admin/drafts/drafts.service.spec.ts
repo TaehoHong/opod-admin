@@ -12,8 +12,10 @@ function prismaMock() {
     generationJob: {
       findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn().mockResolvedValue(null),
+      findUnique: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({}),
       update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     generationJobOutput: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -121,7 +123,7 @@ describe("DraftsService", () => {
     ]);
   });
 
-  it("creates a manual draft with a scene hint", async () => {
+  it("creates a manual draft with a scene hint, defaulting to auto mode", async () => {
     const prisma = prismaMock();
     prisma.postDraft.create.mockResolvedValue({
       ...draftRow,
@@ -129,7 +131,7 @@ describe("DraftsService", () => {
       caption: "",
       hashtags: [],
       scheduledAt: null,
-      conceptJson: { source: "manual", sceneHint: "카페" },
+      conceptJson: { source: "manual", mode: "auto", sceneHint: "카페" },
     });
     const service = makeService(prisma);
 
@@ -139,12 +141,78 @@ describe("DraftsService", () => {
     expect(prisma.postDraft.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         characterId: "ai-1",
-        conceptJson: { source: "manual", sceneHint: "카페" },
+        conceptJson: { source: "manual", mode: "auto", sceneHint: "카페" },
       }),
     });
     expect(prisma.characterActionLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ actionType: "DRAFT_CREATED" }),
     });
+  });
+
+  it("records mode=manual in conceptJson so the pipeline stays operator-driven", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.create.mockResolvedValue({
+      ...draftRow,
+      status: "planned",
+      conceptJson: { source: "manual", mode: "manual" },
+    });
+    const service = makeService(prisma);
+
+    await service.createDraft({ characterId: "ai-1", mode: "manual" });
+
+    expect(prisma.postDraft.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        conceptJson: { source: "manual", mode: "manual" },
+      }),
+    });
+  });
+
+  it("rejects an unknown draft mode", async () => {
+    const service = makeService(prismaMock());
+    await expect(
+      service.createDraft({ characterId: "ai-1", mode: "semi" }),
+    ).rejects.toThrow("Draft mode must be manual or auto");
+  });
+
+  it("queues a draft-state shot with the edited prompt and candidate count", async () => {
+    const prisma = prismaMock();
+    prisma.generationJob.updateMany.mockResolvedValue({ count: 1 });
+    prisma.generationJob.findUnique.mockResolvedValue({
+      characterId: "ai-1",
+      sortOrder: 0,
+    });
+    const service = makeService(prisma);
+
+    await service.queueShot({
+      draftId: "draft-1",
+      jobId: "job-1",
+      prompt: "수정된 프롬프트",
+      candidateCount: 3,
+    });
+
+    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", draftId: "draft-1", status: "draft" },
+      data: { status: "queued", prompt: "수정된 프롬프트", candidateCount: 3 },
+    });
+    expect(prisma.characterActionLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actionType: "DRAFT_SHOT_GENERATION_STARTED",
+      }),
+    });
+  });
+
+  it("refuses to generate a shot that is not in draft state", async () => {
+    const prisma = prismaMock();
+    prisma.generationJob.updateMany.mockResolvedValue({ count: 0 });
+    prisma.postDraft.findUnique.mockResolvedValue(draftRow);
+    const service = makeService(prisma);
+
+    await expect(
+      service.queueShot({ draftId: "draft-1", jobId: "job-1" }),
+    ).rejects.toThrow(
+      "Only draft-state shots of this draft can start generation",
+    );
+    expect(prisma.characterActionLog.create).not.toHaveBeenCalled();
   });
 
   it("edits caption only in reviewable statuses", async () => {

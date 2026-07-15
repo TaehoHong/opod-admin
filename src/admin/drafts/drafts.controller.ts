@@ -11,9 +11,11 @@ import {
 } from "@nestjs/common";
 import { parsePageQuery } from "../../domain/database/page";
 import { DraftWorkerService } from "../../worker/draft-worker.service";
+import { GenerationWorkerService } from "../../worker/generation-worker.service";
 import { AdminJwtGuard } from "../auth/admin-jwt.guard";
 import { DraftsService } from "./drafts.service";
 import { CreateDraftDto } from "./dto/create-draft.dto";
+import { GenerateShotDto } from "./dto/generate-shot.dto";
 import { RegenerateShotDto } from "./dto/regenerate-shot.dto";
 import { RejectDraftDto } from "./dto/reject-draft.dto";
 import { SelectShotOutputDto } from "./dto/select-shot-output.dto";
@@ -24,8 +26,9 @@ import { UpdateDraftDto } from "./dto/update-draft.dto";
 export class DraftsController {
   constructor(
     private readonly draftsService: DraftsService,
-    // 수동 실행(plan/publish)용 — 의존 방향은 admin → worker만 허용.
+    // 수동 실행(plan/publish/generate)용 — 의존 방향은 admin → worker만 허용.
     private readonly draftWorker: DraftWorkerService,
+    private readonly generationWorker: GenerationWorkerService,
   ) {}
 
   @Get()
@@ -50,6 +53,19 @@ export class DraftsController {
   @Post()
   createDraft(@Body() body: CreateDraftDto) {
     return this.draftsService.createDraft(body);
+  }
+
+  // 수동 진행 컷 생성 실행 — draft 상태 컷의 프롬프트/후보 수를 (선택) 수정하고
+  // queued로 전환한 뒤 즉시 생성 워커에 태운다 (WORKER_ENABLED 무관).
+  @Post(":id/jobs/:jobId/generate")
+  async generateShotNow(
+    @Param("id") draftId: string,
+    @Param("jobId") jobId: string,
+    @Body() body: GenerateShotDto,
+  ) {
+    await this.draftsService.queueShot({ draftId, jobId, ...body });
+    await this.generationWorker.runJobNow(jobId);
+    return this.draftsService.getDraft(draftId);
   }
 
   @Patch(":id")
