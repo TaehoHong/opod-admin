@@ -16,6 +16,7 @@ WORKDIR /app
 
 COPY nest-cli.json prisma.config.ts tsconfig.build.json tsconfig.json ./
 COPY prisma ./prisma
+COPY prompts ./prompts
 COPY src ./src
 COPY packages ./packages
 
