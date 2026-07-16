@@ -1,10 +1,39 @@
-import { buildImagePromptBuilderUserPrompt } from "../../prompts/image-prompt-builder";
+import {
+  buildImagePromptBuilderUserPrompt,
+  imageModelFamily,
+  modelFamilyGuidance,
+} from "../../prompts/image-prompt-builder";
 import {
   createLlmImagePromptBuilder,
   localImagePromptBuilder,
   parseBuiltImagePrompts,
   resolveImagePromptBuilder,
 } from "./image-prompt-builder";
+
+describe("imageModelFamily", () => {
+  it("classifies fal model ids into prompt-syntax families", () => {
+    expect(imageModelFamily("fal-ai/flux/dev")).toBe("flux");
+    expect(imageModelFamily("fal-ai/nano-banana-pro/edit")).toBe("nano-banana");
+    expect(imageModelFamily("fal-ai/gemini-2.5-flash-image")).toBe(
+      "nano-banana",
+    );
+    expect(imageModelFamily("fal-ai/stable-diffusion-v35-large")).toBe(
+      "stable-diffusion",
+    );
+    expect(imageModelFamily("fal-ai/fast-sdxl")).toBe("stable-diffusion");
+    expect(imageModelFamily("fal-ai/some-unknown-model")).toBe("generic");
+    expect(imageModelFamily(undefined)).toBe("generic");
+  });
+
+  it("gives distinct guidance per family", () => {
+    expect(modelFamilyGuidance("fal-ai/flux/dev")).toContain("서술형");
+    expect(modelFamilyGuidance("fal-ai/flux/dev")).toContain("가중치 문법");
+    expect(modelFamilyGuidance("fal-ai/fast-sdxl")).toContain("태그·키워드");
+    expect(modelFamilyGuidance("fal-ai/flux/dev")).not.toEqual(
+      modelFamilyGuidance("fal-ai/fast-sdxl"),
+    );
+  });
+});
 
 describe("resolveImagePromptBuilder", () => {
   it("falls back to the local builder without LLM settings", () => {
@@ -49,11 +78,25 @@ describe("buildImagePromptBuilderUserPrompt", () => {
       scenes: ["한강 노을 산책", "골목 카페"],
     });
     expect(prompt).toContain("## 대상 이미지 모델\nfal-ai/flux/dev");
+    // Flux 계열 표현 규칙이 함께 주입된다.
+    expect(prompt).toContain("## 대상 모델 표현 규칙");
+    expect(prompt).toContain("가중치 문법");
     expect(prompt).toContain("young woman, short black hair");
     expect(prompt).toContain("film photography");
     expect(prompt).toContain("1. 한강 노을 산책");
     expect(prompt).toContain("2. 골목 카페");
     expect(prompt).toContain("컷 2개");
+  });
+
+  it("injects the family-specific guidance for the target model", () => {
+    const sdxl = buildImagePromptBuilderUserPrompt({
+      targetModelId: "fal-ai/fast-sdxl",
+      appearancePrompt: "a",
+      stylePrompt: "b",
+      scenes: ["장면"],
+    });
+    expect(sdxl).toContain("태그·키워드 나열형");
+    expect(sdxl).not.toContain("Flux는 무시");
   });
 
   it("marks missing model and prompts as unspecified", () => {
