@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
+import { setupAdminSwagger } from "./admin/swagger";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
@@ -9,6 +10,7 @@ async function bootstrap() {
     httpsOptions: getHttpsOptions(),
   });
 
+  setupAdminSwagger(app);
   app.useStaticAssets(join(process.cwd(), "packages/admin"));
 
   await app.listen(process.env.ADMIN_API_PORT ?? process.env.PORT ?? 7100);

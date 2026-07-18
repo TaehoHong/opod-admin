@@ -10,3 +10,5 @@ test/.tmp/
 /docker-compose.yml
 /docker-compose.*.yml
 .gstack/
+
+.superpowers
