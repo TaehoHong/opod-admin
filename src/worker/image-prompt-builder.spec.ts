@@ -106,7 +106,7 @@ describe("buildImagePromptBuilderUserPrompt", () => {
       scenes: ["장면"],
     });
     expect(prompt).toContain("## 대상 이미지 모델\n(미지정)");
-    expect(prompt).toContain("## 캐릭터 외모 프롬프트 (모든 컷 유지)\n(없음)");
+    expect(prompt).toContain("## 캐릭터 외모 프롬프트\n(없음)");
     expect(prompt).toContain("## 스타일 프롬프트 (모든 컷 반영)\n(없음)");
   });
 });

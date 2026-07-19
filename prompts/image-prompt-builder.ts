@@ -68,6 +68,7 @@ export const IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT = [
   "규칙:",
   "- 프롬프트는 영어로만 쓴다.",
   "- 외모 프롬프트의 정체성 요소는 모든 컷에서 동일하게 유지한다 (컷 간 인물 일관성).",
+  "- 외모 프롬프트가 [라벨] 섹션으로 나뉘어 있으면, 각 컷에서 실제로 보이는 요소의 섹션만 반영한다 — 예: 뒷모습 컷에 얼굴·손톱 묘사 금지, 손 클로즈업 컷에 전신 체형 묘사 금지. 핵심 정체성 섹션은 인물이 보이면 항상 반영한다.",
   "- 장면의 장소·구도·포즈·조명·분위기를 이미지 모델이 이해하는 구체적 시각 어휘로 옮긴다. 장면에 없는 사건·인물을 지어내지 않는다.",
   "- 스타일 프롬프트를 각 컷에 자연스럽게 반영한다.",
   "- '대상 모델 표현 규칙' 섹션의 문법·형식을 반드시 따른다 — 모델 계열마다 프롬프트 작성법이 다르다.",
@@ -83,7 +84,7 @@ export function buildImagePromptBuilderUserPrompt(
   const sections = [
     `## 대상 이미지 모델\n${input.targetModelId?.trim() || "(미지정)"}`,
     `## 대상 모델 표현 규칙\n${modelFamilyGuidance(input.targetModelId)}`,
-    `## 캐릭터 외모 프롬프트 (모든 컷 유지)\n${input.appearancePrompt.trim() || "(없음)"}`,
+    `## 캐릭터 외모 프롬프트\n${input.appearancePrompt.trim() || "(없음)"}`,
     `## 스타일 프롬프트 (모든 컷 반영)\n${input.stylePrompt.trim() || "(없음)"}`,
     `## 컷 장면 (한국어 기획)\n${input.scenes
       .map((scene, index) => `${index + 1}. ${scene}`)
