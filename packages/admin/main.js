@@ -1264,6 +1264,8 @@ const ui = {
   draftPollTimer: 0,
   generationSelectedJobId: "",
   generationSelectedMediaId: "",
+  // 초안 검수 — 필름 마감 미리보기 토글 (드래프트 간에도 유지되는 보기 설정).
+  draftFilmPreview: false,
 };
 
 // — request / auth —
@@ -2713,6 +2715,14 @@ function draftPlanBody(plan, planInput, plannerName) {
   </div>`;
 }
 
+// 게시 마감 프리셋 — draft conceptJson.finish (검수에서 게시글 단위 선택).
+function draftFinishPreset(d) {
+  const concept = d?.conceptJson;
+  const value =
+    concept && typeof concept === "object" ? concept.finish : undefined;
+  return value === "film" || value === "mono-film" ? value : "none";
+}
+
 // ③ 컷 서브카드 — draft(수동 대기)는 생성 실행 폼, completed는 후보 그리드 등.
 function draftShotCard(d, shot) {
   const [jc, jl] = jobStatusMeta(shot.status);
@@ -2806,7 +2816,9 @@ function draftShotCard(d, shot) {
             return `<div class="candidate">
               <img class="candidate-thumb${o.selected ? " is-selected" : ""}"
                 src="${attr(o.url)}" alt="candidate ${escapeHtml(o.candidateIndex)}"
-                data-act="zoom-image" data-url="${attr(o.url)}">
+                data-act="zoom-image" data-url="${attr(o.url)}"
+                data-film-media="${attr(o.mediaId)}" data-orig-url="${attr(o.url)}"
+                data-finish-preset="${attr(draftFinishPreset(d))}">
               ${selectControl}
             </div>`;
           })
@@ -2824,7 +2836,9 @@ function draftShotCard(d, shot) {
 
 // 단계 타임라인 마크업 (순수 함수, 네트워크 비의존 — 테스트 대상).
 // d = GET /api/drafts/:id 응답, characterName = 표시용 캐릭터명.
-export function draftDetailMarkup(d, characterName) {
+// opts.filmPreview = 필름 마감 미리보기 토글 상태 (기본 꺼짐).
+export function draftDetailMarkup(d, characterName, opts = {}) {
+  const filmPreview = opts.filmPreview === true;
   const [sc, sl] = draftStatusMeta(d.status);
   const concept =
     d.conceptJson && typeof d.conceptJson === "object" ? d.conceptJson : {};
@@ -2938,7 +2952,7 @@ export function draftDetailMarkup(d, characterName) {
   // 수동 모드: draft 상태 컷이 남아 있으면 프롬프트 빌드(재빌드) 버튼 노출.
   // 빌드 = 기획된 한국어 장면을 이미지 모델용 프롬프트로 변환하는 별도 스텝.
   const draftShots = shots.filter((s) => s.status === "draft");
-  const stage3Action =
+  const buildAction =
     mode === "manual" && draftShots.length
       ? `<button class="btn btn-secondary" data-act="draft-build-prompts" data-id="${attr(
           d.id,
@@ -2948,11 +2962,47 @@ export function draftDetailMarkup(d, characterName) {
             : "프롬프트 다시 빌드"
         }</button>`
       : "";
-  const builderNote = concept.builderName
-    ? `<p class="count-note" style="margin:0 0 8px">빌더: ${escapeHtml(
-        concept.builderName,
-      )}</p>`
+  // 게시 마감 — 게시글 단위 프리셋 (PATCH /api/drafts/:id {finish}).
+  // 검수에서 컷을 보며 고르고, 게시 시 워커가 같은 연산을 적용한다.
+  // 완료된 후보 이미지가 있어야 고르고 미리볼 의미가 있다.
+  const hasOutputs = shots.some(
+    (s) => Array.isArray(s.outputs) && s.outputs.length > 0,
+  );
+  const finish = draftFinishPreset(d);
+  const finishEditable =
+    d.status === "needs_review" || d.status === "approved";
+  const finishSelect = hasOutputs
+    ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--color-neutral-600)">게시 마감 <select class="input" style="width:auto;padding:4px 8px" data-select="draft-finish" data-id="${attr(
+        d.id,
+      )}"${finishEditable ? "" : " disabled"}>
+        <option value="none"${finish === "none" ? " selected" : ""}>없음</option>
+        <option value="film"${finish === "film" ? " selected" : ""}>필름</option>
+        <option value="mono-film"${
+          finish === "mono-film" ? " selected" : ""
+        }>흑백 필름</option>
+      </select></label>`
     : "";
+  const previewToggle =
+    hasOutputs && finish !== "none"
+      ? `<button class="btn ${
+          filmPreview ? "btn-secondary" : "btn-ghost"
+        }" data-act="draft-film-toggle" aria-pressed="${filmPreview}">마감 미리보기 ${
+          filmPreview ? "ON" : "OFF"
+        }</button>`
+      : "";
+  const stage3Action = [buildAction, finishSelect, previewToggle]
+    .filter(Boolean)
+    .join(" ");
+  const filmNote =
+    filmPreview && finish !== "none"
+      ? `<p class="count-note" style="margin:0 0 8px">마감 미리보기 중 — 게시 시 이 마감이 그대로 적용됩니다. 저장된 후보 원본은 유지됩니다.</p>`
+      : "";
+  const builderNote =
+    (concept.builderName
+      ? `<p class="count-note" style="margin:0 0 8px">빌더: ${escapeHtml(
+          concept.builderName,
+        )}</p>`
+      : "") + filmNote;
   const stage3 = draftStage({
     num: 3,
     tone: stage3Tone,
@@ -3175,10 +3225,78 @@ async function renderDraftDetail(id) {
       ${noticeBlock("초안을 찾을 수 없습니다.")}`;
   }
   await loadCharacterOptions();
-  const html = draftDetailMarkup(d, charName(d.characterId));
+  const html = draftDetailMarkup(d, charName(d.characterId), {
+    filmPreview: ui.draftFilmPreview,
+  });
   // 반환 직전에 폴링 타이머를 (재)설정한다.
   scheduleDraftRefresh(d);
   return html;
+}
+
+// ── 게시 마감 미리보기 ──────────────────────────────────────────────────
+// 켜면 후보 이미지를 서버 후보정본(blob)으로 바꿔치기한다. 결정적 연산이라
+// 미디어·프리셋당 한 번만 받아 object URL로 캐시한다. 저장 데이터는
+// 건드리지 않는다 — 게시 시 워커가 같은 연산으로 마감본을 만든다.
+
+const filmPreviewCache = new Map(); // "preset:mediaId" → object URL
+const filmPreviewPending = new Map(); // "preset:mediaId" → Promise<object URL | "">
+
+async function filmPreviewObjectUrl(mediaId, preset) {
+  if (!mediaId || !preset || preset === "none") return "";
+  const key = `${preset}:${mediaId}`;
+  if (filmPreviewCache.has(key)) return filmPreviewCache.get(key);
+  if (!filmPreviewPending.has(key)) {
+    const pending = (async () => {
+      try {
+        const response = await fetch(
+          `/api/media/${mediaId}/film-finish?preset=${encodeURIComponent(preset)}`,
+          adminRequestOptions({}, readAdminToken()),
+        );
+        if (!response.ok) {
+          throw new Error(`finish request failed (${response.status})`);
+        }
+        const url = URL.createObjectURL(await response.blob());
+        filmPreviewCache.set(key, url);
+        return url;
+      } catch (error) {
+        console.error(`${LOG_PREFIX} finish preview failed:`, error);
+        return "";
+      } finally {
+        filmPreviewPending.delete(key);
+      }
+    })();
+    filmPreviewPending.set(key, pending);
+  }
+  return filmPreviewPending.get(key);
+}
+
+// 렌더 직후 호출 — 토글 상태에 맞춰 data-film-media 이미지들의 src를 맞춘다.
+// 라이트박스(data-url)도 같이 바꿔 확대 보기에서도 같은 판이 보이게 한다.
+async function applyDraftFilmPreview() {
+  if (!hasDocument) return;
+  const imgs = Array.from(document.querySelectorAll("img[data-film-media]"));
+  if (!imgs.length) return;
+  await Promise.all(
+    imgs.map(async (img) => {
+      const preset = img.dataset.finishPreset || "none";
+      if (!ui.draftFilmPreview || preset === "none") {
+        const orig = img.dataset.origUrl || "";
+        if (orig) {
+          img.src = orig;
+          img.dataset.url = orig;
+        }
+        img.style.opacity = "";
+        return;
+      }
+      img.style.opacity = "0.45";
+      const url = await filmPreviewObjectUrl(img.dataset.filmMedia, preset);
+      img.style.opacity = "";
+      // 받는 사이 토글이 꺼졌거나 다시 그려져 떨어져 나간 경우는 손대지 않는다.
+      if (!ui.draftFilmPreview || !url || !img.isConnected) return;
+      img.src = url;
+      img.dataset.url = url;
+    }),
+  );
 }
 
 // ── 사용자 ────────────────────────────────────────────────────────────────
@@ -4729,6 +4847,12 @@ async function handleClick(event) {
     if (result.ok) renderApp();
     return;
   }
+  if (act === "draft-film-toggle") {
+    ui.draftFilmPreview = !ui.draftFilmPreview;
+    // 버튼 상태(ON/OFF)까지 다시 그리고, 렌더 후 훅이 이미지 스왑을 처리한다.
+    renderApp();
+    return;
+  }
   if (act === "select-user") {
     ui.selUserId = el.dataset.id;
     renderApp();
@@ -4801,6 +4925,16 @@ function handleChange(event) {
   } else if (kind === "event-user") {
     ui.eventUserId = el.value;
     renderApp();
+  } else if (kind === "draft-finish") {
+    // 게시 마감 프리셋 — 고르는 즉시 draft에 저장한다 (none = 해제).
+    void submitViaSpec(
+      jsonRequest(`/api/drafts/${el.dataset.id}`, "PATCH", {
+        finish: el.value === "none" ? null : el.value,
+      }),
+      "게시 마감을 저장했습니다.",
+    ).then((result) => {
+      if (result.ok) renderApp();
+    });
   }
 }
 
@@ -4960,6 +5094,8 @@ async function renderApp() {
   }
   if (token !== renderToken) return; // a newer render superseded this one
   mainPanel.innerHTML = html;
+  // 초안 검수의 필름 마감 토글이 켜져 있으면 후보 이미지를 후보정본으로 교체.
+  void applyDraftFilmPreview();
 }
 
 // ═════════════════════════════════════════════════════════════════════════

@@ -70,6 +70,10 @@ import { resolveImagePromptBuilder } from "./image-prompt-builder";
             });
           },
           draftWorkerConfigFromEnv(),
+          undefined,
+          // 게시 마감본 업로드/원본 읽기 — 생성 워커와 같은 스토어·서명자.
+          createGeneratedMediaStore(),
+          createReferenceUrlSigner(),
         ),
       inject: [PrismaService, GenerationSettingsService],
     },

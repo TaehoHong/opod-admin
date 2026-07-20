@@ -6,6 +6,19 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../domain/database/prisma.service";
 import { ContentPlanner } from "./content-planner";
+import {
+  applyFinishWithMeta,
+  downloadMediaBytes,
+  FinishedImage,
+  FinishPreset,
+  mediaSourceBytes,
+  parseFinishPreset,
+} from "./film-finish";
+import {
+  GeneratedMediaStore,
+  localGeneratedMediaStore,
+  ReferenceUrlSigner,
+} from "./generated-media-store";
 import { ImagePromptBuilder } from "./image-prompt-builder";
 import { errorMessage, isRecord, parsePositiveNumber } from "./value-utils";
 
@@ -80,6 +93,16 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly resolvePromptBuilder: () => Promise<ImagePromptBuilder>,
     private readonly config: DraftWorkerConfig,
     private readonly random: () => number = Math.random,
+    // 게시 직전 마감본 업로드용 (초안 검수 미리보기와 동일 연산).
+    private readonly store: GeneratedMediaStore = localGeneratedMediaStore,
+    private readonly signReferenceUrl: ReferenceUrlSigner | null = null,
+    private readonly finishImage: (
+      bytes: Buffer,
+      preset: FinishPreset,
+    ) => Promise<FinishedImage> = applyFinishWithMeta,
+    private readonly downloadBytes: (
+      url: string,
+    ) => Promise<Buffer> = downloadMediaBytes,
   ) {}
 
   onModuleInit(): void {
@@ -712,6 +735,20 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       .map((tag) => tag.trim().replace(/^#+/, "").trim())
       .filter(Boolean);
 
+    // 게시 마감 — 검수에서 고른 프리셋(conceptJson.finish)을 적용한 새 Media를
+    // 만들어 게시물에 붙인다. 후보(원본)는 그대로 남는다. 미리보기와 동일한
+    // 결정적 연산이라 검수에서 본 그대로 나간다. 프리셋 없음 = 원본 게시.
+    const finish = parseFinishPreset(
+      isRecord(draft.conceptJson) ? draft.conceptJson.finish : undefined,
+    );
+    const finishedFiles = finish
+      ? await Promise.all(
+          orderedMediaIds.map((mediaId) =>
+            this.finishedUpload(draft.characterId, mediaId, finish),
+          ),
+        )
+      : null;
+
     await this.prisma.$transaction(async (tx) => {
       const transitioned = await tx.postDraft.updateMany({
         where: { id: draft.id, status: "approved" },
@@ -719,6 +756,29 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       });
       if (transitioned.count === 0) {
         throw new Error("draft left the approved state before publish");
+      }
+      const publishMediaIds: string[] = [];
+      for (const [index, mediaId] of orderedMediaIds.entries()) {
+        const file = finishedFiles?.[index];
+        if (!file) {
+          publishMediaIds.push(mediaId);
+          continue;
+        }
+        const media = await tx.media.create({
+          data: {
+            mediaType: "image",
+            url: file.url,
+            storageKey: file.storageKey,
+            contentType: file.contentType,
+            byteSize: file.byteSize,
+            width: file.width,
+            height: file.height,
+            isAiGenerated: true,
+            uploadedAt: new Date(),
+          },
+          select: { id: true },
+        });
+        publishMediaIds.push(media.id);
       }
       const post = await tx.post.create({
         data: {
@@ -733,7 +793,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
             })),
           },
           postMedia: {
-            create: orderedMediaIds.map((mediaId, index) => ({
+            create: publishMediaIds.map((mediaId, index) => ({
               sortOrder: index,
               media: { connect: { id: mediaId } },
             })),
@@ -764,6 +824,51 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       });
     });
     this.logger.log(`Draft ${draft.id} published`);
+  }
+
+  // 마감본 생성·업로드 (트랜잭션 밖 — 생성 워커의 persistSuccess와 같은 패턴).
+  // 이미지가 아니면 null을 돌려 원본 미디어를 그대로 게시한다.
+  private async finishedUpload(
+    characterId: string,
+    mediaId: string,
+    preset: FinishPreset,
+  ): Promise<{
+    url: string;
+    storageKey?: string;
+    contentType: string;
+    byteSize: number;
+    width: number;
+    height: number;
+  } | null> {
+    const media = await this.prisma.media.findUnique({
+      where: { id: mediaId },
+      select: { mediaType: true, url: true, storageKey: true },
+    });
+    if (!media) {
+      throw new Error(`publish media ${mediaId} not found`);
+    }
+    if (media.mediaType !== "image") {
+      return null;
+    }
+    const source = await mediaSourceBytes(
+      media,
+      this.signReferenceUrl,
+      this.downloadBytes,
+    );
+    const finished = await this.finishImage(source, preset);
+    const stored = await this.store({
+      bytes: finished.bytes,
+      contentType: finished.contentType,
+      keyPrefix: `pod/generated/character/${characterId}`,
+    });
+    return {
+      url: stored.url,
+      storageKey: stored.storageKey,
+      contentType: finished.contentType,
+      byteSize: finished.bytes.byteLength,
+      width: finished.width,
+      height: finished.height,
+    };
   }
 
   // ── 스케줄러 ────────────────────────────────────────────────────────────

@@ -36,6 +36,9 @@ function prismaMock() {
     characterPostingPolicy: {
       findMany: jest.fn().mockResolvedValue([]),
     },
+    media: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
     post: {
       findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({ id: "post-1" }),
@@ -72,6 +75,12 @@ function makeService(
   config: Partial<DraftWorkerConfig> = {},
   random: () => number = () => 0.5,
   builder: ImagePromptBuilder = builderMock(),
+  // 게시 마감 경로 의존성 — 실제 sharp/S3 대신 페이크를 주입한다.
+  finishDeps: {
+    store?: jest.Mock;
+    finishImage?: jest.Mock;
+    download?: jest.Mock;
+  } = {},
 ) {
   return new DraftWorkerService(
     prisma as never,
@@ -79,6 +88,20 @@ function makeService(
     () => Promise.resolve(builder),
     { ...baseConfig, ...config },
     random,
+    (finishDeps.store ??
+      jest
+        .fn()
+        .mockResolvedValue({ url: "https://cdn.test/finished.jpg" })) as never,
+    null,
+    (finishDeps.finishImage ??
+      jest.fn().mockResolvedValue({
+        bytes: Buffer.from("finished"),
+        width: 10,
+        height: 10,
+        contentType: "image/jpeg",
+      })) as never,
+    (finishDeps.download ??
+      jest.fn().mockResolvedValue(Buffer.from("source"))) as never,
   );
 }
 
@@ -115,6 +138,7 @@ function txMock() {
       create: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
+    media: { create: jest.fn().mockResolvedValue({ id: "finished-media-1" }) },
     post: { create: jest.fn().mockResolvedValue({ id: "post-1" }) },
     characterActionLog: { create: jest.fn().mockResolvedValue({}) },
     characterMemory: { create: jest.fn().mockResolvedValue({}) },
@@ -454,6 +478,134 @@ describe("DraftWorkerService publishing", () => {
         reason: "auto: post published from draft",
       }),
     });
+  });
+
+  it("applies the draft finish preset at publish and attaches finished copies", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findMany
+      .mockResolvedValueOnce([]) // aggregation
+      .mockResolvedValueOnce([
+        {
+          id: "draft-1",
+          characterId: "ai-1",
+          contentType: "feed",
+          caption: "노을 산책",
+          hashtags: [],
+          // 검수에서 고른 게시 마감 프리셋.
+          conceptJson: { finish: "mono-film" },
+        },
+      ]);
+    prisma.generationJob.findMany.mockResolvedValue([
+      { sortOrder: 0, status: "completed", outputMediaId: "media-a" },
+    ]);
+    prisma.media.findUnique.mockResolvedValue({
+      mediaType: "image",
+      url: `data:image/png;base64,${Buffer.from("src").toString("base64")}`,
+      storageKey: null,
+    });
+    const tx = txMock();
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+    const finishImage = jest.fn().mockResolvedValue({
+      bytes: Buffer.from("finished"),
+      width: 1024,
+      height: 1536,
+      contentType: "image/jpeg",
+    });
+    const store = jest
+      .fn()
+      .mockResolvedValue({
+        url: "https://cdn.test/finished.jpg",
+        storageKey: "pod/generated/character/ai-1/f.jpg",
+      });
+    const service = makeService(
+      prisma,
+      plannerMock(),
+      {},
+      () => 0.5,
+      builderMock(),
+      { finishImage, store },
+    );
+
+    await service.tick();
+
+    // 검수에서 고른 프리셋이 그대로 전달된다.
+    expect(finishImage).toHaveBeenCalledWith(expect.any(Buffer), "mono-film");
+    // 마감본이 새 Media로 저장되고(원본 불변), 게시물은 마감본을 참조한다.
+    expect(tx.media.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          mediaType: "image",
+          url: "https://cdn.test/finished.jpg",
+          contentType: "image/jpeg",
+          isAiGenerated: true,
+        }),
+      }),
+    );
+    expect(tx.post.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          postMedia: {
+            create: [
+              {
+                sortOrder: 0,
+                media: { connect: { id: "finished-media-1" } },
+              },
+            ],
+          },
+        }),
+      }),
+    );
+  });
+
+  it("publishes originals untouched when no finish preset is set", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findMany
+      .mockResolvedValueOnce([]) // aggregation
+      .mockResolvedValueOnce([
+        {
+          id: "draft-1",
+          characterId: "ai-1",
+          contentType: "feed",
+          caption: "c",
+          hashtags: [],
+          conceptJson: null,
+        },
+      ]);
+    prisma.generationJob.findMany.mockResolvedValue([
+      { sortOrder: 0, status: "completed", outputMediaId: "media-a" },
+    ]);
+    const tx = txMock();
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+    const finishImage = jest.fn();
+    const service = makeService(
+      prisma,
+      plannerMock(),
+      {},
+      () => 0.5,
+      builderMock(),
+      { finishImage },
+    );
+
+    await service.tick();
+
+    // 프리셋 없음 = 마감 연산 자체를 타지 않고 원본을 그대로 게시한다.
+    expect(finishImage).not.toHaveBeenCalled();
+    expect(tx.media.create).not.toHaveBeenCalled();
+    expect(tx.post.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          postMedia: {
+            create: [
+              { sortOrder: 0, media: { connect: { id: "media-a" } } },
+            ],
+          },
+        }),
+      }),
+    );
   });
 
   it("records an error when a shot has no completed output", async () => {

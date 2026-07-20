@@ -15,4 +15,9 @@ export class UpdateDraftDto {
   @IsOptional()
   @IsString()
   scheduledAt?: string | null;
+
+  // 게시 마감 프리셋 (none/film/mono-film). null/"none"은 해제.
+  @IsOptional()
+  @IsString()
+  finish?: string | null;
 }

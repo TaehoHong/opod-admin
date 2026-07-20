@@ -7,6 +7,7 @@ import {
   pageFromRows,
 } from "../../domain/database/page";
 import { PrismaService } from "../../domain/database/prisma.service";
+import { parseFinishPreset } from "../../worker/film-finish";
 
 type DraftStatus =
   | "planned"
@@ -290,6 +291,7 @@ export class DraftsService {
     caption?: string;
     hashtags?: string[];
     scheduledAt?: string | null;
+    finish?: string | null;
   }): Promise<AdminDraft> {
     const data: Record<string, unknown> = {};
     if (input.caption !== undefined) {
@@ -312,6 +314,34 @@ export class DraftsService {
         input.scheduledAt === null
           ? null
           : this.parseOptionalDate(input.scheduledAt);
+    }
+    if (input.finish !== undefined) {
+      // 게시 마감 프리셋 — conceptJson 메타에 저장한다 (게시글 단위 선택).
+      // null/"none"은 프리셋 해제(원본 게시). 다른 키는 보존한다.
+      const clear = input.finish === null || input.finish === "none";
+      const preset = clear ? null : parseFinishPreset(input.finish);
+      if (!clear && !preset) {
+        throw new BadRequestException("Unknown finish preset");
+      }
+      const existing = await this.prisma.postDraft.findUnique({
+        where: { id: input.draftId },
+        select: { conceptJson: true },
+      });
+      if (!existing) {
+        throw new BadRequestException("Draft not found");
+      }
+      const concept =
+        existing.conceptJson &&
+        typeof existing.conceptJson === "object" &&
+        !Array.isArray(existing.conceptJson)
+          ? { ...(existing.conceptJson as Record<string, unknown>) }
+          : {};
+      if (preset) {
+        concept.finish = preset;
+      } else {
+        delete concept.finish;
+      }
+      data.conceptJson = concept;
     }
     if (Object.keys(data).length === 0) {
       throw new BadRequestException("Nothing to update");

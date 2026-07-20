@@ -2172,3 +2172,76 @@ test("candidate images zoom on click; selection is a separate control", () => {
     /data-act="draft-pick-output"[^>]*data-media="m-sel"/,
   );
 });
+
+test("draft-level finish preset select and preview toggle follow conceptJson.finish", () => {
+  const draftBase = {
+    id: "draft-f",
+    characterId: "ai-1",
+    contentType: "feed",
+    status: "needs_review",
+    attemptCount: 1,
+    caption: "c",
+    hashtags: [],
+    createdAt: "2026-07-12T00:00:00.000Z",
+    conceptJson: { source: "manual", mode: "manual" },
+  };
+  const shot = {
+    sortOrder: 0,
+    jobId: "job-f",
+    status: "completed",
+    prompt: "p",
+    outputs: [
+      {
+        candidateIndex: 0,
+        mediaId: "m-1",
+        url: "https://cdn.test/one.jpg",
+        selected: false,
+      },
+    ],
+  };
+
+  // 프리셋 미설정: 셀렉트는 none 선택 상태, 미리보기 토글은 없다.
+  const unset = draftDetailMarkup({ ...draftBase, shots: [shot] }, "한소이");
+  assert.match(unset, /data-select="draft-finish"[^>]*data-id="draft-f"/);
+  assert.match(unset, /<option value="none" selected>없음<\/option>/);
+  assert.match(unset, /<option value="film">필름<\/option>/);
+  assert.match(unset, /<option value="mono-film">흑백 필름<\/option>/);
+  assert.doesNotMatch(unset, /draft-film-toggle/);
+
+  // 프리셋 설정: 셀렉트 반영 + 토글 노출 + 후보 이미지에 스왑용 속성.
+  const filmDraft = {
+    ...draftBase,
+    conceptJson: { ...draftBase.conceptJson, finish: "film" },
+    shots: [shot],
+  };
+  const off = draftDetailMarkup(filmDraft, "한소이");
+  assert.match(off, /<option value="film" selected>필름<\/option>/);
+  assert.match(off, /data-act="draft-film-toggle"[^>]*aria-pressed="false"/);
+  assert.match(
+    off,
+    /data-film-media="m-1"[^>]*data-orig-url="https:\/\/cdn\.test\/one\.jpg"[^>]*data-finish-preset="film"/,
+  );
+
+  // 미리보기 ON: 눌린 상태 + 게시 시 적용된다는 안내.
+  const on = draftDetailMarkup(filmDraft, "한소이", { filmPreview: true });
+  assert.match(on, /data-act="draft-film-toggle"[^>]*aria-pressed="true"/);
+  assert.match(on, /게시 시 이 마감이 그대로 적용/);
+
+  // 검수 불가 상태(published)에서는 셀렉트가 비활성화된다.
+  const published = draftDetailMarkup(
+    { ...filmDraft, status: "published" },
+    "한소이",
+  );
+  assert.match(published, /data-select="draft-finish"[^>]*disabled/);
+
+  // 완료된 후보가 없으면(생성 전) 셀렉트·토글 모두 없다.
+  const none = draftDetailMarkup(
+    {
+      ...draftBase,
+      shots: [{ ...shot, status: "draft", prompt: "", outputs: [] }],
+    },
+    "한소이",
+  );
+  assert.doesNotMatch(none, /draft-finish/);
+  assert.doesNotMatch(none, /draft-film-toggle/);
+});

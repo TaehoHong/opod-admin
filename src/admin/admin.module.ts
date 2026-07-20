@@ -5,6 +5,7 @@ import { PrismaService } from "../domain/database/prisma.service";
 import { GenerationSettingsService } from "../domain/settings/generation-settings.service";
 import { SettingsModule } from "../domain/settings/settings.module";
 import { createLlmContentPlanner } from "../worker/content-planner";
+import { createReferenceUrlSigner } from "../worker/generated-media-store";
 import { resolveImagePromptBuilder } from "../worker/image-prompt-builder";
 import { WorkerModule } from "../worker/worker.module";
 import { AdminAuthModule } from "./auth/admin-auth.module";
@@ -13,6 +14,8 @@ import { AdminService } from "./admin.service";
 import { DraftsController } from "./drafts/drafts.controller";
 import { DraftsService } from "./drafts/drafts.service";
 import { GenerationService } from "./generation/generation.service";
+import { FilmFinishController } from "./media/film-finish.controller";
+import { FilmFinishService } from "./media/film-finish.service";
 import { MediaService } from "./media/media.service";
 import { AdminSettingsController } from "./settings/admin-settings.controller";
 
@@ -26,7 +29,12 @@ import { AdminSettingsController } from "./settings/admin-settings.controller";
     SettingsModule,
     WorkerModule,
   ],
-  controllers: [AdminController, DraftsController, AdminSettingsController],
+  controllers: [
+    AdminController,
+    DraftsController,
+    AdminSettingsController,
+    FilmFinishController,
+  ],
   providers: [
     AdminService,
     DraftsService,
@@ -66,6 +74,13 @@ import { AdminSettingsController } from "./settings/admin-settings.controller";
       inject: [PrismaService, GenerationSettingsService],
     },
     MediaService,
+    {
+      provide: FilmFinishService,
+      // 비공개 S3 원본은 레퍼런스 전달과 동일하게 presigned URL로 읽는다.
+      useFactory: (prisma: PrismaService) =>
+        new FilmFinishService(prisma, createReferenceUrlSigner()),
+      inject: [PrismaService],
+    },
   ],
 })
 export class AdminModule {}
