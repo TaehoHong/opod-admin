@@ -36,7 +36,7 @@ export const PLANNER_SYSTEM_PROMPT = [
   "- 캐릭터의 확정 세계관(메모리)과 모순되는 장소·시점·사건을 만들지 않는다.",
   "- 최근 게시물과 소재가 겹치지 않게 한다.",
   "- shots의 scene은 장면·상황·분위기가 구체적으로 드러나는 한국어 편집 기획 서술로 쓴다. 이미지 모델 프롬프트 문법이나 인물 외모 묘사는 쓰지 않는다 (별도 단계에서 처리).",
-  "- 레퍼런스 카탈로그가 주어지면, 각 shot에 그 장면(구도·포즈·의상·분위기)과 어울리는 이미지 id를 최대 3개 고른다. 어울리는 것이 없으면 빈 배열.",
+  "- 레퍼런스는 인물 동일성(얼굴·머리) 참고용이다. 인물이 보이는 shot에는 얼굴이 잘 보이는 레퍼런스 id를 1~3개 고른다 — 의상·배경·계절이 장면과 달라도 탈락시키지 않는다 (여럿이면 장면과 덜 충돌하는 것을 우선). 인물이 없는 shot(사물·풍경)은 빈 배열.",
   "- 캡션은 캐릭터의 말투로, 1~3문장.",
   "반드시 아래 JSON만 출력한다 (설명·마크다운 금지):",
   '{"caption": "...", "hashtags": ["태그1", "태그2"], "shots": [{"scene": "...", "referenceIds": ["id1"]}]}',
@@ -74,7 +74,7 @@ export function buildPlannerUserPrompt(input: ContentPlanInput): string {
   }
   if ((input.referenceCatalog ?? []).length > 0) {
     sections.push(
-      `## 레퍼런스 카탈로그 (shot별로 어울리는 id 선택)\n${input
+      `## 레퍼런스 카탈로그 (인물 shot의 동일성 참고용 — 규칙 참조)\n${input
         .referenceCatalog!.map(
           (reference) => `- [${reference.id}] ${reference.description}`,
         )
