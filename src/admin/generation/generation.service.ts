@@ -48,6 +48,8 @@ type GenerationJob = {
   // 위저드 LLM 장면 확장 결과 (paramsJson._wizard). 없으면 원문이 그대로 장면.
   expandedScene?: string;
   plannerName?: string;
+  // paramsJson.aspect_ratio — 잡 단위 종횡비 오버라이드 (없으면 프로필 기본값).
+  aspectRatio?: string;
   candidateCount?: number;
   status: JobStatus;
   outputMediaId?: string;
@@ -151,6 +153,7 @@ export class GenerationService {
     characterId: string;
     inputPrompt: string;
     candidateCount: number;
+    aspectRatio?: string;
   }): Promise<GenerationJob> {
     const candidateCount = this.parseCandidateCount(input.candidateCount);
     const inputPrompt = input.inputPrompt.trim();
@@ -257,6 +260,26 @@ export class GenerationService {
       );
     }
 
+    // 밑줄 접두 키는 파이프라인 메타데이터 — 프로바이더 파라미터로
+    // 전달되지 않는다 (generation-worker가 걸러낸다). aspect_ratio는
+    // 프로바이더 파라미터로 그대로 전달되어 프로필 providerConfig
+    // 기본값을 잡 단위로 덮어쓴다 (게시글 4:3 / 스토리 16:9 프리셋).
+    const paramsJson: Prisma.JsonObject = {
+      ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}),
+      ...(planner
+        ? {
+            _wizard: {
+              plannerName: planner.name,
+              builderName: builder.name,
+              expandedScene: scene,
+            },
+            _shot: {
+              scene,
+              ...(referenceMediaIds.length > 0 ? { referenceMediaIds } : {}),
+            },
+          }
+        : {}),
+    };
     const job = await this.prisma.generationJob.create({
       data: {
         characterId: input.characterId,
@@ -265,25 +288,7 @@ export class GenerationService {
         inputPrompt,
         prompt,
         candidateCount,
-        // 밑줄 접두 키는 파이프라인 메타데이터 — 프로바이더 파라미터로
-        // 전달되지 않는다 (generation-worker가 걸러낸다).
-        ...(planner
-          ? {
-              paramsJson: {
-                _wizard: {
-                  plannerName: planner.name,
-                  builderName: builder.name,
-                  expandedScene: scene,
-                },
-                _shot: {
-                  scene,
-                  ...(referenceMediaIds.length > 0
-                    ? { referenceMediaIds }
-                    : {}),
-                },
-              },
-            }
-          : {}),
+        ...(Object.keys(paramsJson).length > 0 ? { paramsJson } : {}),
       },
       include: this.jobWithOutput,
     });
@@ -765,6 +770,7 @@ export class GenerationService {
         : undefined;
 
     const wizard = wizardMetaFromParams(job.paramsJson);
+    const aspectRatio = aspectRatioFromParams(job.paramsJson);
 
     return {
       id: job.id,
@@ -774,6 +780,7 @@ export class GenerationService {
       ...(job.inputPrompt ? { inputPrompt: job.inputPrompt } : {}),
       ...(wizard?.expandedScene ? { expandedScene: wizard.expandedScene } : {}),
       ...(wizard?.plannerName ? { plannerName: wizard.plannerName } : {}),
+      ...(aspectRatio ? { aspectRatio } : {}),
       ...(job.candidateCount != null
         ? { candidateCount: job.candidateCount }
         : {}),
@@ -807,6 +814,21 @@ export class GenerationService {
       route: referenceImageCount > 0 ? "edit" : "t2i",
     };
   }
+}
+
+// paramsJson.aspect_ratio — 잡 단위 종횡비 오버라이드를 꺼낸다.
+function aspectRatioFromParams(
+  paramsJson: Prisma.JsonValue | null | undefined,
+): string | undefined {
+  if (
+    paramsJson == null ||
+    typeof paramsJson !== "object" ||
+    Array.isArray(paramsJson)
+  ) {
+    return undefined;
+  }
+  const value = (paramsJson as Record<string, unknown>).aspect_ratio;
+  return typeof value === "string" ? value : undefined;
 }
 
 // paramsJson._wizard — 위저드 장면 확장 메타데이터를 꺼낸다.

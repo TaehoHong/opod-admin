@@ -91,6 +91,45 @@ describe("GenerationService", () => {
     });
   });
 
+  it("stores the aspect ratio as a provider param and echoes it on the job", async () => {
+    const findUnique = jest.fn().mockResolvedValue({
+      id: "ai-1",
+      visualProfile: {
+        appearancePrompt: "same face",
+        stylePrompt: "film grain",
+        negativePrompt: "",
+        referenceMedia: [],
+      },
+    });
+    const create = jest.fn().mockResolvedValue(
+      job({
+        status: "draft",
+        inputPrompt: "rooftop at dusk",
+        prompt: "same face, rooftop at dusk, film grain",
+        candidateCount: 2,
+        paramsJson: { aspect_ratio: "16:9" },
+      }),
+    );
+    const service = new (
+      GenerationService as new (prisma: unknown) => GenerationService
+    )({ character: { findUnique }, generationJob: { create } });
+
+    await expect(
+      service.createImageDraft({
+        characterId: "ai-1",
+        inputPrompt: "rooftop at dusk",
+        candidateCount: 2,
+        aspectRatio: "16:9",
+      }),
+    ).resolves.toMatchObject({ status: "draft", aspectRatio: "16:9" });
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        paramsJson: { aspect_ratio: "16:9" },
+      }),
+      include: { outputMedia: true },
+    });
+  });
+
   it("expands the scene with the wizard planner and stores wizard metadata", async () => {
     const findUnique = jest.fn().mockResolvedValue({
       id: "ai-1",

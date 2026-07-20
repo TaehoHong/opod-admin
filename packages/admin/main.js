@@ -311,7 +311,7 @@ export function generationWorkflowPanel(
       }
       <div class="field"><label>최종 프롬프트</label><textarea class="input" name="prompt" rows="6" required>${escapeHtml(job.prompt)}</textarea></div>
       <div class="field"><label>후보 수</label><input class="input" name="candidateCount" type="number" min="1" max="4" step="1" value="${attr(job.candidateCount ?? 1)}" data-generation-candidate-count required></div>
-      <p>장면 확장: ${escapeHtml(job.plannerName || "LLM 미설정 — 원문 사용")} · negative prompt: ${escapeHtml(context.negativePrompt || "없음")} · 레퍼런스 ${escapeHtml(context.referenceImageCount ?? 0)}장 · ${escapeHtml(route)}${provider ? ` · ${escapeHtml(provider)}` : ""}</p>
+      <p>장면 확장: ${escapeHtml(job.plannerName || "LLM 미설정 — 원문 사용")} · negative prompt: ${escapeHtml(context.negativePrompt || "없음")} · 레퍼런스 ${escapeHtml(context.referenceImageCount ?? 0)}장 · 비율 ${escapeHtml(job.aspectRatio || "프로필 기본")} · ${escapeHtml(route)}${provider ? ` · ${escapeHtml(provider)}` : ""}</p>
       <p>확정 전에는 비용이 발생하지 않습니다.</p>
       <div><button class="btn btn-secondary" type="submit">프롬프트 저장</button> <button class="btn btn-primary" type="submit" data-submit-action="image-confirm" data-generation-count-button>이미지 ${escapeHtml(job.candidateCount ?? 1)}장 생성</button></div>
     </form>`;
@@ -744,10 +744,12 @@ export function generationCreatePayload(form) {
 }
 
 export function imageDraftPayload(form) {
+  const aspectRatio = fieldValue(form, "aspectRatio");
   return {
     characterId: fieldValue(form, "characterId"),
     inputPrompt: fieldValue(form, "inputPrompt"),
     candidateCount: imageCandidateCount(form.get("candidateCount")),
+    ...(aspectRatio ? { aspectRatio } : {}),
   };
 }
 
@@ -2304,7 +2306,7 @@ function generationWorkerCard(settings, queuedCount) {
     </div>`;
 }
 
-function generationRequestPanel(characters) {
+export function generationRequestPanel(characters) {
   return `${sectionHead(
     "새 이미지 생성",
     "요청을 입력한 뒤 서버가 구성한 최종 프롬프트를 확인합니다.",
@@ -2326,6 +2328,7 @@ function generationRequestPanel(characters) {
       "",
     )}</select></div>
     <div class="field"><label>이미지 요청</label><textarea class="input" name="inputPrompt" rows="6" required></textarea></div>
+    <div class="field"><label>용도 (비율)</label><select class="input" name="aspectRatio" required><option value="4:3" selected>게시글 (4:3)</option><option value="16:9">스토리 (16:9)</option></select></div>
     <div class="field"><label>후보 수</label><input class="input" name="candidateCount" type="number" min="1" max="4" step="1" value="3" required></div>
     <div><button class="btn btn-primary" type="submit">최종 프롬프트 확인</button></div>
   </form>`;

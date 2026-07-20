@@ -39,6 +39,7 @@ import {
   generationActionRequest,
   generationWorkflowStep,
   generationWorkflowPanel,
+  generationRequestPanel,
   imageDraftPayload,
   imageDraftUpdatePayload,
   imageWorkflowRequest,
@@ -1296,6 +1297,46 @@ test("image draft payloads trim strings and cast candidate count", () => {
     prompt: "edited street portrait",
     candidateCount: 3,
   });
+});
+
+test("generation request form offers post/story aspect ratio presets", () => {
+  const html = generationRequestPanel(generationCharacters);
+
+  assert.match(
+    html,
+    /<select[^>]*name="aspectRatio"[^>]*>[\s\S]*<option value="4:3" selected>게시글 \(4:3\)<\/option>[\s\S]*<option value="16:9">스토리 \(16:9\)<\/option>[\s\S]*<\/select>/,
+  );
+});
+
+test("generation prompt step surfaces the job aspect ratio", () => {
+  const withRatio = generationWorkflowPanel(
+    { ...generationDraftJob, aspectRatio: "16:9" },
+    [],
+    generationCharacters,
+    generationSettings,
+  );
+  assert.match(withRatio, /비율 16:9/);
+
+  const withoutRatio = generationWorkflowPanel(
+    generationDraftJob,
+    [],
+    generationCharacters,
+    generationSettings,
+  );
+  assert.match(withoutRatio, /비율 프로필 기본/);
+});
+
+test("image draft payload carries the aspect ratio preset when selected", () => {
+  const form = new FormData();
+  form.set("characterId", "ai-1");
+  form.set("inputPrompt", "street portrait");
+  form.set("candidateCount", "3");
+  form.set("aspectRatio", "16:9");
+
+  assert.equal(imageDraftPayload(form).aspectRatio, "16:9");
+
+  form.delete("aspectRatio");
+  assert.equal("aspectRatio" in imageDraftPayload(form), false);
 });
 
 test("image draft payloads accept candidate count boundaries", () => {

@@ -78,14 +78,19 @@ Content-Type: application/json
 {
   "characterId": "<uuid>",
   "inputPrompt": "street portrait",
-  "candidateCount": 2
+  "candidateCount": 2,
+  "aspectRatio": "16:9"
 }
 ```
 
 `characterId`, non-empty `inputPrompt`, and integer `candidateCount` from 1 to
-4 are required. The response has `status: "draft"`, preserves `inputPrompt`,
-and returns the compiled `prompt` after applying the character visual profile.
-It also includes `candidateCount`, `mediaType: "image"`, `attemptCount: 0`,
+4 are required. Optional `aspectRatio` (`"<w>:<h>"`, e.g. `"4:3"` for feed
+posts, `"16:9"` for stories) is stored as the provider param
+`paramsJson.aspect_ratio` and overrides the visual profile's `providerConfig`
+default for this job; it is echoed back as `aspectRatio` on the response. The
+response has `status: "draft"`, preserves `inputPrompt`, and returns the
+compiled `prompt` after applying the character visual profile. It also
+includes `candidateCount`, `mediaType: "image"`, `attemptCount: 0`,
 `generationContext`, `createdAt`, and `updatedAt`.
 
 ### 2. Edit the draft
