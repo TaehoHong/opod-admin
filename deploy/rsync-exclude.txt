@@ -1,9 +1,0 @@
-.git/
-.gstack/
-.superpowers/
-node_modules/
-dist/
-.env
-.env.*
-docker-compose.yml
-docker-compose.*.yml

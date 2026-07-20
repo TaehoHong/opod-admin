@@ -29,10 +29,10 @@ The server owns `docker-compose.yml` and `.env`. Do not keep production
 compose files in this repo or overwrite them during deploy.
 
 ```bash
-rsync -a --delete --exclude-from=deploy/rsync-exclude.txt ./ taeho@121.141.156.200:~/opod-admin/
-ssh taeho@121.141.156.200 'cd ~/opod-admin && docker compose build admin && docker compose up -d admin'
+./deploy.sh
 ```
 
-Keep the 7100 listener, TLS certificate paths, database URL, volumes, and
-shared Docker network in the server-local `~/opod-admin/docker-compose.yml`
-and `.env`.
+This builds the Linux image locally, uploads it with the server deploy script,
+and restarts only the `admin` service. Keep the 7100 listener, TLS certificate
+paths, database URL, volumes, and shared Docker network in the server-local
+`~/opod-admin/docker-compose.yml` and `.env`.
