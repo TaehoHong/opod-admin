@@ -37,23 +37,23 @@ export function imageModelFamily(modelId?: string): ImageModelFamily {
 // 계열별 프롬프트 작성 규칙 — 문법·형식이 계열마다 다르다.
 const MODEL_FAMILY_GUIDANCE: Record<ImageModelFamily, string> = {
   flux: [
-    "- 하나로 흐르는 자연스러운 서술형 문장으로 쓴다 (콤마 키워드 나열보다 묘사가 낫다).",
-    "- 가중치 문법 `(term:1.2)`나 품질 토큰(masterpiece, best quality 등)은 쓰지 않는다 — Flux는 무시하거나 역효과다.",
-    "- 카메라 앵글·렌즈·조명·재질을 구체적인 문장으로 녹인다.",
+    "- Write a single, natural descriptive passage; prose works better than a comma-separated keyword list.",
+    "- Do not use weighting syntax such as `(term:1.2)` or quality tokens such as masterpiece or best quality; Flux ignores them or may respond poorly.",
+    "- Describe the camera angle, lens, lighting, and materials in specific language.",
   ].join("\n"),
   "nano-banana": [
-    "- 사람에게 지시하듯 명확한 서술형 문장으로 쓴다 (지시-따르기형 모델).",
-    "- 가중치 문법이나 품질 토큰은 쓰지 않는다.",
-    "- 피사체·구도·조명·분위기를 구체적이고 모호하지 않게 지시한다.",
+    "- Use clear descriptive instructions as if directing a person; this model follows instructions.",
+    "- Do not use weighting syntax or quality tokens.",
+    "- Specify the subject, composition, lighting, and mood concretely and without ambiguity.",
   ].join("\n"),
   "stable-diffusion": [
-    "- 태그·키워드 나열형으로 쓴다 (콤마 구분): 핵심 피사체 → 구도 → 조명 → 스타일 → 품질 순.",
-    "- 핵심 요소에만 가중치 문법 `(term:1.2)`를 절제해서 쓴다.",
-    "- 앞부분에 품질 토큰(best quality, highly detailed, sharp focus 등)을 넣는다.",
+    "- Use a comma-separated tag and keyword list ordered as: primary subject, composition, lighting, style, quality.",
+    "- Use weighting syntax such as `(term:1.2)` sparingly and only for essential elements.",
+    "- Put quality tokens such as best quality, highly detailed, and sharp focus near the beginning.",
   ].join("\n"),
   generic: [
-    "- 구체적이고 명확한 서술형 문장으로 쓴다.",
-    "- 특정 모델 전용 문법(가중치 등)은 피하고 범용적으로 쓴다.",
+    "- Use specific, clear descriptive language.",
+    "- Keep the prompt model-agnostic and avoid model-specific syntax such as weighting.",
   ].join("\n"),
 };
 
@@ -63,18 +63,18 @@ export function modelFamilyGuidance(modelId?: string): string {
 }
 
 export const IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT = [
-  "너는 이미지 생성 모델용 프롬프트 엔지니어다.",
-  "캐릭터 외모·스타일 프롬프트와 컷별 한국어 장면 기획을 받아, 대상 모델에 최적화된 영어 이미지 프롬프트를 컷별로 1개씩 만든다.",
-  "규칙:",
-  "- 프롬프트는 영어로만 쓴다.",
-  "- 외모 프롬프트의 정체성 요소는 모든 컷에서 동일하게 유지한다 (컷 간 인물 일관성).",
-  "- 외모 프롬프트가 [라벨] 섹션으로 나뉘어 있으면, 각 컷에서 실제로 보이는 요소의 섹션만 반영한다 — 예: 뒷모습 컷에 얼굴·손톱 묘사 금지, 손 클로즈업 컷에 전신 체형 묘사 금지. 핵심 정체성 섹션은 인물이 보이면 항상 반영한다.",
-  "- 장면의 장소·구도·포즈·조명·분위기를 이미지 모델이 이해하는 구체적 시각 어휘로 옮긴다. 장면에 없는 사건·인물을 지어내지 않는다.",
-  "- 스타일 프롬프트를 각 컷에 자연스럽게 반영한다.",
-  "- '대상 모델 표현 규칙' 섹션의 문법·형식을 반드시 따른다 — 모델 계열마다 프롬프트 작성법이 다르다.",
-  "- 네거티브 프롬프트는 만들지 않는다 (별도 주입됨).",
-  "- 컷 수는 입력과 정확히 같아야 하고 순서를 유지한다.",
-  "반드시 아래 JSON만 출력한다 (설명·마크다운 금지):",
+  "You are a prompt engineer for image-generation models.",
+  "Given a character appearance prompt, a style prompt, and a Korean scene plan for each shot, create one English image prompt per shot optimized for the target model.",
+  "Rules:",
+  "- Write every prompt in English only.",
+  "- Preserve the appearance prompt's identity-defining details across all shots to maintain character consistency.",
+  "- If the appearance prompt is divided into [labeled] sections, include only sections for features actually visible in each shot. For example, omit face and nail details in a rear-view shot and omit full-body proportions in a hand close-up. Always include core identity sections whenever the character is visible.",
+  "- Translate the scene's location, composition, pose, lighting, and mood into concrete visual language the image model understands. Do not invent events or people absent from the scene.",
+  "- Incorporate the style prompt naturally into every shot.",
+  "- Follow the syntax and format in the 'Target model guidance' section exactly; prompt-writing conventions differ by model family.",
+  "- Do not create a negative prompt; it is injected separately.",
+  "- Return exactly as many shots as the input, in the same order.",
+  "Return only the JSON below, with no explanation or Markdown:",
   '{"shots": [{"prompt": "..."}]}',
 ].join("\n");
 
@@ -82,14 +82,14 @@ export function buildImagePromptBuilderUserPrompt(
   input: ImagePromptBuilderPromptInput,
 ): string {
   const sections = [
-    `## 대상 이미지 모델\n${input.targetModelId?.trim() || "(미지정)"}`,
-    `## 대상 모델 표현 규칙\n${modelFamilyGuidance(input.targetModelId)}`,
-    `## 캐릭터 외모 프롬프트\n${input.appearancePrompt.trim() || "(없음)"}`,
-    `## 스타일 프롬프트 (모든 컷 반영)\n${input.stylePrompt.trim() || "(없음)"}`,
-    `## 컷 장면 (한국어 기획)\n${input.scenes
+    `## Target image model\n${input.targetModelId?.trim() || "(unspecified)"}`,
+    `## Target model guidance\n${modelFamilyGuidance(input.targetModelId)}`,
+    `## Character appearance prompt\n${input.appearancePrompt.trim() || "(none)"}`,
+    `## Style prompt (apply to every shot)\n${input.stylePrompt.trim() || "(none)"}`,
+    `## Shot scenes (Korean plan)\n${input.scenes
       .map((scene, index) => `${index + 1}. ${scene}`)
       .join("\n")}`,
-    `## 요청\n컷 ${input.scenes.length}개 각각의 영어 이미지 생성 프롬프트를 만들어라.`,
+    `## Request\nCreate one English image-generation prompt for each of the ${input.scenes.length} shots.`,
   ];
   return sections.join("\n\n");
 }

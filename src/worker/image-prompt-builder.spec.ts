@@ -26,9 +26,13 @@ describe("imageModelFamily", () => {
   });
 
   it("gives distinct guidance per family", () => {
-    expect(modelFamilyGuidance("fal-ai/flux/dev")).toContain("서술형");
-    expect(modelFamilyGuidance("fal-ai/flux/dev")).toContain("가중치 문법");
-    expect(modelFamilyGuidance("fal-ai/fast-sdxl")).toContain("태그·키워드");
+    expect(modelFamilyGuidance("fal-ai/flux/dev")).toContain("descriptive");
+    expect(modelFamilyGuidance("fal-ai/flux/dev")).toContain(
+      "weighting syntax",
+    );
+    expect(modelFamilyGuidance("fal-ai/fast-sdxl")).toContain(
+      "comma-separated tag and keyword list",
+    );
     expect(modelFamilyGuidance("fal-ai/flux/dev")).not.toEqual(
       modelFamilyGuidance("fal-ai/fast-sdxl"),
     );
@@ -77,15 +81,15 @@ describe("buildImagePromptBuilderUserPrompt", () => {
       stylePrompt: "film photography",
       scenes: ["한강 노을 산책", "골목 카페"],
     });
-    expect(prompt).toContain("## 대상 이미지 모델\nfal-ai/flux/dev");
+    expect(prompt).toContain("## Target image model\nfal-ai/flux/dev");
     // Flux 계열 표현 규칙이 함께 주입된다.
-    expect(prompt).toContain("## 대상 모델 표현 규칙");
-    expect(prompt).toContain("가중치 문법");
+    expect(prompt).toContain("## Target model guidance");
+    expect(prompt).toContain("weighting syntax");
     expect(prompt).toContain("young woman, short black hair");
     expect(prompt).toContain("film photography");
     expect(prompt).toContain("1. 한강 노을 산책");
     expect(prompt).toContain("2. 골목 카페");
-    expect(prompt).toContain("컷 2개");
+    expect(prompt).toContain("the 2 shots");
   });
 
   it("injects the family-specific guidance for the target model", () => {
@@ -95,8 +99,8 @@ describe("buildImagePromptBuilderUserPrompt", () => {
       stylePrompt: "b",
       scenes: ["장면"],
     });
-    expect(sdxl).toContain("태그·키워드 나열형");
-    expect(sdxl).not.toContain("Flux는 무시");
+    expect(sdxl).toContain("comma-separated tag and keyword list");
+    expect(sdxl).not.toContain("Flux ignores");
   });
 
   it("marks missing model and prompts as unspecified", () => {
@@ -105,9 +109,9 @@ describe("buildImagePromptBuilderUserPrompt", () => {
       stylePrompt: " ",
       scenes: ["장면"],
     });
-    expect(prompt).toContain("## 대상 이미지 모델\n(미지정)");
-    expect(prompt).toContain("## 캐릭터 외모 프롬프트\n(없음)");
-    expect(prompt).toContain("## 스타일 프롬프트 (모든 컷 반영)\n(없음)");
+    expect(prompt).toContain("## Target image model\n(unspecified)");
+    expect(prompt).toContain("## Character appearance prompt\n(none)");
+    expect(prompt).toContain("## Style prompt (apply to every shot)\n(none)");
   });
 });
 

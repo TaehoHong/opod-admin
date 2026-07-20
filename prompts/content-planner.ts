@@ -30,32 +30,32 @@ export function clampShots(value: number | undefined): number {
 }
 
 export const PLANNER_SYSTEM_PROMPT = [
-  "너는 AI 버추얼 인플루언서의 SNS 콘텐츠 기획자다.",
-  "캐릭터 정보를 바탕으로 인스타그램 스타일 피드 포스트 1건을 기획한다.",
-  "규칙:",
-  "- 캐릭터의 확정 세계관(메모리)과 모순되는 장소·시점·사건을 만들지 않는다.",
-  "- 최근 게시물과 소재가 겹치지 않게 한다.",
-  "- shots의 scene은 장면·상황·분위기가 구체적으로 드러나는 한국어 편집 기획 서술로 쓴다. 이미지 모델 프롬프트 문법이나 인물 외모 묘사는 쓰지 않는다 (별도 단계에서 처리).",
-  "- 레퍼런스는 인물 동일성(얼굴·머리) 참고용이다. 인물이 보이는 shot에는 얼굴이 잘 보이는 레퍼런스 id를 1~3개 고른다 — 의상·배경·계절이 장면과 달라도 탈락시키지 않는다 (여럿이면 장면과 덜 충돌하는 것을 우선). 인물이 없는 shot(사물·풍경)은 빈 배열.",
-  "- 캡션은 캐릭터의 말투로, 1~3문장.",
-  "반드시 아래 JSON만 출력한다 (설명·마크다운 금지):",
-  '{"caption": "...", "hashtags": ["태그1", "태그2"], "shots": [{"scene": "...", "referenceIds": ["id1"]}]}',
+  "You are a social media content planner for an AI virtual influencer.",
+  "Plan one Instagram-style feed post based on the character information.",
+  "Rules:",
+  "- Do not invent places, times, or events that contradict the character's established world and memories.",
+  "- Avoid topics used in recent posts.",
+  "- Write each shots.scene in Korean as a specific editorial brief describing the setting, situation, and mood. Do not use image-model prompt syntax or describe the character's appearance; those are handled separately.",
+  "- References are for character identity, especially the face and hair. For each shot that shows the character, select 1-3 reference IDs where the face is clearly visible. Do not reject a reference solely because its clothing, background, or season differs from the scene; when several work, prefer those that conflict least with the scene. Use an empty array for shots without the character, such as objects or landscapes.",
+  "- Write the caption in the character's voice in 1-3 sentences.",
+  "Return only the JSON below, with no explanation or Markdown:",
+  '{"caption": "...", "hashtags": ["tag1", "tag2"], "shots": [{"scene": "...", "referenceIds": ["id1"]}]}',
 ].join("\n");
 
 export function buildPlannerUserPrompt(input: ContentPlanInput): string {
   const sections = [
-    `## 캐릭터\n이름: ${input.characterName}\n소개: ${input.bio}\n관심사: ${input.interests.join(", ") || "(없음)"}`,
+    `## Character\nName: ${input.characterName}\nBio: ${input.bio}\nInterests: ${input.interests.join(", ") || "(none)"}`,
   ];
   if (input.personas.length > 0) {
     sections.push(
-      `## 페르소나\n${input.personas
+      `## Personas\n${input.personas
         .map((persona) => `### ${persona.title}\n${persona.content}`)
         .join("\n")}`,
     );
   }
   if (input.memories.length > 0) {
     sections.push(
-      `## 확정 세계관/메모리 (모순 금지)\n${input.memories
+      `## Established world and memories (do not contradict)\n${input.memories
         .slice(0, 20)
         .map((memory) => `- ${memory}`)
         .join("\n")}`,
@@ -63,18 +63,20 @@ export function buildPlannerUserPrompt(input: ContentPlanInput): string {
   }
   if (input.recentCaptions.length > 0) {
     sections.push(
-      `## 최근 게시물 캡션 (소재 중복 금지)\n${input.recentCaptions
+      `## Recent post captions (avoid repeating topics)\n${input.recentCaptions
         .slice(0, 20)
         .map((caption) => `- ${caption}`)
         .join("\n")}`,
     );
   }
   if (input.sceneHint?.trim()) {
-    sections.push(`## 운영자 장면 힌트 (반영 필수)\n${input.sceneHint.trim()}`);
+    sections.push(
+      `## Operator scene hint (required)\n${input.sceneHint.trim()}`,
+    );
   }
   if ((input.referenceCatalog ?? []).length > 0) {
     sections.push(
-      `## 레퍼런스 카탈로그 (인물 shot의 동일성 참고용 — 규칙 참조)\n${input
+      `## Reference catalog (for identity in character shots; follow the rules above)\n${input
         .referenceCatalog!.map(
           (reference) => `- [${reference.id}] ${reference.description}`,
         )
@@ -82,7 +84,7 @@ export function buildPlannerUserPrompt(input: ContentPlanInput): string {
     );
   }
   sections.push(
-    `## 요청\n샷(이미지 컷) ${clampShots(input.maxShots)}개짜리 피드 포스트 1건을 기획하라.`,
+    `## Request\nPlan one feed post with ${clampShots(input.maxShots)} image shots.`,
   );
   return sections.join("\n\n");
 }
