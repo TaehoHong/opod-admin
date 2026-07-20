@@ -1475,6 +1475,20 @@ test("simple click actions map to their request and success message", () => {
         "프롬프트를 빌드했습니다. 각 컷에서 확인·수정 후 실행하세요.",
     },
   );
+  assert.deepEqual(
+    simpleClickAction("draft-aggregate-now", { id: "draft-1" }),
+    {
+      request: {
+        path: "/api/drafts/draft-1/aggregate",
+        options: {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      },
+      successMessage: "생성 결과를 집계했습니다. 검수 단계를 확인하세요.",
+    },
+  );
   assert.deepEqual(simpleClickAction("draft-approve", { id: "draft-1" }), {
     request: {
       path: "/api/drafts/draft-1/approve",
@@ -2212,6 +2226,40 @@ test("candidate images zoom on click; selection is a separate control", () => {
     html,
     /data-act="draft-pick-output"[^>]*data-media="m-sel"/,
   );
+});
+
+test("review stage offers manual aggregation once every shot completed", () => {
+  const draftBase = {
+    id: "draft-agg",
+    characterId: "ai-1",
+    contentType: "feed",
+    status: "generating",
+    attemptCount: 1,
+    caption: "c",
+    hashtags: [],
+    createdAt: "2026-07-12T00:00:00.000Z",
+    conceptJson: { source: "manual", mode: "manual" },
+  };
+  const doneShot = {
+    sortOrder: 0,
+    jobId: "job-a",
+    status: "completed",
+    prompt: "p",
+    outputs: [],
+  };
+
+  const ready = draftDetailMarkup({ ...draftBase, shots: [doneShot] }, "한소이");
+  assert.match(ready, /집계 대기/);
+  assert.match(
+    ready,
+    /data-act="draft-aggregate-now"[^>]*data-id="draft-agg"[^>]*>검수로 보내기</,
+  );
+
+  const generating = draftDetailMarkup(
+    { ...draftBase, shots: [doneShot, { ...doneShot, sortOrder: 1, status: "running" }] },
+    "한소이",
+  );
+  assert.doesNotMatch(generating, /draft-aggregate-now/);
 });
 
 test("draft-level finish preset select and preview toggle follow conceptJson.finish", () => {

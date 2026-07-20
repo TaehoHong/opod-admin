@@ -100,6 +100,7 @@ step with the endpoints below.
 POST /api/drafts/:id/plan
 POST /api/drafts/:id/build-prompts
 POST /api/drafts/:id/jobs/:jobId/generate   { "prompt": "...", "candidateCount": 2 }
+POST /api/drafts/:id/aggregate
 POST /api/drafts/:id/publish
 ```
 
@@ -117,6 +118,10 @@ pipeline) and returns the updated draft; failures are HTTP 400 with a reason
 - `generate` (optionally) overrides the prompt/candidate count, then queues the
   shot and runs it immediately. Queuing a shot whose stored prompt is empty
   without providing one is rejected (400) — build prompts first.
+- `aggregate` runs the shot aggregation now for a `generating`/`regenerating`
+  draft: all latest shot jobs `completed` → `needs_review`; any `failed` →
+  `failed`. Rejected (400) while shots are still generating. Same operation the
+  worker loop runs automatically.
 - `publish` publishes an `approved` draft regardless of `scheduledAt`.
 
 ## Edit a draft

@@ -613,6 +613,10 @@ const simpleClickActions = {
     successMessage:
       "프롬프트를 빌드했습니다. 각 컷에서 확인·수정 후 실행하세요.",
   },
+  "draft-aggregate-now": {
+    path: ({ id }) => `/api/drafts/${id}/aggregate`,
+    successMessage: "생성 결과를 집계했습니다. 검수 단계를 확인하세요.",
+  },
   "draft-publish-now": {
     path: ({ id }) => `/api/drafts/${id}/publish`,
     successMessage: "초안을 게시했습니다.",
@@ -3041,6 +3045,18 @@ export function draftDetailMarkup(d, characterName, opts = {}) {
   } else if (d.status === "rejected") {
     stage4Tone = "failed";
     stage4Status = ["tag-neutral", "반려됨"];
+  } else if (
+    (d.status === "generating" || d.status === "regenerating") &&
+    shots.length > 0 &&
+    shots.every((s) => s.status === "completed")
+  ) {
+    // 컷은 전부 완료됐지만 집계 전 — 워커 폴링을 기다리지 않고 버튼으로
+    // 검수 단계로 넘길 수 있다 (수동 = 자동의 스텝 실행 모드).
+    stage4Tone = "current";
+    stage4Status = ["tag-accent-2", "집계 대기"];
+    stage4Action = `<button class="btn btn-primary" data-act="draft-aggregate-now" data-id="${attr(
+      d.id,
+    )}">검수로 보내기</button>`;
   } else {
     stage4Tone = "future";
     stage4Status = ["tag-neutral", "대기"];

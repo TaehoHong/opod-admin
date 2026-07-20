@@ -103,6 +103,21 @@ export class DraftsController {
     return this.draftsService.getDraft(draftId);
   }
 
+  // 수동 집계 — 컷 생성 결과를 지금 집계해 검수(needs_review)로 전환한다.
+  // 컷별 최신 잡이 전부 completed여야 하며, 실패 컷이 있으면 failed로 전이된다.
+  @Post(":id/aggregate")
+  async aggregateDraftNow(@Param("id") draftId: string) {
+    const result = await this.draftWorker.aggregateDraftNow(draftId);
+    if (!result.aggregated) {
+      await this.draftsService.getDraft(draftId); // 404를 400보다 먼저 구분한다.
+      throw new BadRequestException(
+        result.reason ??
+          "Only generating drafts can be aggregated for review",
+      );
+    }
+    return this.draftsService.getDraft(draftId);
+  }
+
   // 수동 게시 — approved draft를 scheduledAt과 무관하게 즉시 게시한다.
   @Post(":id/publish")
   async publishDraftNow(@Param("id") draftId: string) {

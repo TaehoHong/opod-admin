@@ -913,6 +913,70 @@ describe("DraftWorkerService manual triggers", () => {
     });
   });
 
+  it("aggregateDraftNow moves an all-completed generating draft to needs_review", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue({
+      id: "draft-1",
+      characterId: "ai-1",
+      status: "generating",
+      jobs: [
+        { sortOrder: 0, status: "completed" },
+        { sortOrder: 1, status: "completed" },
+      ],
+    });
+    const service = makeService(prisma);
+
+    const result = await service.aggregateDraftNow("draft-1");
+
+    expect(result).toEqual({ aggregated: true });
+    expect(prisma.postDraft.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "draft-1",
+          status: { in: ["generating", "regenerating"] },
+          leaseExpiresAt: null,
+        },
+      }),
+    );
+    expect(prisma.postDraft.updateMany).toHaveBeenCalledWith({
+      where: { id: "draft-1", status: "generating" },
+      data: { status: "needs_review", errorMessage: null },
+    });
+  });
+
+  it("aggregateDraftNow refuses while shots are still generating", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue({
+      id: "draft-1",
+      characterId: "ai-1",
+      status: "generating",
+      jobs: [
+        { sortOrder: 0, status: "completed" },
+        { sortOrder: 1, status: "running" },
+      ],
+    });
+    const service = makeService(prisma);
+
+    const result = await service.aggregateDraftNow("draft-1");
+
+    expect(result).toEqual({
+      aggregated: false,
+      reason: "Some shots have not completed yet",
+    });
+    expect(prisma.postDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("aggregateDraftNow refuses drafts that are not generating", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue(null);
+    const service = makeService(prisma);
+
+    await expect(service.aggregateDraftNow("draft-1")).resolves.toEqual({
+      aggregated: false,
+    });
+    expect(prisma.postDraft.updateMany).not.toHaveBeenCalled();
+  });
+
   it("publishDraftNow publishes an approved draft regardless of scheduledAt", async () => {
     const prisma = prismaMock();
     prisma.postDraft.findFirst.mockResolvedValue({

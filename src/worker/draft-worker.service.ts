@@ -4,6 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../domain/database/prisma.service";
 import { ContentPlanner } from "./content-planner";
 import {
@@ -51,6 +52,17 @@ export function draftWorkerConfigFromEnv(
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const AGGREGATE_BATCH = 20;
 const PUBLISH_BATCH = 5;
+
+// 집계(자동 루프·수동 트리거 공용)가 읽는 초안 형태.
+const AGGREGATE_DRAFT_SELECT = {
+  id: true,
+  characterId: true,
+  status: true,
+  jobs: {
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { sortOrder: true, status: true },
+  },
+} satisfies Prisma.PostDraftSelect;
 
 type PlannedDraft = {
   id: string;
@@ -224,6 +236,33 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       });
       return { published: false, reason: message };
     }
+  }
+
+  // 수동 집계 — 생성 결과를 지금 집계해 검수(needs_review)로 전환한다.
+  // 자동 루프(aggregateGeneratingDrafts)와 동일한 연산의 스텝 실행 모드라
+  // 워커 루프가 죽어 있어도 검수 단계로 진행할 수 있다.
+  async aggregateDraftNow(
+    draftId: string,
+  ): Promise<{ aggregated: boolean; reason?: string }> {
+    const draft = await this.prisma.postDraft.findFirst({
+      where: {
+        id: draftId,
+        status: { in: ["generating", "regenerating"] },
+        leaseExpiresAt: null,
+      },
+      select: AGGREGATE_DRAFT_SELECT,
+    });
+    if (!draft) {
+      return { aggregated: false };
+    }
+    const outcome = await this.aggregateDraft(draft);
+    if (outcome === "pending") {
+      return {
+        aggregated: false,
+        reason: "Some shots have not completed yet",
+      };
+    }
+    return { aggregated: true };
   }
 
   // 수동 초안의 draft 상태 컷 프롬프트를 빌더로 생성해 채운다.
@@ -594,66 +633,70 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         leaseExpiresAt: null,
       },
       take: AGGREGATE_BATCH,
-      select: {
-        id: true,
-        characterId: true,
-        status: true,
-        jobs: {
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          select: { sortOrder: true, status: true },
-        },
-      },
+      select: AGGREGATE_DRAFT_SELECT,
     });
 
     for (const draft of drafts) {
-      if (draft.jobs.length === 0) {
-        // 기획 트랜잭션이 잡을 못 만든 비정상 상태 — 기획으로 되돌린다.
-        await this.prisma.postDraft.updateMany({
-          where: { id: draft.id, status: draft.status as never },
-          data: { status: "planned" },
-        });
-        continue;
-      }
-      const latestPerShot = new Map<number, string>();
-      for (const job of draft.jobs) {
-        if (!latestPerShot.has(job.sortOrder)) {
-          latestPerShot.set(job.sortOrder, job.status);
-        }
-      }
-      const statuses = [...latestPerShot.values()];
-      if (statuses.some((status) => status === "failed")) {
-        const transitioned = await this.prisma.postDraft.updateMany({
-          where: { id: draft.id, status: draft.status as never },
-          data: {
-            status: "failed",
-            errorMessage: "one or more shots failed to generate",
-          },
-        });
-        if (transitioned.count > 0) {
-          await this.recordActionLog(
-            draft.characterId,
-            draft.id,
-            "DRAFT_FAILED",
-            "one or more shots failed to generate",
-          );
-        }
-        continue;
-      }
-      if (statuses.every((status) => status === "completed")) {
-        const transitioned = await this.prisma.postDraft.updateMany({
-          where: { id: draft.id, status: draft.status as never },
-          data: { status: "needs_review", errorMessage: null },
-        });
-        if (transitioned.count > 0) {
-          await this.recordActionLog(
-            draft.characterId,
-            draft.id,
-            "DRAFT_READY_FOR_REVIEW",
-            "all shots generated; waiting for admin review",
-          );
-        }
+      await this.aggregateDraft(draft);
+    }
+  }
+
+  // 한 초안의 집계 — 자동 루프와 수동 트리거(aggregateDraftNow)가 공유한다.
+  private async aggregateDraft(draft: {
+    id: string;
+    characterId: string;
+    status: string;
+    jobs: { sortOrder: number; status: string }[];
+  }): Promise<"planned" | "failed" | "needs_review" | "pending"> {
+    if (draft.jobs.length === 0) {
+      // 기획 트랜잭션이 잡을 못 만든 비정상 상태 — 기획으로 되돌린다.
+      await this.prisma.postDraft.updateMany({
+        where: { id: draft.id, status: draft.status as never },
+        data: { status: "planned" },
+      });
+      return "planned";
+    }
+    const latestPerShot = new Map<number, string>();
+    for (const job of draft.jobs) {
+      if (!latestPerShot.has(job.sortOrder)) {
+        latestPerShot.set(job.sortOrder, job.status);
       }
     }
+    const statuses = [...latestPerShot.values()];
+    if (statuses.some((status) => status === "failed")) {
+      const transitioned = await this.prisma.postDraft.updateMany({
+        where: { id: draft.id, status: draft.status as never },
+        data: {
+          status: "failed",
+          errorMessage: "one or more shots failed to generate",
+        },
+      });
+      if (transitioned.count > 0) {
+        await this.recordActionLog(
+          draft.characterId,
+          draft.id,
+          "DRAFT_FAILED",
+          "one or more shots failed to generate",
+        );
+      }
+      return "failed";
+    }
+    if (statuses.every((status) => status === "completed")) {
+      const transitioned = await this.prisma.postDraft.updateMany({
+        where: { id: draft.id, status: draft.status as never },
+        data: { status: "needs_review", errorMessage: null },
+      });
+      if (transitioned.count > 0) {
+        await this.recordActionLog(
+          draft.characterId,
+          draft.id,
+          "DRAFT_READY_FOR_REVIEW",
+          "all shots generated; waiting for admin review",
+        );
+      }
+      return "needs_review";
+    }
+    return "pending";
   }
 
   // ── 게시 단계 ────────────────────────────────────────────────────────────
