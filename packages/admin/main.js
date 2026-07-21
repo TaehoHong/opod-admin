@@ -42,6 +42,7 @@ export const navItems = [
   { id: "moderation", label: "신고 처리" },
   { id: "events", label: "이벤트 · 선호" },
   { id: "analytics", label: "분석" },
+  { id: "settings", label: "설정" },
 ];
 
 const DEFAULT_ROUTE = "characters";
@@ -1597,6 +1598,7 @@ async function renderSection(route, renderEpoch) {
   if (route === "events") return renderEvents();
   if (route === "logs") return renderLogs();
   if (route === "analytics") return renderAnalytics();
+  if (route === "settings") return renderSettings();
   return renderCharacters();
 }
 
@@ -2190,6 +2192,42 @@ async function renderPostDetail(id) {
 // ── 생성 작업 ──────────────────────────────────────────────────────────────
 
 // 설정 카드 — fal 키/모델 관리 + 적용 상태. 값 원문은 서버가 마스킹해 준다.
+// 설정 라우트 본문 — 프로바이더 설정 + 워커 카드 (생성 작업에서 이동).
+export function settingsView(settings, queuedCount) {
+  return `${sectionHead(
+    "설정",
+    "프로바이더·워커 전역 설정 — 저장 즉시 다음 잡/기획부터 적용됩니다",
+  )}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
+      ${generationSettingsCard(settings)}
+      ${generationWorkerCard(settings, queuedCount)}
+    </div>`;
+}
+
+// 생성 작업 화면의 읽기 전용 프로바이더 요약 — 상태 가시성은 유지하되
+// 변경은 설정 라우트로 보낸다.
+export function generationProvidersSummary(settings) {
+  const resolved = settings?.resolved;
+  if (!resolved) return "";
+  return `<div class="card" style="margin-bottom:20px;padding:10px 16px;flex-direction:row;flex-wrap:wrap;gap:6px 18px;align-items:center;font-size:13px">
+    <span class="stat-label" style="margin:0">적용 중</span>
+    <span>edit <strong>${escapeHtml(resolved.editProvider ?? "—")}</strong></span>
+    <span>t2i <strong>${escapeHtml(resolved.t2iProvider ?? "—")}</strong></span>
+    <span>기획 <strong>${escapeHtml(resolved.plannerProvider ?? "—")}</strong></span>
+    <a href="#settings" style="margin-left:auto;font-size:12.5px">설정에서 변경 →</a>
+  </div>`;
+}
+
+async function renderSettings() {
+  const [settingsRes, queuedRes] = await Promise.all([
+    request("/api/settings/generation"),
+    request(endpoint("/api/generation/jobs", { status: "queued", limit: 50 })),
+  ]);
+  const settings = settingsRes.ok ? settingsRes.body : null;
+  const queuedCount = itemsFromPage(queuedRes.body).length;
+  return settingsView(settings, queuedCount);
+}
+
 function generationSettingsCard(settings) {
   if (!settings) {
     return `<div class="card">${noticeBlock(
@@ -2212,10 +2250,16 @@ function generationSettingsCard(settings) {
     : sources.apiKey === "env"
       ? '<span class="tag tag-neutral">env 키 사용 중</span>'
       : '<span class="tag tag-accent-2">키 없음 — 로컬 플레이스홀더</span>';
+  // env 폴백 활성 필드는 라벨 옆 상시 태그로 표시 — placeholder는 값을
+  // 입력하면 사라져 "env에 뭐가 적용 중인지"를 잃기 때문.
+  const envTag = (source) =>
+    source === "env"
+      ? ' <span class="tag tag-neutral" style="margin-left:6px">env 값 사용 중</span>'
+      : "";
   return `
     <form class="card" data-action="generation-settings" style="gap:12px">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
-        <h6 style="margin:0;color:var(--color-neutral-600)">프로바이더 설정 — PUT /api/settings/generation</h6>
+        <h6 style="margin:0;color:var(--color-neutral-600)">이미지 생성 (fal.ai)</h6>
       </div>
       <div class="field">
         <label>fal.ai API 키</label>
@@ -2224,20 +2268,16 @@ function generationSettingsCard(settings) {
           placeholder="${key.set ? "변경할 때만 입력 (비워두면 유지)" : "fal.ai 대시보드에서 발급한 키"}">
       </div>
       <div class="field">
-        <label>edit 모델 (레퍼런스 컨디셔닝)</label>
+        <label>edit 모델 (레퍼런스 컨디셔닝)${envTag(sources.editModel)}</label>
         <input class="input" name="falImageModel" value="${attr(
           settings.falImageModel ?? "",
-        )}" placeholder="fal-ai/nano-banana/edit${
-          sources.editModel === "env" ? " (현재 env 값 사용 중)" : ""
-        }">
+        )}" placeholder="fal-ai/nano-banana/edit">
       </div>
       <div class="field">
-        <label>t2i 모델 (콜드스타트)</label>
+        <label>t2i 모델 (콜드스타트)${envTag(sources.t2iModel)}</label>
         <input class="input" name="falImageT2iModel" value="${attr(
           settings.falImageT2iModel ?? "",
-        )}" placeholder="fal-ai/nano-banana${
-          sources.t2iModel === "env" ? " (현재 env 값 사용 중)" : ""
-        }">
+        )}" placeholder="fal-ai/nano-banana">
       </div>
       <div style="border-top:1px solid var(--color-divider);padding-top:12px;margin-top:2px">
         <h6 style="margin:0 0 10px;color:var(--color-neutral-600)">기획 LLM (OpenAI-compatible)</h6>
@@ -2248,20 +2288,16 @@ function generationSettingsCard(settings) {
             placeholder="${llmKey.set ? "변경할 때만 입력 (비워두면 유지)" : "sk-..."}">
         </div>
         <div class="field" style="margin-bottom:10px">
-          <label>API URL</label>
+          <label>API URL${envTag(plannerSources.apiUrl)}</label>
           <input class="input" name="llmApiUrl" value="${attr(
             settings.llmApiUrl ?? "",
-          )}" placeholder="https://api.openai.com/v1/chat/completions${
-            plannerSources.apiUrl === "env" ? " (현재 env 값 사용 중)" : ""
-          }">
+          )}" placeholder="https://api.openai.com/v1/chat/completions">
         </div>
         <div class="field">
-          <label>모델</label>
+          <label>모델${envTag(plannerSources.model)}</label>
           <input class="input" name="llmModel" value="${attr(
             settings.llmModel ?? "",
-          )}" placeholder="gpt-5-mini${
-            plannerSources.model === "env" ? " (현재 env 값 사용 중)" : ""
-          }">
+          )}" placeholder="gpt-5-mini">
         </div>
       </div>
       <p style="margin:0;font-size:12px;color:var(--color-neutral-600)">DB 설정이 env보다 우선하며 다음 잡/기획부터 즉시 적용됩니다. 값을 비우고 저장하면 env 값으로 되돌아갑니다. LLM은 URL·키·모델이 모두 있어야 켜지고, 없으면 로컬 결정적 플래너로 동작합니다.</p>
@@ -2284,7 +2320,7 @@ function generationWorkerCard(settings, queuedCount) {
       : `$${Number(worker.todaySpendUsd ?? 0).toFixed(2)} (예산 미설정)`;
   return `
     <div class="card" style="gap:12px">
-      <h6 style="margin:0;color:var(--color-neutral-600)">워커 — POST /api/generation/worker/run</h6>
+      <h6 style="margin:0;color:var(--color-neutral-600)">생성 워커</h6>
       <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13.5px;align-items:baseline">
         <span class="stat-label" style="margin:0">자동 루프</span>
         <span>${
@@ -2417,7 +2453,6 @@ async function renderGeneration(renderEpoch) {
   ]);
   const jobs = itemsFromPage(res.body);
   const settings = settingsRes.ok ? settingsRes.body : null;
-  const queuedCount = jobs.filter((j) => j.status === "queued").length;
 
   const rows = jobs.length
     ? jobs
@@ -2484,10 +2519,7 @@ async function renderGeneration(renderEpoch) {
       "이미지·영상 생성 job 큐 — 등록 → 실행 → 완료, 실패 시 재시도 복제",
       '<button class="btn btn-primary" data-act="generation-create">새 이미지 생성</button>',
     )}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px;align-items:start">
-      ${generationSettingsCard(settings)}
-      ${generationWorkerCard(settings, queuedCount)}
-    </div>
+    ${generationProvidersSummary(settings)}
     <div class="toolbar">
       ${segControl(
         "jobStatus",

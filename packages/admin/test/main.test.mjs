@@ -34,6 +34,7 @@ import {
   generationReplacePollTimer,
   generationRouteState,
   generationSettingsPayload,
+  generationProvidersSummary,
   generationCreatePayload,
   generationFormActionRequest,
   generationActionRequest,
@@ -45,6 +46,7 @@ import {
   imageWorkflowRequest,
   itemsFromPage,
   memoryBulkPayload,
+  settingsView,
   memoryPayload,
   mediaTypeForFile,
   navItems,
@@ -522,6 +524,7 @@ test("navItems exposes the sidebar tabs in order", () => {
       "moderation",
       "events",
       "analytics",
+      "settings",
     ],
   );
 });
@@ -935,6 +938,49 @@ const generationSettings = {
     editProvider: "fal-ai/nano-banana/edit",
   },
 };
+test("settings route hosts the provider/worker cards; generation shows a read-only summary", () => {
+  const settings = {
+    falApiKey: { set: true, last4: "cd12" },
+    falImageModel: "fal-ai/nano-banana-pro/edit",
+    falImageT2iModel: null,
+    llmApiKey: { set: false },
+    llmApiUrl: null,
+    llmModel: null,
+    resolved: {
+      t2iProvider: "fal:fal-ai/nano-banana-pro",
+      editProvider: "fal:fal-ai/nano-banana-pro/edit",
+      plannerProvider: "llm:gpt-5.6-terra",
+      sources: { apiKey: "db", editModel: "db", t2iModel: "env" },
+      plannerSources: { apiUrl: "env", apiKey: "none", model: "env" },
+    },
+    worker: { enabled: true, dailyBudgetUsd: 2, jobCostEstimateUsd: 0.08, todaySpendUsd: 0 },
+  };
+
+  const view = settingsView(settings, 3);
+  assert.match(view, /data-action="generation-settings"/);
+  assert.match(view, /생성 워커/);
+  // 개발자 흔적(HTTP 메서드·경로)은 카드 제목에서 사라졌다.
+  assert.doesNotMatch(view, /PUT \/api\/settings/);
+  assert.doesNotMatch(view, /POST \/api\/generation\/worker/);
+  // env 폴백 필드는 값 유무와 무관하게 상시 태그로 표시된다.
+  assert.match(view, /t2i 모델 \(콜드스타트\) <span class="tag tag-neutral"[^>]*>env 값 사용 중<\/span>/);
+  assert.match(view, /API URL <span class="tag tag-neutral"[^>]*>env 값 사용 중<\/span>/);
+
+  const summary = generationProvidersSummary(settings);
+  assert.match(summary, /적용 중/);
+  assert.match(summary, /fal:fal-ai\/nano-banana-pro\/edit/);
+  assert.match(summary, /llm:gpt-5\.6-terra/);
+  assert.match(summary, /href="#settings"/);
+  // 요약은 읽기 전용 — 폼/저장 요소가 없어야 한다.
+  assert.doesNotMatch(summary, /<form|<input/);
+
+  assert.equal(generationProvidersSummary(null), "");
+});
+
+test("settings appears in the navigation contract", () => {
+  assert.ok(navItems.some((item) => item.id === "settings" && item.label === "설정"));
+});
+
 const generationDraftJob = {
   id: "job-draft",
   characterId: "ai-1",
