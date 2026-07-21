@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Put, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Post, Put, UseGuards } from "@nestjs/common";
 import { PrismaService } from "../../domain/database/prisma.service";
 import {
   GenerationSettings,
@@ -9,6 +9,7 @@ import {
   workerConfigFromEnv,
 } from "../../worker/generation-worker.service";
 import { AdminJwtGuard } from "../auth/admin-jwt.guard";
+import { TestGenerationSettingsDto } from "./dto/test-generation-settings.dto";
 import { UpdateGenerationSettingsDto } from "./dto/update-generation-settings.dto";
 
 // 생성 프로바이더 설정 조회/저장. API 키 원문은 절대 응답에 싣지 않는다 —
@@ -24,6 +25,12 @@ export class AdminSettingsController {
   @Get("generation")
   async getGenerationSettings() {
     return this.buildView(await this.settings.getSettings());
+  }
+
+  // 저장 전 연결 검증 — 폼 입력을 실효 설정 위에 덮어 실제 호출. 읽기 전용.
+  @Post("generation/test")
+  testGenerationSettings(@Body() body: TestGenerationSettingsDto) {
+    return this.settings.testConnection(body);
   }
 
   @Put("generation")

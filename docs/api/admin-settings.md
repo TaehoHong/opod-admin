@@ -50,6 +50,21 @@ The same document also carries the **content-planner LLM** settings
 `resolved.plannerSources`. The LLM planner activates only when URL, key, and
 model all resolve; otherwise the deterministic local planner runs.
 
+## Test a provider connection (read-only)
+
+```http
+POST /api/settings/generation/test
+Content-Type: application/json
+
+{ "target": "image" | "planner", "falApiKey"?, "llmApiUrl"?, "llmApiKey"?, "llmModel"? }
+```
+
+Validates the combination that WOULD apply after saving: supplied fields
+override the currently effective settings (DB > env), omitted fields fall
+through. Returns `{ ok, message }`. The image check authenticates against fal
+without submitting a job (no cost); the planner check makes a minimal
+1-token completion call. Nothing is persisted.
+
 ## Update generation provider settings
 
 ```http

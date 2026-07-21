@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength } from "class-validator";
+import { IsOptional, IsString, Matches, MaxLength } from "class-validator";
 
 // 각 필드: 누락 = 유지, null·빈 문자열 = 삭제(env 폴백 복귀), 값 = 저장.
 // @IsOptional은 null도 검증에서 제외하므로 null 삭제 시맨틱과 호환된다.
@@ -19,8 +19,12 @@ export class UpdateGenerationSettingsDto {
   falImageT2iModel?: string | null;
 
   // 기획 LLM (OpenAI-compatible chat completions)
+  // 빈 문자열은 삭제 의미라 통과시키고, 값이 있으면 http(s) URL이어야 한다.
   @IsOptional()
   @IsString()
+  @Matches(/^$|^https?:\/\//, {
+    message: "llmApiUrl must start with http:// or https://",
+  })
   @MaxLength(500)
   llmApiUrl?: string | null;
 

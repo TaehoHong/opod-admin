@@ -133,4 +133,39 @@ describe("GenerationSettingsService", () => {
       { t2i: "local", edit: "local", planner: "local" },
     );
   });
+
+  it("testConnection distinguishes auth failure from success and merges form input over effective settings", async () => {
+    const prisma = prismaMock([{ key: "planner.llmApiKey", value: "db-key" }]);
+    const service = makeService(prisma);
+    const fetchMock = jest.fn();
+
+    // fal: 401 = 키 무효, 404(존재하지 않는 요청) = 키 유효.
+    fetchMock.mockResolvedValueOnce({ status: 401 });
+    await expect(
+      service.testConnection({ target: "image", falApiKey: "bad" }, {}, fetchMock as never),
+    ).resolves.toMatchObject({ ok: false });
+    fetchMock.mockResolvedValueOnce({ status: 404 });
+    await expect(
+      service.testConnection({ target: "image", falApiKey: "good" }, {}, fetchMock as never),
+    ).resolves.toMatchObject({ ok: true });
+
+    // planner: 실효 설정(DB 키) 위에 폼 입력(URL·모델)을 덮어 호출한다.
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200 });
+    await expect(
+      service.testConnection(
+        { target: "planner", llmApiUrl: "https://llm.test/v1/chat", llmModel: "m1" },
+        {},
+        fetchMock as never,
+      ),
+    ).resolves.toMatchObject({ ok: true });
+    const call = fetchMock.mock.calls[2];
+    expect(call[0]).toBe("https://llm.test/v1/chat");
+    expect(call[1].headers.authorization).toBe("Bearer db-key");
+
+    // 셋 중 하나라도 해석 불가면 호출 없이 실패를 돌려준다.
+    await expect(
+      service.testConnection({ target: "planner" }, {}, fetchMock as never),
+    ).resolves.toMatchObject({ ok: false });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });

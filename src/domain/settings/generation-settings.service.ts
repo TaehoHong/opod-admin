@@ -52,6 +52,19 @@ export type ResolvedPlannerSettings = PlannerProviderSettings & {
 
 type SettingsEnv = Record<string, string | undefined>;
 
+// 연결 테스트 — 폼의 미저장 입력을 실효 설정 위에 덮어 검증한다.
+export type ConnectionTestInput = {
+  target: "image" | "planner";
+  falApiKey?: string;
+  llmApiUrl?: string;
+  llmApiKey?: string;
+  llmModel?: string;
+};
+
+export type ConnectionTestResult = { ok: boolean; message: string };
+
+const CONNECTION_TEST_TIMEOUT_MS = 10_000;
+
 const ENV_KEYS: Record<GenerationSettingField, string> = {
   falApiKey: "FAL_API_KEY",
   falImageModel: "FAL_IMAGE_MODEL",
@@ -146,6 +159,75 @@ export class GenerationSettingsService {
         model: model.source,
       },
     };
+  }
+
+  // 저장 전 연결 검증 — 폼 입력값을 현재 실효 설정(DB > env) 위에 덮어
+  // "저장하면 적용될 조합"으로 프로바이더를 실제 호출해본다. 읽기 전용.
+  async testConnection(
+    input: ConnectionTestInput,
+    env: SettingsEnv = process.env,
+    fetchFn: typeof fetch = fetch,
+  ): Promise<ConnectionTestResult> {
+    try {
+      if (input.target === "image") {
+        const resolved = await this.resolveProviderSettings(env);
+        const apiKey = input.falApiKey?.trim() || resolved.apiKey;
+        if (!apiKey) {
+          return { ok: false, message: "적용될 fal API 키가 없습니다" };
+        }
+        // 잡 제출은 과금되므로, 존재하지 않는 요청의 상태 조회로 인증만
+        // 판별한다: 401/403 = 키 무효, 404 등 = 키 유효.
+        const response = await fetchFn(
+          "https://queue.fal.run/fal-ai/nano-banana/requests/00000000-0000-0000-0000-000000000000/status",
+          {
+            headers: { authorization: `Key ${apiKey}` },
+            signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
+          },
+        );
+        if (response.status === 401 || response.status === 403) {
+          return { ok: false, message: `fal 키 인증 실패 (${response.status})` };
+        }
+        return { ok: true, message: "fal 키 인증 확인" };
+      }
+
+      const resolved = await this.resolvePlannerSettings(env);
+      const apiUrl = input.llmApiUrl?.trim() || resolved.apiUrl;
+      const apiKey = input.llmApiKey?.trim() || resolved.apiKey;
+      const model = input.llmModel?.trim() || resolved.model;
+      if (!apiUrl || !apiKey || !model) {
+        return {
+          ok: false,
+          message: "URL·키·모델이 모두 있어야 테스트할 수 있습니다",
+        };
+      }
+      // 최소 완성 호출 한 번으로 URL·키·모델을 함께 검증한다.
+      const response = await fetchFn(apiUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+        }),
+        signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        const detail = (await response.text().catch(() => "")).slice(0, 200);
+        return {
+          ok: false,
+          message: `LLM 응답 ${response.status}${detail ? `: ${detail}` : ""}`,
+        };
+      }
+      return { ok: true, message: `LLM 연결 확인 (${model})` };
+    } catch (error) {
+      return {
+        ok: false,
+        message: `연결 실패: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
   }
 
   // 현재 설정으로 실제 라우팅될 프로바이더/플래너 이름 (UI 상태 표시용).

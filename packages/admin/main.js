@@ -572,6 +572,21 @@ export function generationSettingsPayload(form) {
   return payload;
 }
 
+// 연결 테스트 페이로드 — 채워진 입력만 담는다. 생략 필드는 서버가 현재
+// 실효 설정(DB > env)으로 채워 검증한다.
+export function settingsTestPayload(act, form) {
+  if (act === "settings-test-image") {
+    const falApiKey = String(form.get("falApiKey") ?? "").trim();
+    return { target: "image", ...(falApiKey ? { falApiKey } : {}) };
+  }
+  const payload = { target: "planner" };
+  for (const field of ["llmApiKey", "llmApiUrl", "llmModel"]) {
+    const value = String(form.get(field) ?? "").trim();
+    if (value) payload[field] = value;
+  }
+  return payload;
+}
+
 export function generationClickRequest(clickAction, jobId) {
   if (clickAction === "job-run") {
     // 수동 실행은 워커 경로를 쓴다 — 레거시 /run은 프로바이더 호출 없이
@@ -2260,6 +2275,7 @@ function generationSettingsCard(settings) {
     <form class="card" data-action="generation-settings" style="gap:12px">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
         <h6 style="margin:0;color:var(--color-neutral-600)">이미지 생성 (fal.ai)</h6>
+        <button class="btn btn-ghost" type="button" data-act="settings-test-image">연결 테스트</button>
       </div>
       <div class="field">
         <label>fal.ai API 키</label>
@@ -2280,7 +2296,10 @@ function generationSettingsCard(settings) {
         )}" placeholder="fal-ai/nano-banana">
       </div>
       <div style="border-top:1px solid var(--color-divider);padding-top:12px;margin-top:2px">
-        <h6 style="margin:0 0 10px;color:var(--color-neutral-600)">기획 LLM (OpenAI-compatible)</h6>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px">
+          <h6 style="margin:0;color:var(--color-neutral-600)">기획 LLM (OpenAI-compatible)</h6>
+          <button class="btn btn-ghost" type="button" data-act="settings-test-llm">연결 테스트</button>
+        </div>
         <div class="field" style="margin-bottom:10px">
           <label>LLM API 키</label>
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">${llmKeyStatus}</div>
@@ -2300,7 +2319,7 @@ function generationSettingsCard(settings) {
           )}" placeholder="gpt-5-mini">
         </div>
       </div>
-      <p style="margin:0;font-size:12px;color:var(--color-neutral-600)">DB 설정이 env보다 우선하며 다음 잡/기획부터 즉시 적용됩니다. 값을 비우고 저장하면 env 값으로 되돌아갑니다. LLM은 URL·키·모델이 모두 있어야 켜지고, 없으면 로컬 결정적 플래너로 동작합니다.</p>
+      <p style="margin:0;font-size:12px;color:var(--color-neutral-600)">DB 설정이 env보다 우선하며 다음 잡/기획부터 즉시 적용됩니다. <strong>모델·URL은 비우고 저장하면 env 값으로 복귀</strong>하지만, <strong>API 키는 비워도 유지</strong>되고 삭제는 "키 삭제" 버튼으로만 합니다. LLM은 URL·키·모델이 모두 있어야 켜지고, 없으면 로컬 결정적 플래너로 동작합니다.</p>
       <div><button class="btn btn-primary" type="submit">저장</button></div>
     </form>`;
 }
@@ -4729,6 +4748,36 @@ async function handleClick(event) {
       `POST ${spec.path}`,
     );
     renderApp();
+    return;
+  }
+  // 연결 테스트 — 폼의 미저장 입력값으로 "저장하면 적용될 조합"을 검증.
+  // 저장과 무관한 읽기 전용 호출이라 재렌더하지 않는다.
+  if (act === "settings-test-image" || act === "settings-test-llm") {
+    const payload = settingsTestPayload(
+      act,
+      new FormData(el.closest("form") ?? undefined),
+    );
+    const spec = jsonRequest("/api/settings/generation/test", "POST", payload);
+    el.disabled = true;
+    try {
+      const result = await request(spec.path, spec.options);
+      const ok = result.ok && result.body?.ok === true;
+      showToast(
+        result.body?.message ??
+          errorMessage(result.body, "연결 테스트가 실패했습니다."),
+        "",
+        !ok,
+      );
+    } finally {
+      el.disabled = false;
+    }
+    return;
+  }
+  // 키 삭제는 원클릭 파괴 액션이라 확인을 거친다.
+  if (
+    (act === "settings-clear-key" || act === "settings-clear-llm-key") &&
+    !window.confirm("저장된 키를 삭제하고 env 값으로 되돌립니다. 계속할까요?")
+  ) {
     return;
   }
   const simpleAction = simpleClickAction(act, el.dataset);
