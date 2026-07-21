@@ -247,6 +247,44 @@ export class GenerationSettingsService {
   }
 }
 
+// 감사 로그용 diff — 실제로 달라진 필드만 { key, changeType, summary }로.
+// 키 필드는 last4 요약만 남긴다 (원문 금지).
+export function settingsChangeEntries(
+  before: GenerationSettings,
+  after: GenerationSettings,
+  update: GenerationSettingsUpdate,
+): { target: string; actionType: "SETTINGS_SET" | "SETTINGS_CLEAR"; summary: string }[] {
+  const SECRET_FIELDS: GenerationSettingField[] = ["falApiKey", "llmApiKey"];
+  const entries: {
+    target: string;
+    actionType: "SETTINGS_SET" | "SETTINGS_CLEAR";
+    summary: string;
+  }[] = [];
+  for (const field of Object.keys(
+    GENERATION_SETTING_KEYS,
+  ) as GenerationSettingField[]) {
+    if (!(field in update)) continue;
+    const prev = before[field];
+    const next = after[field];
+    if (prev === next) continue;
+    const target = GENERATION_SETTING_KEYS[field];
+    if (next === undefined) {
+      entries.push({
+        target,
+        actionType: "SETTINGS_CLEAR",
+        summary: "삭제 (env 폴백 복귀)",
+      });
+      continue;
+    }
+    entries.push({
+      target,
+      actionType: "SETTINGS_SET",
+      summary: SECRET_FIELDS.includes(field) ? `····${next.slice(-4)}` : next,
+    });
+  }
+  return entries;
+}
+
 function pick(
   db: GenerationSettings,
   env: SettingsEnv,

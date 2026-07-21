@@ -1,14 +1,15 @@
-import { Body, Controller, Get, Post, Put, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Post, Put, Req, UseGuards } from "@nestjs/common";
 import { PrismaService } from "../../domain/database/prisma.service";
 import {
   GenerationSettings,
   GenerationSettingsService,
+  settingsChangeEntries,
 } from "../../domain/settings/generation-settings.service";
 import {
   startOfKstDay,
   workerConfigFromEnv,
 } from "../../worker/generation-worker.service";
-import { AdminJwtGuard } from "../auth/admin-jwt.guard";
+import { AdminJwtGuard, AdminRequest } from "../auth/admin-jwt.guard";
 import { TestGenerationSettingsDto } from "./dto/test-generation-settings.dto";
 import { UpdateGenerationSettingsDto } from "./dto/update-generation-settings.dto";
 
@@ -33,8 +34,32 @@ export class AdminSettingsController {
     return this.settings.testConnection(body);
   }
 
+  // 설정 변경 감사 이력 (console_logs) — 최근 것부터.
+  @Get("generation/changes")
+  async listGenerationSettingChanges() {
+    const rows = await this.prisma.consoleLog.findMany({
+      where: { actionType: { in: ["SETTINGS_SET", "SETTINGS_CLEAR"] } },
+      orderBy: { id: "desc" },
+      take: 20,
+    });
+    return {
+      items: rows.map((row) => ({
+        id: String(row.id),
+        adminEmail: row.adminEmail,
+        actionType: row.actionType,
+        target: row.target,
+        summary: row.summary,
+        createdAt: row.createdAt.toISOString(),
+      })),
+    };
+  }
+
   @Put("generation")
-  async updateGenerationSettings(@Body() body: UpdateGenerationSettingsDto) {
+  async updateGenerationSettings(
+    @Body() body: UpdateGenerationSettingsDto,
+    @Req() request: AdminRequest,
+  ) {
+    const before = await this.settings.getSettings();
     const saved = await this.settings.updateSettings({
       ...("falApiKey" in body ? { falApiKey: body.falApiKey ?? null } : {}),
       ...("falImageModel" in body
@@ -47,6 +72,20 @@ export class AdminSettingsController {
       ...("llmApiKey" in body ? { llmApiKey: body.llmApiKey ?? null } : {}),
       ...("llmModel" in body ? { llmModel: body.llmModel ?? null } : {}),
     });
+
+    // 감사 로그 — 실제 달라진 필드만, 키는 last4 요약만 (console_logs).
+    const changes = settingsChangeEntries(before, saved, body);
+    if (changes.length > 0) {
+      await this.prisma.consoleLog.createMany({
+        data: changes.map((change) => ({
+          adminId: request.admin?.id ?? null,
+          adminEmail: request.admin?.email ?? null,
+          actionType: change.actionType,
+          target: change.target,
+          summary: change.summary,
+        })),
+      });
+    }
     return this.buildView(saved);
   }
 

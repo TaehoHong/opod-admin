@@ -50,6 +50,20 @@ The same document also carries the **content-planner LLM** settings
 `resolved.plannerSources`. The LLM planner activates only when URL, key, and
 model all resolve; otherwise the deterministic local planner runs.
 
+## Setting change history (audit)
+
+```http
+GET /api/settings/generation/changes
+```
+
+Returns `{ items: [{ id, adminEmail, actionType, target, summary, createdAt }] }`
+— the latest 20 rows from `console_logs` (actions `SETTINGS_SET` /
+`SETTINGS_CLEAR`). Every PUT records only fields whose value actually
+changed; key values are summarized as `····last4`, never raw. System-side
+events live in the separate `service_logs` table (first writers:
+`DRAFT_PUBLISH_FAILED` from the admin worker, `MESSAGE_REPLY_FAILED` from
+service-backend).
+
 ## Test a provider connection (read-only)
 
 ```http

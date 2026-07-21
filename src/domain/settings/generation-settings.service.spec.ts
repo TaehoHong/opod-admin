@@ -1,4 +1,7 @@
-import { GenerationSettingsService } from "./generation-settings.service";
+import {
+  GenerationSettingsService,
+  settingsChangeEntries,
+} from "./generation-settings.service";
 
 type PrismaMock = {
   adminSetting: {
@@ -167,5 +170,36 @@ describe("GenerationSettingsService", () => {
       service.testConnection({ target: "planner" }, {}, fetchMock as never),
     ).resolves.toMatchObject({ ok: false });
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("settingsChangeEntries logs only real diffs and masks secrets to last4", () => {
+    const entries = settingsChangeEntries(
+      { falApiKey: "old-key-abcd", falImageModel: "fal-ai/nano-banana/edit" },
+      { falApiKey: "new-key-wxyz", llmModel: "gpt-5-mini" },
+      {
+        falApiKey: "new-key-wxyz", // 변경 → last4만
+        falImageModel: null, // 삭제
+        falImageT2iModel: null, // 원래 없던 값 삭제 → diff 없음
+        llmModel: "gpt-5-mini", // 신규 → 원문
+      },
+    );
+
+    expect(entries).toEqual([
+      {
+        target: "generation.falApiKey",
+        actionType: "SETTINGS_SET",
+        summary: "····wxyz",
+      },
+      {
+        target: "generation.falImageModel",
+        actionType: "SETTINGS_CLEAR",
+        summary: "삭제 (env 폴백 복귀)",
+      },
+      {
+        target: "planner.llmModel",
+        actionType: "SETTINGS_SET",
+        summary: "gpt-5-mini",
+      },
+    ]);
   });
 });

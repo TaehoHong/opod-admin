@@ -44,6 +44,7 @@ function prismaMock() {
       create: jest.fn().mockResolvedValue({ id: "post-1" }),
     },
     characterActionLog: { create: jest.fn().mockResolvedValue({}) },
+    serviceLog: { create: jest.fn().mockResolvedValue({}) },
     characterMemory: { create: jest.fn().mockResolvedValue({}) },
     $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn(),
@@ -141,6 +142,7 @@ function txMock() {
     media: { create: jest.fn().mockResolvedValue({ id: "finished-media-1" }) },
     post: { create: jest.fn().mockResolvedValue({ id: "post-1" }) },
     characterActionLog: { create: jest.fn().mockResolvedValue({}) },
+    serviceLog: { create: jest.fn().mockResolvedValue({}) },
     characterMemory: { create: jest.fn().mockResolvedValue({}) },
   };
 }

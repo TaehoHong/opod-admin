@@ -2208,7 +2208,7 @@ async function renderPostDetail(id) {
 
 // 설정 카드 — fal 키/모델 관리 + 적용 상태. 값 원문은 서버가 마스킹해 준다.
 // 설정 라우트 본문 — 프로바이더 설정 + 워커 카드 (생성 작업에서 이동).
-export function settingsView(settings, queuedCount) {
+export function settingsView(settings, queuedCount, changes = []) {
   return `${sectionHead(
     "설정",
     "프로바이더·워커 전역 설정 — 저장 즉시 다음 잡/기획부터 적용됩니다",
@@ -2216,7 +2216,30 @@ export function settingsView(settings, queuedCount) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
       ${generationSettingsCard(settings)}
       ${generationWorkerCard(settings, queuedCount)}
-    </div>`;
+    </div>
+    ${settingsChangesCard(changes)}`;
+}
+
+// 설정 변경 이력 (console_logs) — 읽기 전용.
+function settingsChangesCard(changes) {
+  const rows = changes.length
+    ? changes
+        .map(
+          (change) => `<tr>
+            <td style="color:var(--color-neutral-600);font-size:12.5px;white-space:nowrap">${fmtDateTime(change.createdAt)}</td>
+            <td>${escapeHtml(change.adminEmail ?? "—")}</td>
+            <td style="font-size:12.5px">${escapeHtml(change.target ?? "—")}</td>
+            <td><span class="tag ${change.actionType === "SETTINGS_CLEAR" ? "tag-neutral" : "tag-accent"}">${change.actionType === "SETTINGS_CLEAR" ? "삭제" : "저장"}</span></td>
+            <td style="font-size:12.5px">${escapeHtml(change.summary ?? "")}</td>
+          </tr>`,
+        )
+        .join("")
+    : `<tr class="empty-row"><td colspan="5">변경 이력이 없습니다.</td></tr>`;
+  return `<div class="card" style="margin-top:20px">
+    <h6 style="margin:0 0 10px;color:var(--color-neutral-600)">최근 설정 변경</h6>
+    <table class="table"><thead><tr><th>시각</th><th>관리자</th><th>항목</th><th>유형</th><th>값</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+  </div>`;
 }
 
 // 생성 작업 화면의 읽기 전용 프로바이더 요약 — 상태 가시성은 유지하되
@@ -2234,13 +2257,15 @@ export function generationProvidersSummary(settings) {
 }
 
 async function renderSettings() {
-  const [settingsRes, queuedRes] = await Promise.all([
+  const [settingsRes, queuedRes, changesRes] = await Promise.all([
     request("/api/settings/generation"),
     request(endpoint("/api/generation/jobs", { status: "queued", limit: 50 })),
+    request("/api/settings/generation/changes"),
   ]);
   const settings = settingsRes.ok ? settingsRes.body : null;
   const queuedCount = itemsFromPage(queuedRes.body).length;
-  return settingsView(settings, queuedCount);
+  const changes = changesRes.ok ? (changesRes.body?.items ?? []) : [];
+  return settingsView(settings, queuedCount, changes);
 }
 
 function generationSettingsCard(settings) {

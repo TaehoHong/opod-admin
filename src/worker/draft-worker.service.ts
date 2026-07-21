@@ -741,6 +741,21 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           where: { id: draft.id, status: "approved" },
           data: { errorMessage: errorMessage(error).slice(0, 500) },
         });
+        // 무인 실행 중의 실패라 durable 로그를 남긴다 (service_logs).
+        // 로그 실패(동기 포함)가 게시 루프를 죽여선 안 된다.
+        try {
+          await this.prisma.serviceLog.create({
+            data: {
+              source: "admin-worker",
+              level: "error",
+              eventType: "DRAFT_PUBLISH_FAILED",
+              message: errorMessage(error).slice(0, 500),
+              contextJson: { draftId: draft.id, characterId: draft.characterId },
+            },
+          });
+        } catch {
+          // durable 로그는 베스트에포트.
+        }
       }
     }
   }

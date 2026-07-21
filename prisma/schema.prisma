@@ -771,3 +771,38 @@ model CharacterPersona {
   @@map("character_personas")
   @@schema("opod")
 }
+
+// 콘솔(관리자)에서 수행된 행위의 감사 로그 — 설정 변경 등. 캐릭터 스코프
+// 액션은 CharacterActionLog가 담당하고, 여기는 캐릭터와 무관한 콘솔 행위.
+model ConsoleLog {
+  id         BigInt   @id @default(autoincrement())
+  // 관리자 식별 — 계정 삭제 후에도 이력이 읽히도록 FK 없이 스냅샷.
+  adminId    String?  @map("admin_id") @db.Uuid
+  adminEmail String?  @map("admin_email")
+  actionType String   @map("action_type")
+  target     String?
+  // 민감 값은 요약만 — API 키는 last4, 원문 금지.
+  summary    String
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([createdAt])
+  @@index([actionType, createdAt])
+  @@map("console_logs")
+  @@schema("opod")
+}
+
+// 서비스/워커(시스템)에서 발생한 이벤트 로그 — 사람 행위는 console_logs.
+model ServiceLog {
+  id          BigInt   @id @default(autoincrement())
+  source      String
+  level       String   @default("info")
+  eventType   String   @map("event_type")
+  message     String
+  contextJson Json?    @map("context_json")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([createdAt])
+  @@index([eventType, createdAt])
+  @@map("service_logs")
+  @@schema("opod")
+}

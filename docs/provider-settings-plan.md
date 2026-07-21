@@ -27,7 +27,15 @@
   두 가지 빈값 의미론의 혼란 완화).
 - DTO에 URL 형식 검증 추가.
 
-## Phase 3 — 설정 변경 감사 로그
+## Phase 3 — 설정 변경 감사 로그: **구현 완료 (2026-07-21)**
+
+구현 결정(사용자 지시로 원안에서 조정): 테이블 명은
+**`console_logs`**(콘솔/관리자 행위)이며, 시스템 발생 이벤트용
+**`service_logs`**(source/level/event_type/message/context_json)를 함께
+신설했다. service_logs 최초 기록 지점은 durable 기록이 없던 두 곳 —
+admin 워커의 게시 실패(DRAFT_PUBLISH_FAILED), service-backend의 DM 응답
+실패(MESSAGE_REPLY_FAILED). 이미 CharacterActionLog가 커버하는 생성 잡
+실패는 중복 기록하지 않는다.
 
 - `CharacterActionLog`는 characterId FK 필수라 재사용 불가(확인됨) →
   **`admin_setting_changes` 테이블 신설** (스키마 오너 opod-service-backend):
