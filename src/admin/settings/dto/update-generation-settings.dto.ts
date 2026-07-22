@@ -37,4 +37,29 @@ export class UpdateGenerationSettingsDto {
   @IsString()
   @MaxLength(200)
   llmModel?: string | null;
+
+  // 캐릭터 채팅 LLM (opod-agent) — 미설정 필드는 planner.*를 상속하므로
+  // 값이 있을 때만 오버라이드로 저장된다. 삭제(null/빈값) = 재상속.
+  @IsOptional()
+  @IsString()
+  @Matches(/^$|^https?:\/\//, {
+    message: "agentLlmApiUrl must start with http:// or https://",
+  })
+  @MaxLength(500)
+  agentLlmApiUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  agentLlmApiKey?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  agentLlmModel?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  agentEmbeddingModel?: string | null;
 }

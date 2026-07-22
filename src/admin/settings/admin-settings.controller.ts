@@ -71,6 +71,18 @@ export class AdminSettingsController {
       ...("llmApiUrl" in body ? { llmApiUrl: body.llmApiUrl ?? null } : {}),
       ...("llmApiKey" in body ? { llmApiKey: body.llmApiKey ?? null } : {}),
       ...("llmModel" in body ? { llmModel: body.llmModel ?? null } : {}),
+      ...("agentLlmApiUrl" in body
+        ? { agentLlmApiUrl: body.agentLlmApiUrl ?? null }
+        : {}),
+      ...("agentLlmApiKey" in body
+        ? { agentLlmApiKey: body.agentLlmApiKey ?? null }
+        : {}),
+      ...("agentLlmModel" in body
+        ? { agentLlmModel: body.agentLlmModel ?? null }
+        : {}),
+      ...("agentEmbeddingModel" in body
+        ? { agentEmbeddingModel: body.agentEmbeddingModel ?? null }
+        : {}),
     });
 
     // 감사 로그 — 실제 달라진 필드만, 키는 last4 요약만 (console_logs).
@@ -90,9 +102,10 @@ export class AdminSettingsController {
   }
 
   private async buildView(saved: GenerationSettings) {
-    const [resolved, plannerResolved, names, todaySpend] = await Promise.all([
+    const [resolved, plannerResolved, chat, names, todaySpend] = await Promise.all([
       this.settings.resolveProviderSettings(),
       this.settings.resolvePlannerSettings(),
+      this.settings.resolveChatSettings(),
       this.settings.resolveProviderNames(),
       this.prisma.generationJob.aggregate({
         _sum: { costUsd: true },
@@ -111,6 +124,25 @@ export class AdminSettingsController {
         ? { set: true, last4: saved.llmApiKey.slice(-4) }
         : { set: false },
       llmModel: saved.llmModel ?? null,
+      // 채팅 LLM — 오버라이드 원본값 + 실효값(상속 반영, 키는 last4만).
+      // UI는 실효값을 그대로 보여주고, 채워진 필드만 오버라이드로 저장한다.
+      chat: {
+        overrides: {
+          apiUrl: saved.agentLlmApiUrl ?? null,
+          apiKey: saved.agentLlmApiKey
+            ? { set: true, last4: saved.agentLlmApiKey.slice(-4) }
+            : { set: false },
+          model: saved.agentLlmModel ?? null,
+          embeddingModel: saved.agentEmbeddingModel ?? null,
+        },
+        effective: {
+          apiUrl: chat.apiUrl ?? null,
+          apiKeyLast4: chat.apiKey ? chat.apiKey.slice(-4) : null,
+          model: chat.model ?? null,
+          embeddingModel: chat.embeddingModel,
+          overridden: chat.overridden,
+        },
+      },
       resolved: {
         t2iProvider: names.t2i,
         editProvider: names.edit,

@@ -569,6 +569,23 @@ export function generationSettingsPayload(form) {
   payload.llmApiUrl = llmApiUrl || null;
   const llmModel = String(form.get("llmModel") ?? "").trim();
   payload.llmModel = llmModel || null;
+  // 채팅 LLM 오버라이드 — 키는 채웠을 때만, 나머지는 빈값=재상속(null).
+  const agentLlmApiKey = String(form.get("agentLlmApiKey") ?? "").trim();
+  if (agentLlmApiKey) {
+    payload.agentLlmApiKey = agentLlmApiKey;
+  }
+  if (form.has("agentLlmApiUrl")) {
+    const value = String(form.get("agentLlmApiUrl") ?? "").trim();
+    payload.agentLlmApiUrl = value || null;
+  }
+  if (form.has("agentLlmModel")) {
+    const value = String(form.get("agentLlmModel") ?? "").trim();
+    payload.agentLlmModel = value || null;
+  }
+  if (form.has("agentEmbeddingModel")) {
+    const value = String(form.get("agentEmbeddingModel") ?? "").trim();
+    payload.agentEmbeddingModel = value || null;
+  }
   return payload;
 }
 
@@ -579,10 +596,16 @@ export function settingsTestPayload(act, form) {
     const falApiKey = String(form.get("falApiKey") ?? "").trim();
     return { target: "image", ...(falApiKey ? { falApiKey } : {}) };
   }
-  const payload = { target: "planner" };
-  for (const field of ["llmApiKey", "llmApiUrl", "llmModel"]) {
-    const value = String(form.get(field) ?? "").trim();
-    if (value) payload[field] = value;
+  // 채팅 테스트는 채팅 섹션의 입력을 공통 llm* 테스트 필드로 매핑한다 —
+  // 서버가 chat 실효 설정(오버라이드+상속) 위에 덮어 검증한다.
+  const chat = act === "settings-test-chat";
+  const payload = { target: chat ? "chat" : "planner" };
+  const fields = chat
+    ? { llmApiKey: "agentLlmApiKey", llmApiUrl: "agentLlmApiUrl", llmModel: "agentLlmModel" }
+    : { llmApiKey: "llmApiKey", llmApiUrl: "llmApiUrl", llmModel: "llmModel" };
+  for (const [testField, formField] of Object.entries(fields)) {
+    const value = String(form.get(formField) ?? "").trim();
+    if (value) payload[testField] = value;
   }
   return payload;
 }
@@ -611,6 +634,12 @@ const simpleClickActions = {
     method: "PUT",
     body: { llmApiKey: null },
     successMessage: "LLM API 키를 삭제했습니다.",
+  },
+  "settings-clear-agent-key": {
+    path: "/api/settings/generation",
+    method: "PUT",
+    body: { agentLlmApiKey: null },
+    successMessage: "채팅 LLM 키를 삭제했습니다. 기획 LLM 키를 다시 사용합니다.",
   },
   "draft-approve": {
     path: ({ id }) => `/api/drafts/${id}/approve`,
@@ -2278,6 +2307,10 @@ function generationSettingsCard(settings) {
   const sources = settings.resolved?.sources ?? {};
   const llmKey = settings.llmApiKey ?? { set: false };
   const plannerSources = settings.resolved?.plannerSources ?? {};
+  const chat = settings.chat ?? {
+    overrides: { apiKey: { set: false }, apiUrl: null, model: null, embeddingModel: null },
+    effective: { apiKeyLast4: null, apiUrl: null, model: null, embeddingModel: "", overridden: {} },
+  };
   const llmKeyStatus = llmKey.set
     ? `<span class="tag tag-accent">저장됨 ····${escapeHtml(llmKey.last4 ?? "")}</span>
        <button class="btn btn-ghost" type="button" style="color:var(--color-accent-2-700)" data-act="settings-clear-llm-key">키 삭제</button>`
@@ -2290,61 +2323,54 @@ function generationSettingsCard(settings) {
     : sources.apiKey === "env"
       ? '<span class="tag tag-neutral">env 키 사용 중</span>'
       : '<span class="tag tag-accent-2">키 없음 — 로컬 플레이스홀더</span>';
+  // 채팅 키: 오버라이드가 있으면 그 값(삭제 버튼 포함), 없으면 상속된
+  // 기획 키의 실효값을 그대로 보여준다 (별도 "상속" 문구 없이 값이 보이게).
+  const chatKeyStatus = chat.overrides.apiKey.set
+    ? `<span class="tag tag-accent">저장됨 ····${escapeHtml(chat.overrides.apiKey.last4 ?? "")}</span>
+       <button class="btn btn-ghost" type="button" style="color:var(--color-accent-2-700)" data-act="settings-clear-agent-key">키 삭제</button>`
+    : chat.effective.apiKeyLast4
+      ? `<span class="tag tag-neutral">····${escapeHtml(chat.effective.apiKeyLast4)}</span>`
+      : '<span class="tag tag-accent-2">키 없음</span>';
   // env 폴백 활성 필드는 라벨 옆 상시 태그로 표시 — placeholder는 값을
   // 입력하면 사라져 "env에 뭐가 적용 중인지"를 잃기 때문.
   const envTag = (source) =>
     source === "env"
       ? ' <span class="tag tag-neutral" style="margin-left:6px">env 값 사용 중</span>'
       : "";
+  // 컴팩트 행: 라벨 | 컨트롤. 필드마다 큰 블록을 쌓지 않는다.
+  const row = (label, controlHtml) =>
+    `<div style="display:grid;grid-template-columns:150px 1fr;gap:4px 10px;align-items:center">
+      <label style="margin:0;font-size:12.5px;color:var(--color-neutral-600)">${label}</label>
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">${controlHtml}</div>
+    </div>`;
+  const textInput = (name, value, placeholder) =>
+    `<input class="input" style="padding:6px 10px;font-size:13px" name="${name}" value="${attr(value ?? "")}" placeholder="${attr(placeholder ?? "")}">`;
+  const secretInput = (name, placeholder) =>
+    `<input class="input" style="padding:6px 10px;font-size:13px" name="${name}" type="password" autocomplete="off" placeholder="${attr(placeholder)}">`;
+  const sectionHeadRow = (title, testAct) =>
+    `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+      <h6 style="margin:0;color:var(--color-neutral-600)">${title}</h6>
+      <button class="btn btn-ghost" type="button" data-act="${testAct}">연결 테스트</button>
+    </div>`;
+  const divider = '<div style="border-top:1px solid var(--color-divider)"></div>';
   return `
-    <form class="card" data-action="generation-settings" style="gap:12px">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
-        <h6 style="margin:0;color:var(--color-neutral-600)">이미지 생성 (fal.ai)</h6>
-        <button class="btn btn-ghost" type="button" data-act="settings-test-image">연결 테스트</button>
-      </div>
-      <div class="field">
-        <label>fal.ai API 키</label>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">${keyStatus}</div>
-        <input class="input" name="falApiKey" type="password" autocomplete="off"
-          placeholder="${key.set ? "변경할 때만 입력 (비워두면 유지)" : "fal.ai 대시보드에서 발급한 키"}">
-      </div>
-      <div class="field">
-        <label>edit 모델 (레퍼런스 컨디셔닝)${envTag(sources.editModel)}</label>
-        <input class="input" name="falImageModel" value="${attr(
-          settings.falImageModel ?? "",
-        )}" placeholder="fal-ai/nano-banana/edit">
-      </div>
-      <div class="field">
-        <label>t2i 모델 (콜드스타트)${envTag(sources.t2iModel)}</label>
-        <input class="input" name="falImageT2iModel" value="${attr(
-          settings.falImageT2iModel ?? "",
-        )}" placeholder="fal-ai/nano-banana">
-      </div>
-      <div style="border-top:1px solid var(--color-divider);padding-top:12px;margin-top:2px">
-        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px">
-          <h6 style="margin:0;color:var(--color-neutral-600)">기획 LLM (OpenAI-compatible)</h6>
-          <button class="btn btn-ghost" type="button" data-act="settings-test-llm">연결 테스트</button>
-        </div>
-        <div class="field" style="margin-bottom:10px">
-          <label>LLM API 키</label>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">${llmKeyStatus}</div>
-          <input class="input" name="llmApiKey" type="password" autocomplete="off"
-            placeholder="${llmKey.set ? "변경할 때만 입력 (비워두면 유지)" : "sk-..."}">
-        </div>
-        <div class="field" style="margin-bottom:10px">
-          <label>API URL${envTag(plannerSources.apiUrl)}</label>
-          <input class="input" name="llmApiUrl" value="${attr(
-            settings.llmApiUrl ?? "",
-          )}" placeholder="https://api.openai.com/v1/chat/completions">
-        </div>
-        <div class="field">
-          <label>모델${envTag(plannerSources.model)}</label>
-          <input class="input" name="llmModel" value="${attr(
-            settings.llmModel ?? "",
-          )}" placeholder="gpt-5-mini">
-        </div>
-      </div>
-      <p style="margin:0;font-size:12px;color:var(--color-neutral-600)">DB 설정이 env보다 우선하며 다음 잡/기획부터 즉시 적용됩니다. <strong>모델·URL은 비우고 저장하면 env 값으로 복귀</strong>하지만, <strong>API 키는 비워도 유지</strong>되고 삭제는 "키 삭제" 버튼으로만 합니다. LLM은 URL·키·모델이 모두 있어야 켜지고, 없으면 로컬 결정적 플래너로 동작합니다.</p>
+    <form class="card" data-action="generation-settings" style="gap:10px">
+      ${sectionHeadRow("이미지 생성 (fal.ai)", "settings-test-image")}
+      ${row("fal.ai API 키", `${keyStatus} ${secretInput("falApiKey", key.set ? "변경할 때만 입력" : "fal.ai 대시보드에서 발급한 키")}`)}
+      ${row(`edit 모델 (레퍼런스 컨디셔닝)${envTag(sources.editModel)}`, textInput("falImageModel", settings.falImageModel, "fal-ai/nano-banana/edit"))}
+      ${row(`t2i 모델 (콜드스타트)${envTag(sources.t2iModel)}`, textInput("falImageT2iModel", settings.falImageT2iModel, "fal-ai/nano-banana"))}
+      ${divider}
+      ${sectionHeadRow("기획 LLM (OpenAI-compatible)", "settings-test-llm")}
+      ${row("LLM API 키", `${llmKeyStatus} ${secretInput("llmApiKey", llmKey.set ? "변경할 때만 입력" : "sk-...")}`)}
+      ${row(`API URL${envTag(plannerSources.apiUrl)}`, textInput("llmApiUrl", settings.llmApiUrl, "https://api.openai.com/v1/chat/completions"))}
+      ${row(`모델${envTag(plannerSources.model)}`, textInput("llmModel", settings.llmModel, "gpt-5-mini"))}
+      ${divider}
+      ${sectionHeadRow("캐릭터 채팅 LLM (opod-agent)", "settings-test-chat")}
+      ${row("API 키", `${chatKeyStatus} ${secretInput("agentLlmApiKey", "채팅 전용 키로 바꿀 때만 입력")}`)}
+      ${row("API URL", textInput("agentLlmApiUrl", chat.overrides.apiUrl, chat.effective.apiUrl ?? "https://api.openai.com/v1/chat/completions"))}
+      ${row("모델", textInput("agentLlmModel", chat.overrides.model, chat.effective.model ?? "모델명"))}
+      ${row("임베딩 모델", textInput("agentEmbeddingModel", chat.overrides.embeddingModel, chat.effective.embeddingModel))}
+      <p style="margin:0;font-size:12px;color:var(--color-neutral-600)">DB 설정이 env보다 우선하며 다음 잡/기획/대화부터 즉시 적용됩니다. <strong>모델·URL은 비우고 저장하면 상위 값(상속/env)으로 복귀</strong>하지만, <strong>API 키는 비워도 유지</strong>되고 삭제는 "키 삭제" 버튼으로만 합니다. 채팅 LLM은 비워둔 필드가 기획 LLM 값을 그대로 쓰며(입력칸의 회색 값), 바꾸고 싶은 필드만 채우면 됩니다.</p>
       <div><button class="btn btn-primary" type="submit">저장</button></div>
     </form>`;
 }
@@ -4777,7 +4803,11 @@ async function handleClick(event) {
   }
   // 연결 테스트 — 폼의 미저장 입력값으로 "저장하면 적용될 조합"을 검증.
   // 저장과 무관한 읽기 전용 호출이라 재렌더하지 않는다.
-  if (act === "settings-test-image" || act === "settings-test-llm") {
+  if (
+    act === "settings-test-image" ||
+    act === "settings-test-llm" ||
+    act === "settings-test-chat"
+  ) {
     const payload = settingsTestPayload(
       act,
       new FormData(el.closest("form") ?? undefined),
@@ -4800,8 +4830,8 @@ async function handleClick(event) {
   }
   // 키 삭제는 원클릭 파괴 액션이라 확인을 거친다.
   if (
-    (act === "settings-clear-key" || act === "settings-clear-llm-key") &&
-    !window.confirm("저장된 키를 삭제하고 env 값으로 되돌립니다. 계속할까요?")
+    act.startsWith("settings-clear-") &&
+    !window.confirm("저장된 키를 삭제하고 상위 값(상속/env)으로 되돌립니다. 계속할까요?")
   ) {
     return;
   }

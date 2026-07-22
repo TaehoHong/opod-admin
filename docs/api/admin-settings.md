@@ -50,6 +50,18 @@ The same document also carries the **content-planner LLM** settings
 `resolved.plannerSources`. The LLM planner activates only when URL, key, and
 model all resolve; otherwise the deterministic local planner runs.
 
+## Character-chat LLM (opod-agent)
+
+The same document carries the chat LLM under `chat`: `overrides` (the raw
+`agent.*` values; key masked) and `effective` (what the agent will actually
+use — unset fields inherit the planner's effective values per field, plus
+`embeddingModel` defaulting to `text-embedding-3-small`, and an `overridden`
+map). PUT accepts `agentLlmApiUrl` / `agentLlmApiKey` / `agentLlmModel` /
+`agentEmbeddingModel` with the usual omit/blank semantics — clearing a field
+re-inherits. The connection test accepts `target: "chat"`. opod-agent
+re-reads these settings on a ~60s TTL, so console changes reach live chat
+without a restart.
+
 ## Setting change history (audit)
 
 ```http

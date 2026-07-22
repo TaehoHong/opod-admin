@@ -18,6 +18,11 @@ export const GENERATION_SETTING_KEYS = {
   llmApiUrl: "planner.llmApiUrl",
   llmApiKey: "planner.llmApiKey",
   llmModel: "planner.llmModel",
+  // 캐릭터 채팅 LLM (opod-agent가 읽음) — 미설정 필드는 planner.*를 상속.
+  agentLlmApiUrl: "agent.llmApiUrl",
+  agentLlmApiKey: "agent.llmApiKey",
+  agentLlmModel: "agent.llmModel",
+  agentEmbeddingModel: "agent.embeddingModel",
 } as const;
 
 type GenerationSettingField = keyof typeof GENERATION_SETTING_KEYS;
@@ -54,7 +59,7 @@ type SettingsEnv = Record<string, string | undefined>;
 
 // 연결 테스트 — 폼의 미저장 입력을 실효 설정 위에 덮어 검증한다.
 export type ConnectionTestInput = {
-  target: "image" | "planner";
+  target: "image" | "planner" | "chat";
   falApiKey?: string;
   llmApiUrl?: string;
   llmApiKey?: string;
@@ -72,6 +77,27 @@ const ENV_KEYS: Record<GenerationSettingField, string> = {
   llmApiUrl: "LLM_API_URL",
   llmApiKey: "LLM_API_KEY",
   llmModel: "LLM_MODEL",
+  // agent.*는 admin 프로세스 env에 대응물이 없다 — DB 아니면 상속.
+  agentLlmApiUrl: "AGENT_LLM_API_URL",
+  agentLlmApiKey: "AGENT_LLM_API_KEY",
+  agentLlmModel: "AGENT_LLM_MODEL",
+  agentEmbeddingModel: "AGENT_EMBEDDING_MODEL",
+};
+
+const CHAT_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
+
+// 채팅 LLM 실효 설정 — agent.* 오버라이드(DB) 우선, 없으면 planner 상속.
+export type ResolvedChatSettings = {
+  apiUrl?: string;
+  apiKey?: string;
+  model?: string;
+  embeddingModel: string;
+  overridden: {
+    apiUrl: boolean;
+    apiKey: boolean;
+    model: boolean;
+    embeddingModel: boolean;
+  };
 };
 
 @Injectable()
@@ -161,6 +187,27 @@ export class GenerationSettingsService {
     };
   }
 
+  // 채팅 LLM 실효 설정 — 필드 단위로 agent.* 오버라이드, 미설정은 planner
+  // 실효값(DB > env) 상속. opod-agent도 같은 규칙으로 읽는다.
+  async resolveChatSettings(
+    env: SettingsEnv = process.env,
+  ): Promise<ResolvedChatSettings> {
+    const db = await this.getSettings();
+    const planner = await this.resolvePlannerSettings(env);
+    return {
+      apiUrl: db.agentLlmApiUrl ?? planner.apiUrl,
+      apiKey: db.agentLlmApiKey ?? planner.apiKey,
+      model: db.agentLlmModel ?? planner.model,
+      embeddingModel: db.agentEmbeddingModel ?? CHAT_DEFAULT_EMBEDDING_MODEL,
+      overridden: {
+        apiUrl: db.agentLlmApiUrl !== undefined,
+        apiKey: db.agentLlmApiKey !== undefined,
+        model: db.agentLlmModel !== undefined,
+        embeddingModel: db.agentEmbeddingModel !== undefined,
+      },
+    };
+  }
+
   // 저장 전 연결 검증 — 폼 입력값을 현재 실효 설정(DB > env) 위에 덮어
   // "저장하면 적용될 조합"으로 프로바이더를 실제 호출해본다. 읽기 전용.
   async testConnection(
@@ -190,7 +237,10 @@ export class GenerationSettingsService {
         return { ok: true, message: "fal 키 인증 확인" };
       }
 
-      const resolved = await this.resolvePlannerSettings(env);
+      const resolved =
+        input.target === "chat"
+          ? await this.resolveChatSettings(env)
+          : await this.resolvePlannerSettings(env);
       const apiUrl = input.llmApiUrl?.trim() || resolved.apiUrl;
       const apiKey = input.llmApiKey?.trim() || resolved.apiKey;
       const model = input.llmModel?.trim() || resolved.model;
@@ -254,7 +304,11 @@ export function settingsChangeEntries(
   after: GenerationSettings,
   update: GenerationSettingsUpdate,
 ): { target: string; actionType: "SETTINGS_SET" | "SETTINGS_CLEAR"; summary: string }[] {
-  const SECRET_FIELDS: GenerationSettingField[] = ["falApiKey", "llmApiKey"];
+  const SECRET_FIELDS: GenerationSettingField[] = [
+    "falApiKey",
+    "llmApiKey",
+    "agentLlmApiKey",
+  ];
   const entries: {
     target: string;
     actionType: "SETTINGS_SET" | "SETTINGS_CLEAR";
