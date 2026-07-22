@@ -513,8 +513,10 @@ test("navItems exposes the sidebar tabs in order", () => {
   assert.deepEqual(
     navItems.map((item) => item.id),
     [
+      "home",
       "characters",
       "posts",
+      "media",
       "drafts",
       "generation",
       "logs",
@@ -539,6 +541,7 @@ test("endpoint appends defined query params only", () => {
 test("navBadgeRequests covers every badge shown in the design", () => {
   assert.deepEqual(navBadgeRequests(), [
     { key: "drafts", path: "/api/drafts?status=needs_review&limit=50" },
+    { key: "media", path: "/api/media?uploaded=false&limit=50" },
     { key: "generation", path: "/api/generation/jobs?status=failed&limit=50" },
     {
       key: "moderation",
@@ -584,9 +587,9 @@ test("currentRouteFromHash sends anonymous admins to login", () => {
   assert.equal(currentRouteFromHash("#characters", ""), "login");
   assert.equal(currentRouteFromHash("#media", ""), "login");
   assert.equal(currentRouteFromHash("#login", ""), "login");
-  assert.equal(currentRouteFromHash("#login", "token-1"), "characters");
-  assert.equal(currentRouteFromHash("#media", "token-1"), "characters");
-  assert.equal(currentRouteFromHash("#unknown", "token-1"), "characters");
+  assert.equal(currentRouteFromHash("#login", "token-1"), "home");
+  assert.equal(currentRouteFromHash("#media", "token-1"), "media");
+  assert.equal(currentRouteFromHash("#unknown", "token-1"), "home");
   assert.equal(
     currentRouteFromHash("#characters?mode=create", "token-1"),
     "characters",
@@ -953,7 +956,12 @@ test("settings route hosts the provider/worker cards; generation shows a read-on
       sources: { apiKey: "db", editModel: "db", t2iModel: "env" },
       plannerSources: { apiUrl: "env", apiKey: "none", model: "env" },
     },
-    worker: { enabled: true, dailyBudgetUsd: 2, jobCostEstimateUsd: 0.08, todaySpendUsd: 0 },
+    worker: {
+      enabled: true,
+      dailyBudgetUsd: 2,
+      jobCostEstimateUsd: 0.08,
+      todaySpendUsd: 0,
+    },
   };
 
   const view = settingsView(settings, 3);
@@ -963,8 +971,14 @@ test("settings route hosts the provider/worker cards; generation shows a read-on
   assert.doesNotMatch(view, /PUT \/api\/settings/);
   assert.doesNotMatch(view, /POST \/api\/generation\/worker/);
   // env 폴백 필드는 값 유무와 무관하게 상시 태그로 표시된다.
-  assert.match(view, /t2i 모델 \(콜드스타트\) <span class="tag tag-neutral"[^>]*>env 값 사용 중<\/span>/);
-  assert.match(view, /API URL <span class="tag tag-neutral"[^>]*>env 값 사용 중<\/span>/);
+  assert.match(
+    view,
+    /t2i 모델 \(콜드스타트\) <span class="tag tag-neutral"[^>]*>env 값 사용 중<\/span>/,
+  );
+  assert.match(
+    view,
+    /API URL <span class="tag tag-neutral"[^>]*>env 값 사용 중<\/span>/,
+  );
 
   const summary = generationProvidersSummary(settings);
   assert.match(summary, /적용 중/);
@@ -978,7 +992,9 @@ test("settings route hosts the provider/worker cards; generation shows a read-on
 });
 
 test("settings appears in the navigation contract", () => {
-  assert.ok(navItems.some((item) => item.id === "settings" && item.label === "설정"));
+  assert.ok(
+    navItems.some((item) => item.id === "settings" && item.label === "설정"),
+  );
 });
 
 const generationDraftJob = {
@@ -2294,7 +2310,10 @@ test("review stage offers manual aggregation once every shot completed", () => {
     outputs: [],
   };
 
-  const ready = draftDetailMarkup({ ...draftBase, shots: [doneShot] }, "한소이");
+  const ready = draftDetailMarkup(
+    { ...draftBase, shots: [doneShot] },
+    "한소이",
+  );
   assert.match(ready, /집계 대기/);
   assert.match(
     ready,
@@ -2302,7 +2321,10 @@ test("review stage offers manual aggregation once every shot completed", () => {
   );
 
   const generating = draftDetailMarkup(
-    { ...draftBase, shots: [doneShot, { ...doneShot, sortOrder: 1, status: "running" }] },
+    {
+      ...draftBase,
+      shots: [doneShot, { ...doneShot, sortOrder: 1, status: "running" }],
+    },
     "한소이",
   );
   assert.doesNotMatch(generating, /draft-aggregate-now/);

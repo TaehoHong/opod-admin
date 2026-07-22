@@ -13,7 +13,7 @@ test("ships the admin UI shell", async () => {
   assert.match(html, /id="sidebarNav"/);
   assert.match(html, /id="mainPanel"/);
   assert.match(html, /data-route="characters"/);
-  assert.doesNotMatch(html, /data-route="media"/);
+  assert.match(html, /data-route="media"/);
   assert.deepEqual(
     [...html.matchAll(/data-route="([^"]+)"/g)].map((match) => match[1]),
     navItems.map((item) => item.id),

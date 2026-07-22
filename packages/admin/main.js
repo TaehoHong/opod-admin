@@ -31,8 +31,10 @@ const pendingForms = new WeakSet();
 // ─────────────────────────────────────────────────────────────────────────
 
 export const navItems = [
+  { id: "home", label: "대시보드" },
   { id: "characters", label: "캐릭터" },
   { id: "posts", label: "게시물" },
+  { id: "media", label: "미디어" },
   { id: "drafts", label: "초안 검수" },
   { id: "generation", label: "생성 작업" },
   { id: "logs", label: "액션 로그" },
@@ -45,7 +47,7 @@ export const navItems = [
   { id: "settings", label: "설정" },
 ];
 
-const DEFAULT_ROUTE = "characters";
+const DEFAULT_ROUTE = "home";
 
 export function currentRouteFromHash(hash = "#characters", token = "") {
   const route = String(hash ?? "")
@@ -76,6 +78,10 @@ export function navBadgeRequests() {
     {
       key: "drafts",
       path: endpoint("/api/drafts", { status: "needs_review", limit: 50 }),
+    },
+    {
+      key: "media",
+      path: endpoint("/api/media", { uploaded: "false", limit: 50 }),
     },
     {
       key: "generation",
@@ -601,7 +607,11 @@ export function settingsTestPayload(act, form) {
   const chat = act === "settings-test-chat";
   const payload = { target: chat ? "chat" : "planner" };
   const fields = chat
-    ? { llmApiKey: "agentLlmApiKey", llmApiUrl: "agentLlmApiUrl", llmModel: "agentLlmModel" }
+    ? {
+        llmApiKey: "agentLlmApiKey",
+        llmApiUrl: "agentLlmApiUrl",
+        llmModel: "agentLlmModel",
+      }
     : { llmApiKey: "llmApiKey", llmApiUrl: "llmApiUrl", llmModel: "llmModel" };
   for (const [testField, formField] of Object.entries(fields)) {
     const value = String(form.get(formField) ?? "").trim();
@@ -639,7 +649,12 @@ const simpleClickActions = {
     path: "/api/settings/generation",
     method: "PUT",
     body: { agentLlmApiKey: null },
-    successMessage: "채팅 LLM 키를 삭제했습니다. 기획 LLM 키를 다시 사용합니다.",
+    successMessage:
+      "채팅 LLM 키를 삭제했습니다. 기획 LLM 키를 다시 사용합니다.",
+  },
+  "media-confirm-upload": {
+    path: ({ id }) => `/api/media/${id}/confirm-upload`,
+    successMessage: "업로드를 확정했습니다. 게시물에 연결할 수 있습니다.",
   },
   "draft-approve": {
     path: ({ id }) => `/api/drafts/${id}/approve`,
@@ -676,6 +691,19 @@ export function simpleClickAction(action, dataset) {
     request: jsonRequest(path, spec.method ?? "POST", spec.body ?? {}),
     successMessage: spec.successMessage,
   };
+}
+
+export function mediaUploadStartPayload(formData) {
+  const payload = {
+    mediaType: String(formData.get("mediaType") ?? "image"),
+    contentType: String(formData.get("contentType") ?? "").trim(),
+    fileName: String(formData.get("fileName") ?? "").trim(),
+  };
+  for (const key of ["byteSize", "width", "height"]) {
+    const value = Number(formData.get(key));
+    if (Number.isFinite(value) && value > 0) payload[key] = value;
+  }
+  return payload;
 }
 
 export function paymentDetailRequest(paymentId) {
@@ -1297,9 +1325,12 @@ const ui = {
     payStatus: "전체",
     reportStatus: "전체",
     analyticsPeriod: "7일",
+    mediaType: "전체",
+    mediaUp: "전체",
   },
   selUserId: null,
   selPostId: null,
+  selMediaId: null,
   selPayId: null,
   selDraftId: null,
   ledgerUserId: "",
@@ -1631,8 +1662,10 @@ function optionList(items, valueKey, labelFn, selected) {
 // ═════════════════════════════════════════════════════════════════════════
 
 async function renderSection(route, renderEpoch) {
+  if (route === "home") return renderHome();
   if (route === "characters") return renderCharacters();
   if (route === "posts") return renderPosts();
+  if (route === "media") return renderMedia();
   if (route === "drafts") return renderDrafts();
   if (route === "generation") return renderGeneration(renderEpoch);
   if (route === "users") return renderUsers();
@@ -1643,7 +1676,310 @@ async function renderSection(route, renderEpoch) {
   if (route === "logs") return renderLogs();
   if (route === "analytics") return renderAnalytics();
   if (route === "settings") return renderSettings();
-  return renderCharacters();
+  return renderHome();
+}
+
+// ── 대시보드 ──────────────────────────────────────────────────────────────
+
+// 처리 대기 카드 — navBadgeRequests()의 key와 1:1로 대응한다.
+const HOME_TODOS = [
+  { key: "drafts", label: "검수 필요 초안", desc: "컷 확인 후 승인 또는 반려" },
+  { key: "moderation", label: "미처리 신고", desc: "검토 후 조치 또는 기각" },
+  {
+    key: "payments",
+    label: "정산 불일치",
+    desc: "provider ↔ 원장 상태 불일치",
+  },
+  { key: "generation", label: "실패한 생성 작업", desc: "재시도 필요" },
+  { key: "media", label: "미확정 업로드", desc: "업로드 확정 대기" },
+];
+
+// 목록 API에는 총계가 없어 첫 페이지 기준으로 센다 — 다음 페이지가 있으면 "N+".
+function pageCountLabel(body) {
+  const count = itemsFromPage(body).length;
+  return body?.nextCursor ? `${count}+` : String(count);
+}
+
+async function renderHome() {
+  const badgeSpecs = navBadgeRequests();
+  const [
+    charsRes,
+    postsRes,
+    usersRes,
+    queuedRes,
+    runningRes,
+    logsRes,
+    ...badgeRes
+  ] = await Promise.all([
+    request(endpoint("/api/characters", { limit: 50 })),
+    request(endpoint("/api/posts", { limit: 50 })),
+    request(endpoint("/api/users", { limit: 50 })),
+    request(endpoint("/api/generation/jobs", { status: "queued", limit: 50 })),
+    request(endpoint("/api/generation/jobs", { status: "running", limit: 50 })),
+    request("/api/character-action-logs"),
+    ...badgeSpecs.map((spec) => request(spec.path)),
+  ]);
+
+  const chars = itemsFromPage(charsRes.body);
+  for (const c of chars) {
+    ui.cache.charNames.set(c.id, c.displayName || c.publicId || c.id);
+  }
+  const counts = {};
+  badgeSpecs.forEach((spec, index) => {
+    const count = itemsFromPage(badgeRes[index].body).length;
+    counts[spec.key] = count;
+    ui.badges[spec.key] = count;
+    applyBadge(spec.key, count);
+  });
+
+  const todos = HOME_TODOS.filter((t) => counts[t.key] > 0);
+  const todoHtml = todos.length
+    ? `<div class="todo-cards">${todos
+        .map(
+          (
+            t,
+          ) => `<button type="button" class="todo-card" data-act="go-route" data-route="${attr(
+            t.key,
+          )}">
+            <span class="todo-count">${counts[t.key]}</span>
+            <span class="todo-copy">
+              <span class="todo-label">${escapeHtml(t.label)} <span class="arrow">→</span></span>
+              <span class="todo-desc">${escapeHtml(t.desc)}</span>
+            </span>
+          </button>`,
+        )
+        .join("")}</div>`
+    : `<p style="margin:0 0 44px;font-size:14px;color:var(--color-neutral-700)">처리 대기 항목이 없습니다. 모든 큐가 비어 있습니다.</p>`;
+
+  const activeChars = chars.filter((c) => c.status === "active").length;
+  const inProgress =
+    itemsFromPage(queuedRes.body).length +
+    itemsFromPage(runningRes.body).length;
+  const stats = [
+    {
+      label: "활성 캐릭터",
+      value: String(activeChars),
+      note: `전체 ${pageCountLabel(charsRes.body)}명`,
+    },
+    {
+      label: "게시물",
+      value: pageCountLabel(postsRes.body),
+      note: "캐릭터 명의",
+    },
+    {
+      label: "사용자",
+      value: pageCountLabel(usersRes.body),
+      note: "사람 계정",
+    },
+    {
+      label: "진행 중 작업",
+      value: String(inProgress),
+      note: "queued + running",
+    },
+  ];
+  const statsHtml = stats
+    .map(
+      (m) => `<div>
+        <div class="stat-label" style="margin-bottom:8px">${escapeHtml(m.label)}</div>
+        <span class="stat-value">${escapeHtml(m.value)}</span>
+        <div style="font-size:12px;color:var(--color-neutral-700);margin-top:4px">${escapeHtml(
+          m.note,
+        )}</div>
+      </div>`,
+    )
+    .join("");
+
+  const logs = itemsFromPage(logsRes.body).slice(0, 6);
+  const logRows = logs.length
+    ? logs
+        .map(
+          (
+            l,
+          ) => `<div style="padding:9px 0;border-bottom:1px solid var(--color-divider);display:flex;align-items:baseline;gap:10px">
+            <span class="tag ${logTagClass(l.actionType)}" style="flex:none">${escapeHtml(
+              l.actionType,
+            )}</span>
+            <span style="font-weight:600;flex:none">${escapeHtml(
+              charName(l.characterId),
+            )}</span>
+            <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(
+              l.reason ?? "",
+            )}</span>
+            <span style="color:var(--color-neutral-500);font-size:11px;flex:none;margin-left:auto">${fmtDateTime(
+              l.createdAt,
+            )}</span>
+          </div>`,
+        )
+        .join("")
+    : `<div style="padding:9px 0;color:var(--color-neutral-600)">기록된 액션이 없습니다.</div>`;
+
+  const todayLabel = new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "full",
+  }).format(new Date());
+
+  return `
+    <div style="margin-bottom:30px">
+      <h2 style="font-size:32px;margin:0 0 4px">오늘의 운영 데스크</h2>
+      <p style="margin:0;font-size:13.5px;color:var(--color-neutral-700)">${escapeHtml(
+        todayLabel,
+      )} — 처리 대기 항목을 먼저 확인하세요</p>
+    </div>
+    ${todoHtml}
+    <div class="home-stats">${statsHtml}</div>
+    <div style="max-width:640px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px">
+        <span class="kicker">최근 액션 로그</span>
+        <button type="button" class="btn btn-ghost" style="color:var(--color-accent)" data-act="go-route" data-route="logs">전체 보기 →</button>
+      </div>
+      <div style="font-size:13px;line-height:1.5">${logRows}</div>
+    </div>`;
+}
+
+// ── 미디어 ────────────────────────────────────────────────────────────────
+
+function mediaFileName(media) {
+  try {
+    const path = new URL(media.url, "http://media.local").pathname;
+    const name = decodeURIComponent(path.split("/").pop() ?? "");
+    return name || media.id;
+  } catch {
+    return media.id;
+  }
+}
+
+function mediaSizeLabel(media) {
+  return media.byteSize ? `${(media.byteSize / 1048576).toFixed(1)} MB` : "—";
+}
+
+function mediaDimsLabel(media) {
+  const dims =
+    media.width && media.height ? `${media.width}×${media.height}` : "";
+  const duration = media.durationSeconds ? `${media.durationSeconds}s` : "";
+  return [dims, duration].filter(Boolean).join(" · ") || "—";
+}
+
+async function renderMedia() {
+  if (ui.selMediaId) return renderMediaDetail(ui.selMediaId);
+
+  const typeFilter = ui.filters.mediaType;
+  const upFilter = ui.filters.mediaUp;
+  const res = await request(
+    endpoint("/api/media", {
+      mediaType: typeFilter === "전체" ? "" : typeFilter,
+      uploaded:
+        upFilter === "전체" ? "" : upFilter === "확정" ? "true" : "false",
+      limit: 50,
+    }),
+  );
+  const media = itemsFromPage(res.body);
+
+  const rows = media.length
+    ? media
+        .map((m) => {
+          const pending = !m.uploadedAt;
+          return `<tr class="clickable" data-act="select-media" data-id="${attr(m.id)}">
+            <td style="font-weight:600">${escapeHtml(mediaFileName(m))}</td>
+            <td>${escapeHtml(m.mediaType)}</td>
+            <td>${escapeHtml(mediaSizeLabel(m))}</td>
+            <td style="color:var(--color-neutral-700)">${escapeHtml(mediaDimsLabel(m))}</td>
+            <td style="white-space:nowrap;color:var(--color-neutral-600);font-size:12.5px">${fmtDateTime(
+              m.createdAt,
+            )}</td>
+            <td><span class="tag ${pending ? "tag-accent-2" : "tag-accent"}">${
+              pending ? "pending" : `확정 ${fmtDateTime(m.uploadedAt)}`
+            }</span></td>
+            <td style="white-space:nowrap">${
+              pending
+                ? `<button class="btn btn-ghost" data-act="media-confirm-upload" data-id="${attr(
+                    m.id,
+                  )}">업로드 확정</button>`
+                : ""
+            }</td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr class="empty-row"><td colspan="7">조건에 맞는 미디어가 없습니다.</td></tr>`;
+
+  return `
+    ${sectionHead(
+      "미디어",
+      "S3 presigned 업로드 시작 → 업로드 확정 → 게시물·생성 결과에 연결",
+      `<button class="btn btn-primary" data-act="open-dialog" data-dialog="media-upload">업로드 시작</button>`,
+    )}
+    <div class="toolbar">
+      ${segControl(
+        "mediaType",
+        [
+          { value: "전체", label: "전체" },
+          { value: "image", label: "image" },
+          { value: "video", label: "video" },
+        ],
+        typeFilter,
+      )}
+      ${segControl(
+        "mediaUp",
+        [
+          { value: "전체", label: "전체" },
+          { value: "확정", label: "확정" },
+          { value: "pending", label: "pending" },
+        ],
+        upFilter,
+      )}
+      <span class="count-note">${media.length}건</span>
+    </div>
+    <table class="table">
+      <thead><tr><th>파일</th><th>타입</th><th>크기</th><th>해상도</th><th>생성</th><th>업로드 상태</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function renderMediaDetail(id) {
+  const res = await request(`/api/media/${id}`);
+  if (!res.ok) {
+    ui.selMediaId = null;
+    return noticeBlock("미디어를 찾을 수 없습니다.");
+  }
+  const m = res.body;
+  const pending = !m.uploadedAt;
+
+  return `
+    <button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-media-list">← 미디어 목록</button>
+    <div style="max-width:640px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:8px">
+        <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;min-width:0">
+          <h2 style="font-size:28px;margin:0;word-break:break-all">${escapeHtml(
+            mediaFileName(m),
+          )}</h2>
+          <span class="tag ${pending ? "tag-accent-2" : "tag-accent"}">${
+            pending ? "pending" : "확정"
+          }</span>
+        </div>
+        ${
+          pending
+            ? `<button class="btn btn-primary" style="flex:none" data-act="media-confirm-upload" data-id="${attr(
+                m.id,
+              )}">업로드 확정</button>`
+            : ""
+        }
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 32px;font-size:13.5px;margin-top:24px">
+        <div><div class="stat-label">타입</div>${escapeHtml(m.mediaType)}</div>
+        <div><div class="stat-label">크기</div>${escapeHtml(mediaSizeLabel(m))}</div>
+        <div><div class="stat-label">해상도</div>${escapeHtml(mediaDimsLabel(m))}</div>
+        <div><div class="stat-label">업로드 시작</div>${fmtDateTime(m.createdAt)}</div>
+        <div style="grid-column:1/-1"><div class="stat-label">업로드 확정</div>${
+          pending ? "미확정 — pending" : `${fmtDateTime(m.uploadedAt)} 확정됨`
+        }</div>
+        <div style="grid-column:1/-1;min-width:0"><div class="stat-label">URL</div><span style="word-break:break-all;color:var(--color-neutral-700)">${escapeHtml(
+          m.url ?? "—",
+        )}</span></div>
+      </div>
+      ${
+        pending
+          ? `<p style="margin:26px 0 0;font-size:13px;line-height:1.55;color:var(--color-accent-2-700)">presigned PUT URL 발급 후 아직 확정되지 않은 pending 상태입니다. 클라이언트 업로드 완료를 확인한 뒤 '업로드 확정'을 누르면 게시물에 연결할 수 있게 됩니다.</p>`
+          : ""
+      }
+    </div>`;
 }
 
 // ── 캐릭터 ────────────────────────────────────────────────────────────────
@@ -2308,8 +2644,19 @@ function generationSettingsCard(settings) {
   const llmKey = settings.llmApiKey ?? { set: false };
   const plannerSources = settings.resolved?.plannerSources ?? {};
   const chat = settings.chat ?? {
-    overrides: { apiKey: { set: false }, apiUrl: null, model: null, embeddingModel: null },
-    effective: { apiKeyLast4: null, apiUrl: null, model: null, embeddingModel: "", overridden: {} },
+    overrides: {
+      apiKey: { set: false },
+      apiUrl: null,
+      model: null,
+      embeddingModel: null,
+    },
+    effective: {
+      apiKeyLast4: null,
+      apiUrl: null,
+      model: null,
+      embeddingModel: "",
+      overridden: {},
+    },
   };
   const llmKeyStatus = llmKey.set
     ? `<span class="tag tag-accent">저장됨 ····${escapeHtml(llmKey.last4 ?? "")}</span>
@@ -2352,7 +2699,8 @@ function generationSettingsCard(settings) {
       <h6 style="margin:0;color:var(--color-neutral-600)">${title}</h6>
       <button class="btn btn-ghost" type="button" data-act="${testAct}">연결 테스트</button>
     </div>`;
-  const divider = '<div style="border-top:1px solid var(--color-divider)"></div>';
+  const divider =
+    '<div style="border-top:1px solid var(--color-divider)"></div>';
   return `
     <form class="card" data-action="generation-settings" style="gap:10px">
       ${sectionHeadRow("이미지 생성 (fal.ai)", "settings-test-image")}
@@ -3078,8 +3426,7 @@ export function draftDetailMarkup(d, characterName, opts = {}) {
     (s) => Array.isArray(s.outputs) && s.outputs.length > 0,
   );
   const finish = draftFinishPreset(d);
-  const finishEditable =
-    d.status === "needs_review" || d.status === "approved";
+  const finishEditable = d.status === "needs_review" || d.status === "approved";
   const finishSelect = hasOutputs
     ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--color-neutral-600)">게시 마감 <select class="input" style="width:auto;padding:4px 8px" data-select="draft-finish" data-id="${attr(
         d.id,
@@ -3908,12 +4255,9 @@ async function renderAnalytics() {
         <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:20px">${escapeHtml(
           analyticsLabel(m.name),
         )}</div>
-        <span class="cmyk-num" style="display:inline-block;font-family:var(--font-heading);font-weight:600;font-size:52px">
-          <span class="paper">${escapeHtml(Number(m.value).toLocaleString())}</span>
-          <span class="plate plate-c" aria-hidden="true">${escapeHtml(Number(m.value).toLocaleString())}</span>
-          <span class="plate plate-m" aria-hidden="true">${escapeHtml(Number(m.value).toLocaleString())}</span>
-          <span class="plate plate-y" aria-hidden="true">${escapeHtml(Number(m.value).toLocaleString())}</span>
-        </span>
+        <span style="display:inline-block;font-family:var(--font-heading);font-weight:600;font-size:52px;font-variant-numeric:tabular-nums">${escapeHtml(
+          Number(m.value).toLocaleString(),
+        )}</span>
         <div style="font-size:12.5px;color:var(--color-neutral-700);margin-top:10px">${escapeHtml(metricNotes[m.name] ?? period)}</div>
       </div>`,
         )
@@ -4175,6 +4519,23 @@ export function dialogBody({ type, ctx }) {
         <div class="field"><label>미디어 타입</label><select class="input" name="mediaType"><option value="image">image</option><option value="video">video</option></select></div>
         <div class="field"><label>프롬프트</label><textarea class="input" name="prompt" required></textarea></div>
         <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">큐 등록</button></div>
+      </form>`;
+  }
+  if (type === "media-upload") {
+    return `<div class="dialog-title">미디어 업로드 시작</div>
+      <div class="dialog-body" style="margin:0">S3 presigned PUT URL을 발급하고 pending media를 만듭니다 (600초 유효).</div>
+      <form data-action="dlg-media-upload" style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:grid;grid-template-columns:120px 1fr;gap:10px">
+          <div class="field"><label>미디어 타입</label><select class="input" name="mediaType"><option value="image">image</option><option value="video">video</option></select></div>
+          <div class="field"><label>Content-Type</label><input class="input" name="contentType" required placeholder="image/png"></div>
+        </div>
+        <div class="field"><label>파일 이름</label><input class="input" name="fileName" required placeholder="photo.png"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div class="field"><label>바이트 (선택)</label><input class="input" name="byteSize" type="number" min="1"></div>
+          <div class="field"><label>가로 (선택)</label><input class="input" name="width" type="number" min="1"></div>
+          <div class="field"><label>세로 (선택)</label><input class="input" name="height" type="number" min="1"></div>
+        </div>
+        <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">URL 발급</button></div>
       </form>`;
   }
   if (type === "complete-job") {
@@ -4664,6 +5025,24 @@ async function dispatchSubmit(action, form, formData) {
     return;
   }
 
+  // — 미디어 업로드 시작 (presigned URL 발급 → pending media 생성) —
+  if (action === "dlg-media-upload") {
+    const result = await submitViaSpec(
+      jsonRequest(
+        "/api/media/uploads",
+        "POST",
+        mediaUploadStartPayload(formData),
+      ),
+      "presigned URL을 발급했습니다 — pending 미디어가 생성되었습니다.",
+    );
+    if (result.ok) {
+      closeDialog();
+      renderApp();
+      void updateNavBadges();
+    }
+    return;
+  }
+
   // — credit grant (dialog + inline form share this) —
   if (action === "dlg-grant" || action === "credit-grant-full") {
     const body = { ...creditGrantPayload(formData) };
@@ -4699,7 +5078,7 @@ async function handleClick(event) {
   // sidebar navigation
   const navBtn = event.target.closest?.(".nav-item[data-route]");
   if (navBtn) {
-    ui.selUserId = ui.selPayId = null;
+    ui.selUserId = ui.selPayId = ui.selMediaId = null;
     ui.selPostId = postSelectionAfterAction("sidebar-navigation", ui.selPostId);
     location.hash = navBtn.dataset.route;
     return;
@@ -4831,7 +5210,9 @@ async function handleClick(event) {
   // 키 삭제는 원클릭 파괴 액션이라 확인을 거친다.
   if (
     act.startsWith("settings-clear-") &&
-    !window.confirm("저장된 키를 삭제하고 상위 값(상속/env)으로 되돌립니다. 계속할까요?")
+    !window.confirm(
+      "저장된 키를 삭제하고 상위 값(상속/env)으로 되돌립니다. 계속할까요?",
+    )
   ) {
     return;
   }
@@ -4841,7 +5222,10 @@ async function handleClick(event) {
       simpleAction.request,
       simpleAction.successMessage,
     );
-    if (result.ok) renderApp();
+    if (result.ok) {
+      renderApp();
+      void updateNavBadges();
+    }
     return;
   }
   const generationRequest = generationClickRequest(act, el.dataset.id);
@@ -4960,6 +5344,23 @@ async function handleClick(event) {
   }
   if (act === "select-post" || act === "back-posts") {
     ui.selPostId = postSelectionAfterAction(act, ui.selPostId, el.dataset.id);
+    renderApp();
+    return;
+  }
+  if (act === "go-route") {
+    // 대시보드 처리 대기 카드 — 해당 섹션으로 이동 (사이드바 이동과 동일 처리).
+    ui.selUserId = ui.selPayId = ui.selMediaId = null;
+    ui.selPostId = postSelectionAfterAction("sidebar-navigation", ui.selPostId);
+    location.hash = el.dataset.route;
+    return;
+  }
+  if (act === "select-media") {
+    ui.selMediaId = el.dataset.id;
+    renderApp();
+    return;
+  }
+  if (act === "back-media-list") {
+    ui.selMediaId = null;
     renderApp();
     return;
   }
