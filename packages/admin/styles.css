@@ -557,15 +557,23 @@ input[type="checkbox"] {
   cursor: pointer;
 }
 /* candidate grid — image zooms on click, selection is a separate control */
+.candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
+  gap: 14px;
+}
 .candidate {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 132px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 8px;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
 }
 .candidate-thumb {
-  width: 132px;
-  height: 99px;
+  width: 100%;
+  aspect-ratio: 4 / 3;
   object-fit: cover;
   cursor: zoom-in;
   border: 1px solid var(--color-divider);
@@ -573,6 +581,68 @@ input[type="checkbox"] {
 }
 .candidate-thumb.is-selected {
   border: 2px solid var(--color-accent);
+}
+.candidate-selected {
+  justify-content: center;
+}
+.candidate-filter {
+  display: grid;
+  gap: 6px;
+}
+.candidate-filter-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-neutral-700);
+}
+.candidate-filter-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.candidate-filter-options button {
+  min-height: 30px;
+  padding: 4px 6px;
+  border: 0;
+  border-right: 1px solid var(--color-divider);
+  background: var(--color-bg);
+  color: var(--color-neutral-700);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.candidate-filter-options button:last-child {
+  border-right: 0;
+}
+.candidate-filter-options button[aria-pressed="true"] {
+  background: var(--color-text);
+  color: var(--color-bg);
+}
+.candidate-filter-compare {
+  min-height: 30px;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-neutral-700);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.candidate-filter-compare:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.candidate-filter-status {
+  min-height: 16px;
+  color: var(--color-neutral-600);
+  font-size: 11px;
+}
+.review-readiness {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--color-accent-2);
+  background: var(--color-accent-2-100);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

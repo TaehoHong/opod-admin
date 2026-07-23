@@ -20,6 +20,7 @@ import { RegenerateShotDto } from "./dto/regenerate-shot.dto";
 import { RejectDraftDto } from "./dto/reject-draft.dto";
 import { SelectShotOutputDto } from "./dto/select-shot-output.dto";
 import { UpdateDraftDto } from "./dto/update-draft.dto";
+import { UpdateShotOutputFilterDto } from "./dto/update-shot-output-filter.dto";
 
 @Controller("api/drafts")
 @UseGuards(AdminJwtGuard)
@@ -111,8 +112,7 @@ export class DraftsController {
     if (!result.aggregated) {
       await this.draftsService.getDraft(draftId); // 404를 400보다 먼저 구분한다.
       throw new BadRequestException(
-        result.reason ??
-          "Only generating drafts can be aggregated for review",
+        result.reason ?? "Only generating drafts can be aggregated for review",
       );
     }
     return this.draftsService.getDraft(draftId);
@@ -158,5 +158,20 @@ export class DraftsController {
     @Body() body: SelectShotOutputDto,
   ) {
     return this.draftsService.selectShotOutput({ draftId, jobId, ...body });
+  }
+
+  @Patch(":id/jobs/:jobId/outputs/:mediaId/filter")
+  updateShotOutputFilter(
+    @Param("id") draftId: string,
+    @Param("jobId") jobId: string,
+    @Param("mediaId") mediaId: string,
+    @Body() body: UpdateShotOutputFilterDto,
+  ) {
+    return this.draftsService.updateShotOutputFilter({
+      draftId,
+      jobId,
+      mediaId,
+      ...body,
+    });
   }
 }

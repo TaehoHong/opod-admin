@@ -750,7 +750,10 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
               level: "error",
               eventType: "DRAFT_PUBLISH_FAILED",
               message: errorMessage(error).slice(0, 500),
-              contextJson: { draftId: draft.id, characterId: draft.characterId },
+              contextJson: {
+                draftId: draft.id,
+                characterId: draft.characterId,
+              },
             },
           });
         } catch {
@@ -772,40 +775,60 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     const jobs = await this.prisma.generationJob.findMany({
       where: { draftId: draft.id },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { sortOrder: true, status: true, outputMediaId: true },
+      select: {
+        sortOrder: true,
+        status: true,
+        outputMediaId: true,
+        outputs: {
+          select: { mediaId: true, filterPreset: true },
+        },
+      },
     });
-    const mediaByShot = new Map<number, string>();
+    const mediaByShot = new Map<
+      number,
+      { mediaId: string; filterPreset: string | null }
+    >();
     for (const job of jobs) {
       if (!mediaByShot.has(job.sortOrder)) {
         if (job.status !== "completed" || !job.outputMediaId) {
           throw new Error(`shot ${job.sortOrder} has no completed output`);
         }
-        mediaByShot.set(job.sortOrder, job.outputMediaId);
+        const output = job.outputs?.find(
+          (candidate) => candidate.mediaId === job.outputMediaId,
+        );
+        mediaByShot.set(job.sortOrder, {
+          mediaId: job.outputMediaId,
+          filterPreset: output?.filterPreset ?? null,
+        });
       }
     }
     if (mediaByShot.size === 0) {
       throw new Error("draft has no generated media to publish");
     }
-    const orderedMediaIds = [...mediaByShot.entries()]
+    const orderedMedia = [...mediaByShot.entries()]
       .sort(([a], [b]) => a - b)
-      .map(([, mediaId]) => mediaId);
+      .map(([, media]) => media);
+    const orderedMediaIds = orderedMedia.map(({ mediaId }) => mediaId);
     const hashtags = draft.hashtags
       .map((tag) => tag.trim().replace(/^#+/, "").trim())
       .filter(Boolean);
 
-    // 게시 마감 — 검수에서 고른 프리셋(conceptJson.finish)을 적용한 새 Media를
-    // 만들어 게시물에 붙인다. 후보(원본)는 그대로 남는다. 미리보기와 동일한
-    // 결정적 연산이라 검수에서 본 그대로 나간다. 프리셋 없음 = 원본 게시.
-    const finish = parseFinishPreset(
+    // 선택 이미지마다 저장된 필터를 적용한 새 Media를 게시물에 붙인다.
+    // 후보 원본은 유지하고, 구버전 후보(null)는 초안 전체 finish를 상속한다.
+    const legacyFinish = parseFinishPreset(
       isRecord(draft.conceptJson) ? draft.conceptJson.finish : undefined,
     );
-    const finishedFiles = finish
-      ? await Promise.all(
-          orderedMediaIds.map((mediaId) =>
-            this.finishedUpload(draft.characterId, mediaId, finish),
-          ),
-        )
-      : null;
+    const finishedFiles = await Promise.all(
+      orderedMedia.map(({ mediaId, filterPreset }) => {
+        const finish =
+          filterPreset === null
+            ? legacyFinish
+            : parseFinishPreset(filterPreset);
+        return finish
+          ? this.finishedUpload(draft.characterId, mediaId, finish)
+          : null;
+      }),
+    );
 
     await this.prisma.$transaction(async (tx) => {
       const transitioned = await tx.postDraft.updateMany({
@@ -817,7 +840,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       }
       const publishMediaIds: string[] = [];
       for (const [index, mediaId] of orderedMediaIds.entries()) {
-        const file = finishedFiles?.[index];
+        const file = finishedFiles[index];
         if (!file) {
           publishMediaIds.push(mediaId);
           continue;

@@ -11,7 +11,23 @@ async function bootstrap() {
   });
 
   setupAdminSwagger(app);
-  app.useStaticAssets(join(process.cwd(), "packages/admin"));
+  const adminUiRoot = join(process.cwd(), "packages/admin");
+  app.useStaticAssets(adminUiRoot);
+  app.use(
+    (
+      request: { method: string; path: string },
+      response: { sendFile(path: string): void },
+      next: () => void,
+    ) => {
+      const adminUiPath =
+        /^\/(?:home|characters|posts|media|drafts|generation|logs|users|credits|payments|moderation|events|analytics|settings)(?:\/[^/]+){0,2}\/?$/;
+      if (request.method === "GET" && adminUiPath.test(request.path)) {
+        response.sendFile(join(adminUiRoot, "index.html"));
+        return;
+      }
+      next();
+    },
+  );
 
   await app.listen(process.env.ADMIN_API_PORT ?? process.env.PORT ?? 7100);
 }

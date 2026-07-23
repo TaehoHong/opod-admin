@@ -18,6 +18,8 @@ function prismaMock() {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     generationJobOutput: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      update: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     character: {
@@ -88,6 +90,7 @@ describe("DraftsService", () => {
             mediaId: "media-1",
             candidateIndex: 0,
             selected: true,
+            filterPreset: "film",
             media: { url: "https://cdn.local/a.png" },
           },
         ],
@@ -117,6 +120,7 @@ describe("DraftsService", () => {
             url: "https://cdn.local/a.png",
             candidateIndex: 0,
             selected: true,
+            filterPreset: "film",
           },
         ],
       },
@@ -245,10 +249,26 @@ describe("DraftsService", () => {
 
   it("approves a needs_review draft atomically", async () => {
     const prisma = prismaMock();
-    prisma.postDraft.findUnique.mockResolvedValue({
-      ...draftRow,
-      status: "approved",
-    });
+    prisma.generationJob.findMany.mockResolvedValue([
+      {
+        id: "job-1",
+        sortOrder: 0,
+        status: "completed",
+        prompt: "p",
+        outputs: [
+          {
+            mediaId: "media-1",
+            candidateIndex: 0,
+            selected: true,
+            filterPreset: "none",
+            media: { url: "https://cdn.local/a.png" },
+          },
+        ],
+      },
+    ]);
+    prisma.postDraft.findUnique
+      .mockResolvedValueOnce(draftRow)
+      .mockResolvedValueOnce({ ...draftRow, status: "approved" });
     const service = makeService(prisma);
 
     await expect(service.approveDraft("draft-1")).resolves.toMatchObject({
@@ -263,10 +283,41 @@ describe("DraftsService", () => {
     });
   });
 
+  it("rejects approval until every shot has a selected image", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findUnique.mockResolvedValue(draftRow);
+    prisma.generationJob.findMany.mockResolvedValue([
+      {
+        id: "job-1",
+        sortOrder: 0,
+        status: "completed",
+        prompt: "p",
+        outputs: [
+          {
+            mediaId: "media-1",
+            candidateIndex: 0,
+            selected: false,
+            filterPreset: "none",
+            media: { url: "https://cdn.local/a.png" },
+          },
+        ],
+      },
+    ]);
+    const service = makeService(prisma);
+
+    await expect(service.approveDraft("draft-1")).rejects.toThrow(
+      "Select one image for every shot before approval",
+    );
+    expect(prisma.postDraft.updateMany).not.toHaveBeenCalled();
+  });
+
   it("rejects approving a draft in the wrong status", async () => {
     const prisma = prismaMock();
     prisma.postDraft.updateMany.mockResolvedValue({ count: 0 });
-    prisma.postDraft.findUnique.mockResolvedValue(draftRow);
+    prisma.postDraft.findUnique.mockResolvedValue({
+      ...draftRow,
+      status: "approved",
+    });
     const service = makeService(prisma);
 
     await expect(service.approveDraft("draft-1")).rejects.toThrow(
@@ -361,5 +412,49 @@ describe("DraftsService", () => {
         mediaId: "media-x",
       }),
     ).rejects.toThrow("Media is not a candidate output of this job");
+  });
+
+  it("stores a filter on a completed candidate before draft review", async () => {
+    const prisma = prismaMock();
+    prisma.generationJobOutput.findFirst.mockResolvedValue({ id: "output-1" });
+    prisma.postDraft.findUnique.mockResolvedValue({
+      ...draftRow,
+      status: "generating",
+    });
+    const service = makeService(prisma);
+
+    await service.updateShotOutputFilter({
+      draftId: "draft-1",
+      jobId: "job-1",
+      mediaId: "media-1",
+      filterPreset: "mono-film",
+    });
+
+    expect(prisma.generationJobOutput.findFirst).toHaveBeenCalledWith({
+      where: {
+        jobId: "job-1",
+        mediaId: "media-1",
+        job: {
+          draftId: "draft-1",
+          status: "completed",
+          draft: {
+            status: {
+              in: [
+                "generating",
+                "regenerating",
+                "needs_review",
+                "approved",
+                "failed",
+              ],
+            },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    expect(prisma.generationJobOutput.update).toHaveBeenCalledWith({
+      where: { id: "output-1" },
+      data: { filterPreset: "mono-film" },
+    });
   });
 });

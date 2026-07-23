@@ -72,8 +72,20 @@ Adds `shots` — the latest generation job per cut with its best-of-N candidates
       "status": "completed",
       "prompt": "young woman ..., 해변 역광, film photography ...",
       "outputs": [
-        { "mediaId": "...", "url": "...", "candidateIndex": 0, "selected": true },
-        { "mediaId": "...", "url": "...", "candidateIndex": 1, "selected": false }
+        {
+          "mediaId": "...",
+          "url": "...",
+          "candidateIndex": 0,
+          "selected": true,
+          "filterPreset": "film"
+        },
+        {
+          "mediaId": "...",
+          "url": "...",
+          "candidateIndex": 1,
+          "selected": false,
+          "filterPreset": "none"
+        }
       ]
     }
   ]
@@ -145,8 +157,9 @@ POST /api/drafts/:id/approve
 POST /api/drafts/:id/reject   { "reason": "구도가 어색함" }
 ```
 
-Both require `needs_review` (atomic transition, HTTP 400 otherwise). Approved
-drafts are published by the worker at `scheduledAt` (or immediately).
+Both require `needs_review` (atomic transition, HTTP 400 otherwise). Approval
+also requires one selected image for every cut. Approved drafts are published
+by the worker at `scheduledAt` (or immediately).
 
 ## Regenerate a shot
 
@@ -172,6 +185,20 @@ Content-Type: application/json
 
 Switches the selected best-of-N candidate for a completed shot job. The
 selected media per cut is what gets published.
+
+## Set a candidate filter
+
+```http
+PATCH /api/drafts/:id/jobs/:jobId/outputs/:mediaId/filter
+Content-Type: application/json
+
+{ "filterPreset": "film" }
+```
+
+`filterPreset` is `none`, `film`, or `mono-film`. A completed candidate can be
+filtered while the rest of the draft is still generating. Each candidate keeps
+its own filter; publishing applies the selected candidate's filter and leaves
+the generated original unchanged.
 
 ## Posting policy (scheduler input)
 

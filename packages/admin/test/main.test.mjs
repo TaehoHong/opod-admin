@@ -17,8 +17,9 @@ import {
   adminAccountPayload,
   adminLoginPayload,
   adminRequestOptions,
+  adminRouteState,
   creditGrantPayload,
-  currentRouteFromHash,
+  currentRouteFromUrl,
   dialogSessionAllows,
   dialogContextFromDataset,
   dialogBody,
@@ -58,10 +59,10 @@ import {
   personaReorderPayload,
   postMediaGallery,
   postMediaSelectionItem,
-  postSelectionAfterAction,
   postPayload,
   reportUpdatePayload,
   removePostMediaFile,
+  routeHref,
   simpleClickAction,
   storyPayload,
   submitNewPost,
@@ -583,17 +584,14 @@ test("itemsFromPage accepts page objects and arrays", () => {
   assert.deepEqual(itemsFromPage(null), []);
 });
 
-test("currentRouteFromHash sends anonymous admins to login", () => {
-  assert.equal(currentRouteFromHash("#characters", ""), "login");
-  assert.equal(currentRouteFromHash("#media", ""), "login");
-  assert.equal(currentRouteFromHash("#login", ""), "login");
-  assert.equal(currentRouteFromHash("#login", "token-1"), "home");
-  assert.equal(currentRouteFromHash("#media", "token-1"), "media");
-  assert.equal(currentRouteFromHash("#unknown", "token-1"), "home");
-  assert.equal(
-    currentRouteFromHash("#characters?mode=create", "token-1"),
-    "characters",
-  );
+test("currentRouteFromUrl sends anonymous admins to login", () => {
+  assert.equal(currentRouteFromUrl("/characters", ""), "login");
+  assert.equal(currentRouteFromUrl("/media/media-1", ""), "login");
+  assert.equal(currentRouteFromUrl("/login", ""), "login");
+  assert.equal(currentRouteFromUrl("/login", "token-1"), "home");
+  assert.equal(currentRouteFromUrl("/media/media-1", "token-1"), "media");
+  assert.equal(currentRouteFromUrl("/unknown", "token-1"), "home");
+  assert.equal(currentRouteFromUrl("/characters/new", "token-1"), "characters");
 });
 
 test("parseResponseBody preserves plain text backend errors", () => {
@@ -608,38 +606,32 @@ test("parseResponseBody preserves plain text backend errors", () => {
 });
 
 test("characterRouteState parses list, create, detail, and tab states", () => {
-  assert.deepEqual(characterRouteState("#characters"), {
+  assert.deepEqual(characterRouteState("/characters"), {
     route: "characters",
     mode: "list",
     characterId: "",
     tab: "profile",
   });
-  assert.deepEqual(characterRouteState("#characters?mode=create"), {
+  assert.deepEqual(characterRouteState("/characters/new"), {
     route: "characters",
     mode: "create",
     characterId: "",
     tab: "profile",
   });
-  assert.deepEqual(
-    characterRouteState("#characters?characterId=char-1&tab=activity"),
-    {
-      route: "characters",
-      mode: "detail",
-      characterId: "char-1",
-      tab: "activity",
-    },
-  );
+  assert.deepEqual(characterRouteState("/characters/char-1/activity"), {
+    route: "characters",
+    mode: "detail",
+    characterId: "char-1",
+    tab: "activity",
+  });
   // Unknown tabs fall back to the profile tab.
   assert.equal(
-    characterRouteState("#characters?characterId=char-1&tab=personas").tab,
+    characterRouteState("/characters/char-1/personas").tab,
     "personas",
   );
+  assert.equal(characterRouteState("/characters/char-1/memory").tab, "memory");
   assert.equal(
-    characterRouteState("#characters?characterId=char-1&tab=memory").tab,
-    "memory",
-  );
-  assert.equal(
-    characterRouteState("#characters?characterId=char-1&tab=unknown").tab,
+    characterRouteState("/characters/char-1/unknown").tab,
     "profile",
   );
 });
@@ -708,26 +700,20 @@ test("characterMemoriesPanel shows an empty state", () => {
   );
 });
 
-test("characterHref builds character route hashes", () => {
-  assert.equal(characterHref(), "#characters");
-  assert.equal(characterHref({ mode: "create" }), "#characters?mode=create");
+test("route hrefs use conventional paths for lists and details", () => {
+  assert.equal(routeHref("home"), "/");
+  assert.equal(routeHref("drafts"), "/drafts");
+  assert.equal(routeHref("drafts", "draft-1"), "/drafts/draft-1");
+  assert.equal(characterHref(), "/characters");
+  assert.equal(characterHref({ mode: "create" }), "/characters/new");
   assert.equal(
     characterHref({ characterId: "char-1", tab: "activity" }),
-    "#characters?characterId=char-1&tab=activity",
+    "/characters/char-1/activity",
   );
-});
-
-test("post selection actions open, close, and reset post detail", () => {
-  assert.equal(
-    postSelectionAfterAction("select-post", null, "post-1"),
-    "post-1",
-  );
-  assert.equal(postSelectionAfterAction("back-posts", "post-1"), null);
-  assert.equal(postSelectionAfterAction("sidebar-navigation", "post-1"), null);
-  assert.equal(
-    postSelectionAfterAction("unrelated", "post-1", "post-2"),
-    "post-1",
-  );
+  assert.deepEqual(adminRouteState("/drafts/draft%201"), {
+    route: "drafts",
+    detailId: "draft 1",
+  });
 });
 
 test("characterCreatePayload builds character create body", () => {
@@ -911,7 +897,7 @@ test("generationActionRequest builds existing job action endpoints", () => {
 });
 
 test("generation route and job state restore the workflow step", () => {
-  assert.deepEqual(generationRouteState("#generation?jobId=job-1"), {
+  assert.deepEqual(generationRouteState("/generation/job-1"), {
     jobId: "job-1",
   });
   assert.equal(generationWorkflowStep({ status: "draft" }), "prompt");
@@ -984,7 +970,7 @@ test("settings route hosts the provider/worker cards; generation shows a read-on
   assert.match(summary, /적용 중/);
   assert.match(summary, /fal:fal-ai\/nano-banana-pro\/edit/);
   assert.match(summary, /llm:gpt-5\.6-terra/);
-  assert.match(summary, /href="#settings"/);
+  assert.match(summary, /href="\/settings"/);
   // 요약은 읽기 전용 — 폼/저장 요소가 없어야 한다.
   assert.doesNotMatch(summary, /<form|<input/);
 
@@ -1179,7 +1165,7 @@ test("stale generation renders preserve selection and polling state", () => {
         expectedToken: 7,
         currentToken: 8,
         route: "generation",
-        hash: "#generation?jobId=job-stale",
+        hash: "/generation/job-stale",
       },
       () => {
         scheduled += 1;
@@ -1198,8 +1184,8 @@ test("stale generation renders preserve selection and polling state", () => {
 
 test("generation polling clears the old timer on route or job mismatch", () => {
   for (const runtime of [
-    { route: "posts", hash: "#posts" },
-    { route: "generation", hash: "#generation?jobId=job-new" },
+    { route: "posts", hash: "/posts" },
+    { route: "generation", hash: "/generation/job-new" },
   ]) {
     const cleared = [];
     const state = { generationPollTimer: "timer-old" };
@@ -2281,9 +2267,9 @@ test("candidate images zoom on click; selection is a separate control", () => {
   // 미선택 후보는 "이 컷 선택" 버튼, 선택된 후보는 선택됨 표시.
   assert.match(
     html,
-    /<button[^>]*data-act="draft-pick-output"[^>]*data-media="m-unsel"[^>]*>이 컷 선택<\/button>/,
+    /<button[^>]*data-act="draft-pick-output"[^>]*data-media="m-unsel"[^>]*>이 이미지 선택<\/button>/,
   );
-  assert.match(html, /✓ 선택됨/);
+  assert.match(html, /✓ 게시 이미지/);
   assert.doesNotMatch(
     html,
     /data-act="draft-pick-output"[^>]*data-media="m-sel"/,
@@ -2330,7 +2316,7 @@ test("review stage offers manual aggregation once every shot completed", () => {
   assert.doesNotMatch(generating, /draft-aggregate-now/);
 });
 
-test("draft-level finish preset select and preview toggle follow conceptJson.finish", () => {
+test("candidate filters inherit legacy draft finish and become read-only after publish", () => {
   const draftBase = {
     id: "draft-f",
     characterId: "ai-1",
@@ -2357,41 +2343,46 @@ test("draft-level finish preset select and preview toggle follow conceptJson.fin
     ],
   };
 
-  // 프리셋 미설정: 셀렉트는 none 선택 상태, 미리보기 토글은 없다.
+  // 프리셋 미설정: 후보별 원본 필터가 선택되고 비교 버튼은 비활성화된다.
   const unset = draftDetailMarkup({ ...draftBase, shots: [shot] }, "한소이");
-  assert.match(unset, /data-select="draft-finish"[^>]*data-id="draft-f"/);
-  assert.match(unset, /<option value="none" selected>없음<\/option>/);
-  assert.match(unset, /<option value="film">필름<\/option>/);
-  assert.match(unset, /<option value="mono-film">흑백 필름<\/option>/);
-  assert.doesNotMatch(unset, /draft-film-toggle/);
+  assert.match(unset, /data-filter-media="m-1"/);
+  assert.match(unset, /data-filter-preset="none"/);
+  assert.match(
+    unset,
+    /data-act="draft-filter-set" data-filter="none" aria-pressed="true"/,
+  );
+  assert.match(unset, /data-act="draft-filter-compare"[^>]*disabled/);
+  assert.doesNotMatch(unset, /data-select="draft-finish"/);
+  assert.match(
+    unset,
+    /data-act="draft-approve"[^>]*disabled[^>]*>승인<\/button>/,
+  );
+  assert.match(unset, /게시 이미지 0\/1 선택/);
 
-  // 프리셋 설정: 셀렉트 반영 + 토글 노출 + 후보 이미지에 스왑용 속성.
+  // 기존 초안 전체 프리셋은 후보별 필터 값이 없는 경우에만 상속한다.
   const filmDraft = {
     ...draftBase,
     conceptJson: { ...draftBase.conceptJson, finish: "film" },
     shots: [shot],
   };
-  const off = draftDetailMarkup(filmDraft, "한소이");
-  assert.match(off, /<option value="film" selected>필름<\/option>/);
-  assert.match(off, /data-act="draft-film-toggle"[^>]*aria-pressed="false"/);
+  const legacy = draftDetailMarkup(filmDraft, "한소이");
+  assert.match(legacy, /data-filter-preset="film"/);
   assert.match(
-    off,
-    /data-film-media="m-1"[^>]*data-orig-url="https:\/\/cdn\.test\/one\.jpg"[^>]*data-finish-preset="film"/,
+    legacy,
+    /data-filter-media="m-1"[^>]*data-orig-url="https:\/\/cdn\.test\/one\.jpg"[^>]*data-filter-preset="film"/,
   );
 
-  // 미리보기 ON: 눌린 상태 + 게시 시 적용된다는 안내.
-  const on = draftDetailMarkup(filmDraft, "한소이", { filmPreview: true });
-  assert.match(on, /data-act="draft-film-toggle"[^>]*aria-pressed="true"/);
-  assert.match(on, /게시 시 이 마감이 그대로 적용/);
-
-  // 검수 불가 상태(published)에서는 셀렉트가 비활성화된다.
+  // 게시된 초안에서는 저장 필터를 볼 수만 있고 변경할 수 없다.
   const published = draftDetailMarkup(
     { ...filmDraft, status: "published" },
     "한소이",
   );
-  assert.match(published, /data-select="draft-finish"[^>]*disabled/);
+  assert.match(
+    published,
+    /data-act="draft-filter-set" data-filter="film" aria-pressed="true" disabled/,
+  );
 
-  // 완료된 후보가 없으면(생성 전) 셀렉트·토글 모두 없다.
+  // 완료된 후보가 없으면 필터 컨트롤도 없다.
   const none = draftDetailMarkup(
     {
       ...draftBase,
@@ -2399,6 +2390,45 @@ test("draft-level finish preset select and preview toggle follow conceptJson.fin
     },
     "한소이",
   );
-  assert.doesNotMatch(none, /draft-finish/);
-  assert.doesNotMatch(none, /draft-film-toggle/);
+  assert.doesNotMatch(none, /draft-filter-set/);
+});
+
+test("completed draft candidates expose independent filters before review", () => {
+  const markup = draftDetailMarkup(
+    {
+      id: "draft-filter",
+      characterId: "ai-1",
+      contentType: "feed",
+      status: "generating",
+      caption: "c",
+      hashtags: [],
+      createdAt: "2026-07-12T00:00:00.000Z",
+      conceptJson: { source: "manual", mode: "manual" },
+      shots: [
+        {
+          sortOrder: 0,
+          jobId: "job-1",
+          status: "completed",
+          prompt: "p",
+          outputs: [
+            {
+              candidateIndex: 0,
+              mediaId: "media-1",
+              url: "https://cdn.test/one.jpg",
+              selected: true,
+              filterPreset: "film",
+            },
+          ],
+        },
+      ],
+    },
+    "한소이",
+  );
+
+  assert.match(markup, /data-filter-media="media-1"/);
+  assert.match(markup, /data-filter-preset="film"/);
+  assert.match(markup, />필터</);
+  assert.match(markup, />원본</);
+  assert.match(markup, /누르고 원본 비교/);
+  assert.doesNotMatch(markup, /data-select="draft-finish"/);
 });

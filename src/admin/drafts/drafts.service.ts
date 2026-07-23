@@ -32,6 +32,13 @@ const DRAFT_STATUSES: DraftStatus[] = [
 
 // 검수에서 캡션/일정을 고칠 수 있는 상태. planned/generating은 플래너가 덮어쓴다.
 const EDITABLE_STATUSES: DraftStatus[] = ["needs_review", "approved"];
+const FILTER_EDITABLE_STATUSES: DraftStatus[] = [
+  "generating",
+  "regenerating",
+  "needs_review",
+  "approved",
+  "failed",
+];
 
 const CAPTION_MAX_LENGTH = 2000;
 const HASHTAG_MAX = 5;
@@ -41,6 +48,7 @@ type DraftShotOutput = {
   url: string;
   candidateIndex: number;
   selected: boolean;
+  filterPreset: string | null;
 };
 
 type DraftShot = {
@@ -96,6 +104,7 @@ const draftJobFields = {
       mediaId: true,
       candidateIndex: true,
       selected: true,
+      filterPreset: true,
       media: { select: { url: true } },
     },
   },
@@ -230,6 +239,7 @@ export class DraftsService {
             url: output.media.url,
             candidateIndex: output.candidateIndex,
             selected: output.selected,
+            filterPreset: output.filterPreset,
           })),
         };
       });
@@ -361,6 +371,20 @@ export class DraftsService {
   }
 
   async approveDraft(draftId: string): Promise<AdminDraft> {
+    const current = await this.getDraft(draftId);
+    if (current.status !== "needs_review") {
+      throw new BadRequestException("Only needs_review drafts can be approved");
+    }
+    if (
+      !current.shots?.length ||
+      current.shots.some(
+        (shot) => !shot.outputs.some((output) => output.selected),
+      )
+    ) {
+      throw new BadRequestException(
+        "Select one image for every shot before approval",
+      );
+    }
     const transitioned = await this.prisma.postDraft.updateMany({
       where: { id: draftId, status: "needs_review" },
       data: { status: "approved", errorMessage: null },
@@ -544,6 +568,40 @@ export class DraftsService {
         where: { id: input.jobId },
         data: { outputMediaId: input.mediaId },
       });
+    });
+    return this.getDraft(input.draftId);
+  }
+
+  async updateShotOutputFilter(input: {
+    draftId: string;
+    jobId: string;
+    mediaId: string;
+    filterPreset: string;
+  }): Promise<AdminDraft> {
+    if (
+      input.filterPreset !== "none" &&
+      !parseFinishPreset(input.filterPreset)
+    ) {
+      throw new BadRequestException("Unknown filter preset");
+    }
+    const output = await this.prisma.generationJobOutput.findFirst({
+      where: {
+        jobId: input.jobId,
+        mediaId: input.mediaId,
+        job: {
+          draftId: input.draftId,
+          status: "completed",
+          draft: { status: { in: FILTER_EDITABLE_STATUSES } },
+        },
+      },
+      select: { id: true },
+    });
+    if (!output) {
+      throw new BadRequestException("Completed candidate output not found");
+    }
+    await this.prisma.generationJobOutput.update({
+      where: { id: output.id },
+      data: { filterPreset: input.filterPreset },
     });
     return this.getDraft(input.draftId);
   }

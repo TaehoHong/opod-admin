@@ -515,12 +515,10 @@ describe("DraftWorkerService publishing", () => {
       height: 1536,
       contentType: "image/jpeg",
     });
-    const store = jest
-      .fn()
-      .mockResolvedValue({
-        url: "https://cdn.test/finished.jpg",
-        storageKey: "pod/generated/character/ai-1/f.jpg",
-      });
+    const store = jest.fn().mockResolvedValue({
+      url: "https://cdn.test/finished.jpg",
+      storageKey: "pod/generated/character/ai-1/f.jpg",
+    });
     const service = makeService(
       prisma,
       plannerMock(),
@@ -554,6 +552,77 @@ describe("DraftWorkerService publishing", () => {
                 sortOrder: 0,
                 media: { connect: { id: "finished-media-1" } },
               },
+            ],
+          },
+        }),
+      }),
+    );
+  });
+
+  it("applies each selected image filter independently", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: "draft-1",
+        characterId: "ai-1",
+        contentType: "feed",
+        caption: "노을 산책",
+        hashtags: [],
+        conceptJson: null,
+      },
+    ]);
+    prisma.generationJob.findMany.mockResolvedValue([
+      {
+        sortOrder: 1,
+        status: "completed",
+        outputMediaId: "media-b",
+        outputs: [{ mediaId: "media-b", filterPreset: "none" }],
+      },
+      {
+        sortOrder: 0,
+        status: "completed",
+        outputMediaId: "media-a",
+        outputs: [{ mediaId: "media-a", filterPreset: "film" }],
+      },
+    ]);
+    prisma.media.findUnique.mockResolvedValue({
+      mediaType: "image",
+      url: `data:image/png;base64,${Buffer.from("src").toString("base64")}`,
+      storageKey: null,
+    });
+    const tx = txMock();
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+    const finishImage = jest.fn().mockResolvedValue({
+      bytes: Buffer.from("finished"),
+      width: 1024,
+      height: 1536,
+      contentType: "image/jpeg",
+    });
+    const service = makeService(
+      prisma,
+      plannerMock(),
+      {},
+      () => 0.5,
+      builderMock(),
+      { finishImage },
+    );
+
+    await service.tick();
+
+    expect(finishImage).toHaveBeenCalledTimes(1);
+    expect(finishImage).toHaveBeenCalledWith(expect.any(Buffer), "film");
+    expect(tx.post.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          postMedia: {
+            create: [
+              {
+                sortOrder: 0,
+                media: { connect: { id: "finished-media-1" } },
+              },
+              { sortOrder: 1, media: { connect: { id: "media-b" } } },
             ],
           },
         }),
@@ -601,9 +670,7 @@ describe("DraftWorkerService publishing", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           postMedia: {
-            create: [
-              { sortOrder: 0, media: { connect: { id: "media-a" } } },
-            ],
+            create: [{ sortOrder: 0, media: { connect: { id: "media-a" } } }],
           },
         }),
       }),

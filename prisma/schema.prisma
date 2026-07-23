@@ -662,6 +662,7 @@ model GenerationJobOutput {
   mediaId        String        @map("media_id") @db.Uuid
   candidateIndex Int           @map("candidate_index")
   selected       Boolean       @default(false)
+  filterPreset   String?       @map("filter_preset")
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   job            GenerationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
   media          Media         @relation(fields: [mediaId], references: [id])

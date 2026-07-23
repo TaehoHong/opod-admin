@@ -49,10 +49,45 @@ export const navItems = [
 
 const DEFAULT_ROUTE = "home";
 
-export function currentRouteFromHash(hash = "#characters", token = "") {
-  const route = String(hash ?? "")
-    .replace(/^#/, "")
-    .split("?")[0];
+function parseRouteUrl(input = "/") {
+  const raw = String(input ?? "/");
+  const url = new URL(
+    raw.startsWith("#") ? `/${raw}` : raw,
+    "http://admin.local",
+  );
+  const legacy = raw.startsWith("#") || (url.pathname === "/" && url.hash);
+  const source = legacy ? (raw.startsWith("#") ? raw : url.hash) : url.pathname;
+  const [path, query = ""] = source.replace(/^#/, "").split("?");
+  const segments = path
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return "";
+      }
+    });
+  return { segments, params: new URLSearchParams(query), legacy };
+}
+
+export function adminRouteState(input = "/") {
+  const { segments, params, legacy } = parseRouteUrl(input);
+  const requestedRoute = segments[0] || DEFAULT_ROUTE;
+  const route = navItems.some((item) => item.id === requestedRoute)
+    ? requestedRoute
+    : DEFAULT_ROUTE;
+  let detailId = segments[1] ?? "";
+  if (legacy && route === "characters") {
+    detailId = String(params.get("characterId") ?? "").trim();
+  } else if (legacy && route === "generation") {
+    detailId = String(params.get("jobId") ?? "").trim();
+  }
+  return detailId ? { route, detailId } : { route };
+}
+
+export function currentRouteFromUrl(url = "/", token = "") {
+  const route = adminRouteState(url).route;
   const hasToken = Boolean(String(token ?? "").trim());
   if (!hasToken) {
     return "login";
@@ -127,35 +162,41 @@ const CHARACTER_TABS = [
   "automation",
 ];
 
-export function characterRouteState(hash = "#characters") {
-  const [routePart, query = ""] = String(hash ?? "")
-    .replace(/^#/, "")
-    .split("?");
-  const params = new URLSearchParams(query);
-  const characterId = String(params.get("characterId") ?? "").trim();
-  const mode =
-    params.get("mode") === "create"
-      ? "create"
-      : characterId
-        ? "detail"
-        : "list";
-  const requestedTab = String(params.get("tab") ?? "profile").trim();
+export function characterRouteState(hash = "/characters") {
+  const { segments, params, legacy } = parseRouteUrl(hash);
+  const characterId = legacy
+    ? String(params.get("characterId") ?? "").trim()
+    : segments[1] === "new"
+      ? ""
+      : (segments[1] ?? "");
+  const mode = (
+    legacy ? params.get("mode") === "create" : segments[1] === "new"
+  )
+    ? "create"
+    : characterId
+      ? "detail"
+      : "list";
+  const requestedTab = String(
+    legacy ? (params.get("tab") ?? "profile") : (segments[2] ?? "profile"),
+  ).trim();
   const tab = CHARACTER_TABS.includes(requestedTab) ? requestedTab : "profile";
 
   return {
-    route: routePart || "characters",
+    route: "characters",
     mode,
     characterId,
     tab,
   };
 }
 
-export function generationRouteState(hash = "#generation") {
-  const [, query = ""] = String(hash ?? "")
-    .replace(/^#/, "")
-    .split("?");
-  const params = new URLSearchParams(query);
-  return { jobId: String(params.get("jobId") ?? "").trim() };
+export function generationRouteState(hash = "/generation") {
+  const { segments, params, legacy } = parseRouteUrl(hash);
+  const jobId = String(
+    legacy ? (params.get("jobId") ?? "") : (segments[1] ?? ""),
+  ).trim();
+  return {
+    jobId: jobId === "new" ? "" : jobId,
+  };
 }
 
 export function generationWorkflowStep(job = {}) {
@@ -354,19 +395,21 @@ export function generationWorkflowPanel(
     .join("")}</div>${card}${generationHistory(history)}`;
 }
 
-export function characterHref(input = {}) {
-  const params = new URLSearchParams();
-  if (input.mode === "create") {
-    params.set("mode", "create");
-  } else if (input.characterId) {
-    params.set("characterId", String(input.characterId));
-    if (input.tab && input.tab !== "profile") {
-      params.set("tab", String(input.tab));
-    }
-  }
+export function routeHref(route, detailId = "") {
+  if (route === "home") return "/";
+  const base = navItems.some((item) => item.id === route) ? `/${route}` : "/";
+  return detailId ? `${base}/${encodeURIComponent(detailId)}` : base;
+}
 
-  const query = params.toString();
-  return query ? `#characters?${query}` : "#characters";
+export function characterHref(input = {}) {
+  if (input.mode === "create") {
+    return "/characters/new";
+  }
+  if (!input.characterId) return "/characters";
+  const detail = routeHref("characters", input.characterId);
+  return input.tab && input.tab !== "profile"
+    ? `${detail}/${encodeURIComponent(input.tab)}`
+    : detail;
 }
 
 export function characterPersonasPanel(characterId, personas = []) {
@@ -458,16 +501,6 @@ export function characterMemoriesPanel(characterId, memories = []) {
     </form>
     <div>${rows}</div>
   </div>`;
-}
-
-export function postSelectionAfterAction(
-  action,
-  currentPostId,
-  selectedPostId = "",
-) {
-  if (action === "select-post") return selectedPostId || null;
-  if (action === "back-posts" || action === "sidebar-navigation") return null;
-  return currentPostId;
 }
 
 export function dialogContextFromDataset(dataset = {}) {
@@ -1346,8 +1379,7 @@ const ui = {
   draftPollTimer: 0,
   generationSelectedJobId: "",
   generationSelectedMediaId: "",
-  // 초안 검수 — 필름 마감 미리보기 토글 (드래프트 간에도 유지되는 보기 설정).
-  draftFilmPreview: false,
+  filterCompareControl: null,
 };
 
 // — request / auth —
@@ -1428,8 +1460,22 @@ function clearAdminAuth() {
   window.sessionStorage.removeItem(adminEmailStorageKey);
 }
 
+function currentUrl() {
+  return `${location.pathname}${location.search}${location.hash}`;
+}
+
 function currentRoute() {
-  return currentRouteFromHash(location.hash, readAdminToken());
+  return currentRouteFromUrl(currentUrl(), readAdminToken());
+}
+
+function navigateTo(path, { replace = false } = {}) {
+  const current = `${location.pathname}${location.search}`;
+  if (current !== path || location.hash) {
+    history[replace ? "replaceState" : "pushState"]({}, "", path);
+  }
+  closeLightbox();
+  if (dialogState) closeDialog();
+  renderApp();
 }
 
 // — formatting / classification helpers —
@@ -1985,7 +2031,7 @@ async function renderMediaDetail(id) {
 // ── 캐릭터 ────────────────────────────────────────────────────────────────
 
 async function renderCharacters() {
-  const state = characterRouteState(location.hash);
+  const state = characterRouteState(currentUrl());
   if (state.mode === "detail" && state.characterId) {
     return renderCharacterDetail(state.characterId, state.tab);
   }
@@ -2617,7 +2663,7 @@ export function generationProvidersSummary(settings) {
     <span>edit <strong>${escapeHtml(resolved.editProvider ?? "—")}</strong></span>
     <span>t2i <strong>${escapeHtml(resolved.t2iProvider ?? "—")}</strong></span>
     <span>기획 <strong>${escapeHtml(resolved.plannerProvider ?? "—")}</strong></span>
-    <a href="#settings" style="margin-left:auto;font-size:12.5px">설정에서 변경 →</a>
+    <a href="/settings" data-act="go-route" data-route="settings" style="margin-left:auto;font-size:12.5px">설정에서 변경 →</a>
   </div>`;
 }
 
@@ -2797,13 +2843,13 @@ function scheduleGenerationRefresh(jobId) {
     clearTimer: clearTimeout,
     setTimer: setTimeout,
     currentRoute,
-    currentHash: () => location.hash,
+    currentHash: currentUrl,
     refresh: renderApp,
   });
 }
 
 async function renderGeneration(renderEpoch) {
-  const routeState = generationRouteState(location.hash);
+  const routeState = generationRouteState(currentUrl());
   const characters = await loadCharacterOptions();
   if (ui.generationCreating && !routeState.jobId) {
     return generationRequestPanel(characters);
@@ -2843,7 +2889,7 @@ async function renderGeneration(renderEpoch) {
         expectedToken: renderEpoch,
         currentToken: renderToken,
         route: currentRoute(),
-        hash: location.hash,
+        hash: currentUrl(),
       },
       scheduleGenerationRefresh,
     );
@@ -3172,12 +3218,19 @@ function draftPlanBody(plan, planInput, plannerName) {
   </div>`;
 }
 
-// 게시 마감 프리셋 — draft conceptJson.finish (검수에서 게시글 단위 선택).
+// 구버전 초안 전체 필터 — 후보별 값이 없는 기존 데이터의 fallback.
 function draftFinishPreset(d) {
   const concept = d?.conceptJson;
   const value =
     concept && typeof concept === "object" ? concept.finish : undefined;
   return value === "film" || value === "mono-film" ? value : "none";
+}
+
+function draftOutputFilterPreset(d, output) {
+  const value = output?.filterPreset;
+  return value === "none" || value === "film" || value === "mono-film"
+    ? value
+    : draftFinishPreset(d);
 }
 
 // ③ 컷 서브카드 — draft(수동 대기)는 생성 실행 폼, completed는 후보 그리드 등.
@@ -3263,25 +3316,57 @@ function draftShotCard(d, shot) {
     const candidates = outputs.length
       ? outputs
           .map((o) => {
+            const filterPreset = draftOutputFilterPreset(d, o);
+            const filterEditable =
+              d.status !== "published" && d.status !== "rejected";
             const selectControl = o.selected
-              ? `<span class="tag tag-accent" style="text-align:center">✓ 선택됨</span>`
-              : `<button class="btn btn-ghost" style="padding:4px 0" data-act="draft-pick-output" data-draft="${attr(
+              ? `<span class="tag tag-accent candidate-selected">✓ 게시 이미지</span>`
+              : `<button class="btn btn-ghost" type="button" style="padding:5px 0" data-act="draft-pick-output" data-draft="${attr(
                   d.id,
                 )}" data-job="${attr(shot.jobId)}" data-media="${attr(
                   o.mediaId,
-                )}">이 컷 선택</button>`;
-            return `<div class="candidate">
+                )}">이 이미지 선택</button>`;
+            const filterButtons = [
+              ["none", "원본"],
+              ["film", "필름"],
+              ["mono-film", "흑백"],
+            ]
+              .map(
+                ([value, label]) =>
+                  `<button type="button" data-act="draft-filter-set" data-filter="${value}" aria-pressed="${
+                    filterPreset === value
+                  }"${filterEditable ? "" : " disabled"}>${label}</button>`,
+              )
+              .join("");
+            return `<article class="candidate" data-filter-media="${attr(
+              o.mediaId,
+            )}" data-filter-job="${attr(shot.jobId)}" data-filter-draft="${attr(
+              d.id,
+            )}" data-filter-preset="${attr(filterPreset)}">
               <img class="candidate-thumb${o.selected ? " is-selected" : ""}"
-                src="${attr(o.url)}" alt="candidate ${escapeHtml(o.candidateIndex)}"
+                src="${attr(o.url)}" alt="컷 ${escapeHtml(
+                  shot.sortOrder + 1,
+                )} 후보 ${escapeHtml(o.candidateIndex + 1)}"
                 data-act="zoom-image" data-url="${attr(o.url)}"
-                data-film-media="${attr(o.mediaId)}" data-orig-url="${attr(o.url)}"
-                data-finish-preset="${attr(draftFinishPreset(d))}">
+                data-filter-media="${attr(o.mediaId)}" data-orig-url="${attr(
+                  o.url,
+                )}" data-filter-preset="${attr(filterPreset)}">
               ${selectControl}
-            </div>`;
+              <div class="candidate-filter">
+                <span class="candidate-filter-label">필터</span>
+                <div class="candidate-filter-options" role="group" aria-label="이미지 필터">
+                  ${filterButtons}
+                </div>
+                <button class="candidate-filter-compare" type="button" data-act="draft-filter-compare" aria-pressed="false"${
+                  filterPreset === "none" ? " disabled" : ""
+                }>누르고 원본 비교</button>
+                <span class="candidate-filter-status" aria-live="polite"></span>
+              </div>
+            </article>`;
           })
           .join("")
       : `<div style="padding:6px 0;color:var(--color-neutral-600);font-style:italic">아직 후보가 없습니다.</div>`;
-    bodyHtml = `<div style="display:flex;gap:10px;flex-wrap:wrap">${candidates}</div>${regenBtn}`;
+    bodyHtml = `<div class="candidate-grid">${candidates}</div>${regenBtn}`;
   }
   return `<div style="background:var(--color-neutral-100);padding:14px;margin-bottom:12px;border-radius:4px">
     ${header}
@@ -3293,9 +3378,7 @@ function draftShotCard(d, shot) {
 
 // 단계 타임라인 마크업 (순수 함수, 네트워크 비의존 — 테스트 대상).
 // d = GET /api/drafts/:id 응답, characterName = 표시용 캐릭터명.
-// opts.filmPreview = 필름 마감 미리보기 토글 상태 (기본 꺼짐).
 export function draftDetailMarkup(d, characterName, opts = {}) {
-  const filmPreview = opts.filmPreview === true;
   const [sc, sl] = draftStatusMeta(d.status);
   const concept =
     d.conceptJson && typeof d.conceptJson === "object" ? d.conceptJson : {};
@@ -3419,46 +3502,12 @@ export function draftDetailMarkup(d, characterName, opts = {}) {
             : "프롬프트 다시 빌드"
         }</button>`
       : "";
-  // 게시 마감 — 게시글 단위 프리셋 (PATCH /api/drafts/:id {finish}).
-  // 검수에서 컷을 보며 고르고, 게시 시 워커가 같은 연산을 적용한다.
-  // 완료된 후보 이미지가 있어야 고르고 미리볼 의미가 있다.
-  const hasOutputs = shots.some(
-    (s) => Array.isArray(s.outputs) && s.outputs.length > 0,
-  );
-  const finish = draftFinishPreset(d);
-  const finishEditable = d.status === "needs_review" || d.status === "approved";
-  const finishSelect = hasOutputs
-    ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--color-neutral-600)">게시 마감 <select class="input" style="width:auto;padding:4px 8px" data-select="draft-finish" data-id="${attr(
-        d.id,
-      )}"${finishEditable ? "" : " disabled"}>
-        <option value="none"${finish === "none" ? " selected" : ""}>없음</option>
-        <option value="film"${finish === "film" ? " selected" : ""}>필름</option>
-        <option value="mono-film"${
-          finish === "mono-film" ? " selected" : ""
-        }>흑백 필름</option>
-      </select></label>`
+  const stage3Action = buildAction;
+  const builderNote = concept.builderName
+    ? `<p class="count-note" style="margin:0 0 8px">빌더: ${escapeHtml(
+        concept.builderName,
+      )}</p>`
     : "";
-  const previewToggle =
-    hasOutputs && finish !== "none"
-      ? `<button class="btn ${
-          filmPreview ? "btn-secondary" : "btn-ghost"
-        }" data-act="draft-film-toggle" aria-pressed="${filmPreview}">마감 미리보기 ${
-          filmPreview ? "ON" : "OFF"
-        }</button>`
-      : "";
-  const stage3Action = [buildAction, finishSelect, previewToggle]
-    .filter(Boolean)
-    .join(" ");
-  const filmNote =
-    filmPreview && finish !== "none"
-      ? `<p class="count-note" style="margin:0 0 8px">마감 미리보기 중 — 게시 시 이 마감이 그대로 적용됩니다. 저장된 후보 원본은 유지됩니다.</p>`
-      : "";
-  const builderNote =
-    (concept.builderName
-      ? `<p class="count-note" style="margin:0 0 8px">빌더: ${escapeHtml(
-          concept.builderName,
-        )}</p>`
-      : "") + filmNote;
   const stage3 = draftStage({
     num: 3,
     tone: stage3Tone,
@@ -3479,12 +3528,17 @@ export function draftDetailMarkup(d, characterName, opts = {}) {
   let stage4Tone;
   let stage4Status;
   let stage4Action = "";
+  const selectedShotCount = shots.filter((shot) =>
+    (shot.outputs ?? []).some((output) => output.selected),
+  ).length;
+  const selectionComplete =
+    shots.length > 0 && selectedShotCount === shots.length;
   if (reviewable) {
     stage4Tone = "current";
     stage4Status = ["tag-accent-2", "검수 필요"];
     stage4Action = `<button class="btn btn-primary" data-act="draft-approve" data-id="${attr(
       d.id,
-    )}">승인</button>
+    )}"${selectionComplete ? "" : ' disabled title="컷마다 게시 이미지를 선택하세요"'}>승인</button>
       <button class="btn btn-secondary" data-act="draft-reject" data-id="${attr(
         d.id,
       )}">반려</button>`;
@@ -3510,8 +3564,12 @@ export function draftDetailMarkup(d, characterName, opts = {}) {
     stage4Tone = "future";
     stage4Status = ["tag-neutral", "대기"];
   }
+  const selectionNote =
+    reviewable && !selectionComplete
+      ? `<p class="count-note review-readiness">게시 이미지 ${selectedShotCount}/${shots.length} 선택 · 컷마다 한 장을 선택하면 승인할 수 있습니다.</p>`
+      : "";
   const stage4Body = editable
-    ? `<form data-action="draft-edit" data-draft-id="${attr(
+    ? `${selectionNote}<form data-action="draft-edit" data-draft-id="${attr(
         d.id,
       )}" style="display:flex;flex-direction:column;gap:12px">
         <div class="field" style="margin:0"><label>캡션</label><textarea class="input" name="caption" rows="3">${escapeHtml(
@@ -3693,16 +3751,14 @@ async function renderDraftDetail(id) {
       ${noticeBlock("초안을 찾을 수 없습니다.")}`;
   }
   await loadCharacterOptions();
-  const html = draftDetailMarkup(d, charName(d.characterId), {
-    filmPreview: ui.draftFilmPreview,
-  });
+  const html = draftDetailMarkup(d, charName(d.characterId));
   // 반환 직전에 폴링 타이머를 (재)설정한다.
   scheduleDraftRefresh(d);
   return html;
 }
 
-// ── 게시 마감 미리보기 ──────────────────────────────────────────────────
-// 켜면 후보 이미지를 서버 후보정본(blob)으로 바꿔치기한다. 결정적 연산이라
+// ── 이미지 필터 미리보기 ────────────────────────────────────────────────
+// 후보별 필터 이미지를 서버 후보정본(blob)으로 바꿔치기한다. 결정적 연산이라
 // 미디어·프리셋당 한 번만 받아 object URL로 캐시한다. 저장 데이터는
 // 건드리지 않는다 — 게시 시 워커가 같은 연산으로 마감본을 만든다.
 
@@ -3738,33 +3794,89 @@ async function filmPreviewObjectUrl(mediaId, preset) {
   return filmPreviewPending.get(key);
 }
 
-// 렌더 직후 호출 — 토글 상태에 맞춰 data-film-media 이미지들의 src를 맞춘다.
-// 라이트박스(data-url)도 같이 바꿔 확대 보기에서도 같은 판이 보이게 한다.
-async function applyDraftFilmPreview() {
+async function applyCandidateFilter(img) {
+  const preset = img.dataset.filterPreset || "none";
+  const orig = img.dataset.origUrl || "";
+  if (preset === "none") {
+    if (orig) {
+      img.src = orig;
+      img.dataset.url = orig;
+    }
+    img.dataset.filteredUrl = "";
+    img.style.opacity = "";
+    return true;
+  }
+  img.style.opacity = "0.45";
+  const url = await filmPreviewObjectUrl(img.dataset.filterMedia, preset);
+  img.style.opacity = "";
+  if (!url || !img.isConnected || img.dataset.filterPreset !== preset) {
+    return false;
+  }
+  img.src = url;
+  img.dataset.url = url;
+  img.dataset.filteredUrl = url;
+  return true;
+}
+
+// 렌더 직후 후보별 저장 필터를 적용한다. 라이트박스도 같은 판을 사용한다.
+async function applyDraftFilters() {
   if (!hasDocument) return;
-  const imgs = Array.from(document.querySelectorAll("img[data-film-media]"));
+  const imgs = Array.from(document.querySelectorAll("img[data-filter-media]"));
   if (!imgs.length) return;
-  await Promise.all(
-    imgs.map(async (img) => {
-      const preset = img.dataset.finishPreset || "none";
-      if (!ui.draftFilmPreview || preset === "none") {
-        const orig = img.dataset.origUrl || "";
-        if (orig) {
-          img.src = orig;
-          img.dataset.url = orig;
-        }
-        img.style.opacity = "";
-        return;
-      }
-      img.style.opacity = "0.45";
-      const url = await filmPreviewObjectUrl(img.dataset.filmMedia, preset);
-      img.style.opacity = "";
-      // 받는 사이 토글이 꺼졌거나 다시 그려져 떨어져 나간 경우는 손대지 않는다.
-      if (!ui.draftFilmPreview || !url || !img.isConnected) return;
-      img.src = url;
-      img.dataset.url = url;
-    }),
-  );
+  await Promise.all(imgs.map((img) => applyCandidateFilter(img)));
+}
+
+function filterCompareControl(event) {
+  return event.target.closest?.("[data-act='draft-filter-compare']");
+}
+
+function showCandidateOriginal(control, show) {
+  if (!control || control.disabled) return;
+  const img = control
+    .closest("[data-filter-media]")
+    ?.querySelector("img[data-filter-media]");
+  if (!img) return;
+  control.setAttribute("aria-pressed", String(show));
+  if (show) {
+    const orig = img.dataset.origUrl || "";
+    if (orig) {
+      img.src = orig;
+      img.dataset.url = orig;
+    }
+    return;
+  }
+  const filtered = img.dataset.filteredUrl || "";
+  if (filtered) {
+    img.src = filtered;
+    img.dataset.url = filtered;
+  } else {
+    void applyCandidateFilter(img);
+  }
+}
+
+function handleFilterCompareStart(event) {
+  const control = filterCompareControl(event);
+  if (!control) return;
+  event.preventDefault();
+  ui.filterCompareControl = control;
+  showCandidateOriginal(control, true);
+}
+
+function handleFilterCompareEnd(event) {
+  const control = filterCompareControl(event) || ui.filterCompareControl;
+  if (!control) return;
+  showCandidateOriginal(control, false);
+  ui.filterCompareControl = null;
+}
+
+function handleFilterCompareKeyDown(event) {
+  if (event.key !== " " && event.key !== "Enter") return;
+  handleFilterCompareStart(event);
+}
+
+function handleFilterCompareKeyUp(event) {
+  if (event.key !== " " && event.key !== "Enter") return;
+  handleFilterCompareEnd(event);
 }
 
 // ── 사용자 ────────────────────────────────────────────────────────────────
@@ -4642,13 +4754,11 @@ async function dispatchSubmit(action, form, formData) {
     if (result.ok && result.body?.token) {
       writeAdminAuth(result.body);
       showToast("로그인되었습니다.");
-      if (
-        !location.hash ||
-        currentRouteFromHash(location.hash, "x") === "login"
-      ) {
-        location.hash = DEFAULT_ROUTE;
+      if (location.pathname === "/login") {
+        navigateTo("/", { replace: true });
+      } else {
+        renderApp();
       }
-      renderApp();
     } else {
       showToast(errorMessage(result.body, "로그인에 실패했습니다."), "", true);
     }
@@ -4691,8 +4801,7 @@ async function dispatchSubmit(action, form, formData) {
     }
     closeDialog();
     showToast("캐릭터를 생성했습니다.", "POST /api/characters");
-    location.hash = characterHref({ characterId: id });
-    renderApp();
+    navigateTo(characterHref({ characterId: id }));
     return;
   }
 
@@ -4820,9 +4929,10 @@ async function dispatchSubmit(action, form, formData) {
     if (result.ok) {
       // 초안 검수에서 만들면 바로 상세(단계 타임라인)로 진입한다.
       if (currentRoute() === "drafts" && result.body?.id) {
-        ui.selDraftId = result.body.id;
+        navigateTo(routeHref("drafts", result.body.id));
+      } else {
+        renderApp();
       }
-      renderApp();
     }
     return;
   }
@@ -4922,7 +5032,7 @@ async function dispatchSubmit(action, form, formData) {
     const result = await submitViaSpec(spec, "최종 프롬프트를 준비했습니다.");
     if (result.ok && result.body?.id) {
       ui.generationCreating = false;
-      location.hash = `#generation?jobId=${encodeURIComponent(result.body.id)}`;
+      navigateTo(routeHref("generation", result.body.id));
     }
     return;
   }
@@ -4977,7 +5087,7 @@ async function dispatchSubmit(action, form, formData) {
     if (result.ok && result.body?.id) {
       ui.generationSelectedJobId = "";
       ui.generationSelectedMediaId = "";
-      location.hash = `#generation?jobId=${encodeURIComponent(result.body.id)}`;
+      navigateTo(routeHref("generation", result.body.id));
     }
     return;
   }
@@ -5078,9 +5188,7 @@ async function handleClick(event) {
   // sidebar navigation
   const navBtn = event.target.closest?.(".nav-item[data-route]");
   if (navBtn) {
-    ui.selUserId = ui.selPayId = ui.selMediaId = null;
-    ui.selPostId = postSelectionAfterAction("sidebar-navigation", ui.selPostId);
-    location.hash = navBtn.dataset.route;
+    navigateTo(routeHref(navBtn.dataset.route));
     return;
   }
 
@@ -5133,23 +5241,19 @@ async function handleClick(event) {
     ui.generationCreating = true;
     ui.generationSelectedJobId = "";
     ui.generationSelectedMediaId = "";
-    renderApp();
+    navigateTo("/generation/new");
     return;
   }
   if (act === "generation-open") {
     ui.generationCreating = false;
-    location.hash = `#generation?jobId=${encodeURIComponent(el.dataset.jobId)}`;
+    navigateTo(routeHref("generation", el.dataset.jobId));
     return;
   }
   if (act === "generation-back") {
     ui.generationCreating = false;
     ui.generationSelectedJobId = "";
     ui.generationSelectedMediaId = "";
-    if (location.hash === "#generation") {
-      renderApp();
-    } else {
-      location.hash = "#generation";
-    }
+    navigateTo(routeHref("generation"));
     return;
   }
   if (act === "image-select") {
@@ -5328,55 +5432,54 @@ async function handleClick(event) {
     return;
   }
   if (act === "go-char") {
-    location.hash = characterHref({ characterId: el.dataset.id });
+    navigateTo(characterHref({ characterId: el.dataset.id }));
     return;
   }
   if (act === "go-char-list") {
-    location.hash = characterHref();
+    navigateTo(characterHref());
     return;
   }
   if (act === "char-tab") {
-    location.hash = characterHref({
-      characterId: el.dataset.id,
-      tab: el.dataset.tab,
-    });
+    navigateTo(
+      characterHref({
+        characterId: el.dataset.id,
+        tab: el.dataset.tab,
+      }),
+    );
     return;
   }
-  if (act === "select-post" || act === "back-posts") {
-    ui.selPostId = postSelectionAfterAction(act, ui.selPostId, el.dataset.id);
-    renderApp();
+  if (act === "select-post") {
+    navigateTo(routeHref("posts", el.dataset.id));
+    return;
+  }
+  if (act === "back-posts") {
+    navigateTo(routeHref("posts"));
     return;
   }
   if (act === "go-route") {
+    event.preventDefault();
     // 대시보드 처리 대기 카드 — 해당 섹션으로 이동 (사이드바 이동과 동일 처리).
-    ui.selUserId = ui.selPayId = ui.selMediaId = null;
-    ui.selPostId = postSelectionAfterAction("sidebar-navigation", ui.selPostId);
-    location.hash = el.dataset.route;
+    navigateTo(routeHref(el.dataset.route));
     return;
   }
   if (act === "select-media") {
-    ui.selMediaId = el.dataset.id;
-    renderApp();
+    navigateTo(routeHref("media", el.dataset.id));
     return;
   }
   if (act === "back-media-list") {
-    ui.selMediaId = null;
-    renderApp();
+    navigateTo(routeHref("media"));
     return;
   }
   if (act === "select-draft") {
-    ui.selDraftId = el.dataset.id;
-    renderApp();
+    navigateTo(routeHref("drafts", el.dataset.id));
     return;
   }
   if (act === "back-drafts") {
-    ui.selDraftId = null;
-    renderApp();
+    navigateTo(routeHref("drafts"));
     return;
   }
   if (act === "go-draft") {
-    ui.selDraftId = el.dataset.id;
-    location.hash = "#drafts";
+    navigateTo(routeHref("drafts", el.dataset.id));
     return;
   }
   if (act === "draft-regen") {
@@ -5403,25 +5506,75 @@ async function handleClick(event) {
     if (result.ok) renderApp();
     return;
   }
-  if (act === "draft-film-toggle") {
-    ui.draftFilmPreview = !ui.draftFilmPreview;
-    // 버튼 상태(ON/OFF)까지 다시 그리고, 렌더 후 훅이 이미지 스왑을 처리한다.
-    renderApp();
+  if (act === "draft-filter-set") {
+    const card = el.closest("[data-filter-media]");
+    const img = card?.querySelector("img[data-filter-media]");
+    if (!card || !img) return;
+    const previous = card.dataset.filterPreset || "none";
+    const next = el.dataset.filter || "none";
+    const status = card.querySelector(".candidate-filter-status");
+    const filterButtons = Array.from(
+      card.querySelectorAll("[data-act='draft-filter-set']"),
+    );
+    const setUi = (preset) => {
+      card.dataset.filterPreset = preset;
+      img.dataset.filterPreset = preset;
+      card
+        .querySelectorAll("[data-act='draft-filter-set']")
+        .forEach((button) =>
+          button.setAttribute(
+            "aria-pressed",
+            String(button.dataset.filter === preset),
+          ),
+        );
+      const compare = card.querySelector("[data-act='draft-filter-compare']");
+      if (compare) compare.disabled = preset === "none";
+    };
+    setUi(next);
+    filterButtons.forEach((button) => {
+      button.disabled = true;
+    });
+    if (status) status.textContent = "저장 중…";
+    const preview = applyCandidateFilter(img);
+    const spec = jsonRequest(
+      `/api/drafts/${card.dataset.filterDraft}/jobs/${card.dataset.filterJob}/outputs/${card.dataset.filterMedia}/filter`,
+      "PATCH",
+      { filterPreset: next },
+    );
+    const result = await request(spec.path, spec.options);
+    const previewOk = await preview;
+    filterButtons.forEach((button) => {
+      button.disabled = false;
+    });
+    if (result.ok) {
+      if (status) {
+        status.textContent = previewOk ? "저장됨" : "저장됨 · 미리보기 실패";
+      }
+    } else {
+      setUi(previous);
+      void applyCandidateFilter(img);
+      if (status) {
+        status.textContent = errorMessage(
+          result.body,
+          "필터 저장에 실패했습니다.",
+        );
+      }
+    }
+    return;
+  }
+  if (act === "draft-filter-compare") {
     return;
   }
   if (act === "select-user") {
-    ui.selUserId = el.dataset.id;
-    renderApp();
+    navigateTo(routeHref("users", el.dataset.id));
     return;
   }
   if (act === "back-users") {
-    ui.selUserId = null;
-    renderApp();
+    navigateTo(routeHref("users"));
     return;
   }
   if (act === "select-payment") {
-    ui.selPayId = el.dataset.id;
-    renderApp();
+    navigateTo(routeHref("payments", el.dataset.id));
     return;
   }
   if (act === "toggle-char-status") {
@@ -5481,16 +5634,6 @@ function handleChange(event) {
   } else if (kind === "event-user") {
     ui.eventUserId = el.value;
     renderApp();
-  } else if (kind === "draft-finish") {
-    // 게시 마감 프리셋 — 고르는 즉시 draft에 저장한다 (none = 해제).
-    void submitViaSpec(
-      jsonRequest(`/api/drafts/${el.dataset.id}`, "PATCH", {
-        finish: el.value === "none" ? null : el.value,
-      }),
-      "게시 마감을 저장했습니다.",
-    ).then((result) => {
-      if (result.ok) renderApp();
-    });
   }
 }
 
@@ -5619,9 +5762,14 @@ async function renderApp() {
   clearTimeout(ui.draftPollTimer);
   ui.draftPollTimer = 0;
   const route = currentRoute();
-  if (route !== "generation") {
-    ui.generationCreating = false;
-  }
+  const routeState = adminRouteState(currentUrl());
+  ui.selPostId = route === "posts" ? (routeState.detailId ?? null) : null;
+  ui.selMediaId = route === "media" ? (routeState.detailId ?? null) : null;
+  ui.selDraftId = route === "drafts" ? (routeState.detailId ?? null) : null;
+  ui.selUserId = route === "users" ? (routeState.detailId ?? null) : null;
+  ui.selPayId = route === "payments" ? (routeState.detailId ?? null) : null;
+  ui.generationCreating =
+    route === "generation" && routeState.detailId === "new";
 
   if (route === "login") {
     appShell.hidden = true;
@@ -5650,8 +5798,8 @@ async function renderApp() {
   }
   if (token !== renderToken) return; // a newer render superseded this one
   mainPanel.innerHTML = html;
-  // 초안 검수의 필름 마감 토글이 켜져 있으면 후보 이미지를 후보정본으로 교체.
-  void applyDraftFilmPreview();
+  // 초안 후보별 저장 필터를 렌더된 이미지에 적용한다.
+  void applyDraftFilters();
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -5675,8 +5823,7 @@ if (hasDocument) {
   logoutButton?.addEventListener("click", () => {
     clearAdminAuth();
     closeDialog();
-    location.hash = "";
-    renderApp();
+    navigateTo("/", { replace: true });
   });
 
   document.body.addEventListener("click", handleClick);
@@ -5686,6 +5833,12 @@ if (hasDocument) {
   document.body.addEventListener("dragover", handlePostMediaDragOver);
   document.body.addEventListener("dragleave", handlePostMediaDragLeave);
   document.body.addEventListener("drop", handlePostMediaDrop);
+  document.body.addEventListener("pointerdown", handleFilterCompareStart);
+  document.body.addEventListener("pointerup", handleFilterCompareEnd);
+  document.body.addEventListener("pointercancel", handleFilterCompareEnd);
+  document.body.addEventListener("pointerleave", handleFilterCompareEnd, true);
+  document.body.addEventListener("keydown", handleFilterCompareKeyDown);
+  document.body.addEventListener("keyup", handleFilterCompareKeyUp);
 
   window.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
@@ -5694,12 +5847,21 @@ if (hasDocument) {
     if (dialogState) closeDialog();
   });
 
-  window.addEventListener("hashchange", () => {
+  window.addEventListener("popstate", () => {
     // Navigating dismisses any open modal so it can't linger over a new section.
     closeLightbox();
     if (dialogState) closeDialog();
     renderApp();
   });
+
+  if (location.hash) {
+    const legacy = adminRouteState(location.hash);
+    const path =
+      legacy.route === "characters"
+        ? characterHref(characterRouteState(location.hash))
+        : routeHref(legacy.route, legacy.detailId);
+    history.replaceState({}, "", path);
+  }
 
   // initial paint
   renderApp().then(() => {
