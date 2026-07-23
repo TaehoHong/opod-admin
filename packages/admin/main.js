@@ -4507,7 +4507,9 @@ function paintDialog() {
 
 // 이미지 라이트박스 — 후보/레퍼런스 이미지를 크게 본다. 폼 세션(dialog)과
 // 분리된 가벼운 오버레이. 배경/닫기/Esc로 닫는다.
-let lightboxUrl = null;
+// 게시 마감 프리셋이 있는 후보는 원본/마감 비교 모드로 열린다:
+// 가운데 선(range)을 좌우로 끌면 왼쪽 원본 / 오른쪽 마감이 갈라져 보인다.
+let lightboxState = null; // { url } | { compare: { origUrl, mediaId, preset, finishedUrl } }
 
 function lightboxRootEl() {
   let el = document.getElementById("lightboxRoot");
@@ -4521,22 +4523,68 @@ function lightboxRootEl() {
 
 function paintLightbox() {
   const root = lightboxRootEl();
-  root.innerHTML = lightboxUrl
-    ? `<div class="lightbox-backdrop" data-act="lightbox-backdrop">
+  if (!lightboxState) {
+    root.innerHTML = "";
+    return;
+  }
+  if (!lightboxState.compare) {
+    root.innerHTML = `<div class="lightbox-backdrop" data-act="lightbox-backdrop">
         <button class="lightbox-close" type="button" data-act="lightbox-backdrop" aria-label="닫기">×</button>
-        <img class="lightbox-img" src="${attr(lightboxUrl)}" alt="확대 이미지">
-      </div>`
-    : "";
+        <img class="lightbox-img" src="${attr(lightboxState.url)}" alt="확대 이미지">
+      </div>`;
+    return;
+  }
+  const compare = lightboxState.compare;
+  const presetLabel = compare.preset === "mono-film" ? "흑백 필름" : "필름";
+  root.innerHTML = `<div class="lightbox-backdrop" data-act="lightbox-backdrop">
+      <button class="lightbox-close" type="button" data-act="lightbox-backdrop" aria-label="닫기">×</button>
+      <div class="lightbox-compare${
+        compare.finishedUrl ? "" : " is-loading"
+      }" style="--x:50%">
+        <img class="lightbox-img" src="${attr(compare.origUrl)}" alt="원본">
+        <div class="lb-after">${
+          compare.finishedUrl
+            ? `<img src="${attr(compare.finishedUrl)}" alt="마감 미리보기">`
+            : ""
+        }</div>
+        <div class="lb-divider"></div>
+        <span class="lb-badge lb-badge-l">원본</span>
+        <span class="lb-badge lb-badge-r">${
+          compare.finishedUrl
+            ? `마감 · ${escapeHtml(presetLabel)}`
+            : "마감 불러오는 중…"
+        }</span>
+        <input class="lb-range" type="range" min="0" max="100" value="50" aria-label="원본/마감 비교 슬라이더" data-lightbox-range>
+      </div>
+    </div>`;
 }
 
 function openLightbox(url) {
-  lightboxUrl = url;
+  lightboxState = { url };
   paintLightbox();
 }
 
+function openCompareLightbox(origUrl, mediaId, preset) {
+  const state = { compare: { origUrl, mediaId, preset, finishedUrl: "" } };
+  lightboxState = state;
+  paintLightbox();
+  void filmPreviewObjectUrl(mediaId, preset).then((finishedUrl) => {
+    // 받는 사이 닫혔거나 다른 이미지로 바뀐 경우는 손대지 않는다.
+    if (lightboxState !== state) return;
+    if (!finishedUrl) {
+      // 마감본을 못 받으면 원본 단독 보기로 넘어간다.
+      lightboxState = { url: origUrl };
+      paintLightbox();
+      return;
+    }
+    state.compare.finishedUrl = finishedUrl;
+    paintLightbox();
+  });
+}
+
 function closeLightbox() {
-  if (!lightboxUrl) return false;
-  lightboxUrl = null;
+  if (!lightboxState) return false;
+  lightboxState = null;
   paintLightbox();
   return true;
 }
@@ -5206,7 +5254,17 @@ async function handleClick(event) {
     return;
   }
   if (act === "zoom-image") {
-    if (el.dataset.url) openLightbox(el.dataset.url);
+    const preset = el.dataset.filterPreset;
+    if (el.dataset.filterMedia && preset && preset !== "none") {
+      // 필터가 걸린 후보 — 확대에서 원본/마감 비교 슬라이더로 연다.
+      openCompareLightbox(
+        el.dataset.origUrl || el.dataset.url,
+        el.dataset.filterMedia,
+        preset,
+      );
+    } else if (el.dataset.url) {
+      openLightbox(el.dataset.url);
+    }
     return;
   }
   if (act === "lightbox-backdrop") {
@@ -5673,6 +5731,14 @@ function handlePostMediaDrop(event) {
 }
 
 function handleInput(event) {
+  // 비교 라이트박스 슬라이더 — 가운데 선 위치(--x)만 움직인다.
+  const compareRange = event.target.closest?.("[data-lightbox-range]");
+  if (compareRange) {
+    compareRange
+      .closest(".lightbox-compare")
+      ?.style.setProperty("--x", `${compareRange.value}%`);
+    return;
+  }
   const candidateCount = event.target.closest?.(
     "[data-generation-candidate-count]",
   );

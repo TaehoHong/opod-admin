@@ -556,6 +556,82 @@ input[type="checkbox"] {
   line-height: 1;
   cursor: pointer;
 }
+/* 원본/마감 비교 라이트박스 — 가운데 선(range)을 끌면 좌 원본 / 우 마감 */
+.lightbox-compare {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  cursor: default;
+}
+.lightbox-compare .lb-after {
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 0 0 var(--x, 50%));
+}
+.lightbox-compare .lb-after img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.lightbox-compare .lb-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--x, 50%);
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+.lightbox-compare .lb-divider::after {
+  content: "◂ ▸";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #fff;
+  color: #333;
+  font-size: 11px;
+  letter-spacing: 2px;
+  padding: 5px 8px 5px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+.lightbox-compare .lb-badge {
+  position: absolute;
+  top: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(15, 0, 0, 0.62);
+  color: var(--color-bg);
+  pointer-events: none;
+}
+.lightbox-compare .lb-badge-l {
+  left: 10px;
+}
+.lightbox-compare .lb-badge-r {
+  right: 10px;
+}
+.lightbox-compare .lb-range {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  margin: 0;
+  cursor: ew-resize;
+}
+/* 마감본 로딩 중 — 원본만 보이고 슬라이더는 준비되면 나타난다 */
+.lightbox-compare.is-loading .lb-after,
+.lightbox-compare.is-loading .lb-divider,
+.lightbox-compare.is-loading .lb-range {
+  display: none;
+}
 /* candidate grid — image zooms on click, selection is a separate control */
 .candidate-grid {
   display: grid;
