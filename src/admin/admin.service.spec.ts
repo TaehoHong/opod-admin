@@ -1,6 +1,54 @@
 import { AdminService } from "./admin.service";
 
 describe("AdminService", () => {
+  it("grants a purchase promotion with an explicit paid or free kind", async () => {
+    const createdAt = new Date("2026-07-24T00:00:00.000Z");
+    const create = jest.fn().mockImplementation(({ data }) => ({
+      id: "entry-1",
+      entryType: "grant",
+      remainingAmount: data.amount,
+      expiresAt: null,
+      createdAt,
+      ...data,
+    }));
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        creditPurchase: {
+          findFirst: jest.fn().mockResolvedValue({ id: "purchase-1" }),
+        },
+        creditLedgerEntry: { create },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.grantCredits({
+        userId: "user-1",
+        amount: 100,
+        reason: "paid purchase promotion",
+        creditKind: "paid",
+        purchaseId: "purchase-1",
+        promotionCode: "SUMMER_PAID",
+      }),
+    ).resolves.toMatchObject({
+      creditKind: "paid",
+      purchaseId: "purchase-1",
+      promotionCode: "SUMMER_PAID",
+      amount: 100,
+    });
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        creditKind: "paid",
+        purchaseId: "purchase-1",
+        promotionCode: "SUMMER_PAID",
+      }),
+    });
+    expect(create.mock.calls[0][0].data).not.toHaveProperty("expiresAt");
+  });
+
   it("lists top global hashtags by post count", async () => {
     const findMany = jest.fn().mockResolvedValue([
       { name: "opod", _count: { posts: 42 } },
@@ -301,6 +349,12 @@ describe("AdminService", () => {
       .mockResolvedValue([paidWithoutGrant, paidWithGrant]);
     const findLedgerEntries = jest.fn().mockResolvedValue([
       {
+        id: "grant-1",
+        purchaseId: "purchase-granted",
+        entryType: "grant",
+        creditKind: "paid",
+        promotionCode: null,
+        amount: 100,
         externalReference: "credit_purchase:purchase-granted",
       },
     ]);
@@ -310,6 +364,7 @@ describe("AdminService", () => {
       {
         creditLedgerEntry: { findMany: findLedgerEntries },
         creditPurchase: { findMany: findPurchases },
+        creditRefund: { findMany: jest.fn().mockResolvedValue([]) },
       },
       { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
       { startUpload: jest.fn(), confirmUpload: jest.fn() },
@@ -333,6 +388,8 @@ describe("AdminService", () => {
           currency: "KRW",
           ledgerStatus: "missing_grant",
           reason: "paid purchase has no credit grant",
+          issueCodes: ["paid_missing_grant"],
+          repairActions: ["grant_missing_purchase"],
         },
       ],
     });
@@ -347,15 +404,19 @@ describe("AdminService", () => {
     });
     expect(findLedgerEntries).toHaveBeenCalledWith({
       where: {
-        entryType: "grant",
-        externalReference: {
-          in: [
-            "credit_purchase:purchase-missing",
-            "credit_purchase:purchase-granted",
-          ],
+        purchaseId: {
+          in: ["purchase-missing", "purchase-granted"],
         },
       },
-      select: { externalReference: true },
+      select: {
+        id: true,
+        purchaseId: true,
+        entryType: true,
+        creditKind: true,
+        promotionCode: true,
+        amount: true,
+        externalReference: true,
+      },
     });
   });
 
@@ -366,6 +427,7 @@ describe("AdminService", () => {
     )(
       {
         creditLedgerEntry: { findMany: jest.fn().mockResolvedValue([]) },
+        creditRefund: { findMany: jest.fn().mockResolvedValue([]) },
         creditPurchase: {
           findMany: jest.fn().mockResolvedValue([
             {
@@ -402,6 +464,328 @@ describe("AdminService", () => {
           reason: "payment pending",
         },
       ],
+    });
+  });
+
+  it("detects duplicate grants and refund recovery mismatches", async () => {
+    const createdAt = new Date("2026-07-02T00:00:00.000Z");
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      {
+        creditPurchase: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: "purchase-1",
+              userId: "human-1",
+              provider: "local",
+              status: "refunded",
+              creditAmount: 500,
+              paidAmount: 4900,
+              currency: "KRW",
+              createdAt,
+              updatedAt: createdAt,
+            },
+          ]),
+        },
+        creditLedgerEntry: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: "grant-1",
+              purchaseId: "purchase-1",
+              entryType: "grant",
+              creditKind: "paid",
+              promotionCode: null,
+              amount: 500,
+              externalReference: "credit_purchase:purchase-1",
+            },
+          ]),
+        },
+        creditRefund: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: "refund-1",
+              purchaseId: "purchase-1",
+              status: "refunded",
+              refundAmount: 5000,
+              allocations: [{ recoveryAmount: 500, recoveredAmount: 0 }],
+            },
+          ]),
+        },
+      },
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.listPaymentReconciliation({ status: "mismatch" }),
+    ).resolves.toEqual({
+      items: [
+        expect.objectContaining({
+          paymentId: "purchase-1",
+          issueCodes: [
+            "refund_missing_recovery",
+            "refund_total_exceeds_payment",
+          ],
+        }),
+      ],
+    });
+  });
+
+  it("repairs a missing paid grant once and records the admin action", async () => {
+    const createdAt = new Date("2026-07-02T00:00:00.000Z");
+    const actions: Array<{
+      reference: string;
+      purchaseId: string;
+      actionType: string;
+      details: unknown;
+    }> = [];
+    const ledgerCreate = jest.fn().mockResolvedValue({ id: "grant-1" });
+    let prisma: Record<string, unknown>;
+    prisma = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      creditPurchase: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: "purchase-1",
+          userId: "human-1",
+          provider: "local",
+          status: "paid",
+          creditAmount: 500,
+          paidAmount: 4900,
+          currency: "KRW",
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      },
+      creditReconciliationAction: {
+        findUnique: jest.fn(async ({ where }) =>
+          actions.find((action) => action.reference === where.reference),
+        ),
+        create: jest.fn(async ({ data }) => {
+          actions.push(data);
+          return data;
+        }),
+      },
+      creditLedgerEntry: {
+        findMany: jest.fn().mockResolvedValue([]),
+        create: ledgerCreate,
+      },
+      creditAccount: {
+        upsert: jest.fn().mockResolvedValue({ userId: "human-1", paidDebt: 0 }),
+        update: jest.fn(),
+      },
+      user: { update: jest.fn() },
+      $transaction: jest.fn(
+        async (run: (client: unknown) => Promise<unknown>) => run(prisma),
+      ),
+    };
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      prisma,
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+    const input = {
+      adminId: "admin-1",
+      purchaseId: "purchase-1",
+      action: "grant_missing_purchase" as const,
+      reference: "repair-purchase-1",
+      reason: "reconciliation repair",
+    };
+
+    const first = await service.reconcilePayment(input);
+    const replay = await service.reconcilePayment(input);
+
+    expect(replay).toEqual(first);
+    expect(ledgerCreate).toHaveBeenCalledTimes(1);
+    expect(first).toEqual({
+      reference: "repair-purchase-1",
+      action: "grant_missing_purchase",
+      purchaseId: "purchase-1",
+      grantedCredits: 500,
+      recoveredCredits: 0,
+      debtAdded: 0,
+    });
+    expect(actions).toHaveLength(1);
+  });
+
+  it("recovers an erroneous non-paid grant and records used credits as debt", async () => {
+    const createdAt = new Date("2026-07-02T00:00:00.000Z");
+    const grant = {
+      id: "grant-1",
+      userId: "human-1",
+      purchaseId: "purchase-1",
+      entryType: "grant",
+      creditKind: "paid",
+      promotionCode: null,
+      amount: 500,
+      remainingAmount: 200,
+      createdAt,
+    };
+    const debtUpsert = jest.fn().mockResolvedValue({
+      userId: "human-1",
+      paidDebt: 300,
+    });
+    const ledgerCreate = jest.fn().mockResolvedValue({ id: "debit-1" });
+    let prisma: Record<string, unknown>;
+    prisma = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      creditPurchase: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: "purchase-1",
+          userId: "human-1",
+          status: "failed",
+          creditAmount: 500,
+          paidAmount: 4900,
+          currency: "KRW",
+          provider: "local",
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      },
+      creditReconciliationAction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: "action-1" }),
+      },
+      creditLedgerEntry: {
+        findMany: jest.fn().mockResolvedValue([grant]),
+        update: jest.fn().mockResolvedValue({ ...grant, remainingAmount: 0 }),
+        create: ledgerCreate,
+      },
+      creditAccount: { upsert: debtUpsert },
+      $transaction: jest.fn(
+        async (run: (client: unknown) => Promise<unknown>) => run(prisma),
+      ),
+    };
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      prisma,
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.reconcilePayment({
+        adminId: "admin-1",
+        purchaseId: "purchase-1",
+        action: "recover_nonpaid_grants",
+        reference: "recover-purchase-1",
+        reason: "failed payment grant recovery",
+      }),
+    ).resolves.toMatchObject({
+      recoveredCredits: 500,
+      debtAdded: 300,
+    });
+    expect(debtUpsert).toHaveBeenCalledWith({
+      where: { userId: "human-1" },
+      create: { userId: "human-1", paidDebt: 300 },
+      update: { paidDebt: { increment: 300 } },
+    });
+    expect(ledgerCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        entryType: "debit",
+        amount: 500,
+        externalReference: "credit_reconciliation:recover-purchase-1",
+      }),
+    });
+  });
+
+  it("retries only the unrecovered portion of a completed refund", async () => {
+    const createdAt = new Date("2026-07-02T00:00:00.000Z");
+    const allocationUpdate = jest.fn().mockResolvedValue({});
+    const debtUpsert = jest.fn().mockResolvedValue({});
+    const ledgerCreate = jest.fn().mockResolvedValue({ id: "debit-1" });
+    let prisma: Record<string, unknown>;
+    prisma = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      creditPurchase: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: "purchase-1",
+          userId: "human-1",
+          status: "refunded",
+          creditAmount: 500,
+          paidAmount: 4900,
+          currency: "KRW",
+          provider: "local",
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      },
+      creditReconciliationAction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: "action-1" }),
+      },
+      creditRefund: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: "refund-1",
+            creditAmount: 500,
+            promotionAmount: 0,
+            allocations: [
+              {
+                refundId: "refund-1",
+                ledgerEntryId: "grant-1",
+                recoveryAmount: 500,
+                recoveredAmount: 0,
+                ledgerEntry: { remainingAmount: 200 },
+              },
+            ],
+          },
+        ]),
+      },
+      creditRefundAllocation: { update: allocationUpdate },
+      creditLedgerEntry: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue({ remainingAmount: 0 }),
+        create: ledgerCreate,
+      },
+      creditAccount: { upsert: debtUpsert },
+      $transaction: jest.fn(
+        async (run: (client: unknown) => Promise<unknown>) => run(prisma),
+      ),
+    };
+    const service = new (
+      AdminService as new (...args: unknown[]) => AdminService
+    )(
+      prisma,
+      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
+      { startUpload: jest.fn(), confirmUpload: jest.fn() },
+    );
+
+    await expect(
+      service.reconcilePayment({
+        adminId: "admin-1",
+        purchaseId: "purchase-1",
+        action: "recover_completed_refund",
+        reference: "recover-refund-1",
+        reason: "refund recovery retry",
+      }),
+    ).resolves.toMatchObject({
+      recoveredCredits: 500,
+      debtAdded: 300,
+    });
+    expect(allocationUpdate).toHaveBeenCalledWith({
+      where: {
+        refundId_ledgerEntryId: {
+          refundId: "refund-1",
+          ledgerEntryId: "grant-1",
+        },
+      },
+      data: { recoveredAmount: 500 },
+    });
+    expect(debtUpsert).toHaveBeenCalledWith({
+      where: { userId: "human-1" },
+      create: { userId: "human-1", paidDebt: 300 },
+      update: { paidDebt: { increment: 300 } },
+    });
+    expect(ledgerCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        externalReference: "credit_refund:refund-1",
+        amount: 500,
+      }),
     });
   });
 

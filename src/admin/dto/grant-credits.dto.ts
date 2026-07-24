@@ -1,4 +1,11 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from "class-validator";
+import {
+  IsIn,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from "class-validator";
 
 export class GrantCreditsDto {
   @IsString()
@@ -15,4 +22,17 @@ export class GrantCreditsDto {
   @IsOptional()
   @IsString()
   externalReference?: string;
+
+  @IsOptional()
+  @IsIn(["free", "paid"])
+  creditKind?: "free" | "paid";
+
+  @IsOptional()
+  @IsUUID()
+  purchaseId?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  promotionCode?: string;
 }

@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import {
   decodeCursor,
@@ -22,6 +26,15 @@ type CreditPurchaseStatus =
   "pending" | "paid" | "failed" | "canceled" | "refunded";
 type ReconciliationStatus = "mismatch" | "pending" | "resolved";
 type LedgerStatus = "granted" | "missing_grant" | "not_granted";
+type ReconciliationIssueCode =
+  | "paid_missing_grant"
+  | "paid_grant_amount_mismatch"
+  | "duplicate_base_grant"
+  | "nonpaid_has_grant"
+  | "refunded_without_completed_refund"
+  | "refund_missing_recovery"
+  | "released_refund_has_recovery"
+  | "refund_total_exceeds_payment";
 const analyticsMetricNames = [
   "events.count",
   "messages.count",
@@ -137,6 +150,9 @@ type CreditEntry = {
   id: string;
   userId: string;
   entryType: CreditEntryType;
+  creditKind?: "free" | "paid";
+  purchaseId?: string;
+  promotionCode?: string;
   amount: number;
   reason: string;
   externalReference?: string;
@@ -159,6 +175,8 @@ type PaymentReconciliationItem = {
   currency: string;
   ledgerStatus: LedgerStatus;
   reason?: string;
+  issueCodes?: ReconciliationIssueCode[];
+  repairActions?: ReconciliationActionType[];
 };
 
 type AdminPayment = {
@@ -171,6 +189,21 @@ type AdminPayment = {
   currency: string;
   createdAt: string;
   updatedAt: string;
+};
+
+type ReconciliationActionType =
+  | "grant_missing_purchase"
+  | "recover_nonpaid_grants"
+  | "recover_duplicate_grants"
+  | "recover_completed_refund";
+
+type ReconciliationActionReceipt = {
+  reference: string;
+  action: ReconciliationActionType;
+  purchaseId: string;
+  grantedCredits: number;
+  recoveredCredits: number;
+  debtAdded: number;
 };
 
 type PaymentReconciliationRow = PaymentReconciliationItem & {
@@ -809,6 +842,9 @@ export class AdminService {
     amount: number;
     reason: string;
     externalReference?: string;
+    creditKind?: "free" | "paid";
+    purchaseId?: string;
+    promotionCode?: string;
   }) {
     return this.appendCreditEntry("grant", input);
   }
@@ -1038,32 +1074,47 @@ export class AdminService {
       where: this.parsePaymentCreatedAtWhere(input.from, input.to),
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
-    const references = purchases.map(
-      (purchase) => `credit_purchase:${purchase.id}`,
-    );
-    const grantReferences =
-      references.length === 0
-        ? new Set<string>()
-        : new Set(
-            (
-              await this.prisma.creditLedgerEntry.findMany({
-                where: {
-                  entryType: "grant",
-                  externalReference: { in: references },
+    const purchaseIds = purchases.map((purchase) => purchase.id);
+    const [entries, refunds] =
+      purchaseIds.length === 0
+        ? [[], []]
+        : await Promise.all([
+            this.prisma.creditLedgerEntry.findMany({
+              where: { purchaseId: { in: purchaseIds } },
+              select: {
+                id: true,
+                purchaseId: true,
+                entryType: true,
+                creditKind: true,
+                promotionCode: true,
+                amount: true,
+                externalReference: true,
+              },
+            }),
+            this.prisma.creditRefund.findMany({
+              where: { purchaseId: { in: purchaseIds } },
+              select: {
+                id: true,
+                purchaseId: true,
+                status: true,
+                refundAmount: true,
+                allocations: {
+                  select: {
+                    recoveryAmount: true,
+                    recoveredAmount: true,
+                  },
                 },
-                select: { externalReference: true },
-              })
-            )
-              .map((entry) => entry.externalReference)
-              .filter((reference): reference is string => Boolean(reference)),
-          );
+              },
+            }),
+          ]);
 
     return {
       items: purchases
         .map((purchase) =>
           this.toPaymentReconciliationRow(
             purchase,
-            grantReferences.has(`credit_purchase:${purchase.id}`),
+            entries.filter((entry) => entry.purchaseId === purchase.id),
+            refunds.filter((refund) => refund.purchaseId === purchase.id),
           ),
         )
         .filter((item) => !status || item.reconciliationStatus === status)
@@ -1077,6 +1128,10 @@ export class AdminService {
           currency: item.currency,
           ledgerStatus: item.ledgerStatus,
           ...(item.reason ? { reason: item.reason } : {}),
+          ...(item.issueCodes?.length ? { issueCodes: item.issueCodes } : {}),
+          ...(item.repairActions?.length
+            ? { repairActions: item.repairActions }
+            : {}),
         })),
     };
   }
@@ -1089,6 +1144,259 @@ export class AdminService {
       throw new BadRequestException("Payment not found");
     }
     return this.toPayment(payment);
+  }
+
+  async reconcilePayment(input: {
+    adminId: string;
+    purchaseId: string;
+    action: ReconciliationActionType;
+    reference: string;
+    reason: string;
+  }): Promise<ReconciliationActionReceipt> {
+    const reference = input.reference?.trim();
+    const reason = input.reason?.trim();
+    if (!reference || !reason) {
+      throw new BadRequestException(
+        "Reconciliation reference and reason are required",
+      );
+    }
+
+    const purchase = await this.prisma.creditPurchase.findUnique({
+      where: { id: input.purchaseId },
+    });
+    if (!purchase) {
+      throw new BadRequestException("Payment not found");
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${purchase.userId}, 0))`;
+      const actionLock = `credit_reconciliation:${reference}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${actionLock}, 0))`;
+
+      const existing = await tx.creditReconciliationAction.findUnique({
+        where: { reference },
+      });
+      if (existing) {
+        if (
+          existing.purchaseId !== input.purchaseId ||
+          existing.actionType !== input.action
+        ) {
+          throw new ConflictException(
+            "Reconciliation reference is already used",
+          );
+        }
+        return existing.details as ReconciliationActionReceipt;
+      }
+
+      const grants = await tx.creditLedgerEntry.findMany({
+        where: {
+          purchaseId: purchase.id,
+          entryType: "grant",
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      });
+      let grantedCredits = 0;
+      let recoveredCredits = 0;
+      let debtAdded = 0;
+
+      if (input.action === "grant_missing_purchase") {
+        if (purchase.status !== "paid") {
+          throw new ConflictException("Payment is not paid");
+        }
+        const baseGrants = grants.filter(
+          (grant) =>
+            grant.creditKind === "paid" && grant.promotionCode === null,
+        );
+        if (baseGrants.length > 0) {
+          throw new ConflictException("Payment already has a base grant");
+        }
+
+        const account = await tx.creditAccount.upsert({
+          where: { userId: purchase.userId },
+          create: { userId: purchase.userId },
+          update: {},
+        });
+        const offset = Math.min(account.paidDebt, purchase.creditAmount);
+        if (offset > 0) {
+          const nextDebt = account.paidDebt - offset;
+          await tx.creditAccount.update({
+            where: { userId: purchase.userId },
+            data: { paidDebt: nextDebt },
+          });
+          if (nextDebt === 0) {
+            await tx.user.update({
+              where: { id: purchase.userId },
+              data: { debtIdentityHash: null },
+            });
+          }
+        }
+        await tx.creditLedgerEntry.create({
+          data: {
+            userId: purchase.userId,
+            purchaseId: purchase.id,
+            entryType: "grant",
+            creditKind: "paid",
+            amount: purchase.creditAmount,
+            remainingAmount: purchase.creditAmount - offset,
+            reason,
+            externalReference: `credit_purchase:${purchase.id}`,
+          },
+        });
+        grantedCredits = purchase.creditAmount;
+      } else if (input.action === "recover_completed_refund") {
+        const refunds = await tx.creditRefund.findMany({
+          where: { purchaseId: purchase.id, status: "refunded" },
+          include: {
+            allocations: { include: { ledgerEntry: true } },
+          },
+        });
+        let repaired = false;
+        for (const refund of refunds) {
+          const totalRecovery = refund.creditAmount + refund.promotionAmount;
+          if (totalRecovery === 0) {
+            continue;
+          }
+          for (const allocation of refund.allocations) {
+            const recoveryLeft =
+              allocation.recoveryAmount - allocation.recoveredAmount;
+            if (recoveryLeft <= 0) {
+              continue;
+            }
+            const remaining = allocation.ledgerEntry.remainingAmount ?? 0;
+            const recovered = Math.min(remaining, recoveryLeft);
+            if (recovered > 0) {
+              await tx.creditLedgerEntry.update({
+                where: { id: allocation.ledgerEntryId },
+                data: { remainingAmount: remaining - recovered },
+              });
+            }
+            debtAdded += recoveryLeft - recovered;
+            recoveredCredits += recoveryLeft;
+            await tx.creditRefundAllocation.update({
+              where: {
+                refundId_ledgerEntryId: {
+                  refundId: allocation.refundId,
+                  ledgerEntryId: allocation.ledgerEntryId,
+                },
+              },
+              data: { recoveredAmount: allocation.recoveryAmount },
+            });
+            repaired = true;
+          }
+          const debitReference = `credit_refund:${refund.id}`;
+          if (
+            !(await tx.creditLedgerEntry.findFirst({
+              where: {
+                entryType: "debit",
+                externalReference: debitReference,
+              },
+              select: { id: true },
+            }))
+          ) {
+            await tx.creditLedgerEntry.create({
+              data: {
+                userId: purchase.userId,
+                purchaseId: purchase.id,
+                entryType: "debit",
+                amount: totalRecovery,
+                reason,
+                externalReference: debitReference,
+              },
+            });
+            repaired = true;
+          }
+        }
+        if (!repaired) {
+          throw new ConflictException("No incomplete refund recovery found");
+        }
+        if (debtAdded > 0) {
+          await tx.creditAccount.upsert({
+            where: { userId: purchase.userId },
+            create: { userId: purchase.userId, paidDebt: debtAdded },
+            update: { paidDebt: { increment: debtAdded } },
+          });
+        }
+      } else {
+        if (
+          input.action === "recover_nonpaid_grants" &&
+          purchase.status === "paid"
+        ) {
+          throw new ConflictException("Payment is paid");
+        }
+
+        let targets = grants;
+        if (input.action === "recover_duplicate_grants") {
+          if (purchase.status !== "paid") {
+            throw new ConflictException("Payment is not paid");
+          }
+          const baseGrants = grants.filter(
+            (grant) =>
+              grant.creditKind === "paid" && grant.promotionCode === null,
+          );
+          const keeper = baseGrants.find(
+            (grant) => grant.amount === purchase.creditAmount,
+          );
+          if (!keeper || baseGrants.length < 2) {
+            throw new ConflictException(
+              "No safely repairable duplicate grant exists",
+            );
+          }
+          targets = baseGrants.filter((grant) => grant.id !== keeper.id);
+        }
+        if (targets.length === 0) {
+          throw new ConflictException("No recoverable grants found");
+        }
+
+        for (const grant of targets) {
+          const remaining = grant.remainingAmount ?? 0;
+          if (remaining > 0) {
+            await tx.creditLedgerEntry.update({
+              where: { id: grant.id },
+              data: { remainingAmount: 0 },
+            });
+          }
+          recoveredCredits += grant.amount;
+          debtAdded += grant.amount - remaining;
+        }
+        if (debtAdded > 0) {
+          await tx.creditAccount.upsert({
+            where: { userId: purchase.userId },
+            create: { userId: purchase.userId, paidDebt: debtAdded },
+            update: { paidDebt: { increment: debtAdded } },
+          });
+        }
+        await tx.creditLedgerEntry.create({
+          data: {
+            userId: purchase.userId,
+            purchaseId: purchase.id,
+            entryType: "debit",
+            amount: recoveredCredits,
+            reason,
+            externalReference: `credit_reconciliation:${reference}`,
+          },
+        });
+      }
+
+      const receipt: ReconciliationActionReceipt = {
+        reference,
+        action: input.action,
+        purchaseId: purchase.id,
+        grantedCredits,
+        recoveredCredits,
+        debtAdded,
+      };
+      await tx.creditReconciliationAction.create({
+        data: {
+          actionType: input.action,
+          reference,
+          purchaseId: purchase.id,
+          adminId: input.adminId,
+          reason,
+          details: receipt,
+        },
+      });
+      return receipt;
+    });
   }
 
   async listReports(
@@ -1185,23 +1493,50 @@ export class AdminService {
       amount: number;
       reason: string;
       externalReference?: string;
+      creditKind?: "free" | "paid";
+      purchaseId?: string;
+      promotionCode?: string;
     },
   ): Promise<CreditEntry> {
     this.validateCreditEntryInput(input);
+    const creditKind = input.creditKind ?? "free";
+    const promotionCode = input.promotionCode?.trim() || undefined;
+    if (promotionCode && !input.purchaseId) {
+      throw new BadRequestException(
+        "Purchase-linked promotion requires a purchase ID",
+      );
+    }
+    if (entryType === "grant" && creditKind === "paid" && !input.purchaseId) {
+      throw new BadRequestException("Paid credits require a purchase ID");
+    }
+    if (
+      input.purchaseId &&
+      !(await this.prisma.creditPurchase.findFirst({
+        where: { id: input.purchaseId, userId: input.userId },
+        select: { id: true },
+      }))
+    ) {
+      throw new BadRequestException("Credit purchase not found");
+    }
 
     const entry = await this.prisma.creditLedgerEntry.create({
       data: {
         userId: input.userId,
         entryType,
         amount: input.amount,
-        // Manual admin grants are free credits: consumable bucket with the
-        // 30-day expiry from docs/credit-policy.md in opod-service-backend.
         ...(entryType === "grant"
           ? {
               remainingAmount: input.amount,
-              expiresAt: new Date(
-                Date.now() + freeCreditTtlDays * 24 * 60 * 60 * 1000,
-              ),
+              creditKind,
+              purchaseId: input.purchaseId,
+              promotionCode,
+              ...(creditKind === "free"
+                ? {
+                    expiresAt: new Date(
+                      Date.now() + freeCreditTtlDays * 24 * 60 * 60 * 1000,
+                    ),
+                  }
+                : {}),
             }
           : {}),
         reason: input.reason.trim(),
@@ -1280,6 +1615,9 @@ export class AdminService {
       id: entry.id,
       userId: entry.userId,
       entryType: entry.entryType,
+      creditKind: entry.creditKind ?? undefined,
+      purchaseId: entry.purchaseId ?? undefined,
+      promotionCode: entry.promotionCode ?? undefined,
       amount: entry.amount,
       reason: entry.reason,
       externalReference: entry.externalReference ?? undefined,
@@ -1432,7 +1770,25 @@ export class AdminService {
 
   private toPaymentReconciliationRow(
     purchase: PrismaCreditPurchase,
-    hasGrant: boolean,
+    entries: Array<{
+      id: string;
+      purchaseId: string | null;
+      entryType: CreditEntryType;
+      creditKind: "free" | "paid" | null;
+      promotionCode: string | null;
+      amount: number;
+      externalReference: string | null;
+    }>,
+    refunds: Array<{
+      id: string;
+      purchaseId: string;
+      status: "reserved" | "refunded" | "released";
+      refundAmount: number;
+      allocations?: Array<{
+        recoveryAmount: number;
+        recoveredAmount: number;
+      }>;
+    }>,
   ): PaymentReconciliationRow {
     const payment = {
       paymentId: purchase.id,
@@ -1443,31 +1799,118 @@ export class AdminService {
       paidAmount: purchase.paidAmount,
       currency: purchase.currency,
     };
-    if (purchase.status === "pending") {
-      return {
-        ...payment,
-        ledgerStatus: hasGrant ? "granted" : "not_granted",
-        reconciliationStatus: hasGrant ? "mismatch" : "pending",
-        ...(hasGrant
-          ? { reason: "pending purchase has credit grant" }
-          : { reason: "payment pending" }),
-      };
-    }
+    const grants = entries.filter((entry) => entry.entryType === "grant");
+    const baseGrants = grants.filter(
+      (entry) => entry.creditKind === "paid" && entry.promotionCode === null,
+    );
+    const debitReferences = new Set(
+      entries
+        .filter((entry) => entry.entryType === "debit")
+        .map((entry) => entry.externalReference),
+    );
+    const issues: ReconciliationIssueCode[] = [];
 
     if (purchase.status === "paid") {
-      return {
-        ...payment,
-        ledgerStatus: hasGrant ? "granted" : "missing_grant",
-        reconciliationStatus: hasGrant ? "resolved" : "mismatch",
-        ...(hasGrant ? {} : { reason: "paid purchase has no credit grant" }),
-      };
+      if (baseGrants.length === 0) {
+        issues.push("paid_missing_grant");
+      } else if (baseGrants.length > 1) {
+        issues.push("duplicate_base_grant");
+      } else if (baseGrants[0].amount !== purchase.creditAmount) {
+        issues.push("paid_grant_amount_mismatch");
+      }
+    } else if (purchase.status !== "refunded" && grants.length > 0) {
+      issues.push("nonpaid_has_grant");
     }
+
+    const completedRefunds = refunds.filter(
+      (refund) => refund.status === "refunded",
+    );
+    if (purchase.status === "refunded" && completedRefunds.length === 0) {
+      issues.push("refunded_without_completed_refund");
+    }
+    for (const refund of completedRefunds) {
+      const expectedRecovery = (refund.allocations ?? []).reduce(
+        (sum, allocation) => sum + allocation.recoveryAmount,
+        0,
+      );
+      if (
+        expectedRecovery > 0 &&
+        (!debitReferences.has(`credit_refund:${refund.id}`) ||
+          (refund.allocations ?? []).some(
+            (allocation) =>
+              allocation.recoveredAmount < allocation.recoveryAmount,
+          ))
+      ) {
+        issues.push("refund_missing_recovery");
+      }
+    }
+    for (const refund of refunds.filter((item) => item.status === "released")) {
+      if (debitReferences.has(`credit_refund:${refund.id}`)) {
+        issues.push("released_refund_has_recovery");
+      }
+    }
+    if (
+      completedRefunds.reduce((sum, refund) => sum + refund.refundAmount, 0) >
+      purchase.paidAmount
+    ) {
+      issues.push("refund_total_exceeds_payment");
+    }
+
+    const uniqueIssues = [...new Set(issues)];
+    const repairActions: ReconciliationActionType[] = [];
+    if (uniqueIssues.includes("paid_missing_grant")) {
+      repairActions.push("grant_missing_purchase");
+    }
+    if (uniqueIssues.includes("nonpaid_has_grant")) {
+      repairActions.push("recover_nonpaid_grants");
+    }
+    if (uniqueIssues.includes("duplicate_base_grant")) {
+      repairActions.push("recover_duplicate_grants");
+    }
+    if (uniqueIssues.includes("refund_missing_recovery")) {
+      repairActions.push("recover_completed_refund");
+    }
+    const reasonByIssue: Record<ReconciliationIssueCode, string> = {
+      paid_missing_grant: "paid purchase has no credit grant",
+      paid_grant_amount_mismatch: "paid grant amount does not match purchase",
+      duplicate_base_grant: "paid purchase has duplicate base grants",
+      nonpaid_has_grant: "non-paid purchase has credit grant",
+      refunded_without_completed_refund:
+        "refunded purchase has no completed refund",
+      refund_missing_recovery: "completed refund has no recovery ledger",
+      released_refund_has_recovery: "released refund has recovery ledger",
+      refund_total_exceeds_payment: "refund total exceeds payment amount",
+    };
+    const hasActiveRefund = refunds.some(
+      (refund) => refund.status === "reserved",
+    );
+    const ledgerStatus: LedgerStatus =
+      purchase.status === "paid" && baseGrants.length === 0
+        ? "missing_grant"
+        : grants.length > 0
+          ? "granted"
+          : "not_granted";
 
     return {
       ...payment,
-      ledgerStatus: hasGrant ? "granted" : "not_granted",
-      reconciliationStatus: hasGrant ? "mismatch" : "resolved",
-      ...(hasGrant ? { reason: "non-paid purchase has credit grant" } : {}),
+      ledgerStatus,
+      reconciliationStatus:
+        uniqueIssues.length > 0
+          ? "mismatch"
+          : purchase.status === "pending" || hasActiveRefund
+            ? "pending"
+            : "resolved",
+      ...(uniqueIssues.length > 0
+        ? {
+            reason: uniqueIssues
+              .map((issue) => reasonByIssue[issue])
+              .join("; "),
+            issueCodes: uniqueIssues,
+          }
+        : purchase.status === "pending"
+          ? { reason: "payment pending" }
+          : {}),
+      ...(repairActions.length > 0 ? { repairActions } : {}),
     };
   }
 

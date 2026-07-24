@@ -1,4 +1,8 @@
-import { INestApplication, ValidationPipe } from "@nestjs/common";
+import {
+  ExecutionContext,
+  INestApplication,
+  ValidationPipe,
+} from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { GenerationWorkerService } from "../worker/generation-worker.service";
@@ -11,6 +15,7 @@ import { MediaService } from "./media/media.service";
 const CHARACTER_ID = "11111111-1111-4111-8111-111111111111";
 const JOB_ID = "22222222-2222-4222-8222-222222222222";
 const MEDIA_ID = "33333333-3333-4333-8333-333333333333";
+const PURCHASE_ID = "44444444-4444-4444-8444-444444444444";
 
 describe("AdminController reads", () => {
   let app: INestApplication;
@@ -29,6 +34,7 @@ describe("AdminController reads", () => {
   const confirmImageGenerationDraft = jest.fn();
   const selectGenerationOutput = jest.fn();
   const regenerateImageJob = jest.fn();
+  const reconcilePayment = jest.fn();
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({
@@ -46,6 +52,7 @@ describe("AdminController reads", () => {
             listTopHashtags,
             createImageGenerationDraft,
             regenerateImageJob,
+            reconcilePayment,
           },
         },
         {
@@ -69,7 +76,15 @@ describe("AdminController reads", () => {
       ],
     })
       .overrideGuard(AdminJwtGuard)
-      .useValue({ canActivate: () => true })
+      .useValue({
+        canActivate: (context: ExecutionContext) => {
+          context.switchToHttp().getRequest().admin = {
+            id: "admin-1",
+            email: "admin@opod.com",
+          };
+          return true;
+        },
+      })
       .compile();
     app = module.createNestApplication();
     app.useGlobalPipes(
@@ -94,10 +109,34 @@ describe("AdminController reads", () => {
     confirmImageGenerationDraft.mockReset();
     selectGenerationOutput.mockReset();
     regenerateImageJob.mockReset();
+    reconcilePayment.mockReset();
   });
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it("forwards a payment reconciliation action with the authenticated admin", async () => {
+    reconcilePayment.mockResolvedValue({ repaired: true });
+
+    await request(app.getHttpServer())
+      .post("/api/payments/reconciliation/actions")
+      .send({
+        purchaseId: PURCHASE_ID,
+        action: "grant_missing_purchase",
+        reference: "repair-1",
+        reason: "approved correction",
+      })
+      .expect(201)
+      .expect({ repaired: true });
+
+    expect(reconcilePayment).toHaveBeenCalledWith({
+      purchaseId: PURCHASE_ID,
+      action: "grant_missing_purchase",
+      reference: "repair-1",
+      reason: "approved correction",
+      adminId: "admin-1",
+    });
   });
 
   it("forwards post list filters and parsed pagination", async () => {

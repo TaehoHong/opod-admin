@@ -8,11 +8,12 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from "@nestjs/common";
 import { parsePageQuery } from "../domain/database/page";
 import { GenerationWorkerService } from "../worker/generation-worker.service";
-import { AdminJwtGuard } from "./auth/admin-jwt.guard";
+import { AdminJwtGuard, AdminRequest } from "./auth/admin-jwt.guard";
 import { AdminService } from "./admin.service";
 import { GenerationService } from "./generation/generation.service";
 import { MediaService } from "./media/media.service";
@@ -26,6 +27,7 @@ import { EnqueueGenerationJobDto } from "./dto/enqueue-generation-job.dto";
 import { FailGenerationJobDto } from "./dto/fail-generation-job.dto";
 import { GrantCreditsDto } from "./dto/grant-credits.dto";
 import { RetryGenerationJobDto } from "./dto/retry-generation-job.dto";
+import { ReconcilePaymentDto } from "./dto/reconcile-payment.dto";
 import { RunGenerationJobDto } from "./dto/run-generation-job.dto";
 import { RunGenerationWorkerDto } from "./dto/run-generation-worker.dto";
 import { SelectGenerationOutputDto } from "./dto/select-generation-output.dto";
@@ -367,6 +369,20 @@ export class AdminController {
   @Get("payments/:id")
   getPayment(@Param("id") paymentId: string) {
     return this.adminService.getPayment(paymentId);
+  }
+
+  @Post("payments/reconciliation/actions")
+  reconcilePayment(
+    @Req() request: AdminRequest,
+    @Body() body: ReconcilePaymentDto,
+  ) {
+    if (!request.admin) {
+      throw new Error("Admin guard did not attach an admin");
+    }
+    return this.adminService.reconcilePayment({
+      ...body,
+      adminId: request.admin.id,
+    });
   }
 
   @Get("moderation/reports")
