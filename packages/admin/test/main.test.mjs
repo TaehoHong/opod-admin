@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  applyPersonaTitlePreset,
   adminUserStats,
   analyticsDateRange,
   analyticsRequests,
@@ -656,11 +657,27 @@ test("characterPersonasPanel renders every editable persona safely", () => {
   assert.match(html, /data-action="persona-create"/);
   assert.match(html, /data-persona-id="persona-1"/);
   assert.match(html, /data-persona-id="persona-2"/);
-  assert.match(html, /list="persona-title-suggestions"/);
-  assert.match(html, /<datalist id="persona-title-suggestions">/);
+  assert.equal((html.match(/data-persona-title-preset/g) ?? []).length, 3);
+  assert.match(html, /성격 \(personality\)/);
+  assert.match(html, /placeholder="커스텀 제목"/);
   assert.match(html, /Core &lt;voice&gt;/);
   assert.match(html, /Warm &amp; concise/);
   assert.doesNotMatch(html, /Core <voice>/);
+});
+
+test("applyPersonaTitlePreset copies a selected type to the title input", () => {
+  const titleInput = { value: "identity" };
+  const select = {
+    value: "voice",
+    dataset: { titleName: "title" },
+    closest: () => ({
+      querySelector: (selector) =>
+        selector === 'input[name="title"]' ? titleInput : null,
+    }),
+  };
+
+  assert.equal(applyPersonaTitlePreset(select), true);
+  assert.equal(titleInput.value, "voice");
 });
 
 test("characterPersonasPanel shows an empty state", () => {

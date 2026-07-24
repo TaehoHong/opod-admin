@@ -181,10 +181,24 @@ const MEMORY_TYPES = [
   ["goal", "목표"],
 ];
 
-function personaTitleOptions() {
-  return PERSONA_TITLE_SUGGESTIONS.map(
-    ([value, label]) => `<option value="${value}">${label}</option>`,
-  ).join("");
+function personaTitlePresetSelect(selected = "", titleName = "title") {
+  return `<select class="input" data-persona-title-preset data-title-name="${attr(
+    titleName,
+  )}"><option value="">직접 입력</option>${PERSONA_TITLE_SUGGESTIONS.map(
+    ([value, label]) =>
+      `<option value="${value}"${selected === value ? " selected" : ""}>${label} (${value})</option>`,
+  ).join("")}</select>`;
+}
+
+export function applyPersonaTitlePreset(select) {
+  if (!select?.value) return false;
+  const titleName = select.dataset?.titleName || "title";
+  const titleInput = select
+    .closest?.("form")
+    ?.querySelector?.(`input[name="${titleName}"]`);
+  if (!titleInput) return false;
+  titleInput.value = select.value;
+  return true;
 }
 
 function memoryTypeSelect(selected = "fact") {
@@ -454,9 +468,11 @@ export function characterPersonasPanel(characterId, personas = []) {
               characterId,
             )}" data-persona-id="${attr(persona.id)}" style="display:flex;flex-direction:column;gap:12px;padding:18px 0;border-bottom:1px solid var(--color-divider)">
               <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:12px">
-                <div class="field"><label>제목</label><input class="input" name="title" list="persona-title-suggestions" value="${attr(
+                <div class="field"><label>제목 타입</label><div style="display:grid;grid-template-columns:200px minmax(0,1fr);gap:8px">${personaTitlePresetSelect(
                   persona.title,
-                )}" required></div>
+                )}<input class="input" name="title" value="${attr(
+                  persona.title,
+                )}" placeholder="커스텀 제목" required></div></div>
                 <div class="field"><label>정렬 순서</label><input class="input" name="sortOrder" type="number" step="1" value="${attr(
                   persona.sortOrder ?? "",
                 )}" required></div>
@@ -479,13 +495,12 @@ export function characterPersonasPanel(characterId, personas = []) {
 
   return `<div style="max-width:760px">
     <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px"><strong>페르소나</strong><span class="count-note">${items.length}건</span></div>
-    <p class="count-note" style="margin:0 0 12px">추천 제목을 선택하거나 직접 입력하세요. 한 블록에는 하나의 역할·성격·말투 규칙만 작성하는 편이 좋습니다.</p>
-    <datalist id="persona-title-suggestions">${personaTitleOptions()}</datalist>
+    <p class="count-note" style="margin:0 0 12px">추천 타입을 선택하면 제목에 반영됩니다. 커스텀 제목도 직접 입력할 수 있습니다.</p>
     <form data-action="persona-create" data-character-id="${attr(
       characterId,
     )}" style="display:flex;flex-direction:column;gap:12px;padding:18px;background:var(--color-surface);border-radius:var(--radius-md);margin-bottom:24px">
       <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:12px">
-        <div class="field"><label>새 페르소나 제목</label><input class="input" name="title" list="persona-title-suggestions" placeholder="추천값 선택 또는 직접 입력" required></div>
+        <div class="field"><label>새 페르소나 제목</label><div style="display:grid;grid-template-columns:200px minmax(0,1fr);gap:8px">${personaTitlePresetSelect()}<input class="input" name="title" placeholder="커스텀 제목" required></div></div>
         <div class="field"><label>정렬 순서 (선택)</label><input class="input" name="sortOrder" type="number" step="1"></div>
       </div>
       <div class="field"><label>내용</label><textarea class="input" name="content" rows="5" required></textarea></div>
@@ -4648,7 +4663,10 @@ export function dialogBody({ type, ctx }) {
         <div class="field"><label>표시 이름</label><input class="input" name="displayName" required></div>
         <div class="field"><label>Bio</label><input class="input" name="bio" required></div>
         <div class="field"><label>관심사 (쉼표 구분)</label><input class="input" name="interests" placeholder="art, travel"></div>
-        <div class="field"><label>페르소나 제목</label><input class="input" name="personaTitle" list="new-character-persona-title-suggestions" value="identity" required><datalist id="new-character-persona-title-suggestions">${personaTitleOptions()}</datalist></div>
+        <div class="field"><label>페르소나 제목</label><div style="display:grid;grid-template-columns:200px minmax(0,1fr);gap:8px">${personaTitlePresetSelect(
+          "identity",
+          "personaTitle",
+        )}<input class="input" name="personaTitle" value="identity" placeholder="커스텀 제목" required></div></div>
         <div class="field"><label>페르소나</label><textarea class="input" name="persona" placeholder="선택한 제목에 해당하는 설정만 작성" required></textarea></div>
         <div class="field"><label>초기 기억 타입</label>${memoryTypeSelect()}</div>
         <div class="field"><label>초기 기억 (선택, 한 줄에 하나씩)</label><textarea class="input" name="memories" placeholder="한강 야경 촬영을 좋아함&#10;필름 현상소 단골"></textarea></div>
@@ -5731,6 +5749,14 @@ function handleChange(event) {
       );
     }
     fileInput.value = "";
+    return;
+  }
+
+  const personaTitlePreset = event.target.closest?.(
+    "[data-persona-title-preset]",
+  );
+  if (personaTitlePreset) {
+    applyPersonaTitlePreset(personaTitlePreset);
     return;
   }
 
