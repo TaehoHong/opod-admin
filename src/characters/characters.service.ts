@@ -44,6 +44,7 @@ type CharacterMemory = {
   id: string;
   characterId: string;
   content: string;
+  type: string;
   reason: string;
   createdAt: string;
   updatedAt: string;
@@ -115,6 +116,7 @@ const characterMemoryFields = {
   id: true,
   characterId: true,
   content: true,
+  type: true,
   reason: true,
   createdAt: true,
   updatedAt: true,
@@ -127,6 +129,14 @@ const PERSONA_TITLE_MAX_LENGTH = 200;
 const PERSONA_CONTENT_MAX_LENGTH = 8000;
 const MEMORY_CONTENT_MAX_LENGTH = 8000;
 const MEMORY_REASON_MAX_LENGTH = 1000;
+const MEMORY_TYPES = new Set([
+  "fact",
+  "preference",
+  "relationship",
+  "event",
+  "routine",
+  "goal",
+]);
 const BULK_CREATE_MAX_ITEMS = 50;
 // Personas are numbered in steps so an entry can be inserted between two
 // existing ones (e.g. 15 between 10 and 20) without renumbering the rest.
@@ -323,18 +333,21 @@ export class CharactersService {
   async createCharacterMemory(input: {
     characterId: string;
     content: string;
+    type: string;
     reason: string;
   }): Promise<CharacterMemory> {
     if (!(await this.hasCharacter(input.characterId))) {
       throw new BadRequestException("Character not found");
     }
     const content = this.parseMemoryContent(input.content, "Character memory");
+    const type = this.parseMemoryType(input.type);
     const reason = this.parseMemoryReason(input.reason, "Character memory");
 
     const memory = await this.prisma.characterMemory.create({
       data: {
         characterId: input.characterId,
         content,
+        type,
         reason,
       },
       select: characterMemoryFields,
@@ -351,7 +364,7 @@ export class CharactersService {
 
   async createCharacterMemories(input: {
     characterId: string;
-    items?: Array<{ content?: string; reason?: string }>;
+    items?: Array<{ content?: string; type?: string; reason?: string }>;
   }): Promise<{ items: CharacterMemory[] }> {
     if (!(await this.hasCharacter(input.characterId))) {
       throw new BadRequestException("Character not found");
@@ -362,6 +375,7 @@ export class CharactersService {
           item.content ?? "",
           `Character memory items[${index}]`,
         ),
+        type: this.parseMemoryType(item.type ?? ""),
         reason: this.parseMemoryReason(
           item.reason ?? "",
           `Character memory items[${index}]`,
@@ -391,12 +405,16 @@ export class CharactersService {
     characterId: string;
     memoryId: string;
     content?: string;
+    type?: string;
     reason?: string;
   }): Promise<CharacterMemory> {
     await this.assertCharacterMemory(input.characterId, input.memoryId);
-    const data: { content?: string; reason?: string } = {};
+    const data: { content?: string; type?: string; reason?: string } = {};
     if (input.content !== undefined) {
       data.content = this.parseMemoryContent(input.content, "Character memory");
+    }
+    if (input.type !== undefined) {
+      data.type = this.parseMemoryType(input.type);
     }
     if (input.reason !== undefined) {
       data.reason = this.parseMemoryReason(input.reason, "Character memory");
@@ -729,6 +747,7 @@ export class CharactersService {
       id: memory.id,
       characterId: memory.characterId,
       content: memory.content,
+      type: memory.type,
       reason: memory.reason,
       createdAt: memory.createdAt.toISOString(),
       updatedAt: memory.updatedAt.toISOString(),
@@ -789,6 +808,14 @@ export class CharactersService {
       `${subject} content`,
       MEMORY_CONTENT_MAX_LENGTH,
     );
+  }
+
+  private parseMemoryType(value: string): string {
+    const type = value?.trim();
+    if (!MEMORY_TYPES.has(type)) {
+      throw new BadRequestException("Invalid character memory type");
+    }
+    return type;
   }
 
   private parseMemoryReason(value: string, subject: string): string {

@@ -7,6 +7,7 @@ describe("CharactersService", () => {
       id: "memory-1",
       characterId: "character-1",
       content: "likes concise status reports",
+      type: "preference",
       reason: "operator note",
       createdAt,
       updatedAt: createdAt,
@@ -27,12 +28,14 @@ describe("CharactersService", () => {
       service.createCharacterMemory({
         characterId: "character-1",
         content: " likes concise status reports ",
+        type: "preference",
         reason: " operator note ",
       }),
     ).resolves.toEqual({
       id: "memory-1",
       characterId: "character-1",
       content: "likes concise status reports",
+      type: "preference",
       reason: "operator note",
       createdAt: createdAt.toISOString(),
       updatedAt: createdAt.toISOString(),
@@ -41,6 +44,7 @@ describe("CharactersService", () => {
       data: {
         characterId: "character-1",
         content: "likes concise status reports",
+        type: "preference",
         reason: "operator note",
       },
       select: expect.any(Object),
@@ -53,6 +57,29 @@ describe("CharactersService", () => {
         targetId: "memory-1",
       }),
     });
+  });
+
+  it("rejects unknown character memory types", async () => {
+    const create = jest.fn();
+    const service = new (
+      CharactersService as new (...args: unknown[]) => CharactersService
+    )({
+      character: {
+        findUnique: jest.fn().mockResolvedValue({ id: "character-1" }),
+      },
+      characterMemory: { create },
+      characterActionLog: { create: jest.fn() },
+    });
+
+    await expect(
+      service.createCharacterMemory({
+        characterId: "character-1",
+        content: "likes concise status reports",
+        type: "note",
+        reason: "operator note",
+      }),
+    ).rejects.toThrow("Invalid character memory type");
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("returns character detail with active personas and memory", async () => {
@@ -92,6 +119,7 @@ describe("CharactersService", () => {
             id: "memory-1",
             characterId: "character-1",
             content: "likes night walks",
+            type: "routine",
             reason: "operator",
             createdAt,
             updatedAt: createdAt,
@@ -127,6 +155,7 @@ describe("CharactersService", () => {
           id: "memory-1",
           characterId: "character-1",
           content: "likes night walks",
+          type: "routine",
           reason: "operator",
           createdAt: createdAt.toISOString(),
           updatedAt: createdAt.toISOString(),
@@ -286,6 +315,7 @@ describe("CharactersService", () => {
         id: "memory-1",
         characterId: "character-1",
         content: "likes sunrise",
+        type: "preference",
         reason: "operator",
         createdAt,
         updatedAt: deletedAt,
@@ -295,6 +325,7 @@ describe("CharactersService", () => {
         id: "memory-1",
         characterId: "character-1",
         content: "likes sunrise",
+        type: "preference",
         reason: "operator",
         createdAt,
         updatedAt: deletedAt,
@@ -461,8 +492,8 @@ describe("CharactersService", () => {
       service.createCharacterMemories({
         characterId: "character-1",
         items: [
-          { content: "valid", reason: "valid" },
-          { content: "  ", reason: "valid" },
+          { content: "valid", type: "fact", reason: "valid" },
+          { content: "  ", type: "fact", reason: "valid" },
         ],
       }),
     ).rejects.toThrow("Character memory items[1] content is required");
@@ -473,6 +504,7 @@ describe("CharactersService", () => {
         characterId: "character-1",
         items: Array.from({ length: 51 }, () => ({
           content: "c",
+          type: "fact",
           reason: "r",
         })),
       }),

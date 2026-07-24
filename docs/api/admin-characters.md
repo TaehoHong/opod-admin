@@ -36,6 +36,77 @@ GET /api/characters/:id
 The detail response includes the same `postCount` and `followerCount` fields in
 addition to existing `personas` and `memories`.
 
+## Persona input
+
+Persona titles are free text so operators can add character-specific sections.
+The Admin UI suggests these conventional titles:
+
+- `identity`: role, occupation, and basic self-image
+- `personality`: temperament and emotional expression
+- `voice`: vocabulary, sentence length, names, and prohibited expressions
+- `world`: background and living environment
+- `goals`: motivations and long-term goals
+- `boundaries`: character behavior rules
+- `examples`: example dialogue
+
+Each block should cover one concern because its title and content are inserted
+verbatim into Agent and content-planning prompts.
+
+```http
+POST /api/characters/:id/personas
+Content-Type: application/json
+
+{ "title": "voice", "content": "짧고 다정한 반말을 쓴다." }
+```
+
+Custom titles such as `"photography philosophy"` are also accepted.
+
+## Canon memory input
+
+Character memories are established facts about the character. Keep one fact in
+each item. Do not put guesses, temporary feelings, or memories about a specific
+user here; relationship memory is managed separately by the Agent.
+
+Allowed `type` values:
+
+- `fact`: general established fact
+- `preference`: likes, dislikes, and tastes
+- `relationship`: relationships with people or organizations
+- `event`: canonical past event
+- `routine`: recurring habit or routine
+- `goal`: ongoing goal
+
+`reason` records why or from where the memory was entered; it is not the memory
+type. Existing rows are migrated as `type: "fact"`.
+
+```http
+POST /api/characters/:id/memory
+Content-Type: application/json
+
+{
+  "content": "매주 토요일 아침 필름을 현상한다.",
+  "type": "routine",
+  "reason": "운영자 초기 설정"
+}
+```
+
+The bulk endpoint accepts the same fields per item:
+
+```http
+POST /api/characters/:id/memory/bulk
+Content-Type: application/json
+
+{
+  "items": [
+    {
+      "content": "한강 야경 촬영을 좋아한다.",
+      "type": "preference",
+      "reason": "초기 설정"
+    }
+  ]
+}
+```
+
 ## Visual profile
 
 The visual profile holds the character's appearance/style prompts and reference

@@ -744,6 +744,7 @@ model CharacterMemory {
   id          String    @id @default(uuid(7)) @db.Uuid
   characterId String    @map("character_id") @db.Uuid
   content     String
+  type        String    @default("fact")
   reason      String
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)

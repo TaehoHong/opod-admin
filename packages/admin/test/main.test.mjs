@@ -656,6 +656,8 @@ test("characterPersonasPanel renders every editable persona safely", () => {
   assert.match(html, /data-action="persona-create"/);
   assert.match(html, /data-persona-id="persona-1"/);
   assert.match(html, /data-persona-id="persona-2"/);
+  assert.match(html, /list="persona-title-suggestions"/);
+  assert.match(html, /<datalist id="persona-title-suggestions">/);
   assert.match(html, /Core &lt;voice&gt;/);
   assert.match(html, /Warm &amp; concise/);
   assert.doesNotMatch(html, /Core <voice>/);
@@ -673,12 +675,14 @@ test("characterMemoriesPanel renders every editable memory safely", () => {
     {
       id: "memory-1",
       content: "Likes <film>",
+      type: "preference",
       reason: "Operator & import",
       createdAt: "2026-07-13T00:00:00.000Z",
     },
     {
       id: "memory-2",
       content: "Lives in Seoul",
+      type: "fact",
       reason: "Profile",
       createdAt: "2026-07-12T00:00:00.000Z",
     },
@@ -688,6 +692,8 @@ test("characterMemoriesPanel renders every editable memory safely", () => {
   assert.match(html, /data-action="memory-create"/);
   assert.match(html, /data-memory-id="memory-1"/);
   assert.match(html, /data-memory-id="memory-2"/);
+  assert.match(html, /<select class="input" name="type"/);
+  assert.match(html, /value="preference" selected/);
   assert.match(html, /Likes &lt;film&gt;/);
   assert.match(html, /Operator &amp; import/);
   assert.doesNotMatch(html, /Likes <film>/);
@@ -734,10 +740,12 @@ test("characterCreatePayload builds character create body", () => {
 test("memoryPayload trims content and reason", () => {
   const form = new FormData();
   form.set("content", " city night ");
+  form.set("type", " event ");
   form.set("reason", " operator note ");
 
   assert.deepEqual(memoryPayload(form), {
     content: "city night",
+    type: "event",
     reason: "operator note",
   });
 });
@@ -791,6 +799,7 @@ test("characterResourceFormRequest selects persona and memory mutations", async 
 
   const memory = new FormData();
   memory.set("content", " City night ");
+  memory.set("type", "event");
   memory.set("reason", " Operator ");
   const memorySubmission = await characterResourceFormRequest(
     "memory-update",
@@ -862,9 +871,12 @@ test("bulk payloads parse a JSON array from the items field", () => {
   });
 
   const memoryForm = new FormData();
-  memoryForm.set("items", '[{"content":"met fan","reason":"consistency"}]');
+  memoryForm.set(
+    "items",
+    '[{"content":"met fan","type":"event","reason":"consistency"}]',
+  );
   assert.deepEqual(memoryBulkPayload(memoryForm), {
-    items: [{ content: "met fan", reason: "consistency" }],
+    items: [{ content: "met fan", type: "event", reason: "consistency" }],
   });
 });
 
@@ -1909,26 +1921,30 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
     {
       action: "memory-bulk-create",
       dataset: { characterId: "char-1" },
-      data: { items: '[{"content":"city night","reason":"operator"}]' },
+      data: {
+        items: '[{"content":"city night","type":"event","reason":"operator"}]',
+      },
       path: "/api/characters/char-1/memory/bulk",
       method: "POST",
-      body: { items: [{ content: "city night", reason: "operator" }] },
+      body: {
+        items: [{ content: "city night", type: "event", reason: "operator" }],
+      },
     },
     {
       action: "memory-create",
       dataset: { characterId: "char-1" },
-      data: { content: "city night", reason: "operator" },
+      data: { content: "city night", type: "event", reason: "operator" },
       path: "/api/characters/char-1/memory",
       method: "POST",
-      body: { content: "city night", reason: "operator" },
+      body: { content: "city night", type: "event", reason: "operator" },
     },
     {
       action: "memory-update",
       dataset: { characterId: "char-1", memoryId: "memory-1" },
-      data: { content: "city morning", reason: "operator" },
+      data: { content: "city morning", type: "routine", reason: "operator" },
       path: "/api/characters/char-1/memory/memory-1",
       method: "PATCH",
-      body: { content: "city morning", reason: "operator" },
+      body: { content: "city morning", type: "routine", reason: "operator" },
     },
     {
       action: "memory-delete",

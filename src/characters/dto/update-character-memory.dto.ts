@@ -7,5 +7,9 @@ export class UpdateCharacterMemoryDto {
 
   @IsOptional()
   @IsString()
+  type?: string;
+
+  @IsOptional()
+  @IsString()
   reason?: string;
 }

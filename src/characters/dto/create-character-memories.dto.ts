@@ -10,6 +10,10 @@ export class CharacterMemoryItemDto {
 
   @IsOptional()
   @IsString()
+  type?: string;
+
+  @IsOptional()
+  @IsString()
   reason?: string;
 }
 

@@ -162,6 +162,38 @@ const CHARACTER_TABS = [
   "automation",
 ];
 
+const PERSONA_TITLE_SUGGESTIONS = [
+  ["identity", "정체성"],
+  ["personality", "성격"],
+  ["voice", "말투"],
+  ["world", "세계관·배경"],
+  ["goals", "목표·동기"],
+  ["boundaries", "행동 규칙"],
+  ["examples", "대화 예시"],
+];
+
+const MEMORY_TYPES = [
+  ["fact", "일반 사실"],
+  ["preference", "취향"],
+  ["relationship", "관계"],
+  ["event", "과거 사건"],
+  ["routine", "습관·일과"],
+  ["goal", "목표"],
+];
+
+function personaTitleOptions() {
+  return PERSONA_TITLE_SUGGESTIONS.map(
+    ([value, label]) => `<option value="${value}">${label}</option>`,
+  ).join("");
+}
+
+function memoryTypeSelect(selected = "fact") {
+  return `<select class="input" name="type">${MEMORY_TYPES.map(
+    ([value, label]) =>
+      `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`,
+  ).join("")}</select>`;
+}
+
 export function characterRouteState(hash = "/characters") {
   const { segments, params, legacy } = parseRouteUrl(hash);
   const characterId = legacy
@@ -422,7 +454,7 @@ export function characterPersonasPanel(characterId, personas = []) {
               characterId,
             )}" data-persona-id="${attr(persona.id)}" style="display:flex;flex-direction:column;gap:12px;padding:18px 0;border-bottom:1px solid var(--color-divider)">
               <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:12px">
-                <div class="field"><label>제목</label><input class="input" name="title" value="${attr(
+                <div class="field"><label>제목</label><input class="input" name="title" list="persona-title-suggestions" value="${attr(
                   persona.title,
                 )}" required></div>
                 <div class="field"><label>정렬 순서</label><input class="input" name="sortOrder" type="number" step="1" value="${attr(
@@ -447,11 +479,13 @@ export function characterPersonasPanel(characterId, personas = []) {
 
   return `<div style="max-width:760px">
     <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px"><strong>페르소나</strong><span class="count-note">${items.length}건</span></div>
+    <p class="count-note" style="margin:0 0 12px">추천 제목을 선택하거나 직접 입력하세요. 한 블록에는 하나의 역할·성격·말투 규칙만 작성하는 편이 좋습니다.</p>
+    <datalist id="persona-title-suggestions">${personaTitleOptions()}</datalist>
     <form data-action="persona-create" data-character-id="${attr(
       characterId,
     )}" style="display:flex;flex-direction:column;gap:12px;padding:18px;background:var(--color-surface);border-radius:var(--radius-md);margin-bottom:24px">
       <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:12px">
-        <div class="field"><label>새 페르소나 제목</label><input class="input" name="title" required></div>
+        <div class="field"><label>새 페르소나 제목</label><input class="input" name="title" list="persona-title-suggestions" placeholder="추천값 선택 또는 직접 입력" required></div>
         <div class="field"><label>정렬 순서 (선택)</label><input class="input" name="sortOrder" type="number" step="1"></div>
       </div>
       <div class="field"><label>내용</label><textarea class="input" name="content" rows="5" required></textarea></div>
@@ -473,9 +507,12 @@ export function characterMemoriesPanel(characterId, memories = []) {
               <div class="field"><label>내용</label><textarea class="input" name="content" rows="4" required>${escapeHtml(
                 memory.content,
               )}</textarea></div>
-              <div class="field"><label>사유</label><input class="input" name="reason" value="${attr(
-                memory.reason,
-              )}" required></div>
+              <div style="display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px">
+                <div class="field"><label>타입</label>${memoryTypeSelect(memory.type ?? "fact")}</div>
+                <div class="field"><label>등록 출처·사유</label><input class="input" name="reason" value="${attr(
+                  memory.reason,
+                )}" required></div>
+              </div>
               <div style="display:flex;align-items:center;gap:8px">
                 <button class="btn btn-primary" type="submit">저장</button>
                 <button class="btn btn-ghost" type="button" data-act="memory-delete" data-character-id="${attr(
@@ -492,11 +529,15 @@ export function characterMemoriesPanel(characterId, memories = []) {
 
   return `<div style="max-width:760px">
     <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px"><strong>메모리</strong><span class="count-note">${items.length}건</span></div>
+    <p class="count-note" style="margin:0 0 12px">캐릭터의 확정된 사실만, 한 메모리에 하나씩 작성하세요. 추측이나 사용자와의 대화 기억은 넣지 않습니다.</p>
     <form data-action="memory-create" data-character-id="${attr(
       characterId,
     )}" style="display:flex;flex-direction:column;gap:12px;padding:18px;background:var(--color-surface);border-radius:var(--radius-md);margin-bottom:24px">
       <div class="field"><label>새 메모리 내용</label><textarea class="input" name="content" rows="4" required></textarea></div>
-      <div class="field"><label>사유</label><input class="input" name="reason" required></div>
+      <div style="display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px">
+        <div class="field"><label>타입</label>${memoryTypeSelect()}</div>
+        <div class="field"><label>등록 출처·사유</label><input class="input" name="reason" placeholder="운영자 입력, 초기 설정 등" required></div>
+      </div>
       <div><button class="btn btn-secondary" type="submit">메모리 추가</button></div>
     </form>
     <div>${rows}</div>
@@ -802,6 +843,7 @@ export function characterStatusPayload(form) {
 export function memoryPayload(form) {
   return {
     content: String(form.get("content") ?? "").trim(),
+    type: String(form.get("type") ?? "").trim(),
     reason: String(form.get("reason") ?? "").trim(),
   };
 }
@@ -4606,7 +4648,9 @@ export function dialogBody({ type, ctx }) {
         <div class="field"><label>표시 이름</label><input class="input" name="displayName" required></div>
         <div class="field"><label>Bio</label><input class="input" name="bio" required></div>
         <div class="field"><label>관심사 (쉼표 구분)</label><input class="input" name="interests" placeholder="art, travel"></div>
-        <div class="field"><label>페르소나</label><textarea class="input" name="persona" placeholder="말투 · 성격 · 세계관 설정" required></textarea></div>
+        <div class="field"><label>페르소나 제목</label><input class="input" name="personaTitle" list="new-character-persona-title-suggestions" value="identity" required><datalist id="new-character-persona-title-suggestions">${personaTitleOptions()}</datalist></div>
+        <div class="field"><label>페르소나</label><textarea class="input" name="persona" placeholder="선택한 제목에 해당하는 설정만 작성" required></textarea></div>
+        <div class="field"><label>초기 기억 타입</label>${memoryTypeSelect()}</div>
         <div class="field"><label>초기 기억 (선택, 한 줄에 하나씩)</label><textarea class="input" name="memories" placeholder="한강 야경 촬영을 좋아함&#10;필름 현상소 단골"></textarea></div>
         <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button><button class="btn btn-primary" type="submit">생성</button></div>
       </form>`;
@@ -4825,12 +4869,14 @@ async function dispatchSubmit(action, form, formData) {
       return;
     }
     const id = created.body.id;
+    const personaTitle =
+      String(formData.get("personaTitle") ?? "").trim() || "identity";
     const persona = String(formData.get("persona") ?? "").trim();
     if (persona) {
       await request(
         `/api/characters/${id}/personas`,
         jsonRequest(`/api/characters/${id}/personas`, "POST", {
-          title: "기본 페르소나",
+          title: personaTitle,
           content: persona,
         }).options,
       );
@@ -4839,11 +4885,16 @@ async function dispatchSubmit(action, form, formData) {
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
+    const memoryType = String(formData.get("type") ?? "").trim() || "fact";
     if (memLines.length) {
       await request(
         `/api/characters/${id}/memory/bulk`,
         jsonRequest(`/api/characters/${id}/memory/bulk`, "POST", {
-          items: memLines.map((content) => ({ content, reason: "초기 설정" })),
+          items: memLines.map((content) => ({
+            content,
+            type: memoryType,
+            reason: "초기 설정",
+          })),
         }).options,
       );
     }

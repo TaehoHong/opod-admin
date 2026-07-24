@@ -7,5 +7,9 @@ export class CreateCharacterMemoryDto {
 
   @IsString()
   @IsNotEmpty()
+  type!: string;
+
+  @IsString()
+  @IsNotEmpty()
   reason!: string;
 }
