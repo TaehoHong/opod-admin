@@ -169,16 +169,16 @@ describe("VisualProfileService", () => {
     ).rejects.toThrow("Media upload is not confirmed");
   });
 
-  it("rejects more than five references", async () => {
+  it("rejects more than twenty references", async () => {
     const prisma = prismaMock();
     const service = makeService(prisma);
 
     await expect(
       service.setReferences({
         characterId: "ai-1",
-        mediaIds: ["m1", "m2", "m3", "m4", "m5", "m6"],
+        mediaIds: Array.from({ length: 21 }, (_, i) => `m${i + 1}`),
       }),
-    ).rejects.toThrow("Reference media must be 5 or fewer");
+    ).rejects.toThrow("Reference media must be 20 or fewer");
   });
 
   it("compiles the test generation prompt from profile and scene", async () => {

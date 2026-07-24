@@ -155,7 +155,7 @@ Content-Type: application/json
 { "mediaIds": ["<media uuid>", "..."] }
 ```
 
-Replaces the reference set (array order = display order, 5 at most). Every
+Replaces the reference set (array order = display order, 20 at most). Every
 media id must be upload-confirmed image media; unconfirmed media returns HTTP
 400 `Media upload is not confirmed`.
 

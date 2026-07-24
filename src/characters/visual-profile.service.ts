@@ -6,7 +6,7 @@ import { PrismaService } from "../domain/database/prisma.service";
 import { ReferenceCaptioner } from "../worker/reference-captioner";
 
 const PROMPT_MAX_LENGTH = 4000;
-const REFERENCE_MAX_COUNT = 5;
+const REFERENCE_MAX_COUNT = 20;
 const TEST_SCENE_MAX_LENGTH = 1000;
 
 type VisualProfileReference = {
