@@ -145,6 +145,14 @@ enum InquiryStatus {
   @@schema("opod")
 }
 
+enum AuthProvider {
+  google
+  apple
+
+  @@map("auth_provider")
+  @@schema("opod")
+}
+
 model User {
   id                   String                  @id @default(uuid(7)) @db.Uuid
   email                String?                 @unique
@@ -159,6 +167,7 @@ model User {
   createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt            DateTime?               @map("deleted_at") @db.Timestamptz(6)
+  accounts             UserAccount[]
   characterFollows     UserCharacterFollow[]
   creditCheckIns       CreditCheckIn[]
   creditAccount        CreditAccount?
@@ -190,6 +199,26 @@ model UserRefreshToken {
 
   @@index([userId, createdAt])
   @@map("user_refresh_tokens")
+  @@schema("opod")
+}
+
+model UserAccount {
+  userId         String       @map("user_id") @db.Uuid
+  provider       AuthProvider
+  // id_token의 sub. 이메일이 바뀌어도 불변인 유일한 신원 키.
+  providerUserId String       @map("provider_user_id")
+  // provider가 준 이메일. 표시용이며 신원 키가 아니다. unique를 걸지 않는다.
+  email          String?
+  // Apple revoke 전용. AES-256-GCM 암호문(v1.<iv>.<tag>.<ciphertext>).
+  refreshToken   String?      @map("refresh_token")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // 신원 키가 곧 기본키다. 하나의 소셜 계정이 두 사용자에게 붙는 것을 막는다.
+  @@id([provider, providerUserId])
+  // 한 사용자가 같은 provider를 두 번 연결하는 것을 막는다.
+  @@unique([userId, provider])
+  @@map("user_accounts")
   @@schema("opod")
 }
 
