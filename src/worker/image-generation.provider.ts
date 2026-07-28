@@ -152,9 +152,7 @@ export function falQueueUrls(model: string): {
   };
 }
 
-// negative prompt를 입력 스키마로 받는 모델 계열만 전달한다.
-// nano-banana·seedream·flux 계열은 스키마에 없으므로 전달하지 않는다
-// (필요하면 paramsJson에 negative_prompt를 직접 넣어 강제할 수 있다).
+// negative prompt를 입력 스키마로 받는 모델 계열만 별도 필드로 전달한다.
 export function falSupportsNegativePrompt(model: string): boolean {
   return /stable-diffusion|sdxl|sd3/i.test(model);
 }
@@ -173,11 +171,17 @@ export function createFalImageGenerationProvider(
     name: `fal:${config.model}`,
 
     async submit(request) {
+      const negativePrompt = request.negativePrompt?.trim();
       const body: Record<string, unknown> = {
-        prompt: request.prompt,
+        // 별도 필드를 지원하지 않는 모델도 캐릭터의 제외 조건을 잃지 않도록
+        // 자연어 지시로 합친다.
+        prompt:
+          negativePrompt && !falSupportsNegativePrompt(config.model)
+            ? `${request.prompt.trim()} Do not include: ${negativePrompt}.`
+            : request.prompt,
         num_images: request.candidateCount,
-        ...(request.negativePrompt && falSupportsNegativePrompt(config.model)
-          ? { negative_prompt: request.negativePrompt }
+        ...(negativePrompt && falSupportsNegativePrompt(config.model)
+          ? { negative_prompt: negativePrompt }
           : {}),
         ...(request.referenceImageUrls.length > 0
           ? { image_urls: request.referenceImageUrls }

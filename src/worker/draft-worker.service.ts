@@ -567,9 +567,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
               paramsJson: {
                 _shot: {
                   scene: shot.scene,
-                  ...(referenceIds.length > 0
-                    ? { referenceMediaIds: referenceIds }
-                    : {}),
+                  referenceMediaIds: referenceIds,
                 },
               },
             },

@@ -275,7 +275,7 @@ export class GenerationService {
             },
             _shot: {
               scene,
-              ...(referenceMediaIds.length > 0 ? { referenceMediaIds } : {}),
+              referenceMediaIds,
             },
           }
         : {}),

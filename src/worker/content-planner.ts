@@ -27,7 +27,7 @@ export type ContentPlanner = {
 
 const HTTP_TIMEOUT_MS = 60_000;
 const HASHTAG_MAX = 5;
-// 샷당 선별 레퍼런스 상한 — 앵커 2장과 합쳐도 프로바이더 한도(10)에 여유.
+// 샷당 선별 레퍼런스 상한.
 const SHOT_REFERENCES_MAX = 3;
 
 type PlannerEnv = Record<string, string | undefined>;
@@ -75,12 +75,15 @@ export const localContentPlanner: ContentPlanner = {
   plan(input) {
     const subject = input.sceneHint?.trim() || input.interests[0] || "일상";
     const maxShots = clampShots(input.maxShots);
+    const referenceIds = (input.referenceCatalog ?? [])
+      .slice(0, SHOT_REFERENCES_MAX)
+      .map((reference) => reference.id);
     const shots = Array.from({ length: maxShots }, (_, index) => ({
       scene:
         index === 0
           ? `${subject}의 한 장면`
           : `${subject}의 다른 각도, 디테일 컷`,
-      referenceIds: [] as string[],
+      referenceIds,
     }));
     return Promise.resolve({
       caption: `${subject} 기록 — ${input.characterName}의 하루`,

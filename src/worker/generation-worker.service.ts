@@ -63,18 +63,17 @@ export function workerConfigFromEnv(
 // value_error. 장면별 레퍼런스 선별(LLM 선별)이 들어와도 전송 직전 안전판으로
 // 유지한다 (docs/media-generation-pipeline.md "컨텍스트 선별").
 const MAX_REFERENCE_IMAGES = 10;
-// 정체성 고정용 앵커 — 선별 결과와 무관하게 항상 포함하는 대표컷 수.
-const REFERENCE_ANCHOR_COUNT = 2;
 
 // 잡 paramsJson._shot.referenceMediaIds — 기획 LLM이 이 샷에 고른 레퍼런스.
-function shotReferenceMediaIds(paramsJson: unknown): string[] {
+// 필드 없음은 구버전 잡의 전체 레퍼런스 폴백, 빈 배열은 명시적 미사용이다.
+function shotReferenceMediaIds(paramsJson: unknown): string[] | undefined {
   if (!isRecord(paramsJson) || !isRecord(paramsJson._shot)) {
-    return [];
+    return undefined;
   }
   const ids = paramsJson._shot.referenceMediaIds;
   return Array.isArray(ids)
     ? ids.filter((id): id is string => typeof id === "string")
-    : [];
+    : undefined;
 }
 
 // 프로바이더가 잡 자체를 거부/실패 처리한 경우. 재시도 시 requestId를 버리고
@@ -420,24 +419,20 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       (reference) => reference.media.uploadedAt,
     );
     // 기획 LLM이 이 샷에 고른 레퍼런스 (docs/media-generation-pipeline.md
-    // "컨텍스트 선별"). 앵커(sortOrder 상위 2장 — 정체성 고정)는 항상 포함하고,
-    // 선별분을 뒤에 붙인다. 선별이 없으면 전체(폴백)를 쓴다.
+    // "컨텍스트 선별"). 필드 없음은 구버전 잡 호환을 위해 전체를 쓰고,
+    // 빈 배열은 인물 없는 샷이므로 레퍼런스를 보내지 않는다.
     const selectedIds = shotReferenceMediaIds(job.paramsJson);
-    let ordered = uploaded;
-    if (selectedIds.length > 0) {
-      const anchors = uploaded.slice(0, REFERENCE_ANCHOR_COUNT);
-      const anchorIds = new Set(anchors.map((reference) => reference.mediaId));
-      const selected = selectedIds
-        .filter((mediaId) => !anchorIds.has(mediaId))
-        .map((mediaId) =>
-          uploaded.find((reference) => reference.mediaId === mediaId),
-        )
-        .filter(
-          (reference): reference is (typeof uploaded)[number] =>
-            reference !== undefined,
-        );
-      ordered = [...anchors, ...selected];
-    }
+    const ordered =
+      selectedIds === undefined
+        ? uploaded
+        : selectedIds
+            .map((mediaId) =>
+              uploaded.find((reference) => reference.mediaId === mediaId),
+            )
+            .filter(
+              (reference): reference is (typeof uploaded)[number] =>
+                reference !== undefined,
+            );
     // fal edit 계열의 image_urls 상한(10장 초과 시 422 value_error) 안전판.
     if (ordered.length > MAX_REFERENCE_IMAGES) {
       this.logger.warn(

@@ -67,10 +67,12 @@ export const IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT = [
   "Given a character appearance prompt, a style prompt, and a Korean scene plan for each shot, create one English image prompt per shot optimized for the target model.",
   "Rules:",
   "- Write every prompt in English only.",
+  "- Resolve conflicts in this order: character identity, the shot's explicit capture setup and physical feasibility, the shot's situation and mood, then global style defaults.",
   "- Preserve the appearance prompt's identity-defining details across all shots to maintain character consistency.",
   "- If the appearance prompt is divided into [labeled] sections, include only sections for features actually visible in each shot. For example, omit face and nail details in a rear-view shot and omit full-body proportions in a hand close-up. Always include core identity sections whenever the character is visible.",
-  "- Translate the scene's location, composition, pose, lighting, and mood into concrete visual language the image model understands. Do not invent events or people absent from the scene.",
-  "- Incorporate the style prompt naturally into every shot.",
+  "- Preserve the scene's stated photographer, phone or camera placement, mirror relationship, framing, and lighting. Keep the viewpoint physically reachable from that placement, keep hands consistent with the action, and do not invent an unseen photographer, moving follow-camera, or additional people.",
+  "- Translate the scene's location, composition, pose, lighting, and mood into concrete visual language the image model understands. If an appearance feature obscures the scene's subject, reposition it without changing its identity-defining color, length, or form.",
+  "- Treat the style prompt as a visual default. Incorporate only the parts that do not conflict with the scene's capture setup, time, lighting, composition, or physical action.",
   "- Follow the syntax and format in the 'Target model guidance' section exactly; prompt-writing conventions differ by model family.",
   "- Do not create a negative prompt; it is injected separately.",
   "- Return exactly as many shots as the input, in the same order.",
@@ -85,7 +87,7 @@ export function buildImagePromptBuilderUserPrompt(
     `## Target image model\n${input.targetModelId?.trim() || "(unspecified)"}`,
     `## Target model guidance\n${modelFamilyGuidance(input.targetModelId)}`,
     `## Character appearance prompt\n${input.appearancePrompt.trim() || "(none)"}`,
-    `## Style prompt (apply to every shot)\n${input.stylePrompt.trim() || "(none)"}`,
+    `## Style defaults (apply only when compatible with the shot)\n${input.stylePrompt.trim() || "(none)"}`,
     `## Shot scenes (Korean plan)\n${input.scenes
       .map((scene, index) => `${index + 1}. ${scene}`)
       .join("\n")}`,
