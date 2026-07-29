@@ -37,6 +37,7 @@ export const navItems = [
   { id: "media", label: "미디어" },
   { id: "drafts", label: "초안 검수" },
   { id: "generation", label: "생성 작업" },
+  { id: "llm-logs", label: "LLM 로그" },
   { id: "logs", label: "액션 로그" },
   { id: "users", label: "사용자" },
   { id: "credits", label: "크레딧" },
@@ -1771,6 +1772,7 @@ async function renderSection(route, renderEpoch) {
   if (route === "media") return renderMedia();
   if (route === "drafts") return renderDrafts();
   if (route === "generation") return renderGeneration(renderEpoch);
+  if (route === "llm-logs") return renderLlmLogs();
   if (route === "users") return renderUsers();
   if (route === "credits") return renderCredits();
   if (route === "payments") return renderPayments();
@@ -4395,6 +4397,164 @@ async function renderLogs() {
     </table>`;
 }
 
+// ── LLM 로그 ─────────────────────────────────────────────────────────────
+
+function llmStatusClass(status) {
+  if (status === "succeeded") return "tag-accent";
+  if (status === "failed") return "tag-accent-2";
+  return "tag-neutral";
+}
+
+function llmJsonBlock(label, value, open = false) {
+  return `<details class="llm-log-json"${open ? " open" : ""}>
+    <summary>${escapeHtml(label)}</summary>
+    <pre>${escapeHtml(JSON.stringify(value ?? null, null, 2))}</pre>
+  </details>`;
+}
+
+function llmMediaGallery(media) {
+  const items = Array.isArray(media) ? media : [];
+  if (items.length === 0) return "";
+  return `<section class="llm-log-media"><h3>미디어 입출력</h3>
+    <div class="llm-log-media-grid">${items
+      .map((item) => {
+        const source = httpMediaUrl(item.url);
+        return `<button type="button" class="generation-candidate" data-act="zoom-image" data-url="${attr(
+          source,
+        )}">
+          ${source ? `<img src="${attr(source)}" alt="${attr(item.role)} ${escapeHtml(Number(item.sortOrder ?? 0) + 1)}">` : "<span>미리보기 없음</span>"}
+          <strong>${escapeHtml(item.role)} #${escapeHtml(Number(item.sortOrder ?? 0) + 1)}</strong>
+          <small>${escapeHtml(item.contentType || item.mediaType || "")}</small>
+        </button>`;
+      })
+      .join("")}</div>
+  </section>`;
+}
+
+async function renderLlmLogs() {
+  const routeState = adminRouteState(currentUrl());
+  if (routeState.detailId) {
+    const response = await request(
+      `/api/llm-logs/${encodeURIComponent(routeState.detailId)}`,
+    );
+    if (!response.ok) {
+      return `${sectionHead("LLM 로그", "요청·응답 전문 조회")}
+        ${noticeBlock(escapeHtml(errorMessage(response.body, "로그를 찾을 수 없습니다.")))}`;
+    }
+    const log = response.body;
+    const usage = [log.inputTokens, log.outputTokens, log.totalTokens]
+      .map((value) => value ?? "—")
+      .join(" / ");
+    return `${sectionHead(
+      `LLM 로그 #${log.id}`,
+      `${log.type} · ${log.provider} · ${log.model}`,
+      `<button class="btn btn-secondary" type="button" data-act="llm-log-back">목록</button>`,
+    )}
+      <div class="llm-log-meta">
+        <div><span>상태</span><strong class="tag ${llmStatusClass(log.status)}">${escapeHtml(log.status)}</strong></div>
+        <div><span>실행 시각</span><strong>${fmtDateTime(log.createdAt)}</strong></div>
+        <div><span>소요 시간</span><strong>${escapeHtml(log.durationMs == null ? "—" : `${log.durationMs}ms`)}</strong></div>
+        <div><span>토큰 in / out / total</span><strong>${escapeHtml(usage)}</strong></div>
+        <div><span>Request ID</span><strong>${escapeHtml(log.requestId || "—")}</strong></div>
+        <div><span>Provider Request ID</span><strong>${escapeHtml(log.providerRequestId || "—")}</strong></div>
+        <div><span>User / Character</span><strong>${escapeHtml(log.userId || "—")} / ${escapeHtml(log.characterId || "—")}</strong></div>
+        <div><span>Generation Job</span><strong>${escapeHtml(log.generationJobId || "—")}</strong></div>
+        <div><span>Endpoint</span><strong>${escapeHtml(log.endpoint || "—")}</strong></div>
+        <div><span>HTTP / 오류</span><strong>${escapeHtml(log.httpStatus ?? "—")} · ${escapeHtml(log.errorType || "—")} ${escapeHtml(log.errorMessage || "")}</strong></div>
+      </div>
+      ${llmMediaGallery(log.media)}
+      <div class="llm-log-json-grid">
+        ${llmJsonBlock("System Prompt", log.systemPromptJson, true)}
+        ${llmJsonBlock("User Prompt", log.userPromptJson, true)}
+        ${llmJsonBlock("Provider Request", log.requestJson)}
+        ${llmJsonBlock("Provider Response", log.responseJson)}
+        ${llmJsonBlock("Metadata", log.metadataJson)}
+        ${llmJsonBlock("Redacted Paths", log.redactedPaths)}
+      </div>`;
+  }
+
+  const { params } = parseRouteUrl(currentUrl());
+  const filterKeys = [
+    "status",
+    "type",
+    "provider",
+    "model",
+    "requestId",
+    "generationJobId",
+    "from",
+    "to",
+    "cursor",
+  ];
+  const query = {};
+  for (const key of filterKeys) {
+    const value = params.get(key);
+    if (value) query[key] = value;
+  }
+  query.limit = 50;
+  const response = await request(endpoint("/api/llm-logs", query));
+  const logs = itemsFromPage(response.body);
+  const rows = logs.length
+    ? logs
+        .map(
+          (
+            log,
+          ) => `<tr class="clickable" data-act="llm-log-open" data-id="${attr(log.id)}">
+            <td><span class="tag ${llmStatusClass(log.status)}">${escapeHtml(log.status)}</span></td>
+            <td><strong>${escapeHtml(log.type)}</strong><br><small>${escapeHtml(log.provider)}</small></td>
+            <td>${escapeHtml(log.model)}${log.isStreaming ? " · stream" : ""}</td>
+            <td><small>${escapeHtml(log.requestId || log.generationJobId || "—")}</small></td>
+            <td>${escapeHtml(log.totalTokens ?? "—")}</td>
+            <td>${escapeHtml(log.durationMs == null ? "—" : `${log.durationMs}ms`)}</td>
+            <td>${escapeHtml(log.mediaCount ?? 0)}</td>
+            <td>${fmtDateTime(log.createdAt)}</td>
+          </tr>`,
+        )
+        .join("")
+    : `<tr class="empty-row"><td colspan="8">조건에 맞는 LLM 로그가 없습니다.</td></tr>`;
+  const nextParams = new URLSearchParams(params);
+  if (response.body?.nextCursor) {
+    nextParams.set("cursor", response.body.nextCursor);
+  }
+  const nextUrl = `/llm-logs?${nextParams.toString()}`;
+
+  return `${sectionHead(
+    "LLM 로그",
+    "외부 모델 실행의 프롬프트·요청·응답·미디어 증거 — 읽기 전용",
+  )}
+    <form class="llm-log-filters" data-action="llm-log-filter">
+      <select class="input" name="status">
+        <option value="">전체 상태</option>
+        ${["running", "succeeded", "failed"]
+          .map(
+            (value) =>
+              `<option value="${value}"${params.get("status") === value ? " selected" : ""}>${value}</option>`,
+          )
+          .join("")}
+      </select>
+      ${["type", "provider", "model", "requestId", "generationJobId"]
+        .map(
+          (name) =>
+            `<input class="input" name="${name}" value="${attr(params.get(name) || "")}" placeholder="${name}">`,
+        )
+        .join("")}
+      <input class="input" type="datetime-local" name="from" value="${attr(params.get("from") || "")}">
+      <input class="input" type="datetime-local" name="to" value="${attr(params.get("to") || "")}">
+      <button class="btn btn-primary" type="submit">조회</button>
+      <button class="btn btn-secondary" type="button" data-act="llm-log-reset">초기화</button>
+    </form>
+    <div style="overflow-x:auto">
+      <table class="table">
+        <thead><tr><th>상태</th><th>Type</th><th>모델</th><th>연결 ID</th><th>토큰</th><th>시간</th><th>미디어</th><th>실행 시각</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    ${
+      response.body?.nextCursor
+        ? `<div style="margin-top:16px;text-align:right"><button class="btn btn-secondary" type="button" data-act="llm-log-next" data-url="${attr(nextUrl)}">다음 50건</button></div>`
+        : ""
+    }`;
+}
+
 // ── 분석 ──────────────────────────────────────────────────────────────────
 
 async function renderAnalytics() {
@@ -4854,6 +5014,25 @@ async function handleFormSubmit(event) {
 }
 
 async function dispatchSubmit(action, form, formData) {
+  if (action === "llm-log-filter") {
+    const params = {};
+    for (const key of [
+      "status",
+      "type",
+      "provider",
+      "model",
+      "requestId",
+      "generationJobId",
+      "from",
+      "to",
+    ]) {
+      const value = String(formData.get(key) ?? "").trim();
+      if (value) params[key] = value;
+    }
+    navigateTo(endpoint("/llm-logs", params));
+    return;
+  }
+
   // — login —
   if (action === "admin-login") {
     const result = await request(
@@ -5312,6 +5491,19 @@ async function handleClick(event) {
   const el = event.target.closest?.("[data-act]");
   if (!el) return;
   const act = el.dataset.act;
+
+  if (act === "llm-log-open") {
+    navigateTo(routeHref("llm-logs", el.dataset.id));
+    return;
+  }
+  if (act === "llm-log-back" || act === "llm-log-reset") {
+    navigateTo(routeHref("llm-logs"));
+    return;
+  }
+  if (act === "llm-log-next") {
+    navigateTo(el.dataset.url || routeHref("llm-logs"));
+    return;
+  }
 
   if (act === "remove-post-media") {
     if (!dialogSessionAllows(dialogState, act)) return;

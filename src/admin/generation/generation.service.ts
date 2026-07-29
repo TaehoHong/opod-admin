@@ -17,6 +17,7 @@ import {
   ImagePromptBuilder,
   localImagePromptBuilder,
 } from "../../worker/image-prompt-builder";
+import { randomUUID } from "node:crypto";
 
 type MediaType = "image" | "video";
 type JobStatus = "draft" | "queued" | "running" | "completed" | "failed";
@@ -208,6 +209,7 @@ export class GenerationService {
     // 자동(draft) 기획과 동일한 캐릭터 컨텍스트로 장면을 확장한다.
     // 운영자 원문은 sceneHint(반영 필수)로 전달된다.
     const planner = await this.resolveScenePlanner();
+    const requestId = randomUUID();
     let scene = inputPrompt;
     let referenceMediaIds: string[] = [];
     if (planner) {
@@ -220,19 +222,22 @@ export class GenerationService {
         }));
       let plan;
       try {
-        plan = await planner.plan({
-          characterName: character.displayName,
-          bio: character.bio,
-          interests: character.interests,
-          personas: character.personas,
-          memories: character.memories.map((memory) => memory.content),
-          recentCaptions: character.posts
-            .map((post) => post.content)
-            .filter(Boolean),
-          sceneHint: inputPrompt,
-          maxShots: 1,
-          ...(referenceCatalog.length > 0 ? { referenceCatalog } : {}),
-        });
+        plan = await planner.plan(
+          {
+            characterName: character.displayName,
+            bio: character.bio,
+            interests: character.interests,
+            personas: character.personas,
+            memories: character.memories.map((memory) => memory.content),
+            recentCaptions: character.posts
+              .map((post) => post.content)
+              .filter(Boolean),
+            sceneHint: inputPrompt,
+            maxShots: 1,
+            ...(referenceCatalog.length > 0 ? { referenceCatalog } : {}),
+          },
+          { requestId, characterId: input.characterId },
+        );
       } catch (error) {
         throw new BadGatewayException(
           `Scene planning failed (${planner.name}): ${error instanceof Error ? error.message : String(error)}`,
@@ -248,11 +253,14 @@ export class GenerationService {
     let prompt: string;
     try {
       prompt = (
-        await builder.build({
-          appearancePrompt: character.visualProfile?.appearancePrompt ?? "",
-          stylePrompt: character.visualProfile?.stylePrompt ?? "",
-          shots: [{ scene }],
-        })
+        await builder.build(
+          {
+            appearancePrompt: character.visualProfile?.appearancePrompt ?? "",
+            stylePrompt: character.visualProfile?.stylePrompt ?? "",
+            shots: [{ scene }],
+          },
+          { requestId, characterId: input.characterId },
+        )
       ).prompts[0];
     } catch (error) {
       throw new BadGatewayException(

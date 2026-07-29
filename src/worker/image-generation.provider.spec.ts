@@ -5,6 +5,7 @@ import {
   falSupportsNegativePrompt,
   ImageGenerationRequest,
 } from "./image-generation.provider";
+import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -95,13 +96,53 @@ describe("createFalImageGenerationProvider", () => {
     expect((init.headers as Record<string, string>).authorization).toBe(
       "Key secret",
     );
-    // nano-banana는 negative_prompt를 받지 않으므로 body에서 제외된다.
+    // nano-banana는 negative_prompt를 받지 않아 prompt 본문에 합친다.
     expect(JSON.parse(init.body as string)).toEqual({
-      prompt: "film photo of a beach",
+      prompt: "film photo of a beach Do not include: blurry.",
       num_images: 2,
       image_urls: ["https://cdn.local/ref.png"],
       aspect_ratio: "4:5",
     });
+  });
+
+  it("keeps submit and polling in one LLM log row", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ request_id: "req-1" }))
+      .mockResolvedValueOnce(jsonResponse({ status: "IN_QUEUE" }))
+      .mockResolvedValueOnce(jsonResponse({ status: "COMPLETED" }))
+      .mockResolvedValueOnce(
+        jsonResponse({ images: [{ url: "https://cdn.fal/a.png" }] }),
+      );
+    const handle = { id: 1n, redactedPaths: [], startedAt: Date.now() };
+    const llmLogs = {
+      start: jest.fn().mockResolvedValue(handle),
+      setProviderRequestId: jest.fn().mockResolvedValue(undefined),
+      findRunning: jest.fn(),
+      succeed: jest.fn().mockResolvedValue(undefined),
+      fail: jest.fn().mockResolvedValue(undefined),
+    } as unknown as LlmLogService;
+    const provider = createFalImageGenerationProvider(config, fetchFn, llmLogs);
+    provider.setLogContext?.({
+      requestId: "job-1",
+      characterId: "character-1",
+      generationJobId: "job-1",
+      inputMediaIds: ["media-1"],
+    });
+
+    await expect(provider.submit(baseRequest())).resolves.toEqual({
+      requestId: "req-1",
+    });
+    await expect(provider.poll("req-1")).resolves.toEqual({
+      status: "pending",
+    });
+    await expect(provider.poll("req-1")).resolves.toMatchObject({
+      status: "completed",
+    });
+
+    expect(llmLogs.start).toHaveBeenCalledTimes(1);
+    expect(llmLogs.succeed).toHaveBeenCalledTimes(1);
+    expect(llmLogs.findRunning).not.toHaveBeenCalled();
   });
 
   it("passes negative_prompt for SD-family models and omits empty references", async () => {

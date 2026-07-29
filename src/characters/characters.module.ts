@@ -12,6 +12,7 @@ import { CharactersController } from "./characters.controller";
 import { CharactersService } from "./characters.service";
 import { PostingPolicyService } from "./posting-policy.service";
 import { VisualProfileService } from "./visual-profile.service";
+import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 
 @Module({
   imports: [PrismaModule, AdminAuthModule, SettingsModule],
@@ -26,6 +27,7 @@ import { VisualProfileService } from "./visual-profile.service";
       useFactory: (
         prisma: PrismaService,
         settings: GenerationSettingsService,
+        llmLogs: LlmLogService,
       ) => {
         const readBytes = createMediaBytesReader();
         return new VisualProfileService(prisma, async () => {
@@ -39,10 +41,12 @@ import { VisualProfileService } from "./visual-profile.service";
           return createLlmReferenceCaptioner(
             { apiUrl, apiKey, model },
             readBytes,
+            fetch,
+            llmLogs,
           );
         });
       },
-      inject: [PrismaService, GenerationSettingsService],
+      inject: [PrismaService, GenerationSettingsService, LlmLogService],
     },
   ],
 })

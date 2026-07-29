@@ -46,9 +46,9 @@ GET /api/settings/generation
 The same document also carries the **content-planner LLM** settings
 (OpenAI-compatible chat completions, used by the draft worker):
 `llmApiUrl`, `llmApiKey` (masked the same way), `llmModel`,
-`resolved.plannerProvider` (`llm:<model>` or `local`), and
-`resolved.plannerSources`. The LLM planner activates only when URL, key, and
-model all resolve; otherwise the deterministic local planner runs.
+`resolved.plannerProvider` (`llm:<model>` or `unconfigured`), and
+`resolved.plannerSources`. URL, key, and model must all resolve before draft
+planning can run.
 
 ## Character-chat LLM (opod-agent)
 

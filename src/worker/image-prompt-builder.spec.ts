@@ -111,7 +111,9 @@ describe("buildImagePromptBuilderUserPrompt", () => {
     });
     expect(prompt).toContain("## Target image model\n(unspecified)");
     expect(prompt).toContain("## Character appearance prompt\n(none)");
-    expect(prompt).toContain("## Style prompt (apply to every shot)\n(none)");
+    expect(prompt).toContain(
+      "## Style defaults (apply only when compatible with the shot)\n(none)",
+    );
   });
 });
 

@@ -1,4 +1,10 @@
 import { randomUUID } from "node:crypto";
+import {
+  LLM_LOG_TYPE,
+  LlmLogContext,
+  LlmLogHandle,
+  LlmLogService,
+} from "../domain/llm-logs/llm-log.service";
 
 export type ImageGenerationRequest = {
   prompt: string;
@@ -29,11 +35,13 @@ export type GenerationPollResult =
 // submit 직후 requestId를 DB에 기록해야 재시작 후 poll로 이어받을 수 있다.
 export type ImageGenerationProvider = {
   readonly name: string;
+  setLogContext?(context: LlmLogContext): void;
   submit(request: ImageGenerationRequest): Promise<{ requestId: string }>;
   poll(requestId: string): Promise<GenerationPollResult>;
   // 폴링 데드라인 초과 등으로 결과를 포기할 때의 베스트에포트 취소.
   // 큐에서 아직 시작 전인 요청만 실제로 취소되며, 실패는 무시한다.
   cancel?(requestId: string): Promise<void>;
+  fail?(requestId: string, error: unknown): Promise<void>;
 };
 
 // 레퍼런스 유무에 따라 워커가 라우팅하는 프로바이더 쌍 (D4).
@@ -104,6 +112,7 @@ export type GenerationProviderSettings = {
 export function resolveImageGenerationProviders(
   settings: GenerationProviderSettings,
   fetchFn: typeof fetch = fetch,
+  llmLogs?: LlmLogService,
 ): ImageGenerationProviders {
   const apiKey = settings.apiKey?.trim();
   const editModel = settings.editModel?.trim();
@@ -113,10 +122,18 @@ export function resolveImageGenerationProviders(
     return { t2i: local, edit: local };
   }
   const edit = editModel
-    ? createFalImageGenerationProvider({ apiKey, model: editModel }, fetchFn)
+    ? createFalImageGenerationProvider(
+        { apiKey, model: editModel },
+        fetchFn,
+        llmLogs,
+      )
     : createLocalImageGenerationProvider();
   const t2i = t2iModel
-    ? createFalImageGenerationProvider({ apiKey, model: t2iModel }, fetchFn)
+    ? createFalImageGenerationProvider(
+        { apiKey, model: t2iModel },
+        fetchFn,
+        llmLogs,
+      )
     : edit;
   return { t2i, edit };
 }
@@ -160,15 +177,38 @@ export function falSupportsNegativePrompt(model: string): boolean {
 export function createFalImageGenerationProvider(
   config: { apiKey: string; model: string },
   fetchFn: typeof fetch = fetch,
+  llmLogs?: LlmLogService,
 ): ImageGenerationProvider {
   const urls = falQueueUrls(config.model);
   const headers = {
     authorization: `Key ${config.apiKey}`,
     "content-type": "application/json",
   };
+  const activeLogs = new Map<string, LlmLogHandle>();
+  let logContext: LlmLogContext | undefined;
+
+  const handleFor = async (
+    requestId: string,
+  ): Promise<LlmLogHandle | undefined> => {
+    const active = activeLogs.get(requestId);
+    if (active || !llmLogs) return active;
+    if (!logContext?.generationJobId) {
+      throw new Error("generationJobId is required to resume a fal LLM log");
+    }
+    const handle = await llmLogs.findRunning({
+      type: LLM_LOG_TYPE.imageGenerate,
+      generationJobId: logContext.generationJobId,
+      providerRequestId: requestId,
+    });
+    activeLogs.set(requestId, handle);
+    return handle;
+  };
 
   return {
     name: `fal:${config.model}`,
+    setLogContext(context) {
+      logContext = context;
+    },
 
     async submit(request) {
       const negativePrompt = request.negativePrompt?.trim();
@@ -188,30 +228,88 @@ export function createFalImageGenerationProvider(
           : {}),
         ...request.extraParams,
       };
-      const response = await fetchFn(urls.submitUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-      });
+      const handle = llmLogs
+        ? await llmLogs.start({
+            type: LLM_LOG_TYPE.imageGenerate,
+            provider: "fal",
+            model: config.model,
+            endpoint: urls.submitUrl,
+            requestJson: body,
+            context: {
+              ...logContext,
+            },
+          })
+        : undefined;
+      let response: Response;
+      try {
+        response = await fetchFn(urls.submitUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+        });
+      } catch (error) {
+        if (handle) await llmLogs?.fail(handle, error);
+        throw error;
+      }
       if (!response.ok) {
+        const payload = await responsePayload(response.clone());
+        if (handle) {
+          await llmLogs?.fail(
+            handle,
+            new Error(`fal submit failed (${response.status})`),
+            { responseJson: payload, httpStatus: response.status },
+          );
+        }
         throw new Error(
           `fal submit failed (${response.status}): ${await safeText(response)}`,
         );
       }
       const payload = (await response.json()) as { request_id?: string };
       if (!payload.request_id) {
+        if (handle) {
+          await llmLogs?.fail(
+            handle,
+            new Error("fal submit response is missing request_id"),
+            { responseJson: payload, httpStatus: response.status },
+          );
+        }
         throw new Error("fal submit response is missing request_id");
+      }
+      if (handle) {
+        activeLogs.set(payload.request_id, handle);
+        await llmLogs?.setProviderRequestId(handle, payload.request_id);
       }
       return { requestId: payload.request_id };
     },
 
     async poll(requestId) {
-      const statusResponse = await fetchFn(
-        urls.requestUrl(requestId, "/status"),
-        { headers, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) },
-      );
+      const handle = await handleFor(requestId);
+      let statusResponse: Response;
+      try {
+        statusResponse = await fetchFn(urls.requestUrl(requestId, "/status"), {
+          headers,
+          signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+        });
+      } catch (error) {
+        // 네트워크/타임아웃은 fal 실행 자체의 실패가 아니다. 같은 requestId로
+        // 다음 worker 시도가 polling을 이어가므로 로그도 running을 유지한다.
+        throw error;
+      }
       if (!statusResponse.ok) {
+        const payload = await responsePayload(statusResponse.clone());
+        if (handle) {
+          await llmLogs?.fail(
+            handle,
+            new Error(`fal status failed (${statusResponse.status})`),
+            {
+              responseJson: payload,
+              providerRequestId: requestId,
+              httpStatus: statusResponse.status,
+            },
+          );
+        }
+        activeLogs.delete(requestId);
         return {
           status: "failed",
           errorMessage: `fal status failed (${statusResponse.status}): ${await safeText(statusResponse)}`,
@@ -227,6 +325,20 @@ export function createFalImageGenerationProvider(
         return { status: "pending" };
       }
       if (statusPayload.status !== "COMPLETED") {
+        if (handle) {
+          await llmLogs?.fail(
+            handle,
+            new Error(
+              `fal request ended with status ${statusPayload.status ?? "unknown"}`,
+            ),
+            {
+              responseJson: statusPayload,
+              providerRequestId: requestId,
+              httpStatus: statusResponse.status,
+            },
+          );
+        }
+        activeLogs.delete(requestId);
         return {
           status: "failed",
           errorMessage: `fal request ended with status ${statusPayload.status ?? "unknown"}`,
@@ -235,11 +347,30 @@ export function createFalImageGenerationProvider(
 
       // 앱이 검증/런타임 오류를 낸 요청도 status는 COMPLETED다.
       // 실패 내용은 result 조회가 4xx/5xx + detail로 돌려준다.
-      const resultResponse = await fetchFn(urls.requestUrl(requestId), {
-        headers,
-        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-      });
+      let resultResponse: Response;
+      try {
+        resultResponse = await fetchFn(urls.requestUrl(requestId), {
+          headers,
+          signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+        });
+      } catch (error) {
+        // 결과 수신 실패도 동일 실행을 재조회할 수 있으므로 running 유지.
+        throw error;
+      }
       if (!resultResponse.ok) {
+        const payload = await responsePayload(resultResponse.clone());
+        if (handle) {
+          await llmLogs?.fail(
+            handle,
+            new Error(`fal result failed (${resultResponse.status})`),
+            {
+              responseJson: payload,
+              providerRequestId: requestId,
+              httpStatus: resultResponse.status,
+            },
+          );
+        }
+        activeLogs.delete(requestId);
         return {
           status: "failed",
           errorMessage: `fal result failed (${resultResponse.status}): ${await safeText(resultResponse)}`,
@@ -248,13 +379,34 @@ export function createFalImageGenerationProvider(
           ...(resultResponse.status === 422 ? { permanent: true } : {}),
         };
       }
-      const images = imagesFromFalResult(await resultResponse.json());
+      const resultPayload = await resultResponse.json();
+      const images = imagesFromFalResult(resultPayload);
       if (images.length === 0) {
+        if (handle) {
+          await llmLogs?.fail(
+            handle,
+            new Error("fal result contained no images"),
+            {
+              responseJson: resultPayload,
+              providerRequestId: requestId,
+              httpStatus: resultResponse.status,
+            },
+          );
+        }
+        activeLogs.delete(requestId);
         return {
           status: "failed",
           errorMessage: "fal result contained no images",
         };
       }
+      if (handle) {
+        await llmLogs?.succeed(handle, {
+          responseJson: resultPayload,
+          providerRequestId: requestId,
+          httpStatus: resultResponse.status,
+        });
+      }
+      activeLogs.delete(requestId);
       return { status: "completed", images };
     },
 
@@ -269,7 +421,23 @@ export function createFalImageGenerationProvider(
         // 베스트에포트 — 취소 실패는 무시한다.
       }
     },
+
+    async fail(requestId, error) {
+      const handle = await handleFor(requestId);
+      if (handle) await llmLogs?.fail(handle, error);
+      activeLogs.delete(requestId);
+    },
   };
+}
+
+async function responsePayload(response: Response): Promise<unknown> {
+  const text = await response.text().catch(() => "");
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 function imagesFromFalResult(value: unknown): GeneratedImage[] {

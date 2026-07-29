@@ -14,6 +14,11 @@ import {
   PlannerProviderSettings,
   contentFromChatCompletion,
 } from "./content-planner";
+import {
+  LLM_LOG_TYPE,
+  LlmLogContext,
+  LlmLogService,
+} from "../domain/llm-logs/llm-log.service";
 
 const HTTP_TIMEOUT_MS = 60_000;
 
@@ -25,7 +30,10 @@ export type ImagePromptBuildInput = {
 
 export type ImagePromptBuilder = {
   readonly name: string;
-  build(input: ImagePromptBuildInput): Promise<{ prompts: string[] }>;
+  build(
+    input: ImagePromptBuildInput,
+    context?: LlmLogContext,
+  ): Promise<{ prompts: string[] }>;
 };
 
 // 세 값이 모두 있어야 LLM 빌더, 하나라도 없으면 결정적 폴백.
@@ -33,6 +41,7 @@ export function resolveImagePromptBuilder(
   settings: PlannerProviderSettings,
   options: { targetModelId?: string } = {},
   fetchFn: typeof fetch = fetch,
+  llmLogs?: LlmLogService,
 ): ImagePromptBuilder {
   const apiUrl = settings.apiUrl?.trim();
   const apiKey = settings.apiKey?.trim();
@@ -43,6 +52,7 @@ export function resolveImagePromptBuilder(
   return createLlmImagePromptBuilder(
     { apiUrl, apiKey, model, targetModelId: options.targetModelId },
     fetchFn,
+    llmLogs,
   );
 }
 
@@ -72,33 +82,47 @@ export function createLlmImagePromptBuilder(
     targetModelId?: string;
   },
   fetchFn: typeof fetch = fetch,
+  llmLogs?: LlmLogService,
 ): ImagePromptBuilder {
   return {
     name: `llm:${config.model}`,
-    async build(input) {
-      const response = await fetchFn(config.apiUrl, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${config.apiKey}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          model: config.model,
-          messages: [
-            { role: "system", content: IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT },
-            {
-              role: "user",
-              content: buildImagePromptBuilderUserPrompt({
-                targetModelId: config.targetModelId,
-                appearancePrompt: input.appearancePrompt,
-                stylePrompt: input.stylePrompt,
-                scenes: input.shots.map((shot) => shot.scene),
-              }),
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-      });
+    async build(input, context) {
+      const requestJson = {
+        model: config.model,
+        messages: [
+          { role: "system", content: IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: buildImagePromptBuilderUserPrompt({
+              targetModelId: config.targetModelId,
+              appearancePrompt: input.appearancePrompt,
+              stylePrompt: input.stylePrompt,
+              scenes: input.shots.map((shot) => shot.scene),
+            }),
+          },
+        ],
+      };
+      const execute = () =>
+        fetchFn(config.apiUrl, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${config.apiKey}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(requestJson),
+          signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+        });
+      const response = llmLogs
+        ? await llmLogs.runJsonFetch({
+            type: LLM_LOG_TYPE.imagePromptBuild,
+            provider: "openai-compatible",
+            model: config.model,
+            endpoint: config.apiUrl,
+            requestJson,
+            context,
+            execute,
+          })
+        : await execute();
       if (!response.ok) {
         throw new Error(`image prompt builder LLM failed (${response.status})`);
       }

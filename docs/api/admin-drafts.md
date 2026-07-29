@@ -17,8 +17,8 @@ needs_review | failed → regenerating → needs_review
 ```
 
 Drafts are processed by the in-process worker (`WORKER_ENABLED`): planning uses
-the LLM planner (`LLM_API_URL`/`LLM_API_KEY`/`LLM_MODEL`, local fallback
-otherwise), shots become image generation jobs, and approved drafts are
+the LLM planner (`LLM_API_URL`/`LLM_API_KEY`/`LLM_MODEL`; all required), shots
+become image generation jobs, and approved drafts are
 published at `scheduledAt` (immediately when null). Drafts of inactive
 characters are held (not planned, not published).
 

@@ -193,13 +193,17 @@ describe("DraftWorkerService planning", () => {
         recentCaptions: ["지난 게시물"],
         maxShots: 2,
       }),
+      { requestId: "draft-1", characterId: "ai-1" },
     );
     // 자동 모드: 기획된 컷 장면이 프롬프트 빌더로 배치 전달된다.
-    expect(builder.build).toHaveBeenCalledWith({
-      appearancePrompt: "young woman, short hair",
-      stylePrompt: "film photography",
-      shots: [{ scene: "해변 역광" }, { scene: "카메라 클로즈업" }],
-    });
+    expect(builder.build).toHaveBeenCalledWith(
+      {
+        appearancePrompt: "young woman, short hair",
+        stylePrompt: "film photography",
+        shots: [{ scene: "해변 역광" }, { scene: "카메라 클로즈업" }],
+      },
+      { requestId: "draft-1", characterId: "ai-1" },
+    );
     expect(tx.postDraft.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "draft-1", status: "generating" },
@@ -223,7 +227,9 @@ describe("DraftWorkerService planning", () => {
         draftId: "draft-1",
         sortOrder: 0,
         // 장면 원문은 프롬프트 추적용 메타데이터로 저장된다.
-        paramsJson: { _shot: { scene: "해변 역광" } },
+        paramsJson: {
+          _shot: { scene: "해변 역광", referenceMediaIds: [] },
+        },
       },
     });
     expect(tx.characterActionLog.create).toHaveBeenCalledWith({
@@ -760,6 +766,7 @@ describe("DraftWorkerService manual triggers", () => {
     );
     expect(planner.plan).toHaveBeenCalledWith(
       expect.objectContaining({ sceneHint: "애월 해변" }),
+      { requestId: "draft-1", characterId: "ai-1" },
     );
     expect(tx.generationJob.create).toHaveBeenCalledTimes(2);
   });
@@ -806,7 +813,9 @@ describe("DraftWorkerService manual triggers", () => {
         status: "draft",
         prompt: "",
         sortOrder: 0,
-        paramsJson: { _shot: { scene: "해변 역광" } },
+        paramsJson: {
+          _shot: { scene: "해변 역광", referenceMediaIds: [] },
+        },
       }),
     });
     // source/mode는 보존하고 기획 입력 스냅샷(planInput)을 기록한다.
@@ -871,11 +880,14 @@ describe("DraftWorkerService manual triggers", () => {
     const result = await service.buildDraftPromptsNow("draft-1");
 
     expect(result).toEqual({ built: true });
-    expect(builder.build).toHaveBeenCalledWith({
-      appearancePrompt: "young woman, short hair",
-      stylePrompt: "film photography",
-      shots: [{ scene: "해변 역광" }, { scene: "카메라 클로즈업" }],
-    });
+    expect(builder.build).toHaveBeenCalledWith(
+      {
+        appearancePrompt: "young woman, short hair",
+        stylePrompt: "film photography",
+        shots: [{ scene: "해변 역광" }, { scene: "카메라 클로즈업" }],
+      },
+      { requestId: "draft-1", characterId: "ai-1" },
+    );
     // draft 상태 조건부 갱신 — 빌드 중 큐잉된 잡은 건드리지 않는다.
     expect(tx.generationJob.updateMany).toHaveBeenCalledWith({
       where: { id: "job-1", status: "draft" },

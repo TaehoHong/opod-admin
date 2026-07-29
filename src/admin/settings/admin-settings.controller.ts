@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Put, Req, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Put,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import { PrismaService } from "../../domain/database/prisma.service";
 import {
   GenerationSettings,
@@ -102,16 +110,20 @@ export class AdminSettingsController {
   }
 
   private async buildView(saved: GenerationSettings) {
-    const [resolved, plannerResolved, chat, names, todaySpend] = await Promise.all([
-      this.settings.resolveProviderSettings(),
-      this.settings.resolvePlannerSettings(),
-      this.settings.resolveChatSettings(),
-      this.settings.resolveProviderNames(),
-      this.prisma.generationJob.aggregate({
-        _sum: { costUsd: true },
-        where: { updatedAt: { gte: startOfKstDay() }, costUsd: { not: null } },
-      }),
-    ]);
+    const [resolved, plannerResolved, chat, names, todaySpend] =
+      await Promise.all([
+        this.settings.resolveProviderSettings(),
+        this.settings.resolvePlannerSettings(),
+        this.settings.resolveChatSettings(),
+        this.settings.resolveProviderNames(),
+        this.prisma.generationJob.aggregate({
+          _sum: { costUsd: true },
+          where: {
+            updatedAt: { gte: startOfKstDay() },
+            costUsd: { not: null },
+          },
+        }),
+      ]);
     const worker = workerConfigFromEnv();
     return {
       falApiKey: saved.falApiKey

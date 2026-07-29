@@ -326,11 +326,14 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     let prompts: string[];
     try {
       prompts = (
-        await builder.build({
-          appearancePrompt: profile?.appearancePrompt ?? "",
-          stylePrompt: profile?.stylePrompt ?? "",
-          shots,
-        })
+        await builder.build(
+          {
+            appearancePrompt: profile?.appearancePrompt ?? "",
+            stylePrompt: profile?.stylePrompt ?? "",
+            shots,
+          },
+          { requestId: draft.id, characterId: draft.characterId },
+        )
       ).prompts;
     } catch (error) {
       return { built: false, reason: errorMessage(error).slice(0, 500) };
@@ -501,7 +504,10 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         maxShots: this.config.maxShots,
         ...(referenceCatalog.length > 0 ? { referenceCatalog } : {}),
       };
-      const plan = await planner.plan(planInput);
+      const plan = await planner.plan(planInput, {
+        requestId: draft.id,
+        characterId: draft.characterId,
+      });
 
       // 기획·빌드 LLM을 직렬로 부르면 기본 리스(120s)를 넘길 수 있어,
       // 스윕이 중간에 회수해 이중 기획하지 않도록 리스를 연장한다.
@@ -520,11 +526,14 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       const profile = draft.character.visualProfile;
       const builder = manualMode ? null : await this.resolvePromptBuilder();
       const built = builder
-        ? await builder.build({
-            appearancePrompt: profile?.appearancePrompt ?? "",
-            stylePrompt: profile?.stylePrompt ?? "",
-            shots: plan.shots.map((shot) => ({ scene: shot.scene })),
-          })
+        ? await builder.build(
+            {
+              appearancePrompt: profile?.appearancePrompt ?? "",
+              stylePrompt: profile?.stylePrompt ?? "",
+              shots: plan.shots.map((shot) => ({ scene: shot.scene })),
+            },
+            { requestId: draft.id, characterId: draft.characterId },
+          )
         : null;
 
       await this.prisma.$transaction(async (tx) => {

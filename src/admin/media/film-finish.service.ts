@@ -52,10 +52,7 @@ export class FilmFinishService {
     return pending;
   }
 
-  private async render(
-    mediaId: string,
-    preset: FinishPreset,
-  ): Promise<Buffer> {
+  private async render(mediaId: string, preset: FinishPreset): Promise<Buffer> {
     const media = await this.prisma.media.findUnique({
       where: { id: mediaId },
       select: { mediaType: true, url: true, storageKey: true },
@@ -64,9 +61,7 @@ export class FilmFinishService {
       throw new NotFoundException("Media not found");
     }
     if (media.mediaType !== "image") {
-      throw new BadRequestException(
-        "Finish preview supports image media only",
-      );
+      throw new BadRequestException("Finish preview supports image media only");
     }
     const source = await mediaSourceBytes(
       media,

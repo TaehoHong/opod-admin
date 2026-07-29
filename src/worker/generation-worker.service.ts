@@ -16,6 +16,10 @@ import {
   ImageGenerationRequest,
 } from "./image-generation.provider";
 import { errorMessage, isRecord, parsePositiveNumber } from "./value-utils";
+import {
+  LLM_LOG_TYPE,
+  LlmLogService,
+} from "../domain/llm-logs/llm-log.service";
 
 export type WorkerConfig = {
   enabled: boolean;
@@ -97,6 +101,7 @@ type ClaimedJob = {
   candidateCount: number | null;
   provider: string | null;
   providerRequestId: string | null;
+  originJobId: string | null;
   paramsJson: unknown;
   character: {
     visualProfile: {
@@ -130,6 +135,10 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
 
   // 수동 실행(runJobNow)이 백그라운드로 돌린 처리들. 셧다운 시 대기한다.
   private readonly manualRuns = new Set<Promise<void>>();
+  private readonly requestInputMediaIds = new WeakMap<
+    ImageGenerationRequest,
+    string[]
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -143,6 +152,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     // 자사 S3 레퍼런스를 프로바이더가 받을 수 있게 서명한다(버킷 비공개 유지).
     // null이면 원본 URL 그대로 전송 (공개 버킷/외부 URL 전제).
     private readonly signReferenceUrl: ReferenceUrlSigner | null = null,
+    private readonly llmLogs?: LlmLogService,
   ) {}
 
   onModuleInit(): void {
@@ -376,11 +386,19 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     request: ImageGenerationRequest,
   ): Promise<CompletedGeneration> {
     let requestId = job.providerRequestId ?? undefined;
+    provider.setLogContext?.({
+      requestId: job.originJobId ?? job.id,
+      characterId: job.characterId,
+      generationJobId: job.id,
+      inputMediaIds: this.requestInputMediaIds.get(request) ?? [],
+    });
     // 이전 시도가 다른 프로바이더로 제출했던 잡은 이어받을 수 없으므로 새로 제출한다.
     // (시도 사이에 레퍼런스가 승격되어 라우팅이 바뀐 경우도 여기에 해당한다.)
     if (!requestId || job.provider !== provider.name) {
       const submitted = await provider.submit(request);
       requestId = submitted.requestId;
+      job.providerRequestId = requestId;
+      job.provider = provider.name;
       // 제출 직후 기록해야 크래시 후 재수용 시 이중 제출을 막는다.
       await this.prisma.generationJob.updateMany({
         where: { id: job.id, status: "running" },
@@ -457,7 +475,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       ...(isRecord(profile?.providerConfig) ? profile.providerConfig : {}),
       ...(isRecord(job.paramsJson) ? job.paramsJson : {}),
     });
-    return {
+    const request: ImageGenerationRequest = {
       prompt: job.prompt,
       negativePrompt: profile?.negativePrompt || undefined,
       referenceImageUrls,
@@ -465,6 +483,14 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       extraParams:
         Object.keys(extraParams).length > 0 ? extraParams : undefined,
     };
+    this.requestInputMediaIds.set(
+      request,
+      ordered
+        .slice(0, MAX_REFERENCE_IMAGES)
+        .map((reference) => reference.mediaId)
+        .filter(Boolean),
+    );
+    return request;
   }
 
   // 출력 다운로드 → 우리 스토리지 업로드 → Media(uploadedAt 확정, isAiGenerated)
@@ -539,6 +565,25 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
           selected: false,
         })),
       });
+      const llmLog = await tx.llmLog.findFirst({
+        where: {
+          type: LLM_LOG_TYPE.imageGenerate,
+          generationJobId: job.id,
+        },
+        orderBy: { id: "desc" },
+        select: { id: true },
+      });
+      if (llmLog) {
+        await tx.llmLogMedia.createMany({
+          data: mediaIds.map((mediaId, sortOrder) => ({
+            llmLogId: llmLog.id,
+            mediaId,
+            role: "output",
+            sortOrder,
+          })),
+          skipDuplicates: true,
+        });
+      }
       await tx.characterActionLog.create({
         data: {
           characterId: job.characterId,
@@ -574,6 +619,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (permanent || job.attemptCount >= this.config.maxAttempts) {
+      await this.failRunningLlmLog(job, error);
       const transitioned = await this.prisma.generationJob.updateMany({
         where: { id: job.id, status: "running" },
         data: { status: "failed", errorMessage: message, leaseExpiresAt: null },
@@ -600,6 +646,31 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
           : {}),
       },
     });
+  }
+
+  private async failRunningLlmLog(
+    job: ClaimedJob,
+    error: unknown,
+  ): Promise<void> {
+    if (
+      !this.llmLogs ||
+      !job.provider?.startsWith("fal:") ||
+      !job.providerRequestId
+    ) {
+      return;
+    }
+    try {
+      const handle = await this.llmLogs.findRunning({
+        type: LLM_LOG_TYPE.imageGenerate,
+        generationJobId: job.id,
+        providerRequestId: job.providerRequestId,
+      });
+      await this.llmLogs.fail(handle, error, {
+        providerRequestId: job.providerRequestId,
+      });
+    } catch {
+      // Provider가 이미 실패 처리했거나 로그 완료 갱신이 실패한 경우다.
+    }
   }
 
   private async extendLease(jobId: string): Promise<void> {

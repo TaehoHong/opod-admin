@@ -100,7 +100,11 @@ export class VisualProfileService {
     const failed: { mediaId: string; error: string }[] = [];
     for (const reference of references) {
       try {
-        const description = await captioner.caption(reference.media);
+        const description = await captioner.caption(reference.media, {
+          requestId: reference.mediaId,
+          characterId,
+          inputMediaIds: [reference.mediaId],
+        });
         await this.prisma.characterVisualProfileReference.update({
           where: {
             profileId_mediaId: {

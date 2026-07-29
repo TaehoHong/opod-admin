@@ -151,6 +151,8 @@ function mockSuccessTransaction(prisma: PrismaMock) {
         },
         generationJobOutput: { createMany: jest.fn() },
         characterActionLog: { create: jest.fn() },
+        llmLog: { findFirst: jest.fn().mockResolvedValue(null) },
+        llmLogMedia: { createMany: jest.fn() },
       }),
   );
 }
@@ -204,6 +206,7 @@ describe("GenerationWorkerService", () => {
     const txJobUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
     const txOutputsCreateMany = jest.fn().mockResolvedValue({ count: 2 });
     const txActionLogCreate = jest.fn().mockResolvedValue({});
+    const txLlmLogMediaCreateMany = jest.fn().mockResolvedValue({ count: 2 });
     prisma.$transaction.mockImplementation(
       async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
@@ -211,6 +214,8 @@ describe("GenerationWorkerService", () => {
           generationJob: { updateMany: txJobUpdateMany },
           generationJobOutput: { createMany: txOutputsCreateMany },
           characterActionLog: { create: txActionLogCreate },
+          llmLog: { findFirst: jest.fn().mockResolvedValue({ id: 7n }) },
+          llmLogMedia: { createMany: txLlmLogMediaCreateMany },
         }),
     );
     const { service, downloadBytes } = makeService(prisma, provider);
@@ -254,6 +259,13 @@ describe("GenerationWorkerService", () => {
         expect.objectContaining({ candidateIndex: 0, selected: false }),
         expect.objectContaining({ candidateIndex: 1, selected: false }),
       ]),
+    });
+    expect(txLlmLogMediaCreateMany).toHaveBeenCalledWith({
+      data: [
+        { llmLogId: 7n, mediaId: "media-a", role: "output", sortOrder: 0 },
+        { llmLogId: 7n, mediaId: "media-b", role: "output", sortOrder: 1 },
+      ],
+      skipDuplicates: true,
     });
     expect(txActionLogCreate).toHaveBeenCalled();
   });
@@ -700,13 +712,12 @@ describe("GenerationWorkerService", () => {
 
     await service.tick();
 
-    // 앵커(r1, r2)가 앞, 선별분 중 앵커 제외(r3)가 뒤. r4는 미선택이라 제외.
+    // 기획 LLM이 고른 순서만 유지한다. r2/r4는 미선택이라 제외.
     expect(provider.submit).toHaveBeenCalledWith(
       expect.objectContaining({
         referenceImageUrls: [
-          "https://cdn.local/r1.png",
-          "https://cdn.local/r2.png",
           "https://cdn.local/r3.png",
+          "https://cdn.local/r1.png",
         ],
       }),
     );

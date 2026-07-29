@@ -18,6 +18,8 @@ import { FilmFinishController } from "./media/film-finish.controller";
 import { FilmFinishService } from "./media/film-finish.service";
 import { MediaService } from "./media/media.service";
 import { AdminSettingsController } from "./settings/admin-settings.controller";
+import { LlmLogService } from "../domain/llm-logs/llm-log.service";
+import { LlmLogsController } from "./llm-logs/llm-logs.controller";
 
 @Module({
   // WorkerModule은 수동 실행(generation/worker/run)용 — 의존 방향은
@@ -34,6 +36,7 @@ import { AdminSettingsController } from "./settings/admin-settings.controller";
     DraftsController,
     AdminSettingsController,
     FilmFinishController,
+    LlmLogsController,
   ],
   providers: [
     AdminService,
@@ -46,6 +49,7 @@ import { AdminSettingsController } from "./settings/admin-settings.controller";
       useFactory: (
         prisma: PrismaService,
         settings: GenerationSettingsService,
+        llmLogs: LlmLogService,
       ) =>
         new GenerationService(
           prisma,
@@ -57,7 +61,11 @@ import { AdminSettingsController } from "./settings/admin-settings.controller";
             if (!apiUrl || !apiKey || !model) {
               return null;
             }
-            return createLlmContentPlanner({ apiUrl, apiKey, model });
+            return createLlmContentPlanner(
+              { apiUrl, apiKey, model },
+              fetch,
+              llmLogs,
+            );
           },
           // 프롬프트 빌더 — draft 파이프라인과 동일하게 planner.* 설정을
           // 재사용하고, 대상 모델은 edit 우선 (레퍼런스 경로가 일반적).
@@ -66,12 +74,17 @@ import { AdminSettingsController } from "./settings/admin-settings.controller";
               settings.resolvePlannerSettings(),
               settings.resolveProviderSettings(),
             ]);
-            return resolveImagePromptBuilder(planner, {
-              targetModelId: provider.editModel ?? provider.t2iModel,
-            });
+            return resolveImagePromptBuilder(
+              planner,
+              {
+                targetModelId: provider.editModel ?? provider.t2iModel,
+              },
+              fetch,
+              llmLogs,
+            );
           },
         ),
-      inject: [PrismaService, GenerationSettingsService],
+      inject: [PrismaService, GenerationSettingsService, LlmLogService],
     },
     MediaService,
     {

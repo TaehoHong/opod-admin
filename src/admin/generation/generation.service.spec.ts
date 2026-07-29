@@ -191,6 +191,7 @@ describe("GenerationService", () => {
         recentCaptions: ["지난 캡션"],
         maxShots: 1,
       }),
+      expect.objectContaining({ characterId: "ai-1" }),
     );
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -204,7 +205,10 @@ describe("GenerationService", () => {
               builderName: "local",
               expandedScene: "비 오는 오후 창가 카페, 얕은 심도",
             },
-            _shot: { scene: "비 오는 오후 창가 카페, 얕은 심도" },
+            _shot: {
+              scene: "비 오는 오후 창가 카페, 얕은 심도",
+              referenceMediaIds: [],
+            },
           },
         }),
       }),
@@ -257,11 +261,14 @@ describe("GenerationService", () => {
       candidateCount: 1,
     });
 
-    expect(build).toHaveBeenCalledWith({
-      appearancePrompt: "same face",
-      stylePrompt: "film grain",
-      shots: [{ scene: "확장된 장면" }],
-    });
+    expect(build).toHaveBeenCalledWith(
+      {
+        appearancePrompt: "same face",
+        stylePrompt: "film grain",
+        shots: [{ scene: "확장된 장면" }],
+      },
+      expect.objectContaining({ characterId: "ai-1" }),
+    );
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

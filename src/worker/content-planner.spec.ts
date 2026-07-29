@@ -2,13 +2,23 @@ import { buildPlannerUserPrompt } from "../../prompts/content-planner";
 import {
   createContentPlanner,
   createLlmContentPlanner,
-  localContentPlanner,
   parseContentPlan,
 } from "./content-planner";
 
 describe("createContentPlanner", () => {
-  it("falls back to the local planner without LLM env", () => {
-    expect(createContentPlanner({}).name).toBe("local");
+  it("rejects planning without complete LLM env", async () => {
+    const planner = createContentPlanner({});
+    expect(planner.name).toBe("unconfigured");
+    await expect(
+      planner.plan({
+        characterName: "한소이",
+        bio: "필름 사진",
+        interests: [],
+        personas: [],
+        memories: [],
+        recentCaptions: [],
+      }),
+    ).rejects.toThrow("content planner LLM is not configured");
   });
 
   it("uses the LLM planner when env is configured", () => {
@@ -18,24 +28,6 @@ describe("createContentPlanner", () => {
       LLM_MODEL: "test-model",
     });
     expect(planner.name).toBe("llm:test-model");
-  });
-});
-
-describe("localContentPlanner", () => {
-  it("produces a deterministic plan from the scene hint", async () => {
-    const plan = await localContentPlanner.plan({
-      characterName: "한소이",
-      bio: "필름 사진",
-      interests: ["필름사진", "여행"],
-      personas: [],
-      memories: [],
-      recentCaptions: [],
-      sceneHint: "애월 해변 산책",
-      maxShots: 2,
-    });
-    expect(plan.caption).toContain("애월 해변 산책");
-    expect(plan.shots).toHaveLength(2);
-    expect(plan.hashtags).toContain("필름사진");
   });
 });
 

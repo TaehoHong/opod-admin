@@ -4,6 +4,11 @@ import {
   CAPTION_USER_PROMPT,
 } from "../../prompts/reference-captioner";
 import { contentFromChatCompletion } from "./content-planner";
+import {
+  LLM_LOG_TYPE,
+  LlmLogContext,
+  LlmLogService,
+} from "../domain/llm-logs/llm-log.service";
 
 // 레퍼런스 이미지 캡셔닝 — 비전 LLM(기획 LLM과 동일 설정)으로 장면·구도·의상·
 // 조명 서술을 생성한다. 이 서술이 기획 LLM의 샷별 레퍼런스 선별 카탈로그가
@@ -22,7 +27,7 @@ export type ReferenceImage = {
 
 export type ReferenceCaptioner = {
   readonly name: string;
-  caption(image: ReferenceImage): Promise<string>;
+  caption(image: ReferenceImage, context?: LlmLogContext): Promise<string>;
 };
 
 // 이미지 바이트 확보 — 자사 S3 객체(storageKey 있음)는 자격증명으로 읽고,
@@ -81,37 +86,51 @@ export function createLlmReferenceCaptioner(
   config: { apiUrl: string; apiKey: string; model: string },
   readBytes: MediaBytesReader,
   fetchFn: typeof fetch = fetch,
+  llmLogs?: LlmLogService,
 ): ReferenceCaptioner {
   return {
     name: `llm:${config.model}`,
-    async caption(image) {
+    async caption(image, context) {
       const { bytes, contentType } = await readBytes(image);
-      const response = await fetchFn(config.apiUrl, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${config.apiKey}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          model: config.model,
-          messages: [
-            { role: "system", content: CAPTION_SYSTEM_PROMPT },
-            {
-              role: "user",
-              content: [
-                { type: "text", text: CAPTION_USER_PROMPT },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: `data:${contentType};base64,${bytes.toString("base64")}`,
-                  },
+      const requestJson = {
+        model: config.model,
+        messages: [
+          { role: "system", content: CAPTION_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: CAPTION_USER_PROMPT },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${contentType};base64,${bytes.toString("base64")}`,
                 },
-              ],
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-      });
+              },
+            ],
+          },
+        ],
+      };
+      const execute = () =>
+        fetchFn(config.apiUrl, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${config.apiKey}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(requestJson),
+          signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+        });
+      const response = llmLogs
+        ? await llmLogs.runJsonFetch({
+            type: LLM_LOG_TYPE.referenceCaption,
+            provider: "openai-compatible",
+            model: config.model,
+            endpoint: config.apiUrl,
+            requestJson,
+            context,
+            execute,
+          })
+        : await execute();
       if (!response.ok) {
         throw new Error(`reference captioning failed (${response.status})`);
       }

@@ -100,7 +100,7 @@ describe("GenerationSettingsService", () => {
         // t2i 모델 미설정 → edit 모델 공용
         t2i: "fal:fal-ai/nano-banana/edit",
         edit: "fal:fal-ai/nano-banana/edit",
-        planner: "local",
+        planner: "unconfigured",
       },
     );
   });
@@ -129,11 +129,11 @@ describe("GenerationSettingsService", () => {
     ).resolves.toMatchObject({ planner: "llm:gpt-5-mini" });
   });
 
-  it("falls back to the local provider without any key", async () => {
+  it("reports unconfigured planner without any key", async () => {
     const prisma = prismaMock();
 
     await expect(makeService(prisma).resolveProviderNames({})).resolves.toEqual(
-      { t2i: "local", edit: "local", planner: "local" },
+      { t2i: "local", edit: "local", planner: "unconfigured" },
     );
   });
 
@@ -145,18 +145,30 @@ describe("GenerationSettingsService", () => {
     // fal: 401 = 키 무효, 404(존재하지 않는 요청) = 키 유효.
     fetchMock.mockResolvedValueOnce({ status: 401 });
     await expect(
-      service.testConnection({ target: "image", falApiKey: "bad" }, {}, fetchMock as never),
+      service.testConnection(
+        { target: "image", falApiKey: "bad" },
+        {},
+        fetchMock as never,
+      ),
     ).resolves.toMatchObject({ ok: false });
     fetchMock.mockResolvedValueOnce({ status: 404 });
     await expect(
-      service.testConnection({ target: "image", falApiKey: "good" }, {}, fetchMock as never),
+      service.testConnection(
+        { target: "image", falApiKey: "good" },
+        {},
+        fetchMock as never,
+      ),
     ).resolves.toMatchObject({ ok: true });
 
     // planner: 실효 설정(DB 키) 위에 폼 입력(URL·모델)을 덮어 호출한다.
     fetchMock.mockResolvedValueOnce({ ok: true, status: 200 });
     await expect(
       service.testConnection(
-        { target: "planner", llmApiUrl: "https://llm.test/v1/chat", llmModel: "m1" },
+        {
+          target: "planner",
+          llmApiUrl: "https://llm.test/v1/chat",
+          llmModel: "m1",
+        },
         {},
         fetchMock as never,
       ),

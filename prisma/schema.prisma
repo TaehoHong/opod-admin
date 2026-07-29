@@ -328,6 +328,7 @@ model Media {
   createdAt               DateTime                          @default(now()) @map("created_at") @db.Timestamptz(6)
   generationJobs          GenerationJob[]
   jobOutputs              GenerationJobOutput[]
+  llmLogMedia             LlmLogMedia[]
   postMedia               PostMedia[]
   stories                 Story[]
   visualProfileReferences CharacterVisualProfileReference[]
@@ -693,6 +694,7 @@ model GenerationJob {
   originJob         GenerationJob?        @relation("GenerationJobRetries", fields: [originJobId], references: [id])
   retries           GenerationJob[]       @relation("GenerationJobRetries")
   outputs           GenerationJobOutput[]
+  llmLogs           LlmLog[]
   draft             PostDraft?            @relation(fields: [draftId], references: [id])
 
   @@index([status, createdAt])
@@ -904,5 +906,79 @@ model ServiceLog {
   @@index([createdAt])
   @@index([eventType, createdAt])
   @@map("service_logs")
+  @@schema("opod")
+}
+
+enum LlmLogStatus {
+  running
+  succeeded
+  failed
+
+  @@map("llm_log_status")
+  @@schema("opod")
+}
+
+enum LlmLogMediaRole {
+  input
+  output
+
+  @@map("llm_log_media_role")
+  @@schema("opod")
+}
+
+model LlmLog {
+  id                BigInt         @id @default(autoincrement())
+  type              String
+  provider          String
+  model             String
+  status            LlmLogStatus   @default(running)
+  endpoint          String?
+  isStreaming       Boolean        @default(false) @map("is_streaming")
+  requestId         String?        @map("request_id")
+  providerRequestId String?        @map("provider_request_id")
+  userId            String?        @map("user_id")
+  characterId       String?        @map("character_id")
+  generationJobId   String?        @map("generation_job_id") @db.Uuid
+  systemPromptJson  Json?          @map("system_prompt_json")
+  userPromptJson    Json?          @map("user_prompt_json")
+  requestJson       Json           @map("request_json")
+  responseJson      Json?          @map("response_json")
+  metadataJson      Json?          @map("metadata_json")
+  redactedPaths     String[]       @default([]) @map("redacted_paths")
+  httpStatus        Int?           @map("http_status")
+  errorType         String?        @map("error_type")
+  errorMessage      String?        @map("error_message")
+  durationMs        Int?           @map("duration_ms")
+  inputTokens       Int?           @map("input_tokens")
+  outputTokens      Int?           @map("output_tokens")
+  totalTokens       Int?           @map("total_tokens")
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt       DateTime?      @map("completed_at") @db.Timestamptz(6)
+  generationJob     GenerationJob? @relation(fields: [generationJobId], references: [id], onDelete: SetNull)
+  media             LlmLogMedia[]
+
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@index([type, createdAt])
+  @@index([requestId])
+  @@index([providerRequestId])
+  @@index([generationJobId])
+  @@index([userId, createdAt])
+  @@index([characterId, createdAt])
+  @@map("llm_logs")
+  @@schema("opod")
+}
+
+model LlmLogMedia {
+  llmLogId  BigInt          @map("llm_log_id")
+  mediaId   String          @map("media_id") @db.Uuid
+  role      LlmLogMediaRole
+  sortOrder Int             @default(0) @map("sort_order")
+  llmLog    LlmLog          @relation(fields: [llmLogId], references: [id], onDelete: Cascade)
+  media     Media           @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+
+  @@id([llmLogId, role, mediaId])
+  @@index([mediaId])
+  @@map("llm_log_media")
   @@schema("opod")
 }

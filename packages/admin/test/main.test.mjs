@@ -521,6 +521,7 @@ test("navItems exposes the sidebar tabs in order", () => {
       "media",
       "drafts",
       "generation",
+      "llm-logs",
       "logs",
       "users",
       "credits",

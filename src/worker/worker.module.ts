@@ -18,6 +18,7 @@ import {
 } from "./generation-worker.service";
 import { resolveImageGenerationProviders } from "./image-generation.provider";
 import { resolveImagePromptBuilder } from "./image-prompt-builder";
+import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 
 // 미디어 생성/드래프트 워커. 당분간 opod-admin 프로세스에서 함께 실행한다
 // (docs/media-generation-pipeline.md D1). admin HTTP 모듈에 대한 역참조를
@@ -31,12 +32,15 @@ import { resolveImagePromptBuilder } from "./image-prompt-builder";
       useFactory: (
         prisma: PrismaService,
         settings: GenerationSettingsService,
+        llmLogs: LlmLogService,
       ) =>
         new GenerationWorkerService(
           prisma,
           async () =>
             resolveImageGenerationProviders(
               await settings.resolveProviderSettings(),
+              fetch,
+              llmLogs,
             ),
           createGeneratedMediaStore(),
           workerConfigFromEnv(),
@@ -44,8 +48,9 @@ import { resolveImagePromptBuilder } from "./image-prompt-builder";
           undefined,
           // 비공개 S3 레퍼런스를 프로바이더가 받을 수 있게 presigned URL로 서명.
           createReferenceUrlSigner() ?? undefined,
+          llmLogs,
         ),
-      inject: [PrismaService, GenerationSettingsService],
+      inject: [PrismaService, GenerationSettingsService, LlmLogService],
     },
     {
       provide: DraftWorkerService,
@@ -53,11 +58,16 @@ import { resolveImagePromptBuilder } from "./image-prompt-builder";
       useFactory: (
         prisma: PrismaService,
         settings: GenerationSettingsService,
+        llmLogs: LlmLogService,
       ) =>
         new DraftWorkerService(
           prisma,
           async () =>
-            resolveContentPlanner(await settings.resolvePlannerSettings()),
+            resolveContentPlanner(
+              await settings.resolvePlannerSettings(),
+              fetch,
+              llmLogs,
+            ),
           // 프롬프트 빌더는 기획 LLM 설정을 재사용한다 (캡셔너·위저드 전례).
           // 대상 모델은 edit 우선 — 레퍼런스 있는 캐릭터가 일반 경로.
           async () => {
@@ -65,9 +75,14 @@ import { resolveImagePromptBuilder } from "./image-prompt-builder";
               settings.resolvePlannerSettings(),
               settings.resolveProviderSettings(),
             ]);
-            return resolveImagePromptBuilder(planner, {
-              targetModelId: provider.editModel ?? provider.t2iModel,
-            });
+            return resolveImagePromptBuilder(
+              planner,
+              {
+                targetModelId: provider.editModel ?? provider.t2iModel,
+              },
+              fetch,
+              llmLogs,
+            );
           },
           draftWorkerConfigFromEnv(),
           undefined,
@@ -75,7 +90,7 @@ import { resolveImagePromptBuilder } from "./image-prompt-builder";
           createGeneratedMediaStore(),
           createReferenceUrlSigner(),
         ),
-      inject: [PrismaService, GenerationSettingsService],
+      inject: [PrismaService, GenerationSettingsService, LlmLogService],
     },
   ],
   // admin의 수동 실행이 주입해 쓴다 — 생성(generation/worker/run)과

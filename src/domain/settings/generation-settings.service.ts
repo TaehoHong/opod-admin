@@ -1,5 +1,6 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { PrismaService } from "../database/prisma.service";
+import { LLM_LOG_TYPE, LlmLogService } from "../llm-logs/llm-log.service";
 import {
   PlannerProviderSettings,
   resolveContentPlanner,
@@ -102,7 +103,10 @@ export type ResolvedChatSettings = {
 
 @Injectable()
 export class GenerationSettingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly llmLogs?: LlmLogService,
+  ) {}
 
   async getSettings(): Promise<GenerationSettings> {
     const rows = await this.prisma.adminSetting.findMany({
@@ -224,15 +228,34 @@ export class GenerationSettingsService {
         }
         // 잡 제출은 과금되므로, 존재하지 않는 요청의 상태 조회로 인증만
         // 판별한다: 401/403 = 키 무효, 404 등 = 키 유효.
-        const response = await fetchFn(
-          "https://queue.fal.run/fal-ai/nano-banana/requests/00000000-0000-0000-0000-000000000000/status",
-          {
+        const endpoint =
+          "https://queue.fal.run/fal-ai/nano-banana/requests/00000000-0000-0000-0000-000000000000/status";
+        const execute = () =>
+          fetchFn(endpoint, {
             headers: { authorization: `Key ${apiKey}` },
             signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
-          },
-        );
+          });
+        const response = this.llmLogs
+          ? await this.llmLogs.runJsonFetch({
+              type: LLM_LOG_TYPE.connectionTest,
+              provider: "fal",
+              model: "fal-ai/nano-banana",
+              endpoint,
+              requestJson: {
+                request_id: "00000000-0000-0000-0000-000000000000",
+                operation: "status",
+              },
+              context: { metadata: { target: "image" } },
+              execute,
+              isSuccessful: (response) =>
+                response.status !== 401 && response.status !== 403,
+            })
+          : await execute();
         if (response.status === 401 || response.status === 403) {
-          return { ok: false, message: `fal 키 인증 실패 (${response.status})` };
+          return {
+            ok: false,
+            message: `fal 키 인증 실패 (${response.status})`,
+          };
         }
         return { ok: true, message: "fal 키 인증 확인" };
       }
@@ -251,19 +274,32 @@ export class GenerationSettingsService {
         };
       }
       // 최소 완성 호출 한 번으로 URL·키·모델을 함께 검증한다.
-      const response = await fetchFn(apiUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: "ping" }],
-          max_tokens: 1,
-        }),
-        signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
-      });
+      const requestJson = {
+        model,
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 1,
+      };
+      const execute = () =>
+        fetchFn(apiUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(requestJson),
+          signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
+        });
+      const response = this.llmLogs
+        ? await this.llmLogs.runJsonFetch({
+            type: LLM_LOG_TYPE.connectionTest,
+            provider: "openai-compatible",
+            model,
+            endpoint: apiUrl,
+            requestJson,
+            context: { metadata: { target: input.target } },
+            execute,
+          })
+        : await execute();
       if (!response.ok) {
         const detail = (await response.text().catch(() => "")).slice(0, 200);
         return {
@@ -303,7 +339,11 @@ export function settingsChangeEntries(
   before: GenerationSettings,
   after: GenerationSettings,
   update: GenerationSettingsUpdate,
-): { target: string; actionType: "SETTINGS_SET" | "SETTINGS_CLEAR"; summary: string }[] {
+): {
+  target: string;
+  actionType: "SETTINGS_SET" | "SETTINGS_CLEAR";
+  summary: string;
+}[] {
   const SECRET_FIELDS: GenerationSettingField[] = [
     "falApiKey",
     "llmApiKey",

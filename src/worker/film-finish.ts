@@ -114,31 +114,33 @@ export async function applyFinishWithMeta(
             [0.0, 0.05, 0.91],
           ])
           .modulate({ saturation: 0.87 });
-  return graded
-    // out = in×0.9 + 14 — 블랙이 뜨고 화이트가 죽는 바랜 필름 대비.
-    .linear(0.9, 14)
-    // 디지털 선예도를 녹이는 최소 블러 (그레인 전에 적용돼야 입자가 산다).
-    .blur(0.4)
-    .composite([
-      (() => {
-        const tileSize = Math.min(GRAIN_TILE_SIZE, width, height);
-        return {
-          input: grainTile(tileSize),
-          raw: { width: tileSize, height: tileSize, channels: 3 as const },
-          tile: true,
-          blend: "overlay" as const,
-        };
-      })(),
-      { input: vignetteSvg(width, height), blend: "over" },
-    ])
-    .jpeg({ quality: JPEG_QUALITY })
-    .toBuffer({ resolveWithObject: true })
-    .then(({ data, info }) => ({
-      bytes: data,
-      width: info.width,
-      height: info.height,
-      contentType: "image/jpeg" as const,
-    }));
+  return (
+    graded
+      // out = in×0.9 + 14 — 블랙이 뜨고 화이트가 죽는 바랜 필름 대비.
+      .linear(0.9, 14)
+      // 디지털 선예도를 녹이는 최소 블러 (그레인 전에 적용돼야 입자가 산다).
+      .blur(0.4)
+      .composite([
+        (() => {
+          const tileSize = Math.min(GRAIN_TILE_SIZE, width, height);
+          return {
+            input: grainTile(tileSize),
+            raw: { width: tileSize, height: tileSize, channels: 3 as const },
+            tile: true,
+            blend: "overlay" as const,
+          };
+        })(),
+        { input: vignetteSvg(width, height), blend: "over" },
+      ])
+      .jpeg({ quality: JPEG_QUALITY })
+      .toBuffer({ resolveWithObject: true })
+      .then(({ data, info }) => ({
+        bytes: data,
+        width: info.width,
+        height: info.height,
+        contentType: "image/jpeg" as const,
+      }))
+  );
 }
 
 // 미디어 원본 바이트 로더 — 후보정 입력용. 자사 S3 객체(storageKey)는
