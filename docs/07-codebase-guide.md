@@ -138,7 +138,9 @@ Query, Mantine form과 MSW 테스트를 한 번에 보여준다. characters feat
   충돌을 피해 미뤘다.
 - 부팅 설정은 `AppConfigService`로 주입한다. worker와 provider 설정 함수는
   아직 `env` 파라미터(기본값 `process.env`)를 받는다.
-- frontend가 목표 React stack으로 전환되지 않았다.
+- frontend 전환 진행 중이다. auth와 characters만 React로 옮겼고 나머지 13개
+  화면은 legacy SPA가 담당한다. Helmet CSP는 전환이 끝날 때 실제 asset에
+  맞춰 켠다.
 - 토큰 사용량 집계는 `GET /api/admin/v1/llm-logs/usage`로 제공한다(UI 미연결).
 - approved 4-table logging은 새 테이블이 필요해 `opod-service-backend`의
   canonical schema 변경이 선행돼야 한다.
