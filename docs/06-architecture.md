@@ -199,5 +199,6 @@ runtime log는 위 business/audit log와 분리한다.
 - 최초 계정은 bootstrap 환경변수로만 만든다.
 - 일부 service가 아직 Prisma를 직접 사용한다. controller에는 남아 있지 않다.
 - frontend는 아직 정적 HTML/CSS/JavaScript다.
-- approved log table structure와 token dashboard가 완성되지 않았다.
+- 토큰 사용량 집계 API는 있고 UI는 아직 없다.
+- approved 4-table log 구조는 canonical schema 변경이 선행돼야 한다.
 - 현재 Raw SQL은 queue claim, row/advisory lock에 사용된다.

@@ -22,6 +22,8 @@ import { AdminSettingsController } from "./settings/admin-settings.controller";
 import { SettingsAuditRepository } from "./settings/settings-audit.repository";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 import { LlmLogsController } from "./llm-logs/llm-logs.controller";
+import { TokenUsageRepository } from "./llm-logs/token-usage.repository";
+import { TokenUsageService } from "./llm-logs/token-usage.service";
 
 @Module({
   // WorkerModule은 수동 실행(generation/worker/run)용 — 의존 방향은
@@ -44,6 +46,8 @@ import { LlmLogsController } from "./llm-logs/llm-logs.controller";
     AdminService,
     DraftsService,
     SettingsAuditRepository,
+    TokenUsageService,
+    TokenUsageRepository,
     {
       provide: GenerationService,
       // 위저드 장면 확장 플래너 — draft 기획과 동일한 planner.* 설정을

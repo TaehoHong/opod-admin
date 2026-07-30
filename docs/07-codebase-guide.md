@@ -129,7 +129,9 @@ feature를 canonical example로 등록한다.
 - 부팅 설정은 `AppConfigService`로 주입한다. worker와 provider 설정 함수는
   아직 `env` 파라미터(기본값 `process.env`)를 받는다.
 - frontend가 목표 React stack으로 전환되지 않았다.
-- approved 4-table logging과 token dashboard가 완성되지 않았다.
+- 토큰 사용량 집계는 `GET /api/admin/v1/llm-logs/usage`로 제공한다(UI 미연결).
+- approved 4-table logging은 새 테이블이 필요해 `opod-service-backend`의
+  canonical schema 변경이 선행돼야 한다.
 - Raw SQL이 queue claim과 lock에 남아 있다.
 - 실제 provider refund, 사용자 제재와 자동 상호작용 중단 기능이
   완성되지 않았다.
