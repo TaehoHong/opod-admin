@@ -24,6 +24,7 @@
 | Settings | `src/admin/settings/`, `src/domain/settings/` | provider 설정과 audit | `GenerationSettingsService` | settings specs, `docs/api/admin-settings.md` |
 | LLM logs | `src/admin/llm-logs/`, `src/domain/llm-logs/` | LLM 실행 기록과 조회 | `LlmLogService`, `LlmLogsController` | LLM log specs, `docs/api/admin-llm-logs.md` |
 | Prompt code | `prompts/`, `src/worker/*prompt*` | pure prompt 구성과 worker orchestration | exported builders | prompt/worker specs |
+| Health | `src/health/` | 인증 없는 liveness/readiness와 DB 도달성 확인 | `HealthController`, `HealthService`, `HealthRepository` | `health.controller.spec.ts` |
 | Prisma/schema | `src/domain/database/`, `prisma/`, `scripts/check-schema-sync.mjs` | Prisma client와 admin schema mirror | `PrismaModule`, `PrismaService` | schema check, E2E setup |
 | Admin UI | `packages/admin/` | 현재 정적 SPA shell과 `/api/*` 호출 | `index.html`, `main.js` | `packages/admin/test/`, `npm run admin:check` |
 | E2E | `test/` | Testcontainers PostgreSQL와 API contract | Jest global setup | `test/jest-e2e.json`, `test/e2e-global-setup.ts` |
@@ -54,10 +55,11 @@
 | Observable behavior tests | draft/generation worker specs | 상태 전이와 결과를 보호 | `src/admin/drafts/drafts.service.spec.ts`, `src/worker/*.spec.ts` |
 | Cross-module DB contract | auth/generation E2E | 실제 PostgreSQL과 API 경계 검증 | `test/admin-auth.e2e-spec.ts`, `test/generation.e2e-spec.ts` |
 | Pure prompt logic | prompt builders | network/persistence 없이 deterministic 구성 | `prompts/`, 관련 specs |
+| Repository/application-service 구조 | health feature | controller → application service → repository 방향이고 `PrismaService`가 repository 안에만 있음 | `src/health/` |
 
-승인된 repository/application-service 구조의 완전한 canonical example은
-아직 없다. 기존 service의 직접 Prisma 접근을 새 규칙의 example로
-간주하지 않는다. 첫 올바른 구현이 검증되면 이 표를 갱신한다.
+health feature가 승인된 repository/application-service 구조의 첫 canonical
+example이다. 새 DB 접근은 이 형태를 따른다. 기존 service의 직접 Prisma
+접근은 새 규칙의 example로 간주하지 않는다.
 
 ## Target Dependency Rules
 
@@ -121,4 +123,5 @@ feature를 canonical example로 등록한다.
 - Raw SQL이 queue claim과 lock에 남아 있다.
 - 실제 provider refund, 사용자 제재와 자동 상호작용 중단 기능이
   완성되지 않았다.
-- health endpoint, automated smoke와 rollback 절차가 없다.
+- `GET /api/health`가 DB 도달성을 확인한다. automated smoke와 rollback
+  절차는 아직 없다.

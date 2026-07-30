@@ -97,7 +97,8 @@ React 전환 후에도 `npm run admin:check`처럼 하나의 빠른 UI 검증 �
 
 - `npm run schema:check`는 현재 통과하며 canonical schema mirror의
   회귀 방지 경로로 유지한다.
-- production smoke automation과 health endpoint가 없다.
+- `GET /api/health`가 인증 없이 DB 도달성을 보고한다. production smoke
+  automation은 아직 없다.
 - CI, staging과 automatic rollback은 의도적으로 초기 필수 경로가 아니다.
 - 환불 실행, 사용자 제재, 자동 상호작용 중단과 목표 frontend stack은
   아직 완전히 구현되지 않았다.
