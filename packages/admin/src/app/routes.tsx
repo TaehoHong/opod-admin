@@ -1,5 +1,10 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { CharactersPage } from "../features/characters/CharactersPage";
+import { CreditsPage } from "../features/credits/CreditsPage";
+import { EventsPage } from "../features/events/EventsPage";
+import { ModerationPage } from "../features/moderation/ModerationPage";
+import { PostsPage } from "../features/posts/PostsPage";
+import { UsersPage } from "../features/users/UsersPage";
 import { AppLayout } from "./AppLayout";
 import { PendingMigrationPage } from "./PendingMigrationPage";
 
@@ -23,21 +28,36 @@ export const NAV_ITEMS = [
   { id: "settings", label: "설정" },
 ] as const;
 
-const MIGRATED = new Set(["characters"]);
+const MIGRATED: Record<string, () => React.JSX.Element> = {
+  characters: CharactersPage,
+  posts: PostsPage,
+  users: UsersPage,
+  credits: CreditsPage,
+  moderation: ModerationPage,
+  events: EventsPage,
+};
 
 export function AppRoutes() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<Navigate to="/home" replace />} />
-        <Route path="characters" element={<CharactersPage />} />
-        {NAV_ITEMS.filter((item) => !MIGRATED.has(item.id)).map((item) => (
-          <Route
-            key={item.id}
-            path={item.id}
-            element={<PendingMigrationPage label={item.label} />}
-          />
-        ))}
+        {NAV_ITEMS.map((item) => {
+          const Migrated = MIGRATED[item.id];
+          return (
+            <Route
+              key={item.id}
+              path={item.id}
+              element={
+                Migrated ? (
+                  <Migrated />
+                ) : (
+                  <PendingMigrationPage label={item.label} />
+                )
+              }
+            />
+          );
+        })}
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Route>
     </Routes>

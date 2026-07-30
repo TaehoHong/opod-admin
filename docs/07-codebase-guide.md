@@ -99,8 +99,16 @@ canonical example: auth feature(`src/features/auth/`)가 apiClient, TanStack
 Query, Mantine form과 MSW 테스트를 한 번에 보여준다. characters feature가
 목록 조회와 cursor 페이지네이션의 canonical example이다.
 
-옮긴 화면: characters. 나머지 라우트는 `PendingMigrationPage`로 전환 중임을
-표시한다.
+옮긴 화면: characters, posts, users, credits, moderation, events.
+나머지 9개(home, media, drafts, generation, llm-logs, logs, payments,
+analytics, settings)는 `PendingMigrationPage`로 전환 중임을 표시한다.
+생성 위저드(generation)가 가장 크므로 마지막에 옮긴다.
+
+색상·typography·radius는 `src/app/theme.ts`의 Mantine Theme token이
+소유한다. 새 화면은 legacy `styles.css` 값을 복사하지 않는다
+(docs/04-design-rules.md:25-26). 목록 화면의 반복(제목·로딩·오류·빈
+상태·더 보기)은 `shared/ui/DataPage`와 `shared/api/useCursorList`로
+공통화했다.
 
 ## Verification Paths
 

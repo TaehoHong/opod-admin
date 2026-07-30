@@ -1,0 +1,6 @@
+/* 승인된 canvas cream 배경. 나머지 색상은 Mantine Theme token이 소유한다
+   (docs/04-design-rules.md "Visual Direction"). */
+body {
+  background-color: var(--mantine-color-white);
+  color: var(--mantine-color-black);
+}

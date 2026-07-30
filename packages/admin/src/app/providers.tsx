@@ -1,6 +1,7 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { theme } from "./theme";
 
 // 테스트에서도 같은 provider 구성을 쓰기 위해 client 생성을 분리한다.
 // 테스트는 retry를 꺼야 실패 경로가 즉시 드러난다
@@ -22,7 +23,7 @@ export function AppProviders({
   queryClient?: QueryClient;
 }) {
   return (
-    <MantineProvider>
+    <MantineProvider theme={theme}>
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </MantineProvider>
   );

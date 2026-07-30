@@ -1,4 +1,12 @@
-import { AppShell, Burger, Button, Group, NavLink, Title } from "@mantine/core";
+import {
+  AppShell,
+  Burger,
+  Button,
+  Group,
+  NavLink,
+  Text,
+  Title,
+} from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { NavLink as RouterNavLink, Outlet } from "react-router-dom";
 import { useLogout, useSession } from "../features/auth/useSession";
@@ -27,7 +35,9 @@ export function AppLayout() {
             <Title order={4}>OPOD Admin</Title>
           </Group>
           <Group>
-            <span>{session.data?.email}</span>
+            <Text size="sm" c="dimmed">
+              {session.data?.email}
+            </Text>
             <Button
               variant="subtle"
               size="compact-sm"
