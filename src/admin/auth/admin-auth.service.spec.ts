@@ -3,6 +3,7 @@ import {
   ConflictException,
   UnauthorizedException,
 } from "@nestjs/common";
+import { AppConfigService } from "../../domain/config/app-config.service";
 import { AdminAuthService, hashAdminPassword } from "./admin-auth.service";
 
 type TestAdminRow = {
@@ -14,7 +15,10 @@ type TestAdminRow = {
   createdAt: Date;
 };
 
-function createService(initialRows: TestAdminRow[] = []) {
+function createService(
+  initialRows: TestAdminRow[] = [],
+  env: Record<string, string | undefined> = {},
+) {
   const rows = [...initialRows];
   const prisma = {
     admin: {
@@ -64,7 +68,15 @@ function createService(initialRows: TestAdminRow[] = []) {
   return {
     rows,
     prisma,
-    service: new AdminAuthService(prisma as never),
+    service: new AdminAuthService(
+      prisma as never,
+      // typed config를 주입하므로 테스트가 process.env를 건드리지 않는다.
+      new AppConfigService({
+        DATABASE_URL: "postgresql://test/test",
+        ADMIN_JWT_SECRET: "test-admin-secret",
+        ...env,
+      }),
+    ),
   };
 }
 
@@ -80,23 +92,16 @@ function defaultAdmin(overrides: Partial<TestAdminRow> = {}): TestAdminRow {
   };
 }
 
+const bootstrapEnv = {
+  ADMIN_BOOTSTRAP_EMAIL: " Bootstrap@Example.test ",
+  ADMIN_BOOTSTRAP_PASSWORD: "bootstrap-password",
+};
+
 describe("AdminAuthService", () => {
-  beforeEach(() => {
-    process.env.ADMIN_JWT_SECRET = "test-admin-secret";
-  });
-
-  afterEach(() => {
-    delete process.env.ADMIN_JWT_SECRET;
-    delete process.env.ADMIN_BOOTSTRAP_EMAIL;
-    delete process.env.ADMIN_BOOTSTRAP_PASSWORD;
-  });
-
   // docs/03-deployment-rules.md "First Admin" — 알려진 기본 계정이 자동으로
   // 생기면 운영 콘솔에 누구나 로그인할 수 있다.
   it("creates the first admin from bootstrap env vars when no admin exists", async () => {
-    process.env.ADMIN_BOOTSTRAP_EMAIL = " Bootstrap@Example.test ";
-    process.env.ADMIN_BOOTSTRAP_PASSWORD = "bootstrap-password";
-    const { prisma, rows, service } = createService();
+    const { prisma, rows, service } = createService([], bootstrapEnv);
 
     await service.onModuleInit();
 
@@ -121,10 +126,8 @@ describe("AdminAuthService", () => {
   });
 
   it("does not create or change an account when an admin already exists", async () => {
-    process.env.ADMIN_BOOTSTRAP_EMAIL = "bootstrap@example.test";
-    process.env.ADMIN_BOOTSTRAP_PASSWORD = "bootstrap-password";
     const existing = defaultAdmin();
-    const { prisma, rows, service } = createService([existing]);
+    const { prisma, rows, service } = createService([existing], bootstrapEnv);
 
     await service.onModuleInit();
 

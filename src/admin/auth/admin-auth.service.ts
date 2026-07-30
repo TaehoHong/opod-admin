@@ -11,6 +11,7 @@ import {
   scryptSync,
   timingSafeEqual,
 } from "node:crypto";
+import { AppConfigService } from "../../domain/config/app-config.service";
 import { PrismaService } from "../../domain/database/prisma.service";
 
 const adminJwtTtlSeconds = 7 * 24 * 60 * 60;
@@ -59,7 +60,10 @@ const publicAdminFields = {
 
 @Injectable()
 export class AdminAuthService implements OnModuleInit {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: AppConfigService,
+  ) {}
 
   // 최초 관리자는 명시적 bootstrap 환경변수로만 만든다
   // (docs/03-deployment-rules.md "First Admin"). 코드에 기본 계정을 두면
@@ -70,24 +74,17 @@ export class AdminAuthService implements OnModuleInit {
     // 바꾸지 않는다.
     if (existingCount > 0) return;
 
-    const email = process.env.ADMIN_BOOTSTRAP_EMAIL?.trim();
-    const password = process.env.ADMIN_BOOTSTRAP_PASSWORD?.trim();
-    if (!email || !password) {
+    const bootstrap = this.config.bootstrapAdmin;
+    if (!bootstrap) {
       throw new Error(
         "ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD are required to create the first admin",
       );
     }
-    if (!email.includes("@")) {
-      throw new Error("ADMIN_BOOTSTRAP_EMAIL is invalid");
-    }
-    if (password.length < 8) {
-      throw new Error("ADMIN_BOOTSTRAP_PASSWORD must be at least 8 characters");
-    }
 
     // 평문 password는 로그에 남기지 않는다.
     await this.createAdmin({
-      email: email.toLowerCase(),
-      password: hashAdminPassword(password),
+      email: bootstrap.email,
+      password: hashAdminPassword(bootstrap.password),
     });
   }
 
@@ -248,14 +245,7 @@ export class AdminAuthService implements OnModuleInit {
   }
 
   private jwtSecret(): string {
-    const secret =
-      process.env.ADMIN_JWT_SECRET?.trim() ||
-      process.env.AUTH_JWT_SECRET?.trim() ||
-      process.env.ADMIN_API_KEY?.trim();
-    if (!secret) {
-      throw new Error("ADMIN_JWT_SECRET or AUTH_JWT_SECRET is required");
-    }
-    return secret;
+    return this.config.adminJwtSecret;
   }
 
   private toPublicAdmin(admin: PublicAdminRow) {

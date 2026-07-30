@@ -4,10 +4,21 @@ import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
+import { loadAppConfig } from "./domain/config/app-config";
 
 async function bootstrap() {
+  // composition root — 여기서 한 번 읽고 검증한 뒤 나머지 코드는
+  // AppConfigService를 주입받는다 (docs/02-development-rules.md:135-137).
+  const config = loadAppConfig();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    httpsOptions: getHttpsOptions(),
+    ...(config.tls
+      ? {
+          httpsOptions: {
+            cert: readFileSync(config.tls.certPath),
+            key: readFileSync(config.tls.keyPath),
+          },
+        }
+      : {}),
   });
 
   // 전역 보안 헤더. CSP 세부값은 React 전환 시 실제 asset에 맞춘다
@@ -33,21 +44,7 @@ async function bootstrap() {
     },
   );
 
-  await app.listen(process.env.ADMIN_API_PORT ?? process.env.PORT ?? 7100);
-}
-
-function getHttpsOptions() {
-  const certPath = process.env.ADMIN_TLS_CERT_PATH;
-  const keyPath = process.env.ADMIN_TLS_KEY_PATH;
-
-  if (!certPath || !keyPath) {
-    return undefined;
-  }
-
-  return {
-    cert: readFileSync(certPath),
-    key: readFileSync(keyPath),
-  };
+  await app.listen(config.port);
 }
 
 void bootstrap();

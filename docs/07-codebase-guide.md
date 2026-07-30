@@ -24,6 +24,7 @@
 | Settings | `src/admin/settings/`, `src/domain/settings/` | provider 설정과 audit | `GenerationSettingsService` | settings specs, `docs/api/admin-settings.md` |
 | LLM logs | `src/admin/llm-logs/`, `src/domain/llm-logs/` | LLM 실행 기록과 조회 | `LlmLogService`, `LlmLogsController` | LLM log specs, `docs/api/admin-llm-logs.md` |
 | Prompt code | `prompts/`, `src/worker/*prompt*` | pure prompt 구성과 worker orchestration | exported builders | prompt/worker specs |
+| Config | `src/domain/config/` | 부팅 설정 로드·검증과 typed 주입 | `AppConfigService`, `loadAppConfig`, `ConfigModule` | `admin-auth.service.spec.ts`가 주입 경로 사용 |
 | Health | `src/health/` | 인증 없는 liveness/readiness와 DB 도달성 확인 | `HealthController`, `HealthService`, `HealthRepository` | `health.controller.spec.ts` |
 | Prisma/schema | `src/domain/database/`, `prisma/`, `scripts/check-schema-sync.mjs` | Prisma client와 admin schema mirror | `PrismaModule`, `PrismaService` | schema check, E2E setup |
 | Admin UI | `packages/admin/` | 현재 정적 SPA shell과 `/api/*` 호출 | `index.html`, `main.js` | `packages/admin/test/`, `npm run admin:check` |
@@ -42,6 +43,7 @@
 | Generated media storage | `createGeneratedMediaStore`, `createReferenceUrlSigner` | provider 임시 결과를 owned storage에 보존 | worker, draft publish |
 | Prompt construction | exports under `prompts/` | pure construction; network/DB 없음 | planner, prompt builder |
 | Shot generation contract | `ContentPlanShot`, `paramsJson._shot` | `scene`과 `captureSetup` 분리, 인물 노출 샷은 업로드 완료 identity reference 필수, 빌드 대상 모델과 실행 모델 일치 | planner, draft/generation worker, retry/regeneration |
+| Bootstrap config | `AppConfigService` (`ConfigModule`은 `@Global`) | 부팅 필수 값만 소유. DB 우선인 provider 설정은 `GenerationSettingsService`가 유지 | `main.ts`, `PrismaService`, `AdminAuthService` |
 | Validation/error boundary | `ValidationPipe`, `AllExceptionsFilter` | whitelist+transform, common error response | all HTTP routes |
 
 ## Current Canonical Examples
@@ -118,6 +120,8 @@ feature를 canonical example로 등록한다.
 - current auth는 Bearer JWT를 사용한다. 최초 관리자는 `ADMIN_BOOTSTRAP_EMAIL`과
   `ADMIN_BOOTSTRAP_PASSWORD`로만 생성되며 코드에 기본 계정이 없다.
 - 목표 repository/application-service 구조가 완성되지 않았다.
+- 부팅 설정은 `AppConfigService`로 주입한다. worker와 provider 설정 함수는
+  아직 `env` 파라미터(기본값 `process.env`)를 받는다.
 - frontend가 목표 React stack으로 전환되지 않았다.
 - approved 4-table logging과 token dashboard가 완성되지 않았다.
 - Raw SQL이 queue claim과 lock에 남아 있다.
