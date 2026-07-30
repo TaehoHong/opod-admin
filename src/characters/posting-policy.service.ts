@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { PrismaService } from "../domain/database/prisma.service";
+import { PostingPolicyRepository } from "./posting-policy.repository";
 
 type PostingPolicy = {
   characterId: string;
@@ -16,13 +16,11 @@ const CADENCE_MAX = 21;
 // 캐릭터 자동 포스팅 정책. 드래프트 워커 스케줄러의 입력이다.
 @Injectable()
 export class PostingPolicyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly policies: PostingPolicyRepository) {}
 
   async getPolicy(characterId: string): Promise<PostingPolicy> {
     await this.assertCharacter(characterId);
-    const policy = await this.prisma.characterPostingPolicy.findUnique({
-      where: { characterId },
-    });
+    const policy = await this.policies.findByCharacter(characterId);
     if (!policy) {
       return {
         characterId,
@@ -69,20 +67,11 @@ export class PostingPolicyService {
     }
 
     const data = { enabled, weeklyCadence, hourStartKst, hourEndKst };
-    const policy = await this.prisma.characterPostingPolicy.upsert({
-      where: { characterId: input.characterId },
-      create: { characterId: input.characterId, ...data },
-      update: data,
-    });
-    await this.prisma.characterActionLog.create({
-      data: {
-        characterId: input.characterId,
-        actionType: "POSTING_POLICY_UPDATED",
-        targetTable: "character_posting_policies",
-        targetId: input.characterId,
-        reason: `posting policy ${enabled ? "enabled" : "disabled"} (${weeklyCadence}/week, ${hourStartKst}-${hourEndKst} KST)`,
-      },
-    });
+    const policy = await this.policies.upsert(input.characterId, data);
+    await this.policies.recordPolicyChange(
+      input.characterId,
+      `posting policy ${enabled ? "enabled" : "disabled"} (${weeklyCadence}/week, ${hourStartKst}-${hourEndKst} KST)`,
+    );
     return this.toPolicy(policy);
   }
 
@@ -101,11 +90,7 @@ export class PostingPolicyService {
   }
 
   private async assertCharacter(characterId: string): Promise<void> {
-    const character = await this.prisma.character.findUnique({
-      where: { id: characterId },
-      select: { id: true },
-    });
-    if (!character) {
+    if (!(await this.policies.characterExists(characterId))) {
       throw new BadRequestException("Character not found");
     }
   }

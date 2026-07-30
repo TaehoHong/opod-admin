@@ -16,8 +16,10 @@ import { DraftsService } from "./drafts/drafts.service";
 import { GenerationService } from "./generation/generation.service";
 import { FilmFinishController } from "./media/film-finish.controller";
 import { FilmFinishService } from "./media/film-finish.service";
+import { MediaRepository } from "./media/media.repository";
 import { MediaService } from "./media/media.service";
 import { AdminSettingsController } from "./settings/admin-settings.controller";
+import { SettingsAuditRepository } from "./settings/settings-audit.repository";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 import { LlmLogsController } from "./llm-logs/llm-logs.controller";
 
@@ -41,6 +43,7 @@ import { LlmLogsController } from "./llm-logs/llm-logs.controller";
   providers: [
     AdminService,
     DraftsService,
+    SettingsAuditRepository,
     {
       provide: GenerationService,
       // 위저드 장면 확장 플래너 — draft 기획과 동일한 planner.* 설정을
@@ -88,12 +91,13 @@ import { LlmLogsController } from "./llm-logs/llm-logs.controller";
       inject: [PrismaService, GenerationSettingsService, LlmLogService],
     },
     MediaService,
+    MediaRepository,
     {
       provide: FilmFinishService,
       // 비공개 S3 원본은 레퍼런스 전달과 동일하게 presigned URL로 읽는다.
-      useFactory: (prisma: PrismaService) =>
-        new FilmFinishService(prisma, createReferenceUrlSigner()),
-      inject: [PrismaService],
+      useFactory: (media: MediaRepository) =>
+        new FilmFinishService(media, createReferenceUrlSigner()),
+      inject: [MediaRepository],
     },
   ],
 })

@@ -120,7 +120,12 @@ feature를 canonical example로 등록한다.
 - admin API는 `/api/admin/v1/*`이고 `/api/health`만 그 밖에 있다.
 - auth는 `__Host-` HttpOnly cookie 세션이다. 최초 관리자는
   `ADMIN_BOOTSTRAP_EMAIL`과 `ADMIN_BOOTSTRAP_PASSWORD`로만 생성된다.
-- 목표 repository/application-service 구조가 완성되지 않았다.
+- repository 분리 완료: health, admin auth, media, settings audit,
+  posting policy, character profile image.
+- repository 분리 대기: `admin.service.ts`, `drafts.service.ts`,
+  `generation.service.ts`, `characters.service.ts`, `visual-profile.service.ts`,
+  `llm-log.service.ts`, worker service들. 대부분 병행 세션이 편집 중이라
+  충돌을 피해 미뤘다.
 - 부팅 설정은 `AppConfigService`로 주입한다. worker와 provider 설정 함수는
   아직 `env` 파라미터(기본값 `process.env`)를 받는다.
 - frontend가 목표 React stack으로 전환되지 않았다.

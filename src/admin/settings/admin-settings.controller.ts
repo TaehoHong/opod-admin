@@ -7,7 +7,6 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { PrismaService } from "../../domain/database/prisma.service";
 import {
   GenerationSettings,
   GenerationSettingsService,
@@ -19,6 +18,7 @@ import {
 } from "../../worker/generation-worker.service";
 import { AdminJwtGuard, AdminRequest } from "../auth/admin-jwt.guard";
 import { TestGenerationSettingsDto } from "./dto/test-generation-settings.dto";
+import { SettingsAuditRepository } from "./settings-audit.repository";
 import { UpdateGenerationSettingsDto } from "./dto/update-generation-settings.dto";
 
 // 생성 프로바이더 설정 조회/저장. API 키 원문은 절대 응답에 싣지 않는다 —
@@ -28,7 +28,7 @@ import { UpdateGenerationSettingsDto } from "./dto/update-generation-settings.dt
 export class AdminSettingsController {
   constructor(
     private readonly settings: GenerationSettingsService,
-    private readonly prisma: PrismaService,
+    private readonly audit: SettingsAuditRepository,
   ) {}
 
   @Get("generation")
@@ -45,21 +45,7 @@ export class AdminSettingsController {
   // 설정 변경 감사 이력 (console_logs) — 최근 것부터.
   @Get("generation/changes")
   async listGenerationSettingChanges() {
-    const rows = await this.prisma.consoleLog.findMany({
-      where: { actionType: { in: ["SETTINGS_SET", "SETTINGS_CLEAR"] } },
-      orderBy: { id: "desc" },
-      take: 20,
-    });
-    return {
-      items: rows.map((row) => ({
-        id: String(row.id),
-        adminEmail: row.adminEmail,
-        actionType: row.actionType,
-        target: row.target,
-        summary: row.summary,
-        createdAt: row.createdAt.toISOString(),
-      })),
-    };
+    return { items: await this.audit.listRecentChanges() };
   }
 
   @Put("generation")
@@ -95,17 +81,15 @@ export class AdminSettingsController {
 
     // 감사 로그 — 실제 달라진 필드만, 키는 last4 요약만 (console_logs).
     const changes = settingsChangeEntries(before, saved, body);
-    if (changes.length > 0) {
-      await this.prisma.consoleLog.createMany({
-        data: changes.map((change) => ({
-          adminId: request.admin?.id ?? null,
-          adminEmail: request.admin?.email ?? null,
-          actionType: change.actionType,
-          target: change.target,
-          summary: change.summary,
-        })),
-      });
-    }
+    await this.audit.recordChanges(
+      changes.map((change) => ({
+        adminId: request.admin?.id ?? null,
+        adminEmail: request.admin?.email ?? null,
+        actionType: change.actionType,
+        target: change.target,
+        summary: change.summary,
+      })),
+    );
     return this.buildView(saved);
   }
 
@@ -116,13 +100,7 @@ export class AdminSettingsController {
         this.settings.resolvePlannerSettings(),
         this.settings.resolveChatSettings(),
         this.settings.resolveProviderNames(),
-        this.prisma.generationJob.aggregate({
-          _sum: { costUsd: true },
-          where: {
-            updatedAt: { gte: startOfKstDay() },
-            costUsd: { not: null },
-          },
-        }),
+        this.audit.sumGenerationCostSince(startOfKstDay()),
       ]);
     const worker = workerConfigFromEnv();
     return {
@@ -166,7 +144,7 @@ export class AdminSettingsController {
         enabled: worker.enabled,
         dailyBudgetUsd: worker.dailyBudgetUsd ?? null,
         jobCostEstimateUsd: worker.jobCostEstimateUsd,
-        todaySpendUsd: Number(todaySpend._sum.costUsd ?? 0),
+        todaySpendUsd: Number(todaySpend ?? 0),
       },
     };
   }

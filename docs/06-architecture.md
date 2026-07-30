@@ -197,7 +197,7 @@ runtime log는 위 business/audit log와 분리한다.
 ## Known Implementation Gaps
 
 - 최초 계정은 bootstrap 환경변수로만 만든다.
-- controller/service에서 Prisma를 직접 사용하는 코드가 남아 있다.
+- 일부 service가 아직 Prisma를 직접 사용한다. controller에는 남아 있지 않다.
 - frontend는 아직 정적 HTML/CSS/JavaScript다.
 - approved log table structure와 token dashboard가 완성되지 않았다.
 - 현재 Raw SQL은 queue claim, row/advisory lock에 사용된다.

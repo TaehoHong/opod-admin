@@ -12,6 +12,7 @@ import { CharactersController } from "./characters.controller";
 import { CharactersService } from "./characters.service";
 import { CharacterProfileImageRepository } from "./character-profile-image.repository";
 import { CharacterProfileImageService } from "./character-profile-image.service";
+import { PostingPolicyRepository } from "./posting-policy.repository";
 import { PostingPolicyService } from "./posting-policy.service";
 import { VisualProfileService } from "./visual-profile.service";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
@@ -24,6 +25,7 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
     CharacterProfileImageRepository,
     CharacterProfileImageService,
     PostingPolicyService,
+    PostingPolicyRepository,
     {
       provide: VisualProfileService,
       // 캡셔닝 비전 LLM — 기획 LLM(planner.*) 설정을 호출 시마다 재해석한다.

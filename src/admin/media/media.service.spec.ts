@@ -14,7 +14,7 @@ describe("MediaService", () => {
       S3_PUBLIC_BASE_URL: "https://cdn.example.com",
     });
     const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const create = jest.fn().mockImplementation(({ data }) =>
+    const create = jest.fn().mockImplementation((data) =>
       Promise.resolve({
         id: "media-1",
         ...data,
@@ -25,7 +25,7 @@ describe("MediaService", () => {
     );
     const service = new (
       MediaService as new (...args: unknown[]) => MediaService
-    )({ media: { create } });
+    )({ create });
 
     try {
       await expect(
@@ -58,7 +58,7 @@ describe("MediaService", () => {
         headers: { "content-type": "image/png" },
         expiresAt: expect.any(String),
       });
-      expect(create.mock.calls[0][0].data).toMatchObject({
+      expect(create.mock.calls[0][0]).toMatchObject({
         mediaType: "image",
         storageKey: expect.stringMatching(/^media\/image\/.+\.png$/),
         url: expect.stringMatching(
@@ -83,7 +83,7 @@ describe("MediaService", () => {
       S3_PUBLIC_BASE_URL: "https://cdn.example.com",
     });
     const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const create = jest.fn().mockImplementation(({ data }) =>
+    const create = jest.fn().mockImplementation((data) =>
       Promise.resolve({
         id: "media-1",
         ...data,
@@ -94,7 +94,7 @@ describe("MediaService", () => {
     );
     const service = new (
       MediaService as new (...args: unknown[]) => MediaService
-    )({ media: { create } });
+    )({ create });
 
     try {
       await expect(
@@ -116,7 +116,7 @@ describe("MediaService", () => {
           "https://bucket.s3.us-east-1.amazonaws.com/pod/reels/character/character-1/",
         ),
       });
-      expect(create.mock.calls[0][0].data).toMatchObject({
+      expect(create.mock.calls[0][0]).toMatchObject({
         mediaType: "video",
         storageKey: expect.stringMatching(
           /^pod\/reels\/character\/character-1\/.+\.mp4$/,
@@ -134,7 +134,7 @@ describe("MediaService", () => {
     const restoreS3Env = setS3Env({});
     const service = new (
       MediaService as new (...args: unknown[]) => MediaService
-    )({ media: { create: jest.fn() } });
+    )({ create: jest.fn() });
 
     try {
       await expect(
@@ -168,10 +168,8 @@ describe("MediaService", () => {
     const service = new (
       MediaService as new (...args: unknown[]) => MediaService
     )({
-      media: {
-        findUnique: jest.fn().mockResolvedValue({ id: "media-1" }),
-        update,
-      },
+      exists: jest.fn().mockResolvedValue(true),
+      markUploaded: update,
     });
 
     await expect(service.confirmUpload("media-1")).resolves.toMatchObject({
@@ -179,20 +177,15 @@ describe("MediaService", () => {
       mediaType: "image",
       uploadedAt: uploadedAt.toISOString(),
     });
-    expect(update).toHaveBeenCalledWith({
-      where: { id: "media-1" },
-      data: { uploadedAt: expect.any(Date) },
-    });
+    expect(update).toHaveBeenCalledWith("media-1", expect.any(Date));
   });
 
   it("rejects upload confirmation for missing media", async () => {
     const service = new (
       MediaService as new (...args: unknown[]) => MediaService
     )({
-      media: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        update: jest.fn(),
-      },
+      exists: jest.fn().mockResolvedValue(false),
+      markUploaded: jest.fn(),
     });
 
     await expect(service.confirmUpload("missing")).rejects.toBeInstanceOf(

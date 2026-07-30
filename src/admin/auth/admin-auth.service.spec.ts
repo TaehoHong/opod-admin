@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import { AppConfigService } from "../../domain/config/app-config.service";
 import { AdminAuthService, hashAdminPassword } from "./admin-auth.service";
+import { DuplicateAdminEmailError } from "./admin.repository";
 
 type TestAdminRow = {
   id: string;
@@ -20,56 +21,38 @@ function createService(
   env: Record<string, string | undefined> = {},
 ) {
   const rows = [...initialRows];
-  const prisma = {
-    admin: {
-      count: jest.fn(() => Promise.resolve(rows.length)),
-      findUnique: jest.fn(
-        ({ where }: { where: { id?: string; email?: string } }) =>
-          Promise.resolve(
-            rows.find(
-              (row) =>
-                (where.id && row.id === where.id) ||
-                (where.email && row.email === where.email),
-            ) ?? null,
-          ),
-      ),
-      create: jest.fn(
-        ({
-          data,
-        }: {
-          data: {
-            email: string;
-            password: string;
-            isEnabled?: boolean;
-            isDeleted?: boolean;
-          };
-        }) => {
-          if (rows.some((row) => row.email === data.email)) {
-            throw Object.assign(new Error("duplicate admin"), {
-              code: "P2002",
-            });
-          }
-
-          const row = {
-            id: `admin-${rows.length + 1}`,
-            email: data.email,
-            password: data.password,
-            isEnabled: data.isEnabled ?? true,
-            isDeleted: data.isDeleted ?? false,
-            createdAt: new Date("2026-07-07T00:00:00.000Z"),
-          };
-          rows.push(row);
-          return Promise.resolve(row);
-        },
-      ),
-    },
+  // application service는 concrete repository를 주입받으므로
+  // (docs/02-development-rules.md:55) 테스트도 Prisma 대신 repository를 대체한다.
+  const admins = {
+    countAll: jest.fn(() => Promise.resolve(rows.length)),
+    findByEmailWithPassword: jest.fn((email: string) =>
+      Promise.resolve(rows.find((row) => row.email === email) ?? null),
+    ),
+    findById: jest.fn((id: string) =>
+      Promise.resolve(rows.find((row) => row.id === id) ?? null),
+    ),
+    create: jest.fn((input: { email: string; password: string }) => {
+      if (rows.some((row) => row.email === input.email)) {
+        return Promise.reject(new DuplicateAdminEmailError(input.email));
+      }
+      const row = {
+        id: `admin-${rows.length + 1}`,
+        email: input.email,
+        password: input.password,
+        isEnabled: true,
+        isDeleted: false,
+        createdAt: new Date("2026-07-07T00:00:00.000Z"),
+      };
+      rows.push(row);
+      return Promise.resolve(row);
+    }),
   };
 
   return {
     rows,
-    prisma,
+    admins,
     service: new AdminAuthService(
-      prisma as never,
+      admins as never,
       // typed config를 주입하므로 테스트가 process.env를 건드리지 않는다.
       new AppConfigService({
         DATABASE_URL: "postgresql://test/test",
@@ -101,7 +84,7 @@ describe("AdminAuthService", () => {
   // docs/03-deployment-rules.md "First Admin" — 알려진 기본 계정이 자동으로
   // 생기면 운영 콘솔에 누구나 로그인할 수 있다.
   it("creates the first admin from bootstrap env vars when no admin exists", async () => {
-    const { prisma, rows, service } = createService([], bootstrapEnv);
+    const { admins, rows, service } = createService([], bootstrapEnv);
 
     await service.onModuleInit();
 
@@ -113,26 +96,26 @@ describe("AdminAuthService", () => {
     });
     expect(rows[0].password).toMatch(/^scrypt\$/);
     expect(rows[0].password).not.toContain("bootstrap-password");
-    expect(prisma.admin.create).toHaveBeenCalledTimes(1);
+    expect(admins.create).toHaveBeenCalledTimes(1);
   });
 
   it("fails startup when no admin exists and bootstrap env vars are missing", async () => {
-    const { prisma, service } = createService();
+    const { admins, service } = createService();
 
     await expect(service.onModuleInit()).rejects.toThrow(
       /ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD are required/,
     );
-    expect(prisma.admin.create).not.toHaveBeenCalled();
+    expect(admins.create).not.toHaveBeenCalled();
   });
 
   it("does not create or change an account when an admin already exists", async () => {
     const existing = defaultAdmin();
-    const { prisma, rows, service } = createService([existing], bootstrapEnv);
+    const { admins, rows, service } = createService([existing], bootstrapEnv);
 
     await service.onModuleInit();
 
     expect(rows).toEqual([existing]);
-    expect(prisma.admin.create).not.toHaveBeenCalled();
+    expect(admins.create).not.toHaveBeenCalled();
   });
 
   it("logs in an enabled admin and returns a JWT", async () => {

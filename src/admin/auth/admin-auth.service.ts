@@ -12,20 +12,13 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { AppConfigService } from "../../domain/config/app-config.service";
-import { PrismaService } from "../../domain/database/prisma.service";
+import { AdminRepository, DuplicateAdminEmailError } from "./admin.repository";
 
 const adminJwtTtlSeconds = 7 * 24 * 60 * 60;
 
 export type AuthenticatedAdmin = {
   id: string;
   email: string;
-};
-
-type AdminRow = AuthenticatedAdmin & {
-  password: string;
-  isEnabled: boolean;
-  isDeleted: boolean;
-  createdAt: Date;
 };
 
 type PublicAdminRow = AuthenticatedAdmin & {
@@ -41,27 +34,10 @@ type JwtPayload = {
   exp: number;
 };
 
-const adminAuthFields = {
-  id: true,
-  email: true,
-  password: true,
-  isEnabled: true,
-  isDeleted: true,
-  createdAt: true,
-} as const;
-
-const publicAdminFields = {
-  id: true,
-  email: true,
-  isEnabled: true,
-  isDeleted: true,
-  createdAt: true,
-} as const;
-
 @Injectable()
 export class AdminAuthService implements OnModuleInit {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly admins: AdminRepository,
     private readonly config: AppConfigService,
   ) {}
 
@@ -69,7 +45,7 @@ export class AdminAuthService implements OnModuleInit {
   // (docs/03-deployment-rules.md "First Admin"). 코드에 기본 계정을 두면
   // 알려진 자격증명으로 운영 콘솔에 접근할 수 있다.
   async onModuleInit() {
-    const existingCount = await this.prisma.admin.count();
+    const existingCount = await this.admins.countAll();
     // 이미 관리자가 있으면 bootstrap 값으로 계정을 추가하거나 password를
     // 바꾸지 않는다.
     if (existingCount > 0) return;
@@ -91,10 +67,7 @@ export class AdminAuthService implements OnModuleInit {
   async login(input: { email: string; password: string }) {
     const email = normalizeEmail(input.email);
     const password = requiredString(input.password, "password");
-    const admin = (await this.prisma.admin.findUnique({
-      where: { email },
-      select: adminAuthFields,
-    })) as AdminRow | null;
+    const admin = await this.admins.findByEmailWithPassword(email);
 
     if (
       !admin ||
@@ -217,27 +190,16 @@ export class AdminAuthService implements OnModuleInit {
   }
 
   private async findEnabledAdminById(id: string) {
-    const admin = (await this.prisma.admin.findUnique({
-      where: { id },
-      select: publicAdminFields,
-    })) as PublicAdminRow | null;
+    const admin = await this.admins.findById(id);
     if (!admin || !admin.isEnabled || admin.isDeleted) return null;
     return admin;
   }
 
   private async createAdmin(input: { email: string; password: string }) {
     try {
-      return await this.prisma.admin.create({
-        data: {
-          email: input.email,
-          password: input.password,
-          isEnabled: true,
-          isDeleted: false,
-        },
-        select: publicAdminFields,
-      });
+      return await this.admins.create(input);
     } catch (error) {
-      if ((error as { code?: string }).code === "P2002") {
+      if (error instanceof DuplicateAdminEmailError) {
         throw new ConflictException("Admin email already exists");
       }
       throw error;

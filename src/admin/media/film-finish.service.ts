@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { PrismaService } from "../../domain/database/prisma.service";
+import { MediaRepository } from "./media.repository";
 import {
   applyFinish,
   downloadMediaBytes,
@@ -25,7 +25,7 @@ export class FilmFinishService {
   private readonly cache = new Map<string, Promise<Buffer>>();
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly media: MediaRepository,
     // 비공개 S3 객체는 presigned URL로 읽는다 (레퍼런스 전달과 동일 방식).
     private readonly signReferenceUrl: ReferenceUrlSigner | null = null,
     private readonly fetchBytes: (
@@ -53,10 +53,7 @@ export class FilmFinishService {
   }
 
   private async render(mediaId: string, preset: FinishPreset): Promise<Buffer> {
-    const media = await this.prisma.media.findUnique({
-      where: { id: mediaId },
-      select: { mediaType: true, url: true, storageKey: true },
-    });
+    const media = await this.media.findSource(mediaId);
     if (!media) {
       throw new NotFoundException("Media not found");
     }

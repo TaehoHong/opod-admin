@@ -1020,6 +1020,7 @@ input[type="checkbox"] {
   object-fit: cover;
   object-position: var(--profile-crop-x, 50%) var(--profile-crop-y, 50%);
   transform: scale(var(--profile-crop-zoom, 1));
+  transform-origin: var(--profile-crop-x, 50%) var(--profile-crop-y, 50%);
 }
 .character-profile-layout {
   display: grid;
@@ -1042,7 +1043,7 @@ input[type="checkbox"] {
   flex-direction: column;
   gap: 3px;
 }
-.character-profile-image-card span {
+.character-profile-image-card > div > span {
   color: var(--color-neutral-600);
   font-size: 12px;
 }

@@ -8,6 +8,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 import { basename, extname } from "node:path";
 import { PrismaService } from "../../domain/database/prisma.service";
+import { MediaRepository } from "./media.repository";
 
 export type MediaType = "image" | "video";
 type UploadMethod = "PUT";
@@ -57,7 +58,7 @@ type SignPutUpload = (input: {
 
 @Injectable()
 export class MediaService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly media: MediaRepository) {}
 
   async startUpload(input: {
     mediaType: string;
@@ -94,14 +95,12 @@ export class MediaService {
       fileName,
       ...(storagePrefix ? { storagePrefix } : {}),
     });
-    const media = await this.prisma.media.create({
-      data: {
-        mediaType,
-        url: signed.publicUrl,
-        storageKey: signed.storageKey,
-        contentType,
-        ...numbers,
-      },
+    const media = await this.media.create({
+      mediaType,
+      url: signed.publicUrl,
+      storageKey: signed.storageKey,
+      contentType,
+      ...numbers,
     });
 
     return {
@@ -114,19 +113,11 @@ export class MediaService {
   }
 
   async confirmUpload(mediaId: string): Promise<Media> {
-    const existing = await this.prisma.media.findUnique({
-      where: { id: mediaId },
-      select: { id: true },
-    });
-    if (!existing) {
+    if (!(await this.media.exists(mediaId))) {
       throw new BadRequestException("Media not found");
     }
 
-    const media = await this.prisma.media.update({
-      where: { id: mediaId },
-      data: { uploadedAt: new Date() },
-    });
-    return this.toMedia(media);
+    return this.toMedia(await this.media.markUploaded(mediaId, new Date()));
   }
 
   private parseMediaType(mediaType: string): MediaType {

@@ -5900,11 +5900,7 @@ async function handleClick(event) {
   if (act === "profile-image-remove") {
     const id = el.dataset.characterId;
     const result = await submitViaSpec(
-      jsonRequest(
-        `/api/admin/v1/characters/${id}/profile-image`,
-        "DELETE",
-        undefined,
-      ),
+      jsonRequest(`/api/admin/v1/characters/${id}/profile-image`, "DELETE", {}),
       "프로필 이미지를 제거했습니다.",
     );
     if (result.ok) {
@@ -6308,13 +6304,13 @@ async function handleChange(event) {
     if (dialogState?.type !== "character-profile-image") return;
     const file = profileImageInput.files?.[0];
     if (!file) return;
-    if (mediaTypeForFile(file) !== "image") {
-      showToast("이미지 파일만 프로필로 사용할 수 있습니다.", "", true);
-      profileImageInput.value = "";
-      return;
-    }
-    profileImageInput.disabled = true;
     try {
+      if (mediaTypeForFile(file) !== "image") {
+        showToast("이미지 파일만 프로필로 사용할 수 있습니다.", "", true);
+        profileImageInput.value = "";
+        return;
+      }
+      profileImageInput.disabled = true;
       const characterId = dialogState.ctx.characterId;
       const mediaId = await uploadMedia(
         file,
