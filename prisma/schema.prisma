@@ -145,6 +145,16 @@ enum InquiryStatus {
   @@schema("opod")
 }
 
+enum ConsentType {
+  terms_of_service
+  privacy
+  age_14
+  marketing
+
+  @@map("consent_type")
+  @@schema("opod")
+}
+
 model User {
   id                   String                  @id @default(uuid(7)) @db.Uuid
   email                String?                 @unique
@@ -160,6 +170,7 @@ model User {
   updatedAt            DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt            DateTime?               @map("deleted_at") @db.Timestamptz(6)
   characterFollows     UserCharacterFollow[]
+  consents             UserConsent[]
   creditCheckIns       CreditCheckIn[]
   creditAccount        CreditAccount?
   creditLedgerEntries  CreditLedgerEntry[]
@@ -175,8 +186,26 @@ model User {
   refreshTokens        UserRefreshToken[]
   reports              Report[]
   hashtagPreferences   UserHashtagPreference[]
+  userAccounts         UserAccount[]
 
   @@map("users")
+  @@schema("opod")
+}
+
+model UserAccount {
+  id                String   @id @default(uuid(7)) @db.Uuid
+  userId            String   @map("user_id") @db.Uuid
+  provider          String
+  providerAccountId String   @map("provider_account_id")
+  email             String?
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@unique([userId, provider])
+  @@index([userId])
+  @@map("user_accounts")
   @@schema("opod")
 }
 
@@ -190,6 +219,20 @@ model UserRefreshToken {
 
   @@index([userId, createdAt])
   @@map("user_refresh_tokens")
+  @@schema("opod")
+}
+
+model UserConsent {
+  id        String      @id @default(uuid(7)) @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  type      ConsentType
+  version   String
+  agreed    Boolean
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User        @relation(fields: [userId], references: [id])
+
+  @@index([userId, type, createdAt])
+  @@map("user_consents")
   @@schema("opod")
 }
 
@@ -539,7 +582,7 @@ model CreditLedgerEntry {
   refundAllocations CreditRefundAllocation[]
 
   @@index([userId, createdAt])
-  @@index([userId, entryType, creditKind, expiresAt])
+  @@index([userId, entryType, creditKind, expiresAt], map: "credit_ledger_entries_user_id_entry_type_credit_kind_expires_at")
   @@index([purchaseId])
   @@map("credit_ledger_entries")
   @@schema("opod")
