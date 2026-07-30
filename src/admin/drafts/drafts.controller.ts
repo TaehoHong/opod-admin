@@ -22,7 +22,7 @@ import { SelectShotOutputDto } from "./dto/select-shot-output.dto";
 import { UpdateDraftDto } from "./dto/update-draft.dto";
 import { UpdateShotOutputFilterDto } from "./dto/update-shot-output-filter.dto";
 
-@Controller("api/drafts")
+@Controller("api/admin/v1/drafts")
 @UseGuards(AdminJwtGuard)
 export class DraftsController {
   constructor(

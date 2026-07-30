@@ -196,9 +196,7 @@ runtime log는 위 business/audit log와 분리한다.
 
 ## Known Implementation Gaps
 
-- current route와 목표 API prefix가 다르다.
-- current auth는 Bearer JWT를 사용한다. 기본 관리자 자동 생성은 제거됐고
-  최초 계정은 bootstrap 환경변수로만 만든다.
+- 최초 계정은 bootstrap 환경변수로만 만든다.
 - controller/service에서 Prisma를 직접 사용하는 코드가 남아 있다.
 - frontend는 아직 정적 HTML/CSS/JavaScript다.
 - approved log table structure와 token dashboard가 완성되지 않았다.

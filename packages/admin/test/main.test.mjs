@@ -11,6 +11,10 @@ import {
   characterHref,
   characterMemoriesPanel,
   characterPersonasPanel,
+  characterProfileImageDialog,
+  characterProfileImageMarkup,
+  characterProfileImagePayload,
+  characterProfileMediaRequest,
   characterResourceFormRequest,
   characterRouteState,
   characterStatusPayload,
@@ -53,6 +57,7 @@ import {
   mediaTypeForFile,
   navItems,
   navBadgeRequests,
+  normalizeProfileCrop,
   parseResponseBody,
   paymentDetailRequest,
   personaBulkPayload,
@@ -160,7 +165,7 @@ test("postPayload uploads mixed media sequentially and preserves order", async (
   let uploadNumber = 0;
   const request = async (path, options = {}) => {
     calls.push({ path, options });
-    if (path === "/api/media/uploads") {
+    if (path === "/api/admin/v1/media/uploads") {
       uploadNumber += 1;
       return {
         ok: true,
@@ -193,7 +198,7 @@ test("postPayload uploads mixed media sequentially and preserves order", async (
     media: [{ mediaId: "media-1" }, { mediaId: "media-2" }],
   });
   const presignBodies = calls
-    .filter((call) => call.path === "/api/media/uploads")
+    .filter((call) => call.path === "/api/admin/v1/media/uploads")
     .map((call) => JSON.parse(call.options.body));
   assert.deepEqual(
     presignBodies.map(({ mediaType, storagePrefix }) => ({
@@ -214,12 +219,12 @@ test("postPayload uploads mixed media sequentially and preserves order", async (
   assert.deepEqual(
     calls.map((call) => call.path ?? call.url),
     [
-      "/api/media/uploads",
+      "/api/admin/v1/media/uploads",
       "https://s3.example/upload-1",
-      "/api/media/media-1/confirm-upload",
-      "/api/media/uploads",
+      "/api/admin/v1/media/media-1/confirm-upload",
+      "/api/admin/v1/media/uploads",
       "https://s3.example/upload-2",
-      "/api/media/media-2/confirm-upload",
+      "/api/admin/v1/media/media-2/confirm-upload",
     ],
   );
 });
@@ -237,10 +242,10 @@ test("postPayload identifies the failed file and does not continue", async () =>
   ];
   let presignCount = 0;
   const request = async (path) => {
-    if (path === "/api/media/uploads" && ++presignCount === 2) {
+    if (path === "/api/admin/v1/media/uploads" && ++presignCount === 2) {
       return { ok: false, body: { message: "signing failed" } };
     }
-    if (path === "/api/media/uploads") {
+    if (path === "/api/admin/v1/media/uploads") {
       return {
         ok: true,
         body: {
@@ -283,7 +288,7 @@ test("submitNewPost creates one post after all confirmations with ordered media"
   let uploadNumber = 0;
   const request = async (path) => {
     events.push(path);
-    if (path === "/api/media/uploads") {
+    if (path === "/api/admin/v1/media/uploads") {
       uploadNumber += 1;
       return {
         ok: true,
@@ -318,15 +323,15 @@ test("submitNewPost creates one post after all confirmations with ordered media"
 
   assert.equal(result.ok, true);
   assert.equal(postRequests.length, 1);
-  assert.equal(postRequests[0].path, "/api/posts");
+  assert.equal(postRequests[0].path, "/api/admin/v1/posts");
   assert.deepEqual(JSON.parse(postRequests[0].options.body).media, [
     { mediaId: "media-1" },
     { mediaId: "media-2" },
     { mediaId: "media-3" },
   ]);
   assert.deepEqual(events.slice(-2), [
-    "/api/media/media-3/confirm-upload",
-    "/api/posts",
+    "/api/admin/v1/media/media-3/confirm-upload",
+    "/api/admin/v1/posts",
   ]);
 });
 
@@ -341,7 +346,7 @@ test("submitNewPost stops after a second-file upload stage failure", async (t) =
       let uploadNumber = 0;
       const request = async (path) => {
         events.push(path);
-        if (path === "/api/media/uploads") {
+        if (path === "/api/admin/v1/media/uploads") {
           uploadNumber += 1;
           if (failure.stage === "presign" && uploadNumber === 2) {
             return { ok: false, body: { message: failure.message } };
@@ -358,7 +363,7 @@ test("submitNewPost stops after a second-file upload stage failure", async (t) =
         }
         if (
           failure.stage === "confirm" &&
-          path === "/api/media/media-2/confirm-upload"
+          path === "/api/admin/v1/media/media-2/confirm-upload"
         ) {
           return { ok: false, body: { message: failure.message } };
         }
@@ -473,7 +478,7 @@ test("storyPayload uploads selected media under the story prefix", async () => {
   const calls = [];
   const request = async (path, options = {}) => {
     calls.push({ path, options });
-    if (path === "/api/media/uploads") {
+    if (path === "/api/admin/v1/media/uploads") {
       return {
         ok: true,
         body: {
@@ -484,7 +489,7 @@ test("storyPayload uploads selected media under the story prefix", async () => {
         },
       };
     }
-    if (path === "/api/media/media-story/confirm-upload") {
+    if (path === "/api/admin/v1/media/media-story/confirm-upload") {
       return { ok: true, body: { id: "media-story" } };
     }
     throw new Error(`Unexpected request ${path}`);
@@ -536,23 +541,29 @@ test("navItems exposes the sidebar tabs in order", () => {
 
 test("endpoint appends defined query params only", () => {
   assert.equal(
-    endpoint("/api/users", { q: "mina", cursor: "", limit: 25 }),
-    "/api/users?q=mina&limit=25",
+    endpoint("/api/admin/v1/users", { q: "mina", cursor: "", limit: 25 }),
+    "/api/admin/v1/users?q=mina&limit=25",
   );
 });
 
 test("navBadgeRequests covers every badge shown in the design", () => {
   assert.deepEqual(navBadgeRequests(), [
-    { key: "drafts", path: "/api/drafts?status=needs_review&limit=50" },
-    { key: "media", path: "/api/media?uploaded=false&limit=50" },
-    { key: "generation", path: "/api/generation/jobs?status=failed&limit=50" },
+    {
+      key: "drafts",
+      path: "/api/admin/v1/drafts?status=needs_review&limit=50",
+    },
+    { key: "media", path: "/api/admin/v1/media?uploaded=false&limit=50" },
+    {
+      key: "generation",
+      path: "/api/admin/v1/generation/jobs?status=failed&limit=50",
+    },
     {
       key: "moderation",
-      path: "/api/moderation/reports?status=submitted&limit=50",
+      path: "/api/admin/v1/moderation/reports?status=submitted&limit=50",
     },
     {
       key: "payments",
-      path: "/api/payments/reconciliation?status=mismatch",
+      path: "/api/admin/v1/payments/reconciliation?status=mismatch",
     },
   ]);
 });
@@ -564,8 +575,8 @@ test("analyticsRequests applies the selected reporting period", () => {
     to: "2026-07-12T12:00:00.000Z",
   });
   assert.deepEqual(analyticsRequests("30일", now), [
-    "/api/analytics?from=2026-06-12T12%3A00%3A00.000Z&to=2026-07-12T12%3A00%3A00.000Z",
-    "/api/analytics/hashtags?limit=10",
+    "/api/admin/v1/analytics?from=2026-06-12T12%3A00%3A00.000Z&to=2026-07-12T12%3A00%3A00.000Z",
+    "/api/admin/v1/analytics/hashtags?limit=10",
   ]);
 });
 
@@ -635,6 +646,88 @@ test("characterRouteState parses list, create, detail, and tab states", () => {
   assert.equal(
     characterRouteState("/characters/char-1/unknown").tab,
     "profile",
+  );
+});
+
+test("profile crop normalizes unsafe values and builds the API payload", () => {
+  assert.deepEqual(normalizeProfileCrop({ x: -1, y: 2, zoom: 8 }), {
+    x: 0,
+    y: 1,
+    zoom: 3,
+  });
+  assert.deepEqual(normalizeProfileCrop({}), {
+    x: 0.5,
+    y: 0.5,
+    zoom: 1,
+  });
+
+  const form = new FormData();
+  form.set("mediaId", " media-1 ");
+  form.set("cropX", "0.2");
+  form.set("cropY", "0.7");
+  form.set("cropZoom", "2");
+  assert.deepEqual(characterProfileImagePayload(form), {
+    mediaId: "media-1",
+    crop: { x: 0.2, y: 0.7, zoom: 2 },
+  });
+});
+
+test("profile image markup renders a cropped image or safe fallback", () => {
+  const image = characterProfileImageMarkup(
+    {
+      image: { url: "https://cdn.example/profile.png?a=1&b=2" },
+      crop: { x: 0.2, y: 0.7, zoom: 2 },
+    },
+    "Mina",
+  );
+  assert.match(image, /profile\.png\?a=1&amp;b=2/);
+  assert.match(image, /--profile-crop-x:20%/);
+  assert.match(image, /--profile-crop-y:70%/);
+  assert.match(image, /--profile-crop-zoom:2/);
+
+  const fallback = characterProfileImageMarkup(
+    { image: { url: "javascript:alert(1)" } },
+    "Mina",
+  );
+  assert.doesNotMatch(fallback, /src="javascript:/);
+  assert.match(fallback, />M</);
+});
+
+test("profile image dialog exposes upload, reusable media, crop, and removal", () => {
+  const html = characterProfileImageDialog({
+    characterId: "char-1",
+    profile: {
+      image: { id: "media-1", url: "https://cdn.example/current.png" },
+      crop: { x: 0.4, y: 0.6, zoom: 1.5 },
+    },
+    selectedImage: {
+      id: "media-1",
+      url: "https://cdn.example/current.png",
+    },
+    crop: { x: 0.4, y: 0.6, zoom: 1.5 },
+    media: [
+      {
+        id: "media-1",
+        url: "https://cdn.example/current.png",
+      },
+      {
+        id: "media-2",
+        url: "https://cdn.example/other.png",
+      },
+    ],
+  });
+
+  assert.match(html, /data-profile-image-upload/);
+  assert.equal(
+    (html.match(/data-act="profile-media-select"/g) ?? []).length,
+    2,
+  );
+  assert.match(html, /name="cropZoom"/);
+  assert.match(html, /data-action="profile-image-save"/);
+  assert.match(html, /data-act="profile-image-remove"/);
+  assert.equal(
+    characterProfileMediaRequest(),
+    "/api/admin/v1/media?mediaType=image&uploaded=true&limit=50",
   );
 });
 
@@ -812,7 +905,7 @@ test("characterResourceFormRequest selects persona and memory mutations", async 
   assert.equal(personaSubmission.successMessage, "페르소나를 추가했습니다.");
   assert.equal(
     personaSubmission.request.path,
-    "/api/characters/char-1/personas",
+    "/api/admin/v1/characters/char-1/personas",
   );
 
   const memory = new FormData();
@@ -827,7 +920,7 @@ test("characterResourceFormRequest selects persona and memory mutations", async 
   assert.equal(memorySubmission.successMessage, "메모리를 저장했습니다.");
   assert.equal(
     memorySubmission.request.path,
-    "/api/characters/char-1/memory/memory-1",
+    "/api/admin/v1/characters/char-1/memory/memory-1",
   );
   assert.equal(
     await characterResourceFormRequest("admin-login", new FormData()),
@@ -858,7 +951,7 @@ test("characterDeleteRequest cancels or builds the selected soft delete", async 
   assert.equal(submission.successMessage, "메모리를 삭제했습니다.");
   assert.equal(
     submission.request.path,
-    "/api/characters/char-1/memory/memory-1",
+    "/api/admin/v1/characters/char-1/memory/memory-1",
   );
   assert.equal(submission.request.options.method, "DELETE");
 });
@@ -916,7 +1009,7 @@ test("generationActionRequest builds existing job action endpoints", () => {
   assert.deepEqual(
     generationActionRequest("job-1", "retry", { reason: "bad" }),
     {
-      path: "/api/generation/jobs/job-1/retry",
+      path: "/api/admin/v1/generation/jobs/job-1/retry",
       options: {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1151,12 +1244,12 @@ test("generation confirm saves current fields before confirming", async () => {
     })),
     [
       {
-        path: "/api/generation/jobs/job-1/draft",
+        path: "/api/admin/v1/generation/jobs/job-1/draft",
         method: "PATCH",
         body: { prompt: "current edited prompt", candidateCount: 4 },
       },
       {
-        path: "/api/generation/jobs/job-1/confirm",
+        path: "/api/admin/v1/generation/jobs/job-1/confirm",
         method: "POST",
         body: {},
       },
@@ -1176,7 +1269,7 @@ test("generation confirm aborts when saving current fields fails", async () => {
   });
 
   assert.equal(outcome.stage, "update");
-  assert.deepEqual(paths, ["/api/generation/jobs/job-1/draft"]);
+  assert.deepEqual(paths, ["/api/admin/v1/generation/jobs/job-1/draft"]);
 });
 
 test("stale generation renders preserve selection and polling state", () => {
@@ -1241,7 +1334,7 @@ test("candidate click remains local until final confirmation", () => {
     generationSelectedMediaId: "media-2",
   });
   assert.deepEqual(imageWorkflowRequest("select", "job-1", "media-2"), {
-    path: "/api/generation/jobs/job-1/select-output",
+    path: "/api/admin/v1/generation/jobs/job-1/select-output",
     options: {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1464,7 +1557,7 @@ test("image workflow actions map to staged generation endpoints", () => {
   const jsonHeaders = { "content-type": "application/json" };
 
   assert.deepEqual(imageWorkflowRequest("create", "", createBody), {
-    path: "/api/generation/image-jobs/draft",
+    path: "/api/admin/v1/generation/image-jobs/draft",
     options: {
       method: "POST",
       headers: jsonHeaders,
@@ -1472,7 +1565,7 @@ test("image workflow actions map to staged generation endpoints", () => {
     },
   });
   assert.deepEqual(imageWorkflowRequest("update", "job-1", updateBody), {
-    path: "/api/generation/jobs/job-1/draft",
+    path: "/api/admin/v1/generation/jobs/job-1/draft",
     options: {
       method: "PATCH",
       headers: jsonHeaders,
@@ -1480,7 +1573,7 @@ test("image workflow actions map to staged generation endpoints", () => {
     },
   });
   assert.deepEqual(imageWorkflowRequest("confirm", "job-1"), {
-    path: "/api/generation/jobs/job-1/confirm",
+    path: "/api/admin/v1/generation/jobs/job-1/confirm",
     options: {
       method: "POST",
       headers: jsonHeaders,
@@ -1488,7 +1581,7 @@ test("image workflow actions map to staged generation endpoints", () => {
     },
   });
   assert.deepEqual(imageWorkflowRequest("select", "job-1", "media-2"), {
-    path: "/api/generation/jobs/job-1/select-output",
+    path: "/api/admin/v1/generation/jobs/job-1/select-output",
     options: {
       method: "POST",
       headers: jsonHeaders,
@@ -1496,7 +1589,7 @@ test("image workflow actions map to staged generation endpoints", () => {
     },
   });
   assert.deepEqual(imageWorkflowRequest("regenerate", "job-1"), {
-    path: "/api/generation/jobs/job-1/regenerate",
+    path: "/api/admin/v1/generation/jobs/job-1/regenerate",
     options: {
       method: "POST",
       headers: jsonHeaders,
@@ -1508,7 +1601,7 @@ test("image workflow actions map to staged generation endpoints", () => {
 test("generation click actions map to runnable job endpoints", () => {
   // 실행 버튼은 워커 수동 실행을 쓴다 — 레거시 /run(프로바이더 미호출)이 아니라.
   assert.deepEqual(generationClickRequest("job-run", "job-1"), {
-    path: "/api/generation/worker/run",
+    path: "/api/admin/v1/generation/worker/run",
     options: {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1516,7 +1609,7 @@ test("generation click actions map to runnable job endpoints", () => {
     },
   });
   assert.deepEqual(generationClickRequest("job-retry", "job-2"), {
-    path: "/api/generation/jobs/job-2/retry",
+    path: "/api/admin/v1/generation/jobs/job-2/retry",
     options: {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1529,7 +1622,7 @@ test("generation click actions map to runnable job endpoints", () => {
 test("simple click actions map to their request and success message", () => {
   assert.deepEqual(simpleClickAction("settings-clear-key", {}), {
     request: {
-      path: "/api/settings/generation",
+      path: "/api/admin/v1/settings/generation",
       options: {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -1542,7 +1635,7 @@ test("simple click actions map to their request and success message", () => {
     simpleClickAction("draft-build-prompts", { id: "draft-1" }),
     {
       request: {
-        path: "/api/drafts/draft-1/build-prompts",
+        path: "/api/admin/v1/drafts/draft-1/build-prompts",
         options: {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -1557,7 +1650,7 @@ test("simple click actions map to their request and success message", () => {
     simpleClickAction("draft-aggregate-now", { id: "draft-1" }),
     {
       request: {
-        path: "/api/drafts/draft-1/aggregate",
+        path: "/api/admin/v1/drafts/draft-1/aggregate",
         options: {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -1569,7 +1662,7 @@ test("simple click actions map to their request and success message", () => {
   );
   assert.deepEqual(simpleClickAction("draft-approve", { id: "draft-1" }), {
     request: {
-      path: "/api/drafts/draft-1/approve",
+      path: "/api/admin/v1/drafts/draft-1/approve",
       options: {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1583,7 +1676,7 @@ test("simple click actions map to their request and success message", () => {
 
 test("workerRunRequest targets the next or a specific queued job", () => {
   assert.deepEqual(workerRunRequest(), {
-    path: "/api/generation/worker/run",
+    path: "/api/admin/v1/generation/worker/run",
     options: {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1693,7 +1786,7 @@ test("generation completion form delegates to the job request builder", async ()
   assert.deepEqual(
     await generationFormActionRequest("generation-action", form),
     {
-      path: "/api/generation/jobs/job-1/complete",
+      path: "/api/admin/v1/generation/jobs/job-1/complete",
       options: {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1705,13 +1798,16 @@ test("generation completion form delegates to the job request builder", async ()
 });
 
 test("paymentDetailRequest targets payment detail endpoint", () => {
-  assert.equal(paymentDetailRequest("pay-1"), "/api/payments/pay-1");
+  assert.equal(paymentDetailRequest("pay-1"), "/api/admin/v1/payments/pay-1");
 });
 
-test("adminRequestOptions adds the admin bearer token header", () => {
-  assert.deepEqual(adminRequestOptions({ method: "POST" }, " secret "), {
+// 세션 cookie가 붙지 않거나 고정 헤더가 빠지면 상태 변경 요청이 전부
+// 401/403이 된다.
+test("adminRequestOptions sends the session cookie and the fixed admin header", () => {
+  assert.deepEqual(adminRequestOptions({ method: "POST" }), {
     method: "POST",
-    headers: { authorization: "Bearer secret" },
+    credentials: "same-origin",
+    headers: { "x-opod-admin": "1" },
   });
 });
 
@@ -1844,14 +1940,14 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
     {
       action: "admin-login",
       data: { email: "admin@example.test", password: "test-password-1" },
-      path: "/api/admin/login",
+      path: "/api/admin/v1/auth/login",
       method: "POST",
       body: { email: "admin@example.test", password: "test-password-1" },
     },
     {
       action: "admin-create",
       data: { email: "next@opod.com", password: "next-pass" },
-      path: "/api/admin/accounts",
+      path: "/api/admin/v1/auth/accounts",
       method: "POST",
       body: { email: "next@opod.com", password: "next-pass" },
     },
@@ -1863,7 +1959,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
         bio: "City walks",
         interests: "art, travel",
       },
-      path: "/api/characters",
+      path: "/api/admin/v1/characters",
       method: "POST",
       body: {
         publicId: "mina_ai",
@@ -1876,7 +1972,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "character-update",
       dataset: { characterId: "char-1" },
       data: { displayName: "Mina", bio: "City walks", interests: "art" },
-      path: "/api/characters/char-1",
+      path: "/api/admin/v1/characters/char-1",
       method: "PATCH",
       body: { displayName: "Mina", bio: "City walks", interests: ["art"] },
     },
@@ -1884,7 +1980,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "character-status",
       dataset: { characterId: "char-1" },
       data: { status: "inactive", reason: "policy" },
-      path: "/api/characters/char-1/status",
+      path: "/api/admin/v1/characters/char-1/status",
       method: "PATCH",
       body: { status: "inactive", reason: "policy" },
     },
@@ -1892,7 +1988,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "character-delete",
       dataset: { characterId: "char-1" },
       data: { reason: "policy" },
-      path: "/api/characters/char-1",
+      path: "/api/admin/v1/characters/char-1",
       method: "DELETE",
       body: { reason: "policy" },
     },
@@ -1900,7 +1996,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "persona-create",
       dataset: { characterId: "char-1" },
       data: { title: "Core", content: "warm" },
-      path: "/api/characters/char-1/personas",
+      path: "/api/admin/v1/characters/char-1/personas",
       method: "POST",
       body: { title: "Core", content: "warm" },
     },
@@ -1908,7 +2004,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "persona-update",
       dataset: { characterId: "char-1", personaId: "persona-1" },
       data: { title: "Core", content: "warmer" },
-      path: "/api/characters/char-1/personas/persona-1",
+      path: "/api/admin/v1/characters/char-1/personas/persona-1",
       method: "PATCH",
       body: { title: "Core", content: "warmer" },
     },
@@ -1916,7 +2012,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "persona-delete",
       dataset: { characterId: "char-1", personaId: "persona-1" },
       data: {},
-      path: "/api/characters/char-1/personas/persona-1",
+      path: "/api/admin/v1/characters/char-1/personas/persona-1",
       method: "DELETE",
       body: {},
     },
@@ -1924,7 +2020,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "persona-bulk-create",
       dataset: { characterId: "char-1" },
       data: { items: '[{"title":"Core","content":"warm"}]' },
-      path: "/api/characters/char-1/personas/bulk",
+      path: "/api/admin/v1/characters/char-1/personas/bulk",
       method: "POST",
       body: { items: [{ title: "Core", content: "warm" }] },
     },
@@ -1932,7 +2028,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "persona-reorder",
       dataset: { characterId: "char-1" },
       data: { personaIds: '["persona-2","persona-1"]' },
-      path: "/api/characters/char-1/personas/order",
+      path: "/api/admin/v1/characters/char-1/personas/order",
       method: "PUT",
       body: { personaIds: ["persona-2", "persona-1"] },
     },
@@ -1942,7 +2038,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       data: {
         items: '[{"content":"city night","type":"event","reason":"operator"}]',
       },
-      path: "/api/characters/char-1/memory/bulk",
+      path: "/api/admin/v1/characters/char-1/memory/bulk",
       method: "POST",
       body: {
         items: [{ content: "city night", type: "event", reason: "operator" }],
@@ -1952,7 +2048,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "memory-create",
       dataset: { characterId: "char-1" },
       data: { content: "city night", type: "event", reason: "operator" },
-      path: "/api/characters/char-1/memory",
+      path: "/api/admin/v1/characters/char-1/memory",
       method: "POST",
       body: { content: "city night", type: "event", reason: "operator" },
     },
@@ -1960,7 +2056,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "memory-update",
       dataset: { characterId: "char-1", memoryId: "memory-1" },
       data: { content: "city morning", type: "routine", reason: "operator" },
-      path: "/api/characters/char-1/memory/memory-1",
+      path: "/api/admin/v1/characters/char-1/memory/memory-1",
       method: "PATCH",
       body: { content: "city morning", type: "routine", reason: "operator" },
     },
@@ -1968,14 +2064,14 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
       action: "memory-delete",
       dataset: { characterId: "char-1", memoryId: "memory-1" },
       data: {},
-      path: "/api/characters/char-1/memory/memory-1",
+      path: "/api/admin/v1/characters/char-1/memory/memory-1",
       method: "DELETE",
       body: {},
     },
     {
       action: "credit-grant",
       data: { userId: "user-1", amount: "10", reason: "campaign" },
-      path: "/api/credits/grants",
+      path: "/api/admin/v1/credits/grants",
       method: "POST",
       body: { userId: "user-1", amount: 10, reason: "campaign" },
     },
@@ -1988,7 +2084,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
         mediaType: " image ",
         mediaUrl: " pod/stories/character/char-1/story.png ",
       },
-      path: "/api/stories",
+      path: "/api/admin/v1/stories",
       method: "POST",
       body: {
         characterId: "char-1",
@@ -2007,7 +2103,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
         mediaType: "image",
         prompt: "city portrait",
       },
-      path: "/api/generation/jobs",
+      path: "/api/admin/v1/generation/jobs",
       method: "POST",
       body: {
         characterId: "char-1",
@@ -2018,7 +2114,7 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
     {
       action: "report-update",
       data: { reportId: "report-1", status: "resolved", resolution: "ok" },
-      path: "/api/moderation/reports/report-1",
+      path: "/api/admin/v1/moderation/reports/report-1",
       method: "PATCH",
       body: { status: "resolved", resolution: "ok" },
     },
@@ -2052,7 +2148,7 @@ test("formActionRequest maps generation job actions", async () => {
   const request = await formActionRequest("generation-action", form);
 
   assert.deepEqual(request, {
-    path: "/api/generation/jobs/job-1/complete",
+    path: "/api/admin/v1/generation/jobs/job-1/complete",
     options: {
       method: "POST",
       headers: { "content-type": "application/json" },

@@ -23,7 +23,7 @@ describe("generation", () => {
     const headers = await adminHeaders(app);
 
     const character = await request(app.getHttpServer())
-      .post("/api/characters")
+      .post("/api/admin/v1/characters")
       .set(headers)
       .send({
         publicId: uniqueHandle("gen"),
@@ -34,7 +34,7 @@ describe("generation", () => {
       .expect(201);
 
     const created = await request(app.getHttpServer())
-      .post("/api/generation/jobs")
+      .post("/api/admin/v1/generation/jobs")
       .set(headers)
       .send({
         characterId: character.body.id,
@@ -44,7 +44,7 @@ describe("generation", () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${created.body.id}/start`)
+      .post(`/api/admin/v1/generation/jobs/${created.body.id}/start`)
       .set(headers)
       .expect(201)
       .expect((response) => {
@@ -52,7 +52,7 @@ describe("generation", () => {
       });
 
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${created.body.id}/complete`)
+      .post(`/api/admin/v1/generation/jobs/${created.body.id}/complete`)
       .set(headers)
       .send({
         url: "https://cdn.local/generated.png",
@@ -68,7 +68,7 @@ describe("generation", () => {
       });
 
     const logs = await request(app.getHttpServer())
-      .get("/api/character-action-logs")
+      .get("/api/admin/v1/character-action-logs")
       .set(headers)
       .expect(200);
 
@@ -101,7 +101,7 @@ describe("generation", () => {
     const headers = await adminHeaders(app);
 
     await request(app.getHttpServer())
-      .post("/api/generation/jobs")
+      .post("/api/admin/v1/generation/jobs")
       .set(headers)
       .send({
         characterId: "ai-1",
@@ -124,7 +124,7 @@ describe("generation", () => {
     const headers = await adminHeaders(app);
 
     const character = await request(app.getHttpServer())
-      .post("/api/characters")
+      .post("/api/admin/v1/characters")
       .set(headers)
       .send({
         publicId: uniqueHandle("gen-media"),
@@ -135,7 +135,7 @@ describe("generation", () => {
       .expect(201);
 
     const job = await request(app.getHttpServer())
-      .post("/api/generation/jobs")
+      .post("/api/admin/v1/generation/jobs")
       .set(headers)
       .send({
         characterId: character.body.id,
@@ -145,7 +145,7 @@ describe("generation", () => {
       .expect(201);
 
     const upload = await request(app.getHttpServer())
-      .post("/api/media/uploads")
+      .post("/api/admin/v1/media/uploads")
       .set(headers)
       .send({
         mediaType: "image",
@@ -155,17 +155,17 @@ describe("generation", () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/api/media/${upload.body.media.id}/confirm-upload`)
+      .post(`/api/admin/v1/media/${upload.body.media.id}/confirm-upload`)
       .set(headers)
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${job.body.id}/start`)
+      .post(`/api/admin/v1/generation/jobs/${job.body.id}/start`)
       .set(headers)
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${job.body.id}/complete`)
+      .post(`/api/admin/v1/generation/jobs/${job.body.id}/complete`)
       .set(headers)
       .send({ mediaId: upload.body.media.id })
       .expect(201)
@@ -188,7 +188,7 @@ describe("generation", () => {
     const headers = await adminHeaders(app);
 
     const character = await request(app.getHttpServer())
-      .post("/api/characters")
+      .post("/api/admin/v1/characters")
       .set(headers)
       .send({
         publicId: uniqueHandle("gen-run"),
@@ -198,7 +198,7 @@ describe("generation", () => {
       })
       .expect(201);
     const job = await request(app.getHttpServer())
-      .post("/api/generation/jobs")
+      .post("/api/admin/v1/generation/jobs")
       .set(headers)
       .send({
         characterId: character.body.id,
@@ -208,7 +208,7 @@ describe("generation", () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${job.body.id}/run`)
+      .post(`/api/admin/v1/generation/jobs/${job.body.id}/run`)
       .set(headers)
       .send({ provider: "local" })
       .expect(201)
@@ -218,7 +218,7 @@ describe("generation", () => {
       });
 
     const logs = await request(app.getHttpServer())
-      .get("/api/character-action-logs")
+      .get("/api/admin/v1/character-action-logs")
       .set(headers)
       .expect(200);
 
@@ -240,7 +240,7 @@ describe("generation", () => {
     const headers = await adminHeaders(app);
 
     const character = await request(app.getHttpServer())
-      .post("/api/characters")
+      .post("/api/admin/v1/characters")
       .set(headers)
       .send({
         publicId: uniqueHandle("gen-retry"),
@@ -250,7 +250,7 @@ describe("generation", () => {
       })
       .expect(201);
     const job = await request(app.getHttpServer())
-      .post("/api/generation/jobs")
+      .post("/api/admin/v1/generation/jobs")
       .set(headers)
       .send({
         characterId: character.body.id,
@@ -260,13 +260,13 @@ describe("generation", () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${job.body.id}/fail`)
+      .post(`/api/admin/v1/generation/jobs/${job.body.id}/fail`)
       .set(headers)
       .send({ errorMessage: "provider timeout" })
       .expect(201);
 
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${job.body.id}/retry`)
+      .post(`/api/admin/v1/generation/jobs/${job.body.id}/retry`)
       .set(headers)
       .send({ reason: "provider timeout" })
       .expect(201)
@@ -316,7 +316,7 @@ describe("generation", () => {
       await app.init();
       const headers = await adminHeaders(app);
       const character = await request(app.getHttpServer())
-        .post("/api/characters")
+        .post("/api/admin/v1/characters")
         .set(headers)
         .send({
           publicId: uniqueHandle("gen-draft"),
@@ -327,7 +327,7 @@ describe("generation", () => {
         .expect(201);
 
       const created = await request(app.getHttpServer())
-        .post("/api/generation/image-jobs/draft")
+        .post("/api/admin/v1/generation/image-jobs/draft")
         .set(headers)
         .send({
           characterId: character.body.id,
@@ -342,7 +342,7 @@ describe("generation", () => {
       });
 
       const edited = await request(app.getHttpServer())
-        .patch(`/api/generation/jobs/${created.body.id}/draft`)
+        .patch(`/api/admin/v1/generation/jobs/${created.body.id}/draft`)
         .set(headers)
         .send({ prompt: "edited final prompt", candidateCount: 3 })
         .expect(200);
@@ -356,7 +356,7 @@ describe("generation", () => {
         moduleRef.get(GenerationWorkerService).runJobNow(created.body.id),
       ).resolves.toEqual({ jobId: null });
       const stillDraft = await request(app.getHttpServer())
-        .get(`/api/generation/jobs/${created.body.id}`)
+        .get(`/api/admin/v1/generation/jobs/${created.body.id}`)
         .set(headers)
         .expect(200);
       expect(stillDraft.body).toMatchObject({ status: "draft" });
@@ -365,19 +365,19 @@ describe("generation", () => {
       expect(stillDraft.body).not.toHaveProperty("outputs");
 
       const confirmed = await request(app.getHttpServer())
-        .post(`/api/generation/jobs/${created.body.id}/confirm`)
+        .post(`/api/admin/v1/generation/jobs/${created.body.id}/confirm`)
         .set(headers)
         .expect(201);
       expect(confirmed.body.status).toBe("queued");
 
       const confirmedAgain = await request(app.getHttpServer())
-        .post(`/api/generation/jobs/${created.body.id}/confirm`)
+        .post(`/api/admin/v1/generation/jobs/${created.body.id}/confirm`)
         .set(headers)
         .expect(201);
       expect(confirmedAgain.body.status).toBe("queued");
 
       const confirmationLogs = await request(app.getHttpServer())
-        .get("/api/character-action-logs")
+        .get("/api/admin/v1/character-action-logs")
         .set(headers)
         .query({ characterId: character.body.id })
         .expect(200);
@@ -390,7 +390,7 @@ describe("generation", () => {
       ).toHaveLength(1);
 
       await request(app.getHttpServer())
-        .post("/api/generation/worker/run")
+        .post("/api/admin/v1/generation/worker/run")
         .set(headers)
         .send({ jobId: created.body.id })
         .expect(201)
@@ -401,7 +401,7 @@ describe("generation", () => {
       let lastObserved: Record<string, unknown> | undefined;
       while (Date.now() < deadline) {
         const response = await request(app.getHttpServer())
-          .get(`/api/generation/jobs/${created.body.id}`)
+          .get(`/api/admin/v1/generation/jobs/${created.body.id}`)
           .set(headers)
           .expect(200);
         lastObserved = response.body;
@@ -436,18 +436,22 @@ describe("generation", () => {
 
       await Promise.all([
         request(app.getHttpServer())
-          .post(`/api/generation/jobs/${created.body.id}/select-output`)
+          .post(
+            `/api/admin/v1/generation/jobs/${created.body.id}/select-output`,
+          )
           .set(headers)
           .send({ mediaId: outputs[1].mediaId })
           .expect(201),
         request(app.getHttpServer())
-          .post(`/api/generation/jobs/${created.body.id}/select-output`)
+          .post(
+            `/api/admin/v1/generation/jobs/${created.body.id}/select-output`,
+          )
           .set(headers)
           .send({ mediaId: outputs[1].mediaId })
           .expect(201),
       ]);
       const selected = await request(app.getHttpServer())
-        .get(`/api/generation/jobs/${created.body.id}`)
+        .get(`/api/admin/v1/generation/jobs/${created.body.id}`)
         .set(headers)
         .expect(200);
       expect(
@@ -462,7 +466,7 @@ describe("generation", () => {
       ]);
 
       const selectionLogs = await request(app.getHttpServer())
-        .get("/api/character-action-logs")
+        .get("/api/admin/v1/character-action-logs")
         .set(headers)
         .query({ characterId: character.body.id })
         .expect(200);
@@ -475,7 +479,7 @@ describe("generation", () => {
       ).toHaveLength(1);
 
       const regenerated = await request(app.getHttpServer())
-        .post(`/api/generation/jobs/${created.body.id}/regenerate`)
+        .post(`/api/admin/v1/generation/jobs/${created.body.id}/regenerate`)
         .set(headers)
         .expect(201);
       expect(regenerated.body).toMatchObject({

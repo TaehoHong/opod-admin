@@ -3,7 +3,7 @@ import { parsePageQuery } from "../../domain/database/page";
 import { LlmLogService } from "../../domain/llm-logs/llm-log.service";
 import { AdminJwtGuard } from "../auth/admin-jwt.guard";
 
-@Controller("api/llm-logs")
+@Controller("api/admin/v1/llm-logs")
 @UseGuards(AdminJwtGuard)
 export class LlmLogsController {
   constructor(private readonly llmLogs: LlmLogService) {}

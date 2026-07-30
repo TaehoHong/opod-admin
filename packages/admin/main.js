@@ -2,7 +2,7 @@
 //
 // Two layers live in this file:
 //   1. A pure request/payload helper layer (exported, unit-tested) that maps
-//      UI intent onto the real `/api/*` admin backend.
+//      UI intent onto the real `/api/admin/v1/*` admin backend.
 //   2. A state-driven rendering layer that paints the Broadsheet console and
 //      wires it to those helpers. The rendering layer degrades gracefully for
 //      resources the backend does not expose a list endpoint for (posts,
@@ -22,7 +22,6 @@ const identityEmail = $("#identityEmail");
 const identityAvatar = $("#identityAvatar");
 const logoutButton = $("#logoutButton");
 
-const adminTokenStorageKey = "opodAdminToken";
 const adminEmailStorageKey = "opodAdminEmail";
 const pendingForms = new WeakSet();
 
@@ -87,10 +86,11 @@ export function adminRouteState(input = "/") {
   return detailId ? { route, detailId } : { route };
 }
 
-export function currentRouteFromUrl(url = "/", token = "") {
+// signedIn은 HttpOnly cookie를 읽을 수 없는 클라이언트의 표식일 뿐이다.
+// 실제 접근 통제는 서버가 한다.
+export function currentRouteFromUrl(url = "/", signedIn = false) {
   const route = adminRouteState(url).route;
-  const hasToken = Boolean(String(token ?? "").trim());
-  if (!hasToken) {
+  if (!signedIn) {
     return "login";
   }
   if (route === "login") {
@@ -113,26 +113,34 @@ export function navBadgeRequests() {
   return [
     {
       key: "drafts",
-      path: endpoint("/api/drafts", { status: "needs_review", limit: 50 }),
+      path: endpoint("/api/admin/v1/drafts", {
+        status: "needs_review",
+        limit: 50,
+      }),
     },
     {
       key: "media",
-      path: endpoint("/api/media", { uploaded: "false", limit: 50 }),
+      path: endpoint("/api/admin/v1/media", { uploaded: "false", limit: 50 }),
     },
     {
       key: "generation",
-      path: endpoint("/api/generation/jobs", { status: "failed", limit: 50 }),
+      path: endpoint("/api/admin/v1/generation/jobs", {
+        status: "failed",
+        limit: 50,
+      }),
     },
     {
       key: "moderation",
-      path: endpoint("/api/moderation/reports", {
+      path: endpoint("/api/admin/v1/moderation/reports", {
         status: "submitted",
         limit: 50,
       }),
     },
     {
       key: "payments",
-      path: endpoint("/api/payments/reconciliation", { status: "mismatch" }),
+      path: endpoint("/api/admin/v1/payments/reconciliation", {
+        status: "mismatch",
+      }),
     },
   ];
 }
@@ -148,8 +156,8 @@ export function analyticsDateRange(period = "7일", now = new Date()) {
 export function analyticsRequests(period = "7일", now = new Date()) {
   const range = analyticsDateRange(period, now);
   return [
-    endpoint("/api/analytics", range),
-    "/api/analytics/hashtags?limit=10",
+    endpoint("/api/admin/v1/analytics", range),
+    "/api/admin/v1/analytics/hashtags?limit=10",
   ];
 }
 
@@ -560,6 +568,154 @@ export function characterMemoriesPanel(characterId, memories = []) {
   </div>`;
 }
 
+export function normalizeProfileCrop(crop = {}) {
+  const numberInRange = (value, fallback, min, max) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(max, Math.max(min, number));
+  };
+  return {
+    x: numberInRange(crop.x, 0.5, 0, 1),
+    y: numberInRange(crop.y, 0.5, 0, 1),
+    zoom: numberInRange(crop.zoom, 1, 1, 3),
+  };
+}
+
+function profileCropStyle(crop = {}) {
+  const normalized = normalizeProfileCrop(crop);
+  return `--profile-crop-x:${normalized.x * 100}%;--profile-crop-y:${
+    normalized.y * 100
+  }%;--profile-crop-zoom:${normalized.zoom}`;
+}
+
+export function characterProfileImageMarkup(
+  profile = {},
+  displayName = "",
+  className = "character-profile-avatar",
+) {
+  const source = httpMediaUrl(profile.image?.url);
+  const style = profileCropStyle(profile.crop);
+  return `<span class="avatar ${attr(className)}" style="${attr(style)}">${
+    source
+      ? `<img src="${attr(source)}" alt="${attr(`${displayName} 프로필 이미지`)}">`
+      : escapeHtml(initialOf(displayName))
+  }</span>`;
+}
+
+export function characterProfileMediaRequest(cursor = "") {
+  return endpoint("/api/admin/v1/media", {
+    mediaType: "image",
+    uploaded: "true",
+    limit: 50,
+    cursor,
+  });
+}
+
+export function characterProfileImagePayload(form) {
+  const mediaId = String(form.get("mediaId") ?? "").trim();
+  if (!mediaId) {
+    throw new Error("프로필 이미지를 선택하세요.");
+  }
+  return {
+    mediaId,
+    crop: normalizeProfileCrop({
+      x: form.get("cropX"),
+      y: form.get("cropY"),
+      zoom: form.get("cropZoom"),
+    }),
+  };
+}
+
+export function characterProfileImageDialog(ctx = {}) {
+  const crop = normalizeProfileCrop(ctx.crop ?? ctx.profile?.crop);
+  const selected = ctx.selectedImage ?? ctx.profile?.image ?? null;
+  const source = httpMediaUrl(selected?.url);
+  const media = Array.isArray(ctx.media) ? ctx.media : [];
+  const tiles = media.length
+    ? media
+        .map((item) => {
+          const itemSource = httpMediaUrl(item.url);
+          if (!itemSource) return "";
+          const active = selected?.id === item.id;
+          return `<button class="profile-media-tile${
+            active ? " is-selected" : ""
+          }" type="button" data-act="profile-media-select" data-media-id="${attr(
+            item.id,
+          )}" aria-pressed="${active}">
+            <img src="${attr(itemSource)}" alt="">
+          </button>`;
+        })
+        .join("")
+    : `<p class="profile-media-empty">재사용할 수 있는 업로드 완료 이미지가 없습니다.</p>`;
+
+  return `<div class="dialog-title">프로필 이미지 편집</div>
+    <form class="profile-image-editor" data-action="profile-image-save" data-character-id="${attr(
+      ctx.characterId,
+    )}">
+      <input type="hidden" name="mediaId" value="${attr(selected?.id ?? "")}">
+      <div class="profile-image-editor-main">
+        <div class="profile-image-editor-preview" style="${attr(
+          profileCropStyle(crop),
+        )}">
+          ${
+            source
+              ? `<img src="${attr(source)}" alt="프로필 이미지 크롭 미리보기">`
+              : `<span>이미지를 선택하세요</span>`
+          }
+        </div>
+        <div class="profile-crop-controls">
+          <label>가로 위치 <output data-profile-crop-output="x">${Math.round(
+            crop.x * 100,
+          )}%</output><input type="range" name="cropX" min="0" max="1" step="0.01" value="${attr(
+            crop.x,
+          )}" data-profile-crop></label>
+          <label>세로 위치 <output data-profile-crop-output="y">${Math.round(
+            crop.y * 100,
+          )}%</output><input type="range" name="cropY" min="0" max="1" step="0.01" value="${attr(
+            crop.y,
+          )}" data-profile-crop></label>
+          <label>확대 <output data-profile-crop-output="zoom">${crop.zoom.toFixed(
+            1,
+          )}×</output><input type="range" name="cropZoom" min="1" max="3" step="0.05" value="${attr(
+            crop.zoom,
+          )}" data-profile-crop></label>
+        </div>
+      </div>
+      <div class="field">
+        <label>새 이미지 업로드</label>
+        <input class="input" type="file" accept="image/*" data-profile-image-upload>
+      </div>
+      <div>
+        <div class="profile-media-heading">
+          <strong>기존 미디어에서 선택</strong>
+          <span>업로드 완료 이미지</span>
+        </div>
+        <div class="profile-media-grid">${tiles}</div>
+        ${
+          ctx.nextCursor
+            ? `<button class="btn btn-secondary" type="button" data-act="profile-media-more" data-cursor="${attr(
+                ctx.nextCursor,
+              )}">이미지 더 보기</button>`
+            : ""
+        }
+      </div>
+      <div class="dialog-actions">
+        ${
+          ctx.profile?.image
+            ? `<button class="btn btn-ghost" type="button" data-act="profile-image-remove" data-character-id="${attr(
+                ctx.characterId,
+              )}">이미지 제거</button>`
+            : ""
+        }
+        <span class="profile-dialog-spacer"></span>
+        <button class="btn btn-secondary" type="button" data-act="close-dialog">취소</button>
+        <button class="btn btn-primary" type="submit"${
+          selected ? "" : " disabled"
+        }>적용</button>
+      </div>
+    </form>`;
+}
+
 export function dialogContextFromDataset(dataset = {}) {
   return {
     actor: dataset.actor,
@@ -586,7 +742,7 @@ export function adminUserStats(user) {
 
 export function generationActionRequest(jobId, action, body = {}) {
   return {
-    path: `/api/generation/jobs/${jobId}/${action}`,
+    path: `/api/admin/v1/generation/jobs/${jobId}/${action}`,
     options: {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -597,21 +753,41 @@ export function generationActionRequest(jobId, action, body = {}) {
 
 export function imageWorkflowRequest(action, jobId, value) {
   if (action === "create") {
-    return jsonRequest("/api/generation/image-jobs/draft", "POST", value);
+    return jsonRequest(
+      "/api/admin/v1/generation/image-jobs/draft",
+      "POST",
+      value,
+    );
   }
   if (action === "update") {
-    return jsonRequest(`/api/generation/jobs/${jobId}/draft`, "PATCH", value);
+    return jsonRequest(
+      `/api/admin/v1/generation/jobs/${jobId}/draft`,
+      "PATCH",
+      value,
+    );
   }
   if (action === "confirm") {
-    return jsonRequest(`/api/generation/jobs/${jobId}/confirm`, "POST", {});
+    return jsonRequest(
+      `/api/admin/v1/generation/jobs/${jobId}/confirm`,
+      "POST",
+      {},
+    );
   }
   if (action === "select") {
-    return jsonRequest(`/api/generation/jobs/${jobId}/select-output`, "POST", {
-      mediaId: value,
-    });
+    return jsonRequest(
+      `/api/admin/v1/generation/jobs/${jobId}/select-output`,
+      "POST",
+      {
+        mediaId: value,
+      },
+    );
   }
   if (action === "regenerate") {
-    return jsonRequest(`/api/generation/jobs/${jobId}/regenerate`, "POST", {});
+    return jsonRequest(
+      `/api/admin/v1/generation/jobs/${jobId}/regenerate`,
+      "POST",
+      {},
+    );
   }
   return null;
 }
@@ -635,7 +811,7 @@ export async function generationConfirmDraft(jobId, form, requestFn) {
 export function workerRunRequest(jobId) {
   const id = String(jobId ?? "").trim();
   return {
-    path: "/api/generation/worker/run",
+    path: "/api/admin/v1/generation/worker/run",
     options: {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -724,51 +900,51 @@ export function generationClickRequest(clickAction, jobId) {
 
 const simpleClickActions = {
   "settings-clear-key": {
-    path: "/api/settings/generation",
+    path: "/api/admin/v1/settings/generation",
     method: "PUT",
     body: { falApiKey: null },
     successMessage: "API 키를 삭제했습니다.",
   },
   "settings-clear-llm-key": {
-    path: "/api/settings/generation",
+    path: "/api/admin/v1/settings/generation",
     method: "PUT",
     body: { llmApiKey: null },
     successMessage: "LLM API 키를 삭제했습니다.",
   },
   "settings-clear-agent-key": {
-    path: "/api/settings/generation",
+    path: "/api/admin/v1/settings/generation",
     method: "PUT",
     body: { agentLlmApiKey: null },
     successMessage:
       "채팅 LLM 키를 삭제했습니다. 기획 LLM 키를 다시 사용합니다.",
   },
   "media-confirm-upload": {
-    path: ({ id }) => `/api/media/${id}/confirm-upload`,
+    path: ({ id }) => `/api/admin/v1/media/${id}/confirm-upload`,
     successMessage: "업로드를 확정했습니다. 게시물에 연결할 수 있습니다.",
   },
   "draft-approve": {
-    path: ({ id }) => `/api/drafts/${id}/approve`,
+    path: ({ id }) => `/api/admin/v1/drafts/${id}/approve`,
     successMessage: "초안을 승인했습니다. 예정 시각에 게시됩니다.",
   },
   "draft-reject": {
-    path: ({ id }) => `/api/drafts/${id}/reject`,
+    path: ({ id }) => `/api/admin/v1/drafts/${id}/reject`,
     successMessage: "초안을 반려했습니다.",
   },
   "draft-plan-now": {
-    path: ({ id }) => `/api/drafts/${id}/plan`,
+    path: ({ id }) => `/api/admin/v1/drafts/${id}/plan`,
     successMessage: "기획을 실행했습니다. 결과를 확인하세요.",
   },
   "draft-build-prompts": {
-    path: ({ id }) => `/api/drafts/${id}/build-prompts`,
+    path: ({ id }) => `/api/admin/v1/drafts/${id}/build-prompts`,
     successMessage:
       "프롬프트를 빌드했습니다. 각 컷에서 확인·수정 후 실행하세요.",
   },
   "draft-aggregate-now": {
-    path: ({ id }) => `/api/drafts/${id}/aggregate`,
+    path: ({ id }) => `/api/admin/v1/drafts/${id}/aggregate`,
     successMessage: "생성 결과를 집계했습니다. 검수 단계를 확인하세요.",
   },
   "draft-publish-now": {
-    path: ({ id }) => `/api/drafts/${id}/publish`,
+    path: ({ id }) => `/api/admin/v1/drafts/${id}/publish`,
     successMessage: "초안을 게시했습니다.",
   },
 };
@@ -797,19 +973,22 @@ export function mediaUploadStartPayload(formData) {
 }
 
 export function paymentDetailRequest(paymentId) {
-  return `/api/payments/${paymentId}`;
+  return `/api/admin/v1/payments/${paymentId}`;
 }
 
-export function adminRequestOptions(options = {}, token = "") {
-  const value = String(token ?? "").trim();
-  if (!value) {
-    return options;
-  }
+// 세션은 HttpOnly cookie에 있어 JavaScript가 읽을 수 없다. 모든 요청에
+// same-origin cookie를 붙이고, 상태를 바꾸는 요청에는 서버가 요구하는 고정
+// 헤더를 실어 보낸다 (docs/06-architecture.md "Authentication and Web
+// Security").
+export const ADMIN_REQUEST_HEADER = "x-opod-admin";
+
+export function adminRequestOptions(options = {}) {
   return {
     ...options,
+    credentials: "same-origin",
     headers: {
       ...(options.headers ?? {}),
-      authorization: `Bearer ${value}`,
+      [ADMIN_REQUEST_HEADER]: "1",
     },
   };
 }
@@ -958,47 +1137,55 @@ export async function formActionRequest(action, form, dataset = {}) {
   const characterId =
     fieldValue(dataset, "characterId") || fieldValue(form, "characterId");
   if (action === "admin-login") {
-    return jsonRequest("/api/admin/login", "POST", adminLoginPayload(form));
+    return jsonRequest(
+      "/api/admin/v1/auth/login",
+      "POST",
+      adminLoginPayload(form),
+    );
   }
   if (action === "admin-create") {
     return jsonRequest(
-      "/api/admin/accounts",
+      "/api/admin/v1/auth/accounts",
       "POST",
       adminAccountPayload(form),
     );
   }
   if (action === "character-create") {
-    return jsonRequest("/api/characters", "POST", characterCreatePayload(form));
+    return jsonRequest(
+      "/api/admin/v1/characters",
+      "POST",
+      characterCreatePayload(form),
+    );
   }
   if (action === "character-update") {
     return jsonRequest(
-      `/api/characters/${characterId}`,
+      `/api/admin/v1/characters/${characterId}`,
       "PATCH",
       characterUpdatePayload(form),
     );
   }
   if (action === "character-status") {
     return jsonRequest(
-      `/api/characters/${characterId}/status`,
+      `/api/admin/v1/characters/${characterId}/status`,
       "PATCH",
       characterStatusPayload(form),
     );
   }
   if (action === "character-delete") {
-    return jsonRequest(`/api/characters/${characterId}`, "DELETE", {
+    return jsonRequest(`/api/admin/v1/characters/${characterId}`, "DELETE", {
       reason: requiredField(form, "reason"),
     });
   }
   if (action === "persona-create") {
     return jsonRequest(
-      `/api/characters/${characterId}/personas`,
+      `/api/admin/v1/characters/${characterId}/personas`,
       "POST",
       personaPayload(form),
     );
   }
   if (action === "persona-update") {
     return jsonRequest(
-      `/api/characters/${characterId}/personas/${fieldValue(
+      `/api/admin/v1/characters/${characterId}/personas/${fieldValue(
         dataset,
         "personaId",
       )}`,
@@ -1008,14 +1195,14 @@ export async function formActionRequest(action, form, dataset = {}) {
   }
   if (action === "persona-reorder") {
     return jsonRequest(
-      `/api/characters/${characterId}/personas/order`,
+      `/api/admin/v1/characters/${characterId}/personas/order`,
       "PUT",
       personaReorderPayload(form),
     );
   }
   if (action === "persona-delete") {
     return jsonRequest(
-      `/api/characters/${characterId}/personas/${fieldValue(
+      `/api/admin/v1/characters/${characterId}/personas/${fieldValue(
         dataset,
         "personaId",
       )}`,
@@ -1025,28 +1212,28 @@ export async function formActionRequest(action, form, dataset = {}) {
   }
   if (action === "persona-bulk-create") {
     return jsonRequest(
-      `/api/characters/${characterId}/personas/bulk`,
+      `/api/admin/v1/characters/${characterId}/personas/bulk`,
       "POST",
       personaBulkPayload(form),
     );
   }
   if (action === "memory-create") {
     return jsonRequest(
-      `/api/characters/${characterId}/memory`,
+      `/api/admin/v1/characters/${characterId}/memory`,
       "POST",
       memoryPayload(form),
     );
   }
   if (action === "memory-bulk-create") {
     return jsonRequest(
-      `/api/characters/${characterId}/memory/bulk`,
+      `/api/admin/v1/characters/${characterId}/memory/bulk`,
       "POST",
       memoryBulkPayload(form),
     );
   }
   if (action === "memory-update") {
     return jsonRequest(
-      `/api/characters/${characterId}/memory/${fieldValue(
+      `/api/admin/v1/characters/${characterId}/memory/${fieldValue(
         dataset,
         "memoryId",
       )}`,
@@ -1056,7 +1243,7 @@ export async function formActionRequest(action, form, dataset = {}) {
   }
   if (action === "memory-delete") {
     return jsonRequest(
-      `/api/characters/${characterId}/memory/${fieldValue(
+      `/api/admin/v1/characters/${characterId}/memory/${fieldValue(
         dataset,
         "memoryId",
       )}`,
@@ -1065,14 +1252,22 @@ export async function formActionRequest(action, form, dataset = {}) {
     );
   }
   if (action === "credit-grant") {
-    return jsonRequest("/api/credits/grants", "POST", creditGrantPayload(form));
+    return jsonRequest(
+      "/api/admin/v1/credits/grants",
+      "POST",
+      creditGrantPayload(form),
+    );
   }
   if (action === "story-create") {
-    return jsonRequest("/api/stories", "POST", await storyPayload(form));
+    return jsonRequest(
+      "/api/admin/v1/stories",
+      "POST",
+      await storyPayload(form),
+    );
   }
   if (action === "generation-create") {
     return jsonRequest(
-      "/api/generation/jobs",
+      "/api/admin/v1/generation/jobs",
       "POST",
       generationCreatePayload(form),
     );
@@ -1088,7 +1283,7 @@ export async function formActionRequest(action, form, dataset = {}) {
   }
   if (action === "report-update") {
     return jsonRequest(
-      `/api/moderation/reports/${fieldValue(form, "reportId")}`,
+      `/api/admin/v1/moderation/reports/${fieldValue(form, "reportId")}`,
       "PATCH",
       reportUpdatePayload(form),
     );
@@ -1235,7 +1430,7 @@ export async function submitNewPost(
 ) {
   const body = await postPayload(form, requestFn, putObject, files);
   return submitFn(
-    jsonRequest("/api/posts", "POST", body),
+    jsonRequest("/api/admin/v1/posts", "POST", body),
     "게시물을 생성했습니다.",
   );
 }
@@ -1333,7 +1528,7 @@ async function uploadMedia(
   storagePrefix = "",
 ) {
   const contentType = file.type || `${mediaType}/octet-stream`;
-  const upload = await requestFn("/api/media/uploads", {
+  const upload = await requestFn("/api/admin/v1/media/uploads", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -1361,9 +1556,12 @@ async function uploadMedia(
   }
 
   const mediaId = upload.body.media.id;
-  const confirmed = await requestFn(`/api/media/${mediaId}/confirm-upload`, {
-    method: "POST",
-  });
+  const confirmed = await requestFn(
+    `/api/admin/v1/media/${mediaId}/confirm-upload`,
+    {
+      method: "POST",
+    },
+  );
   if (!confirmed.ok) {
     throw new Error(
       errorMessage(confirmed.body, "Media upload confirm failed"),
@@ -1448,10 +1646,7 @@ async function request(path, options) {
   const method = options?.method ?? "GET";
   const startedAt = Date.now();
   try {
-    const response = await fetch(
-      path,
-      adminRequestOptions(options, readAdminToken()),
-    );
+    const response = await fetch(path, adminRequestOptions(options));
     const text = await response.text();
     const result = {
       ok: response.ok,
@@ -1488,33 +1683,29 @@ async function request(path, options) {
   }
 }
 
-function readAdminToken() {
-  return hasDocument
-    ? (window.sessionStorage.getItem(adminTokenStorageKey) ?? "")
-    : "";
-}
-
 function readAdminEmail() {
   return hasDocument
     ? (window.sessionStorage.getItem(adminEmailStorageKey) ?? "")
     : "";
 }
 
+// 세션 자체는 HttpOnly cookie라 JavaScript가 볼 수 없다. 저장된 이메일은
+// 라우팅과 화면 표시를 위한 표식일 뿐이고, 실제 권한은 서버가 cookie로
+// 판정한다 — 표식을 위조해도 API는 401을 준다.
+function hasAdminSession() {
+  return Boolean(readAdminEmail());
+}
+
 function writeAdminAuth(body) {
-  const token = String(body?.token ?? "").trim();
-  if (token) {
-    window.sessionStorage.setItem(adminTokenStorageKey, token);
-    window.sessionStorage.setItem(
-      adminEmailStorageKey,
-      String(body?.admin?.email ?? ""),
-    );
+  const email = String(body?.admin?.email ?? "").trim();
+  if (email) {
+    window.sessionStorage.setItem(adminEmailStorageKey, email);
   } else {
     clearAdminAuth();
   }
 }
 
 function clearAdminAuth() {
-  window.sessionStorage.removeItem(adminTokenStorageKey);
   window.sessionStorage.removeItem(adminEmailStorageKey);
 }
 
@@ -1523,7 +1714,7 @@ function currentUrl() {
 }
 
 function currentRoute() {
-  return currentRouteFromUrl(currentUrl(), readAdminToken());
+  return currentRouteFromUrl(currentUrl(), hasAdminSession());
 }
 
 function navigateTo(path, { replace = false } = {}) {
@@ -1734,7 +1925,7 @@ function spinner() {
 // — user/character option loading (for selects) —
 
 async function loadUserOptions() {
-  const res = await request(endpoint("/api/users", { limit: 50 }));
+  const res = await request(endpoint("/api/admin/v1/users", { limit: 50 }));
   const users = itemsFromPage(res.body);
   for (const u of users) {
     ui.cache.userLabels.set(u.id, u.email || u.displayName || u.id);
@@ -1743,7 +1934,9 @@ async function loadUserOptions() {
 }
 
 async function loadCharacterOptions() {
-  const res = await request(endpoint("/api/characters", { limit: 50 }));
+  const res = await request(
+    endpoint("/api/admin/v1/characters", { limit: 50 }),
+  );
   const chars = itemsFromPage(res.body);
   for (const c of chars) {
     ui.cache.charNames.set(c.id, c.displayName || c.publicId || c.id);
@@ -1816,12 +2009,22 @@ async function renderHome() {
     logsRes,
     ...badgeRes
   ] = await Promise.all([
-    request(endpoint("/api/characters", { limit: 50 })),
-    request(endpoint("/api/posts", { limit: 50 })),
-    request(endpoint("/api/users", { limit: 50 })),
-    request(endpoint("/api/generation/jobs", { status: "queued", limit: 50 })),
-    request(endpoint("/api/generation/jobs", { status: "running", limit: 50 })),
-    request("/api/character-action-logs"),
+    request(endpoint("/api/admin/v1/characters", { limit: 50 })),
+    request(endpoint("/api/admin/v1/posts", { limit: 50 })),
+    request(endpoint("/api/admin/v1/users", { limit: 50 })),
+    request(
+      endpoint("/api/admin/v1/generation/jobs", {
+        status: "queued",
+        limit: 50,
+      }),
+    ),
+    request(
+      endpoint("/api/admin/v1/generation/jobs", {
+        status: "running",
+        limit: 50,
+      }),
+    ),
+    request("/api/admin/v1/character-action-logs"),
     ...badgeSpecs.map((spec) => request(spec.path)),
   ]);
 
@@ -1969,7 +2172,7 @@ async function renderMedia() {
   const typeFilter = ui.filters.mediaType;
   const upFilter = ui.filters.mediaUp;
   const res = await request(
-    endpoint("/api/media", {
+    endpoint("/api/admin/v1/media", {
       mediaType: typeFilter === "전체" ? "" : typeFilter,
       uploaded:
         upFilter === "전체" ? "" : upFilter === "확정" ? "true" : "false",
@@ -2039,7 +2242,7 @@ async function renderMedia() {
 }
 
 async function renderMediaDetail(id) {
-  const res = await request(`/api/media/${id}`);
+  const res = await request(`/api/admin/v1/media/${id}`);
   if (!res.ok) {
     ui.selMediaId = null;
     return noticeBlock("미디어를 찾을 수 없습니다.");
@@ -2099,7 +2302,9 @@ async function renderCharacters() {
 
 async function renderCharacterList() {
   const filter = ui.filters.charStatus;
-  const res = await request(endpoint("/api/characters", { limit: 50 }));
+  const res = await request(
+    endpoint("/api/admin/v1/characters", { limit: 50 }),
+  );
   const allChars = itemsFromPage(res.body);
   const chars = allChars.filter((character) => {
     if (filter === "활성") return character.status === "active";
@@ -2160,10 +2365,13 @@ async function renderCharacterList() {
 }
 
 async function renderCharacterDetail(id, tab) {
-  const [detailRes, logsRes, jobsRes] = await Promise.all([
-    request(`/api/characters/${id}`),
-    request("/api/character-action-logs"),
-    request(endpoint("/api/generation/jobs", { characterId: id, limit: 50 })),
+  const [detailRes, profileImageRes, logsRes, jobsRes] = await Promise.all([
+    request(`/api/admin/v1/characters/${id}`),
+    request(`/api/admin/v1/characters/${id}/profile-image`),
+    request("/api/admin/v1/character-action-logs"),
+    request(
+      endpoint("/api/admin/v1/generation/jobs", { characterId: id, limit: 50 }),
+    ),
   ]);
   const c = detailRes.body;
   if (!detailRes.ok || !c?.id) {
@@ -2173,6 +2381,9 @@ async function renderCharacterDetail(id, tab) {
   ui.cache.charNames.set(c.id, c.displayName || c.publicId || c.id);
   const personas = Array.isArray(c.personas) ? c.personas : [];
   const memories = Array.isArray(c.memories) ? c.memories : [];
+  const profileImage = profileImageRes.ok
+    ? profileImageRes.body
+    : { characterId: c.id, image: null, crop: normalizeProfileCrop() };
   const logs = itemsFromPage(logsRes.body).filter((l) => l.characterId === id);
   const jobs = itemsFromPage(jobsRes.body);
   const stats = [
@@ -2185,9 +2396,12 @@ async function renderCharacterDetail(id, tab) {
   const header = `
     <button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="go-char-list">← 캐릭터 목록</button>
     <div style="display:flex;align-items:flex-start;gap:22px;margin-bottom:26px">
-      <span class="avatar" style="width:68px;height:68px;font-size:30px">${initialOf(
+      <button class="profile-avatar-button" type="button" data-act="profile-image-open" data-character-id="${attr(
+        c.id,
+      )}" aria-label="프로필 이미지 편집">${characterProfileImageMarkup(
+        profileImage,
         c.displayName,
-      )}</span>
+      )}</button>
       <div style="min-width:0;flex:1">
         <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
           <h2 style="font-size:36px;margin:0;line-height:1.05">${escapeHtml(
@@ -2247,22 +2461,38 @@ async function renderCharacterDetail(id, tab) {
   let body = "";
   if (tab === "profile") {
     body = `
-      <div style="max-width:560px">
-        <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">프로필 수정</span><span style="font-size:11px;color:var(--color-neutral-500)">PATCH /api/characters/:id</span></div>
-        <form data-action="char-profile" data-character-id="${attr(
-          c.id,
-        )}" style="display:flex;flex-direction:column;gap:12px">
-          <div class="field"><label>표시 이름</label><input class="input" name="displayName" value="${attr(
+      <div class="character-profile-layout">
+        <section class="character-profile-image-card">
+          <div>
+            <strong>프로필 이미지</strong>
+            <span>정사각형 크롭 · 현재 선택값</span>
+          </div>
+          ${characterProfileImageMarkup(
+            profileImage,
             c.displayName,
-          )}" required></div>
-          <div class="field"><label>Bio</label><input class="input" name="bio" value="${attr(
-            c.bio,
-          )}" required></div>
-          <div class="field"><label>관심사 (쉼표 구분)</label><input class="input" name="interests" value="${attr(
-            (c.interests ?? []).join(", "),
-          )}"></div>
-          <div><button class="btn btn-primary" type="submit">저장</button></div>
-        </form>
+            "character-profile-card-image",
+          )}
+          <button class="btn btn-secondary" type="button" data-act="profile-image-open" data-character-id="${attr(
+            c.id,
+          )}">${profileImage.image ? "이미지 편집" : "이미지 추가"}</button>
+        </section>
+        <section>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">기본 정보</span><span style="font-size:11px;color:var(--color-neutral-500)">PATCH /api/admin/v1/characters/:id</span></div>
+          <form data-action="char-profile" data-character-id="${attr(
+            c.id,
+          )}" style="display:flex;flex-direction:column;gap:12px">
+            <div class="field"><label>표시 이름</label><input class="input" name="displayName" value="${attr(
+              c.displayName,
+            )}" required></div>
+            <div class="field"><label>Bio</label><input class="input" name="bio" value="${attr(
+              c.bio,
+            )}" required></div>
+            <div class="field"><label>관심사 (쉼표 구분)</label><input class="input" name="interests" value="${attr(
+              (c.interests ?? []).join(", "),
+            )}"></div>
+            <div><button class="btn btn-primary" type="submit">기본 정보 저장</button></div>
+          </form>
+        </section>
       </div>`;
   } else if (tab === "personas") {
     body = characterPersonasPanel(c.id, personas);
@@ -2270,7 +2500,7 @@ async function renderCharacterDetail(id, tab) {
     body = characterMemoriesPanel(c.id, memories);
   } else if (tab === "posts") {
     const postsRes = await request(
-      endpoint("/api/posts", { characterId: id, limit: 50 }),
+      endpoint("/api/admin/v1/posts", { characterId: id, limit: 50 }),
     );
     const posts = itemsFromPage(postsRes.body);
     const rows = posts.length
@@ -2299,7 +2529,7 @@ async function renderCharacterDetail(id, tab) {
       : `<tr class="empty-row"><td colspan="7">게시물이 없습니다.</td></tr>`;
     body = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px">
-        <span class="count-note">${posts.length}건 · GET /api/posts?characterId=</span>
+        <span class="count-note">${posts.length}건 · GET /api/admin/v1/posts?characterId=</span>
         <button class="btn btn-primary" data-act="open-dialog" data-dialog="new-post" data-actor="${attr(
           id,
         )}">새 게시물</button>
@@ -2309,7 +2539,9 @@ async function renderCharacterDetail(id, tab) {
         <tbody>${rows}</tbody>
       </table>`;
   } else if (tab === "visual") {
-    const profileRes = await request(`/api/characters/${id}/visual-profile`);
+    const profileRes = await request(
+      `/api/admin/v1/characters/${id}/visual-profile`,
+    );
     const vp = profileRes.ok ? (profileRes.body ?? {}) : {};
     const references = Array.isArray(vp.referenceMedia)
       ? vp.referenceMedia
@@ -2320,7 +2552,7 @@ async function renderCharacterDetail(id, tab) {
     body = `
       <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:56px">
         <div>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">비주얼 프로필</span><span style="font-size:11px;color:var(--color-neutral-500)">PUT /api/characters/:id/visual-profile</span></div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">비주얼 프로필</span><span style="font-size:11px;color:var(--color-neutral-500)">PUT /api/admin/v1/characters/:id/visual-profile</span></div>
           <form data-action="visual-profile-save" data-character-id="${attr(
             c.id,
           )}" style="display:flex;flex-direction:column;gap:12px">
@@ -2335,7 +2567,7 @@ async function renderCharacterDetail(id, tab) {
             )}</textarea></div>
             <div><button class="btn btn-primary" type="submit">저장</button></div>
           </form>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">테스트 생성</span><span style="font-size:11px;color:var(--color-neutral-500)">POST /api/characters/:id/visual-profile/test-generation</span></div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">테스트 생성</span><span style="font-size:11px;color:var(--color-neutral-500)">POST /api/admin/v1/characters/:id/visual-profile/test-generation</span></div>
           <form data-action="visual-test-gen" data-character-id="${attr(
             c.id,
           )}" style="display:flex;gap:8px">
@@ -2345,7 +2577,7 @@ async function renderCharacterDetail(id, tab) {
           <p style="margin:8px 0 0;font-size:12px;color:var(--color-neutral-500)">외모 + 장면 + 스타일 프롬프트가 합쳐져 이미지 생성 잡으로 등록됩니다. 결과는 아래 최근 생성에 표시됩니다.</p>
         </div>
         <div>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px;flex-wrap:wrap"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">레퍼런스 이미지</span><span style="font-size:11px;color:var(--color-neutral-500)">${references.length}/5 · PUT /api/characters/:id/visual-profile/references</span><span style="flex:1;min-width:0"></span>${
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px;flex-wrap:wrap"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">레퍼런스 이미지</span><span style="font-size:11px;color:var(--color-neutral-500)">${references.length}/5 · PUT /api/admin/v1/characters/:id/visual-profile/references</span><span style="flex:1;min-width:0"></span>${
             references.length
               ? `${
                   missingCaptions
@@ -2389,7 +2621,7 @@ async function renderCharacterDetail(id, tab) {
             <input class="input" type="file" name="referenceFile" accept="image/*" required>
             <button class="btn btn-secondary" type="submit" style="flex:none">업로드 추가</button>
           </form>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">최근 생성</span><span style="font-size:11px;color:var(--color-neutral-500)">GET /api/generation/jobs?characterId=</span></div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">최근 생성</span><span style="font-size:11px;color:var(--color-neutral-500)">GET /api/admin/v1/generation/jobs?characterId=</span></div>
           <div style="font-size:13px">
             ${
               testJobs.length
@@ -2421,15 +2653,15 @@ async function renderCharacterDetail(id, tab) {
       </div>`;
   } else if (tab === "automation") {
     const [policyRes, draftsRes] = await Promise.all([
-      request(`/api/characters/${id}/posting-policy`),
-      request(endpoint("/api/drafts", { characterId: id, limit: 10 })),
+      request(`/api/admin/v1/characters/${id}/posting-policy`),
+      request(endpoint("/api/admin/v1/drafts", { characterId: id, limit: 10 })),
     ]);
     const policy = policyRes.ok ? (policyRes.body ?? {}) : {};
     const drafts = itemsFromPage(draftsRes.body);
     body = `
       <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:56px">
         <div>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">포스팅 정책</span><span style="font-size:11px;color:var(--color-neutral-500)">PUT /api/characters/:id/posting-policy</span></div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">포스팅 정책</span><span style="font-size:11px;color:var(--color-neutral-500)">PUT /api/admin/v1/characters/:id/posting-policy</span></div>
           <form data-action="policy-save" data-character-id="${attr(
             c.id,
           )}" style="display:flex;flex-direction:column;gap:12px">
@@ -2450,7 +2682,7 @@ async function renderCharacterDetail(id, tab) {
             </div>
             <div><button class="btn btn-primary" type="submit">저장</button></div>
           </form>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">수동 초안 기획</span><span style="font-size:11px;color:var(--color-neutral-500)">POST /api/drafts</span></div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:30px 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">수동 초안 기획</span><span style="font-size:11px;color:var(--color-neutral-500)">POST /api/admin/v1/drafts</span></div>
           <form data-action="draft-create" data-character-id="${attr(
             c.id,
           )}" style="display:flex;gap:8px">
@@ -2460,7 +2692,7 @@ async function renderCharacterDetail(id, tab) {
           <p style="margin:8px 0 0;font-size:12px;color:var(--color-neutral-500)">워커가 페르소나·메모리·최근 게시물을 반영해 캡션과 컷을 기획하고, 이미지 생성 후 초안 검수 큐에 올립니다.</p>
         </div>
         <div>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">최근 초안</span><span style="font-size:11px;color:var(--color-neutral-500)">${drafts.length}건 · GET /api/drafts?characterId=</span></div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">최근 초안</span><span style="font-size:11px;color:var(--color-neutral-500)">${drafts.length}건 · GET /api/admin/v1/drafts?characterId=</span></div>
           <div style="font-size:13px">
             ${
               drafts.length
@@ -2504,13 +2736,13 @@ async function renderCharacterDetail(id, tab) {
     body = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:56px">
         <div>
-          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 8px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">최근 액션 로그</span><span style="font-size:11px;color:var(--color-neutral-500)">GET /api/character-action-logs</span></div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 8px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">최근 액션 로그</span><span style="font-size:11px;color:var(--color-neutral-500)">GET /api/admin/v1/character-action-logs</span></div>
           <div style="font-size:13px;line-height:1.5">${logRows}</div>
         </div>
         <div>
           <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 8px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">생성 작업</span><span style="font-size:11px;color:var(--color-neutral-500)">${
             jobs.length
-          }건 · GET /api/generation/jobs</span></div>
+          }건 · GET /api/admin/v1/generation/jobs</span></div>
           <div style="font-size:13px">
             ${
               jobs.length
@@ -2546,7 +2778,7 @@ async function renderPosts() {
     return renderPostDetail(ui.selPostId);
   }
   await loadCharacterOptions();
-  const res = await request(endpoint("/api/posts", { limit: 50 }));
+  const res = await request(endpoint("/api/admin/v1/posts", { limit: 50 }));
   const posts = itemsFromPage(res.body);
 
   const rows = posts.length
@@ -2594,10 +2826,10 @@ async function renderPosts() {
 
 async function renderPostDetail(id) {
   const [postRes, commentsRes, reactionsRes, logsRes] = await Promise.all([
-    request(`/api/posts/${id}`),
-    request(endpoint(`/api/posts/${id}/comments`, { limit: 50 })),
-    request(endpoint(`/api/posts/${id}/reactions`, { limit: 50 })),
-    request("/api/character-action-logs"),
+    request(`/api/admin/v1/posts/${id}`),
+    request(endpoint(`/api/admin/v1/posts/${id}/comments`, { limit: 50 })),
+    request(endpoint(`/api/admin/v1/posts/${id}/reactions`, { limit: 50 })),
+    request("/api/admin/v1/character-action-logs"),
   ]);
   const p = postRes.body;
   if (!postRes.ok || !p?.id) {
@@ -2669,7 +2901,7 @@ async function renderPostDetail(id) {
           p.id,
         )}">캐릭터 반응 추가</button>
       </div>
-      <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 4px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">관련 액션 로그</span><span style="font-size:11px;color:var(--color-neutral-500)">GET /api/character-action-logs</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 4px"><span style="font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">관련 액션 로그</span><span style="font-size:11px;color:var(--color-neutral-500)">GET /api/admin/v1/character-action-logs</span></div>
       <div style="font-size:13px;line-height:1.5;max-width:560px">${logRows}</div>
     </div>`;
 }
@@ -2728,9 +2960,14 @@ export function generationProvidersSummary(settings) {
 
 async function renderSettings() {
   const [settingsRes, queuedRes, changesRes] = await Promise.all([
-    request("/api/settings/generation"),
-    request(endpoint("/api/generation/jobs", { status: "queued", limit: 50 })),
-    request("/api/settings/generation/changes"),
+    request("/api/admin/v1/settings/generation"),
+    request(
+      endpoint("/api/admin/v1/generation/jobs", {
+        status: "queued",
+        limit: 50,
+      }),
+    ),
+    request("/api/admin/v1/settings/generation/changes"),
   ]);
   const settings = settingsRes.ok ? settingsRes.body : null;
   const queuedCount = itemsFromPage(queuedRes.body).length;
@@ -2915,8 +3152,8 @@ async function renderGeneration(renderEpoch) {
   }
   if (routeState.jobId) {
     const [jobRes, settingsRes] = await Promise.all([
-      request(`/api/generation/jobs/${routeState.jobId}`),
-      request("/api/settings/generation"),
+      request(`/api/admin/v1/generation/jobs/${routeState.jobId}`),
+      request("/api/admin/v1/settings/generation"),
     ]);
     if (!jobRes.ok || !jobRes.body?.id) {
       return `${sectionHead(
@@ -2934,7 +3171,9 @@ async function renderGeneration(renderEpoch) {
     let originJobId = job.originJobId;
     while (originJobId && !seen.has(originJobId)) {
       seen.add(originJobId);
-      const ancestorRes = await request(`/api/generation/jobs/${originJobId}`);
+      const ancestorRes = await request(
+        `/api/admin/v1/generation/jobs/${originJobId}`,
+      );
       if (!ancestorRes.ok || !ancestorRes.body?.id) break;
       history.push(ancestorRes.body);
       originJobId = ancestorRes.body.originJobId;
@@ -2970,9 +3209,12 @@ async function renderGeneration(renderEpoch) {
     ui.filters.jobStatus === "전체" ? "" : ui.filters.jobStatus;
   const [res, settingsRes] = await Promise.all([
     request(
-      endpoint("/api/generation/jobs", { status: statusParam, limit: 50 }),
+      endpoint("/api/admin/v1/generation/jobs", {
+        status: statusParam,
+        limit: 50,
+      }),
     ),
-    request("/api/settings/generation"),
+    request("/api/admin/v1/settings/generation"),
   ]);
   const jobs = itemsFromPage(res.body);
   const settings = settingsRes.ok ? settingsRes.body : null;
@@ -3074,7 +3316,7 @@ async function renderDrafts() {
   const statusParam =
     ui.filters.draftStatus === "전체" ? "" : ui.filters.draftStatus;
   const res = await request(
-    endpoint("/api/drafts", { status: statusParam, limit: 50 }),
+    endpoint("/api/admin/v1/drafts", { status: statusParam, limit: 50 }),
   );
   const drafts = itemsFromPage(res.body);
 
@@ -3132,7 +3374,7 @@ async function renderDrafts() {
         ],
         ui.filters.draftStatus,
       )}
-      <span class="count-note">${drafts.length}건 · GET /api/drafts</span>
+      <span class="count-note">${drafts.length}건 · GET /api/admin/v1/drafts</span>
     </div>
     <table class="table">
       <thead><tr><th>캐릭터</th><th>캡션</th><th>상태</th><th>게시 예정</th><th>생성</th></tr></thead>
@@ -3436,7 +3678,7 @@ function draftShotCard(d, shot) {
 }
 
 // 단계 타임라인 마크업 (순수 함수, 네트워크 비의존 — 테스트 대상).
-// d = GET /api/drafts/:id 응답, characterName = 표시용 캐릭터명.
+// d = GET /api/admin/v1/drafts/:id 응답, characterName = 표시용 캐릭터명.
 export function draftDetailMarkup(d, characterName, opts = {}) {
   const [sc, sl] = draftStatusMeta(d.status);
   const concept =
@@ -3786,7 +4028,7 @@ function scheduleDraftRefresh(d) {
   const snapshot = draftDetailSnapshot(d);
   ui.draftPollTimer = setTimeout(async () => {
     if (currentRoute() !== "drafts" || ui.selDraftId !== d.id) return;
-    const res = await request(`/api/drafts/${d.id}`);
+    const res = await request(`/api/admin/v1/drafts/${d.id}`);
     if (currentRoute() !== "drafts" || ui.selDraftId !== d.id) return;
     const next = res.ok && res.body?.id ? res.body : null;
     if (
@@ -3803,7 +4045,7 @@ function scheduleDraftRefresh(d) {
 }
 
 async function renderDraftDetail(id) {
-  const res = await request(`/api/drafts/${id}`);
+  const res = await request(`/api/admin/v1/drafts/${id}`);
   const d = res.body;
   if (!res.ok || !d?.id) {
     return `<button class="btn btn-ghost" style="margin:0 0 18px -5px" data-act="back-drafts">← 초안 목록</button>
@@ -3832,8 +4074,8 @@ async function filmPreviewObjectUrl(mediaId, preset) {
     const pending = (async () => {
       try {
         const response = await fetch(
-          `/api/media/${mediaId}/film-finish?preset=${encodeURIComponent(preset)}`,
-          adminRequestOptions({}, readAdminToken()),
+          `/api/admin/v1/media/${mediaId}/film-finish?preset=${encodeURIComponent(preset)}`,
+          adminRequestOptions({}),
         );
         if (!response.ok) {
           throw new Error(`finish request failed (${response.status})`);
@@ -3944,7 +4186,7 @@ async function renderUsers() {
   if (ui.selUserId) {
     return renderUserDetail(ui.selUserId);
   }
-  const res = await request(endpoint("/api/users", { limit: 50 }));
+  const res = await request(endpoint("/api/admin/v1/users", { limit: 50 }));
   const users = itemsFromPage(res.body);
   for (const u of users) {
     ui.cache.userLabels.set(u.id, u.email || u.displayName || u.id);
@@ -3987,9 +4229,11 @@ async function renderUsers() {
 
 async function renderUserDetail(id) {
   const [userRes, ledgerRes, eventsRes] = await Promise.all([
-    request(`/api/users/${id}`),
-    request(endpoint("/api/credits/ledger", { userId: id, limit: 30 })),
-    request(endpoint("/api/events", { userId: id, limit: 20 })),
+    request(`/api/admin/v1/users/${id}`),
+    request(
+      endpoint("/api/admin/v1/credits/ledger", { userId: id, limit: 30 }),
+    ),
+    request(endpoint("/api/admin/v1/events", { userId: id, limit: 20 })),
   ]);
   const u = userRes.body;
   if (!userRes.ok || !u?.id) {
@@ -4057,12 +4301,12 @@ async function renderUserDetail(id) {
       <div><div class="stat-label">크레딧 잔액</div><span class="stat-value" style="font-size:18px">${creditBalance}</span></div>
       <div><div class="stat-label">원장 항목</div>${ledger.length}건</div>
     </div>
-    <h6 style="color:var(--color-neutral-600)">크레딧 원장 — GET /api/credits/ledger?userId=</h6>
+    <h6 style="color:var(--color-neutral-600)">크레딧 원장 — GET /api/admin/v1/credits/ledger?userId=</h6>
     <table class="table" style="margin-bottom:34px">
       <thead><tr><th>구분</th><th style="text-align:right">금액</th><th>사유</th><th>외부 참조</th><th>시각</th></tr></thead>
       <tbody>${ledgerRows}</tbody>
     </table>
-    <h6 style="color:var(--color-neutral-600)">최근 이벤트 — GET /api/events?userId=</h6>
+    <h6 style="color:var(--color-neutral-600)">최근 이벤트 — GET /api/admin/v1/events?userId=</h6>
     <div style="font-size:14px;max-width:620px">${eventRows}</div>`;
 }
 
@@ -4072,7 +4316,10 @@ async function renderCredits() {
   const users = await loadUserOptions();
   const ledgerUserId = ui.ledgerUserId;
   const res = await request(
-    endpoint("/api/credits/ledger", { userId: ledgerUserId, limit: 30 }),
+    endpoint("/api/admin/v1/credits/ledger", {
+      userId: ledgerUserId,
+      limit: 30,
+    }),
   );
   const ledger = itemsFromPage(res.body);
   const ledgerRows = ledger.length
@@ -4105,7 +4352,7 @@ async function renderCredits() {
     ${sectionHead("크레딧", "운영 지급(grant)과 전체 원장 조회")}
     <div style="display:grid;grid-template-columns:320px 1fr;gap:48px;align-items:start">
       <form data-action="credit-grant-full" style="display:flex;flex-direction:column;gap:12px">
-        <h6 style="color:var(--color-neutral-600);margin:0">크레딧 지급 — POST /api/credits/grants</h6>
+        <h6 style="color:var(--color-neutral-600);margin:0">크레딧 지급 — POST /api/admin/v1/credits/grants</h6>
         <div class="field"><label>사용자</label>
           <select class="input" name="userId">${optionList(
             users,
@@ -4144,7 +4391,7 @@ async function renderPayments() {
   const statusParam =
     ui.filters.payStatus === "전체" ? "" : ui.filters.payStatus;
   const res = await request(
-    endpoint("/api/payments/reconciliation", { status: statusParam }),
+    endpoint("/api/admin/v1/payments/reconciliation", { status: statusParam }),
   );
   const rows = itemsFromPage(res.body);
   await ensureUserLabels(rows.map((p) => p.userId));
@@ -4182,7 +4429,7 @@ async function renderPayments() {
       await ensureUserLabels([payment.userId]);
       detail = `
         <div style="margin-top:32px;max-width:560px">
-          <h6 style="color:var(--color-neutral-600)">결제 상세 — GET /api/payments/:id</h6>
+          <h6 style="color:var(--color-neutral-600)">결제 상세 — GET /api/admin/v1/payments/:id</h6>
           <div style="display:flex;align-items:baseline;gap:12px;margin:6px 0 14px">
             <h3 style="font-size:22px;margin:0">${escapeHtml(String(payment.id).slice(0, 12))}</h3>
             <span class="tag ${providerStatusClass(payment.status)}">${escapeHtml(payment.status)}</span>
@@ -4228,7 +4475,10 @@ async function renderModeration() {
   const statusParam =
     ui.filters.reportStatus === "전체" ? "" : ui.filters.reportStatus;
   const res = await request(
-    endpoint("/api/moderation/reports", { status: statusParam, limit: 50 }),
+    endpoint("/api/admin/v1/moderation/reports", {
+      status: statusParam,
+      limit: 50,
+    }),
   );
   const reports = itemsFromPage(res.body);
   await ensureUserLabels(reports.map((r) => r.reporterUserId));
@@ -4295,8 +4545,8 @@ async function renderEvents() {
   const users = await loadUserOptions();
   const userId = ui.eventUserId;
   const [evRes, prefRes] = await Promise.all([
-    request(endpoint("/api/events", { userId, limit: 30 })),
-    request(endpoint("/api/hashtag-preferences", { userId })),
+    request(endpoint("/api/admin/v1/events", { userId, limit: 30 })),
+    request(endpoint("/api/admin/v1/hashtag-preferences", { userId })),
   ]);
   const events = itemsFromPage(evRes.body);
   const prefs = itemsFromPage(prefRes.body);
@@ -4342,14 +4592,14 @@ async function renderEvents() {
     )}</select>
     <div style="display:grid;grid-template-columns:1fr 340px;gap:48px;align-items:start">
       <div>
-        <h6 style="color:var(--color-neutral-600)">사용자 이벤트 — GET /api/events</h6>
+        <h6 style="color:var(--color-neutral-600)">사용자 이벤트 — GET /api/admin/v1/events</h6>
         <table class="table">
           <thead><tr><th>사용자</th><th>이벤트</th><th>대상</th><th>시각</th></tr></thead>
           <tbody>${eventRows}</tbody>
         </table>
       </div>
       <div>
-        <h6 style="color:var(--color-neutral-600)">해시태그 선호 — GET /api/hashtag-preferences</h6>
+        <h6 style="color:var(--color-neutral-600)">해시태그 선호 — GET /api/admin/v1/hashtag-preferences</h6>
         <div style="font-size:14px">${prefRows}</div>
       </div>
     </div>`;
@@ -4359,7 +4609,7 @@ async function renderEvents() {
 
 async function renderLogs() {
   const [logsRes] = await Promise.all([
-    request("/api/character-action-logs"),
+    request("/api/admin/v1/character-action-logs"),
     ui.cache.charNames.size ? Promise.resolve() : loadCharacterOptions(),
   ]);
   const logs = itemsFromPage(logsRes.body);
@@ -4435,7 +4685,7 @@ async function renderLlmLogs() {
   const routeState = adminRouteState(currentUrl());
   if (routeState.detailId) {
     const response = await request(
-      `/api/llm-logs/${encodeURIComponent(routeState.detailId)}`,
+      `/api/admin/v1/llm-logs/${encodeURIComponent(routeState.detailId)}`,
     );
     if (!response.ok) {
       return `${sectionHead("LLM 로그", "요청·응답 전문 조회")}
@@ -4491,7 +4741,7 @@ async function renderLlmLogs() {
     if (value) query[key] = value;
   }
   query.limit = 50;
-  const response = await request(endpoint("/api/llm-logs", query));
+  const response = await request(endpoint("/api/admin/v1/llm-logs", query));
   const logs = itemsFromPage(response.body);
   const rows = logs.length
     ? logs
@@ -4609,7 +4859,7 @@ async function renderAnalytics() {
 
   return `
     <div class="section-head" style="margin-bottom:36px">
-      <div><h2>분석</h2><p class="section-sub">서비스 핵심 지표 — GET /api/analytics</p></div>
+      <div><h2>분석</h2><p class="section-sub">서비스 핵심 지표 — GET /api/admin/v1/analytics</p></div>
       ${segControl(
         "analyticsPeriod",
         [
@@ -4695,6 +4945,28 @@ async function openDialog(type, ctx = {}) {
   if (type === "grant") {
     ctx.users = await loadUserOptions();
   }
+  if (type === "character-profile-image") {
+    const [profileRes, mediaRes] = await Promise.all([
+      request(
+        `/api/admin/v1/characters/${encodeURIComponent(ctx.characterId)}/profile-image`,
+      ),
+      request(characterProfileMediaRequest()),
+    ]);
+    if (!profileRes.ok) {
+      showToast(
+        errorMessage(profileRes.body, "프로필 이미지를 불러오지 못했습니다."),
+        "",
+        true,
+      );
+      closeDialog();
+      return;
+    }
+    ctx.profile = profileRes.body;
+    ctx.selectedImage = profileRes.body?.image ?? null;
+    ctx.crop = normalizeProfileCrop(profileRes.body?.crop);
+    ctx.media = itemsFromPage(mediaRes.body);
+    ctx.nextCursor = mediaRes.body?.nextCursor ?? "";
+  }
   paintDialog();
   renderPostMediaSelection();
 }
@@ -4715,7 +4987,11 @@ function closeDialog(session = dialogState, action = "close") {
 
 function paintDialog() {
   if (!dialogRoot || !dialogState) return;
-  dialogRoot.innerHTML = `<div class="dialog-backdrop" data-act="dialog-backdrop"><div class="dialog" role="dialog" aria-modal="true">${dialogBody(
+  const profileImageClass =
+    dialogState.type === "character-profile-image"
+      ? " dialog-profile-image"
+      : "";
+  dialogRoot.innerHTML = `<div class="dialog-backdrop" data-act="dialog-backdrop"><div class="dialog${profileImageClass}" role="dialog" aria-modal="true">${dialogBody(
     dialogState,
   )}</div></div>`;
   const first = dialogRoot.querySelector("input, textarea, select");
@@ -4816,6 +5092,9 @@ function charSelect(name, characters, selected = "") {
 }
 
 export function dialogBody({ type, ctx }) {
+  if (type === "character-profile-image") {
+    return characterProfileImageDialog(ctx);
+  }
   if (type === "new-char") {
     return `<div class="dialog-title">새 캐릭터</div>
       <form data-action="dlg-new-char" style="display:flex;flex-direction:column;gap:12px">
@@ -5036,9 +5315,12 @@ async function dispatchSubmit(action, form, formData) {
   // — login —
   if (action === "admin-login") {
     const result = await request(
-      "/api/admin/login",
-      jsonRequest("/api/admin/login", "POST", adminLoginPayload(formData))
-        .options,
+      "/api/admin/v1/auth/login",
+      jsonRequest(
+        "/api/admin/v1/auth/login",
+        "POST",
+        adminLoginPayload(formData),
+      ).options,
     );
     if (result.ok && result.body?.token) {
       writeAdminAuth(result.body);
@@ -5057,9 +5339,12 @@ async function dispatchSubmit(action, form, formData) {
   // — new character (create + optional persona + optional memories) —
   if (action === "dlg-new-char") {
     const created = await request(
-      "/api/characters",
-      jsonRequest("/api/characters", "POST", characterCreatePayload(formData))
-        .options,
+      "/api/admin/v1/characters",
+      jsonRequest(
+        "/api/admin/v1/characters",
+        "POST",
+        characterCreatePayload(formData),
+      ).options,
     );
     if (!created.ok || !created.body?.id) {
       showToast(errorMessage(created.body, "캐릭터 생성 실패"), "", true);
@@ -5071,8 +5356,8 @@ async function dispatchSubmit(action, form, formData) {
     const persona = String(formData.get("persona") ?? "").trim();
     if (persona) {
       await request(
-        `/api/characters/${id}/personas`,
-        jsonRequest(`/api/characters/${id}/personas`, "POST", {
+        `/api/admin/v1/characters/${id}/personas`,
+        jsonRequest(`/api/admin/v1/characters/${id}/personas`, "POST", {
           title: personaTitle,
           content: persona,
         }).options,
@@ -5085,8 +5370,8 @@ async function dispatchSubmit(action, form, formData) {
     const memoryType = String(formData.get("type") ?? "").trim() || "fact";
     if (memLines.length) {
       await request(
-        `/api/characters/${id}/memory/bulk`,
-        jsonRequest(`/api/characters/${id}/memory/bulk`, "POST", {
+        `/api/admin/v1/characters/${id}/memory/bulk`,
+        jsonRequest(`/api/admin/v1/characters/${id}/memory/bulk`, "POST", {
           items: memLines.map((content) => ({
             content,
             type: memoryType,
@@ -5096,7 +5381,7 @@ async function dispatchSubmit(action, form, formData) {
       );
     }
     closeDialog();
-    showToast("캐릭터를 생성했습니다.", "POST /api/characters");
+    showToast("캐릭터를 생성했습니다.", "POST /api/admin/v1/characters");
     navigateTo(characterHref({ characterId: id }));
     return;
   }
@@ -5115,13 +5400,30 @@ async function dispatchSubmit(action, form, formData) {
     return;
   }
 
+  if (action === "profile-image-save") {
+    const id = form.dataset.characterId;
+    const result = await submitViaSpec(
+      jsonRequest(
+        `/api/admin/v1/characters/${id}/profile-image`,
+        "PUT",
+        characterProfileImagePayload(formData),
+      ),
+      "프로필 이미지를 저장했습니다.",
+    );
+    if (result.ok) {
+      closeDialog();
+      renderApp();
+    }
+    return;
+  }
+
   // — character profile save —
   if (action === "char-profile") {
     const id = form.dataset.characterId;
     const updated = await request(
-      `/api/characters/${id}`,
+      `/api/admin/v1/characters/${id}`,
       jsonRequest(
-        `/api/characters/${id}`,
+        `/api/admin/v1/characters/${id}`,
         "PATCH",
         characterUpdatePayload(formData),
       ).options,
@@ -5130,7 +5432,7 @@ async function dispatchSubmit(action, form, formData) {
       showToast(errorMessage(updated.body, "프로필 저장 실패"), "", true);
       return;
     }
-    showToast("프로필을 저장했습니다.", `PATCH /api/characters/${id}`);
+    showToast("프로필을 저장했습니다.", `PATCH /api/admin/v1/characters/${id}`);
     renderApp();
     return;
   }
@@ -5139,7 +5441,7 @@ async function dispatchSubmit(action, form, formData) {
   if (action === "visual-profile-save") {
     const id = form.dataset.characterId;
     await submitViaSpec(
-      jsonRequest(`/api/characters/${id}/visual-profile`, "PUT", {
+      jsonRequest(`/api/admin/v1/characters/${id}/visual-profile`, "PUT", {
         appearancePrompt: String(formData.get("appearancePrompt") ?? "").trim(),
         stylePrompt: String(formData.get("stylePrompt") ?? "").trim(),
         negativePrompt: String(formData.get("negativePrompt") ?? "").trim(),
@@ -5167,9 +5469,13 @@ async function dispatchSubmit(action, form, formData) {
       .map((v) => v.trim())
       .filter(Boolean);
     const result = await submitViaSpec(
-      jsonRequest(`/api/characters/${id}/visual-profile/references`, "PUT", {
-        mediaIds: [...current, mediaId],
-      }),
+      jsonRequest(
+        `/api/admin/v1/characters/${id}/visual-profile/references`,
+        "PUT",
+        {
+          mediaIds: [...current, mediaId],
+        },
+      ),
       "레퍼런스를 추가했습니다.",
     );
     if (result.ok) renderApp();
@@ -5179,7 +5485,7 @@ async function dispatchSubmit(action, form, formData) {
     const id = form.dataset.characterId;
     const result = await submitViaSpec(
       jsonRequest(
-        `/api/characters/${id}/visual-profile/test-generation`,
+        `/api/admin/v1/characters/${id}/visual-profile/test-generation`,
         "POST",
         {
           scene: String(formData.get("scene") ?? "").trim(),
@@ -5196,7 +5502,7 @@ async function dispatchSubmit(action, form, formData) {
     const id = form.dataset.draftId;
     const scheduledRaw = String(formData.get("scheduledAt") ?? "").trim();
     const result = await submitViaSpec(
-      jsonRequest(`/api/drafts/${id}`, "PATCH", {
+      jsonRequest(`/api/admin/v1/drafts/${id}`, "PATCH", {
         caption: String(formData.get("caption") ?? "").trim(),
         hashtags: splitCsv(formData.get("hashtags")),
         scheduledAt: scheduledRaw ? new Date(scheduledRaw).toISOString() : null,
@@ -5213,7 +5519,7 @@ async function dispatchSubmit(action, form, formData) {
     const sceneHint = String(formData.get("sceneHint") ?? "").trim();
     const mode = String(formData.get("mode") ?? "manual").trim() || "manual";
     const result = await submitViaSpec(
-      jsonRequest("/api/drafts", "POST", {
+      jsonRequest("/api/admin/v1/drafts", "POST", {
         characterId,
         ...(sceneHint ? { sceneHint } : {}),
         mode,
@@ -5247,7 +5553,7 @@ async function dispatchSubmit(action, form, formData) {
     const candidateCount = candidateRaw ? Number(candidateRaw) : undefined;
     const result = await submitViaSpec(
       jsonRequest(
-        `/api/drafts/${form.dataset.draftId}/jobs/${form.dataset.jobId}/generate`,
+        `/api/admin/v1/drafts/${form.dataset.draftId}/jobs/${form.dataset.jobId}/generate`,
         "POST",
         {
           ...(prompt ? { prompt } : {}),
@@ -5264,12 +5570,16 @@ async function dispatchSubmit(action, form, formData) {
   if (action === "policy-save") {
     const characterId = form.dataset.characterId;
     const result = await submitViaSpec(
-      jsonRequest(`/api/characters/${characterId}/posting-policy`, "PUT", {
-        enabled: formData.get("enabled") === "on",
-        weeklyCadence: Number(formData.get("weeklyCadence") ?? 3),
-        hourStartKst: Number(formData.get("hourStartKst") ?? 18),
-        hourEndKst: Number(formData.get("hourEndKst") ?? 22),
-      }),
+      jsonRequest(
+        `/api/admin/v1/characters/${characterId}/posting-policy`,
+        "PUT",
+        {
+          enabled: formData.get("enabled") === "on",
+          weeklyCadence: Number(formData.get("weeklyCadence") ?? 3),
+          hourStartKst: Number(formData.get("hourStartKst") ?? 18),
+          hourEndKst: Number(formData.get("hourEndKst") ?? 22),
+        },
+      ),
       "포스팅 정책을 저장했습니다.",
     );
     if (result.ok) renderApp();
@@ -5294,7 +5604,7 @@ async function dispatchSubmit(action, form, formData) {
   if (action === "dlg-comment") {
     const postId = form.dataset.postId;
     const result = await submitViaSpec(
-      jsonRequest(`/api/posts/${postId}/comments`, "POST", {
+      jsonRequest(`/api/admin/v1/posts/${postId}/comments`, "POST", {
         characterId: String(formData.get("characterId") ?? "").trim(),
         body: String(formData.get("body") ?? "").trim(),
         reason: String(formData.get("reason") ?? "").trim() || undefined,
@@ -5307,7 +5617,7 @@ async function dispatchSubmit(action, form, formData) {
   if (action === "dlg-reaction") {
     const postId = form.dataset.postId;
     const result = await submitViaSpec(
-      jsonRequest(`/api/posts/${postId}/reactions`, "POST", {
+      jsonRequest(`/api/admin/v1/posts/${postId}/reactions`, "POST", {
         characterId: String(formData.get("characterId") ?? "").trim(),
         reactionType: String(formData.get("reactionType") ?? "like"),
         reason: String(formData.get("reason") ?? "").trim() || undefined,
@@ -5347,7 +5657,7 @@ async function dispatchSubmit(action, form, formData) {
     if (outcome.result.ok) {
       showToast(
         "최종 프롬프트를 저장하고 이미지 생성을 시작했습니다.",
-        `PATCH /api/generation/jobs/${jobId}/draft → POST /api/generation/jobs/${jobId}/confirm`,
+        `PATCH /api/admin/v1/generation/jobs/${jobId}/draft → POST /api/admin/v1/generation/jobs/${jobId}/confirm`,
       );
       renderApp();
     } else {
@@ -5391,7 +5701,7 @@ async function dispatchSubmit(action, form, formData) {
   if (action === "generation-settings") {
     const result = await submitViaSpec(
       jsonRequest(
-        "/api/settings/generation",
+        "/api/admin/v1/settings/generation",
         "PUT",
         generationSettingsPayload(formData),
       ),
@@ -5421,7 +5731,7 @@ async function dispatchSubmit(action, form, formData) {
   if (action === "dlg-new-job") {
     const result = await submitViaSpec(
       jsonRequest(
-        "/api/generation/jobs",
+        "/api/admin/v1/generation/jobs",
         "POST",
         generationCreatePayload(formData),
       ),
@@ -5435,7 +5745,7 @@ async function dispatchSubmit(action, form, formData) {
   if (action === "dlg-media-upload") {
     const result = await submitViaSpec(
       jsonRequest(
-        "/api/media/uploads",
+        "/api/admin/v1/media/uploads",
         "POST",
         mediaUploadStartPayload(formData),
       ),
@@ -5455,7 +5765,7 @@ async function dispatchSubmit(action, form, formData) {
     const extRef = String(formData.get("externalReference") ?? "").trim();
     if (extRef) body.externalReference = extRef;
     const result = await submitViaSpec(
-      jsonRequest("/api/credits/grants", "POST", body),
+      jsonRequest("/api/admin/v1/credits/grants", "POST", body),
       "크레딧을 지급했습니다.",
     );
     if (result.ok) {
@@ -5546,6 +5856,63 @@ async function handleClick(event) {
     await openDialog(el.dataset.dialog, ctx);
     return;
   }
+  if (act === "profile-image-open") {
+    await openDialog("character-profile-image", {
+      characterId: el.dataset.characterId,
+    });
+    return;
+  }
+  if (act === "profile-media-select") {
+    if (dialogState?.type !== "character-profile-image") return;
+    const image = dialogState.ctx.media.find(
+      (item) => item.id === el.dataset.mediaId,
+    );
+    if (!image) return;
+    dialogState.ctx.selectedImage = image;
+    dialogState.ctx.crop =
+      dialogState.ctx.profile?.image?.id === image.id
+        ? normalizeProfileCrop(dialogState.ctx.profile.crop)
+        : normalizeProfileCrop();
+    paintDialog();
+    return;
+  }
+  if (act === "profile-media-more") {
+    if (dialogState?.type !== "character-profile-image") return;
+    const response = await request(
+      characterProfileMediaRequest(el.dataset.cursor),
+    );
+    if (!response.ok) {
+      showToast(
+        errorMessage(response.body, "이미지를 더 불러오지 못했습니다."),
+        "",
+        true,
+      );
+      return;
+    }
+    const known = new Set(dialogState.ctx.media.map((item) => item.id));
+    dialogState.ctx.media.push(
+      ...itemsFromPage(response.body).filter((item) => !known.has(item.id)),
+    );
+    dialogState.ctx.nextCursor = response.body?.nextCursor ?? "";
+    paintDialog();
+    return;
+  }
+  if (act === "profile-image-remove") {
+    const id = el.dataset.characterId;
+    const result = await submitViaSpec(
+      jsonRequest(
+        `/api/admin/v1/characters/${id}/profile-image`,
+        "DELETE",
+        undefined,
+      ),
+      "프로필 이미지를 제거했습니다.",
+    );
+    if (result.ok) {
+      closeDialog();
+      renderApp();
+    }
+    return;
+  }
   if (act === "preset-amount") {
     const input = el.closest("form")?.querySelector('input[name="amount"]');
     if (input) input.value = String(el.dataset.amt);
@@ -5614,7 +5981,11 @@ async function handleClick(event) {
       act,
       new FormData(el.closest("form") ?? undefined),
     );
-    const spec = jsonRequest("/api/settings/generation/test", "POST", payload);
+    const spec = jsonRequest(
+      "/api/admin/v1/settings/generation/test",
+      "POST",
+      payload,
+    );
     el.disabled = true;
     try {
       const result = await request(spec.path, spec.options);
@@ -5667,7 +6038,7 @@ async function handleClick(event) {
     // 캡션 없는 레퍼런스를 순차 캡셔닝 — 장수에 따라 수십 초 걸릴 수 있어 중복 클릭을 막는다.
     el.disabled = true;
     const result = await request(
-      `/api/characters/${el.dataset.id}/visual-profile/captions`,
+      `/api/admin/v1/characters/${el.dataset.id}/visual-profile/captions`,
       { method: "POST" },
     );
     if (!result.ok) {
@@ -5685,7 +6056,7 @@ async function handleClick(event) {
       `캡션 ${body.captioned ?? 0}장 생성${
         failed.length ? `, 실패 ${failed.length}장` : ""
       }`,
-      `POST /api/characters/${el.dataset.id}/visual-profile/captions`,
+      `POST /api/admin/v1/characters/${el.dataset.id}/visual-profile/captions`,
     );
     renderApp();
     return;
@@ -5697,7 +6068,7 @@ async function handleClick(event) {
       .filter((v) => v && v !== el.dataset.media);
     const result = await submitViaSpec(
       jsonRequest(
-        `/api/characters/${el.dataset.id}/visual-profile/references`,
+        `/api/admin/v1/characters/${el.dataset.id}/visual-profile/references`,
         "PUT",
         { mediaIds: remaining },
       ),
@@ -5707,7 +6078,9 @@ async function handleClick(event) {
     return;
   }
   if (act === "visual-ref-promote") {
-    const jobRes = await request(`/api/generation/jobs/${el.dataset.job}`);
+    const jobRes = await request(
+      `/api/admin/v1/generation/jobs/${el.dataset.job}`,
+    );
     const outputs = Array.isArray(jobRes.body?.outputs)
       ? jobRes.body.outputs
       : [];
@@ -5727,7 +6100,7 @@ async function handleClick(event) {
     }
     const result = await submitViaSpec(
       jsonRequest(
-        `/api/characters/${el.dataset.id}/visual-profile/references`,
+        `/api/admin/v1/characters/${el.dataset.id}/visual-profile/references`,
         "PUT",
         { mediaIds: [...current, mediaId] },
       ),
@@ -5804,7 +6177,7 @@ async function handleClick(event) {
   if (act === "draft-regen") {
     const result = await submitViaSpec(
       jsonRequest(
-        `/api/drafts/${el.dataset.draft}/jobs/${el.dataset.job}/regenerate`,
+        `/api/admin/v1/drafts/${el.dataset.draft}/jobs/${el.dataset.job}/regenerate`,
         "POST",
         {},
       ),
@@ -5816,7 +6189,7 @@ async function handleClick(event) {
   if (act === "draft-pick-output") {
     const result = await submitViaSpec(
       jsonRequest(
-        `/api/drafts/${el.dataset.draft}/jobs/${el.dataset.job}/select`,
+        `/api/admin/v1/drafts/${el.dataset.draft}/jobs/${el.dataset.job}/select`,
         "POST",
         { mediaId: el.dataset.media },
       ),
@@ -5856,7 +6229,7 @@ async function handleClick(event) {
     if (status) status.textContent = "저장 중…";
     const preview = applyCandidateFilter(img);
     const spec = jsonRequest(
-      `/api/drafts/${card.dataset.filterDraft}/jobs/${card.dataset.filterJob}/outputs/${card.dataset.filterMedia}/filter`,
+      `/api/admin/v1/drafts/${card.dataset.filterDraft}/jobs/${card.dataset.filterJob}/outputs/${card.dataset.filterMedia}/filter`,
       "PATCH",
       { filterPreset: next },
     );
@@ -5899,7 +6272,7 @@ async function handleClick(event) {
   if (act === "toggle-char-status") {
     const next = el.dataset.current === "active" ? "inactive" : "active";
     const result = await submitViaSpec(
-      jsonRequest(`/api/characters/${el.dataset.id}/status`, "PATCH", {
+      jsonRequest(`/api/admin/v1/characters/${el.dataset.id}/status`, "PATCH", {
         status: next,
         reason: "운영 콘솔에서 상태 전환",
       }),
@@ -5911,11 +6284,15 @@ async function handleClick(event) {
   if (act === "report-action") {
     const status = el.dataset.status;
     const result = await submitViaSpec(
-      jsonRequest(`/api/moderation/reports/${el.dataset.id}`, "PATCH", {
-        status,
-        resolution:
-          status === "resolved" ? "운영 콘솔에서 조치" : "운영 콘솔에서 기각",
-      }),
+      jsonRequest(
+        `/api/admin/v1/moderation/reports/${el.dataset.id}`,
+        "PATCH",
+        {
+          status,
+          resolution:
+            status === "resolved" ? "운영 콘솔에서 조치" : "운영 콘솔에서 기각",
+        },
+      ),
       status === "resolved" ? "조치 완료 처리했습니다." : "기각했습니다.",
     );
     if (result.ok) renderApp();
@@ -5923,7 +6300,54 @@ async function handleClick(event) {
   }
 }
 
-function handleChange(event) {
+async function handleChange(event) {
+  const profileImageInput = event.target.closest?.(
+    "[data-profile-image-upload]",
+  );
+  if (profileImageInput) {
+    if (dialogState?.type !== "character-profile-image") return;
+    const file = profileImageInput.files?.[0];
+    if (!file) return;
+    if (mediaTypeForFile(file) !== "image") {
+      showToast("이미지 파일만 프로필로 사용할 수 있습니다.", "", true);
+      profileImageInput.value = "";
+      return;
+    }
+    profileImageInput.disabled = true;
+    try {
+      const characterId = dialogState.ctx.characterId;
+      const mediaId = await uploadMedia(
+        file,
+        "image",
+        request,
+        fetch,
+        `pod/profile/character/${characterId}`,
+      );
+      const mediaRes = await request(`/api/admin/v1/media/${mediaId}`);
+      if (!mediaRes.ok || !mediaRes.body?.url) {
+        throw new Error("업로드한 이미지를 불러오지 못했습니다.");
+      }
+      const media = mediaRes.body;
+      dialogState.ctx.media = [
+        media,
+        ...dialogState.ctx.media.filter((item) => item.id !== media.id),
+      ];
+      dialogState.ctx.selectedImage = media;
+      dialogState.ctx.crop = normalizeProfileCrop();
+      showToast("이미지를 업로드했습니다. 크롭을 조정한 뒤 적용하세요.");
+      paintDialog();
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : String(error),
+        "",
+        true,
+      );
+      profileImageInput.disabled = false;
+      profileImageInput.value = "";
+    }
+    return;
+  }
+
   const fileInput = event.target.closest?.("[data-post-media-input]");
   if (fileInput) {
     if (!dialogSessionAllows(dialogState, "add-post-media")) return;
@@ -6006,6 +6430,32 @@ function handleInput(event) {
     compareRange
       .closest(".lightbox-compare")
       ?.style.setProperty("--x", `${compareRange.value}%`);
+    return;
+  }
+  const profileCrop = event.target.closest?.("[data-profile-crop]");
+  if (profileCrop) {
+    const form = profileCrop.closest("form");
+    if (!form) return;
+    const crop = normalizeProfileCrop({
+      x: form.elements.cropX?.value,
+      y: form.elements.cropY?.value,
+      zoom: form.elements.cropZoom?.value,
+    });
+    const preview = form.querySelector(".profile-image-editor-preview");
+    if (preview) {
+      preview.style.setProperty("--profile-crop-x", `${crop.x * 100}%`);
+      preview.style.setProperty("--profile-crop-y", `${crop.y * 100}%`);
+      preview.style.setProperty("--profile-crop-zoom", String(crop.zoom));
+    }
+    const xOutput = form.querySelector('[data-profile-crop-output="x"]');
+    const yOutput = form.querySelector('[data-profile-crop-output="y"]');
+    const zoomOutput = form.querySelector('[data-profile-crop-output="zoom"]');
+    if (xOutput) xOutput.textContent = `${Math.round(crop.x * 100)}%`;
+    if (yOutput) yOutput.textContent = `${Math.round(crop.y * 100)}%`;
+    if (zoomOutput) zoomOutput.textContent = `${crop.zoom.toFixed(1)}×`;
+    if (dialogState?.type === "character-profile-image") {
+      dialogState.ctx.crop = crop;
+    }
     return;
   }
   const candidateCount = event.target.closest?.(
@@ -6200,6 +6650,6 @@ if (hasDocument) {
 
   // initial paint
   renderApp().then(() => {
-    if (readAdminToken()) updateNavBadges();
+    if (hasAdminSession()) updateNavBadges();
   });
 }

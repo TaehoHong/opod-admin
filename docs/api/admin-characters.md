@@ -1,11 +1,11 @@
 # Admin Characters API
 
-All endpoints require an admin JWT.
+All endpoints require admin authentication.
 
 ## List characters
 
 ```http
-GET /api/characters?status=active&limit=20&cursor=<cursor>
+GET /api/admin/v1/characters?status=active&limit=20&cursor=<cursor>
 ```
 
 Each item includes operational counts:
@@ -30,11 +30,55 @@ the number of user-character follow rows. Both return `0` when empty.
 ## Get a character
 
 ```http
-GET /api/characters/:id
+GET /api/admin/v1/characters/:id
 ```
 
 The detail response includes the same `postCount` and `followerCount` fields in
 addition to existing `personas` and `memories`.
+
+## Profile image
+
+Profile images reuse upload-confirmed image rows from the media library. The
+character stores the media relation and normalized square-crop settings; the
+original media is not modified.
+
+```http
+GET /api/admin/v1/characters/:id/profile-image
+```
+
+Characters without an image return a centered default crop:
+
+```json
+{
+  "characterId": "0190d8d1-463b-7e36-a9ef-0242ac120003",
+  "image": null,
+  "crop": { "x": 0.5, "y": 0.5, "zoom": 1 }
+}
+```
+
+Assign an existing media image and its crop:
+
+```http
+PUT /api/admin/v1/characters/:id/profile-image
+Content-Type: application/json
+
+{
+  "mediaId": "0190d8d1-463b-7e36-a9ef-0242ac120020",
+  "crop": { "x": 0.4, "y": 0.6, "zoom": 1.5 }
+}
+```
+
+`x` and `y` range from `0` to `1`; `zoom` ranges from `1` to `3`. When `crop`
+is omitted it defaults to centered at `1×`. Video, missing, or upload-pending
+media returns HTTP 400.
+
+```http
+DELETE /api/admin/v1/characters/:id/profile-image
+```
+
+Clearing the profile resets the crop but keeps the media row available for
+reuse. Profile images are optional in the current release; making them
+required during character creation is deferred.
 
 ## Persona input
 
@@ -53,7 +97,7 @@ Each block should cover one concern because its title and content are inserted
 verbatim into Agent and content-planning prompts.
 
 ```http
-POST /api/characters/:id/personas
+POST /api/admin/v1/characters/:id/personas
 Content-Type: application/json
 
 { "title": "voice", "content": "짧고 다정한 반말을 쓴다." }
@@ -80,7 +124,7 @@ Allowed `type` values:
 type. Existing rows are migrated as `type: "fact"`.
 
 ```http
-POST /api/characters/:id/memory
+POST /api/admin/v1/characters/:id/memory
 Content-Type: application/json
 
 {
@@ -93,7 +137,7 @@ Content-Type: application/json
 The bulk endpoint accepts the same fields per item:
 
 ```http
-POST /api/characters/:id/memory/bulk
+POST /api/admin/v1/characters/:id/memory/bulk
 Content-Type: application/json
 
 {
@@ -114,7 +158,7 @@ images used by the media generation pipeline
 (`docs/media-generation-pipeline.md`).
 
 ```http
-GET /api/characters/:id/visual-profile
+GET /api/admin/v1/characters/:id/visual-profile
 ```
 
 Returns the profile, or an empty default (all prompts `""`, no references)
@@ -138,7 +182,7 @@ before one is saved:
 ```
 
 ```http
-PUT /api/characters/:id/visual-profile
+PUT /api/admin/v1/characters/:id/visual-profile
 Content-Type: application/json
 
 { "appearancePrompt": "...", "stylePrompt": "...", "negativePrompt": "..." }
@@ -149,7 +193,7 @@ An optional `providerConfig` JSON object stores provider-specific settings
 (LoRA id, seed).
 
 ```http
-PUT /api/characters/:id/visual-profile/references
+PUT /api/admin/v1/characters/:id/visual-profile/references
 Content-Type: application/json
 
 { "mediaIds": ["<media uuid>", "..."] }
@@ -160,7 +204,7 @@ media id must be upload-confirmed image media; unconfirmed media returns HTTP
 400 `Media upload is not confirmed`.
 
 ```http
-POST /api/characters/:id/visual-profile/test-generation
+POST /api/admin/v1/characters/:id/visual-profile/test-generation
 Content-Type: application/json
 
 { "scene": "walking on a beach at sunset" }

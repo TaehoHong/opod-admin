@@ -15,14 +15,11 @@
 의미하지는 않는다. 실제 순서는 별도 기능 요청에서 정한다.
 
 - React/Vite/Mantine 기반 관리자 UI 전환
-- `/api/admin/v1/*` API와 cookie 인증 전환
 - entity 중심 repository 구조로 데이터 접근 분리
 - 일반 기능, LLM, 결제·환불, 크레딧 로그 분리
 - 최근 30일 토큰 사용량 합계·추이와 provider/model 집계
 - 환불 시작, 사용자 정지·해제, 콘텐츠 숨김·삭제 control surface
 - 자동 댓글·캐릭터 상호작용의 이력과 중단 제어
-- cookie/CSRF/CORS 등 승인된 보안 경계 적용 (Helmet 전역 적용은 완료,
-  CSP 세부값은 React 전환에서 정한다)
 
 ## Final Automation Direction
 

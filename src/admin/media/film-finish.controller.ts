@@ -12,7 +12,7 @@ import { parseFinishPreset } from "../../worker/film-finish";
 import { AdminJwtGuard } from "../auth/admin-jwt.guard";
 import { FilmFinishService } from "./film-finish.service";
 
-@Controller("api/media")
+@Controller("api/admin/v1/media")
 @UseGuards(AdminJwtGuard)
 export class FilmFinishController {
   constructor(private readonly filmFinishService: FilmFinishService) {}

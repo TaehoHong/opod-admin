@@ -35,7 +35,7 @@ import { StartMediaUploadDto } from "./dto/start-media-upload.dto";
 import { UpdateImageGenerationDraftDto } from "./dto/update-image-generation-draft.dto";
 import { UpdateReportDto } from "./dto/update-report.dto";
 
-@Controller("api")
+@Controller("api/admin/v1")
 @UseGuards(AdminJwtGuard)
 export class AdminController {
   constructor(

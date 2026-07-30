@@ -317,28 +317,34 @@ model Admin {
 }
 
 model Character {
-  id             String                  @id @default(uuid(7)) @db.Uuid
-  publicId       String                  @unique @map("public_id")
-  displayName    String                  @map("display_name")
-  bio            String
-  interests      String[]                @default([])
-  status         CharacterStatus         @default(active)
-  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
-  actionLogs     CharacterActionLog[]
-  comments       PostComment[]
-  conversations  MessageConversation[]
-  generationJobs GenerationJob[]
-  memories       CharacterMemory[]
-  personas       CharacterPersona[]
-  posts          Post[]
-  reactions      PostReaction[]
-  stories        Story[]
-  userFollowers  UserCharacterFollow[]
-  visualProfile  CharacterVisualProfile?
-  postDrafts     PostDraft[]
-  postingPolicy  CharacterPostingPolicy?
+  id                   String                  @id @default(uuid(7)) @db.Uuid
+  publicId             String                  @unique @map("public_id")
+  displayName          String                  @map("display_name")
+  bio                  String
+  interests            String[]                @default([])
+  status               CharacterStatus         @default(active)
+  profileImageId       String?                 @map("profile_image_id") @db.Uuid
+  profileImageCropX    Float                   @default(0.5) @map("profile_image_crop_x")
+  profileImageCropY    Float                   @default(0.5) @map("profile_image_crop_y")
+  profileImageCropZoom Float                   @default(1) @map("profile_image_crop_zoom")
+  createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  actionLogs           CharacterActionLog[]
+  comments             PostComment[]
+  conversations        MessageConversation[]
+  generationJobs       GenerationJob[]
+  memories             CharacterMemory[]
+  personas             CharacterPersona[]
+  posts                Post[]
+  reactions            PostReaction[]
+  stories              Story[]
+  userFollowers        UserCharacterFollow[]
+  visualProfile        CharacterVisualProfile?
+  postDrafts           PostDraft[]
+  postingPolicy        CharacterPostingPolicy?
+  profileImage         Media?                  @relation("CharacterProfileImage", fields: [profileImageId], references: [id], onDelete: SetNull)
 
+  @@index([profileImageId])
   @@map("characters")
   @@schema("opod")
 }
@@ -373,6 +379,7 @@ model Media {
   jobOutputs              GenerationJobOutput[]
   llmLogMedia             LlmLogMedia[]
   postMedia               PostMedia[]
+  characterProfileImages  Character[]                       @relation("CharacterProfileImage")
   stories                 Story[]
   visualProfileReferences CharacterVisualProfileReference[]
 

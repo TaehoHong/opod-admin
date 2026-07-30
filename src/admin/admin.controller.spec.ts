@@ -120,7 +120,7 @@ describe("AdminController reads", () => {
     reconcilePayment.mockResolvedValue({ repaired: true });
 
     await request(app.getHttpServer())
-      .post("/api/payments/reconciliation/actions")
+      .post("/api/admin/v1/payments/reconciliation/actions")
       .send({
         purchaseId: PURCHASE_ID,
         action: "grant_missing_purchase",
@@ -143,7 +143,7 @@ describe("AdminController reads", () => {
     listPosts.mockResolvedValue({ items: [] });
 
     await request(app.getHttpServer())
-      .get("/api/posts")
+      .get("/api/admin/v1/posts")
       .query({ characterId: "ai-1", contentType: "feed", limit: "7" })
       .expect(200)
       .expect({ items: [] });
@@ -159,7 +159,7 @@ describe("AdminController reads", () => {
     getPost.mockResolvedValue({ id: "post-1" });
 
     await request(app.getHttpServer())
-      .get("/api/posts/post-1")
+      .get("/api/admin/v1/posts/post-1")
       .expect(200)
       .expect({ id: "post-1" });
 
@@ -170,7 +170,7 @@ describe("AdminController reads", () => {
     listPostComments.mockResolvedValue({ items: [] });
 
     await request(app.getHttpServer())
-      .get("/api/posts/post-1/comments")
+      .get("/api/admin/v1/posts/post-1/comments")
       .query({ characterId: "ai-1", limit: "6" })
       .expect(200)
       .expect({ items: [] });
@@ -186,7 +186,7 @@ describe("AdminController reads", () => {
     listPostReactions.mockResolvedValue({ items: [] });
 
     await request(app.getHttpServer())
-      .get("/api/posts/post-1/reactions")
+      .get("/api/admin/v1/posts/post-1/reactions")
       .query({ characterId: "ai-1", reactionType: "like", limit: "8" })
       .expect(200)
       .expect({ items: [] });
@@ -203,7 +203,7 @@ describe("AdminController reads", () => {
     listStories.mockResolvedValue({ items: [] });
 
     await request(app.getHttpServer())
-      .get("/api/stories")
+      .get("/api/admin/v1/stories")
       .query({ characterId: "ai-1", limit: "5" })
       .expect(200)
       .expect({ items: [] });
@@ -218,7 +218,7 @@ describe("AdminController reads", () => {
     getStory.mockResolvedValue({ id: "story-1" });
 
     await request(app.getHttpServer())
-      .get("/api/stories/story-1")
+      .get("/api/admin/v1/stories/story-1")
       .expect(200)
       .expect({ id: "story-1" });
 
@@ -229,7 +229,7 @@ describe("AdminController reads", () => {
     listGenerationJobs.mockResolvedValue({ items: [] });
 
     await request(app.getHttpServer())
-      .get("/api/generation/jobs")
+      .get("/api/admin/v1/generation/jobs")
       .query({
         characterId: CHARACTER_ID,
         status: "queued",
@@ -249,7 +249,7 @@ describe("AdminController reads", () => {
 
   it("rejects a malformed generation character filter", async () => {
     await request(app.getHttpServer())
-      .get("/api/generation/jobs")
+      .get("/api/admin/v1/generation/jobs")
       .query({ characterId: "not-a-uuid" })
       .expect(400);
 
@@ -260,7 +260,7 @@ describe("AdminController reads", () => {
     getGenerationJob.mockResolvedValue({ id: JOB_ID });
 
     await request(app.getHttpServer())
-      .get(`/api/generation/jobs/${JOB_ID}`)
+      .get(`/api/admin/v1/generation/jobs/${JOB_ID}`)
       .expect(200)
       .expect({ id: JOB_ID });
 
@@ -271,7 +271,7 @@ describe("AdminController reads", () => {
     createImageGenerationDraft.mockResolvedValue({ id: JOB_ID });
 
     await request(app.getHttpServer())
-      .post("/api/generation/image-jobs/draft")
+      .post("/api/admin/v1/generation/image-jobs/draft")
       .send({
         characterId: CHARACTER_ID,
         inputPrompt: "portrait",
@@ -291,7 +291,7 @@ describe("AdminController reads", () => {
     updateImageGenerationDraft.mockResolvedValue({ id: JOB_ID });
 
     await request(app.getHttpServer())
-      .patch(`/api/generation/jobs/${JOB_ID}/draft`)
+      .patch(`/api/admin/v1/generation/jobs/${JOB_ID}/draft`)
       .send({ prompt: "edited", candidateCount: 2 })
       .expect(200)
       .expect({ id: JOB_ID });
@@ -306,7 +306,7 @@ describe("AdminController reads", () => {
     confirmImageGenerationDraft.mockResolvedValue({ id: JOB_ID });
 
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${JOB_ID}/confirm`)
+      .post(`/api/admin/v1/generation/jobs/${JOB_ID}/confirm`)
       .expect(201)
       .expect({ id: JOB_ID });
 
@@ -317,7 +317,7 @@ describe("AdminController reads", () => {
     selectGenerationOutput.mockResolvedValue({ id: JOB_ID });
 
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${JOB_ID}/select-output`)
+      .post(`/api/admin/v1/generation/jobs/${JOB_ID}/select-output`)
       .send({ mediaId: MEDIA_ID })
       .expect(201)
       .expect({ id: JOB_ID });
@@ -329,7 +329,7 @@ describe("AdminController reads", () => {
     regenerateImageJob.mockResolvedValue({ id: JOB_ID });
 
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${JOB_ID}/regenerate`)
+      .post(`/api/admin/v1/generation/jobs/${JOB_ID}/regenerate`)
       .expect(201)
       .expect({ id: JOB_ID });
 
@@ -345,7 +345,7 @@ describe("AdminController reads", () => {
     { characterId: CHARACTER_ID, inputPrompt: "portrait", candidateCount: 5 },
   ])("rejects invalid image draft creation input %#", async (body) => {
     await request(app.getHttpServer())
-      .post("/api/generation/image-jobs/draft")
+      .post("/api/admin/v1/generation/image-jobs/draft")
       .send(body)
       .expect(400);
 
@@ -359,7 +359,7 @@ describe("AdminController reads", () => {
     { prompt: "edited", candidateCount: 5 },
   ])("rejects invalid image draft update input %#", async (body) => {
     await request(app.getHttpServer())
-      .patch(`/api/generation/jobs/${JOB_ID}/draft`)
+      .patch(`/api/admin/v1/generation/jobs/${JOB_ID}/draft`)
       .send(body)
       .expect(400);
 
@@ -370,7 +370,7 @@ describe("AdminController reads", () => {
     "rejects invalid output selection input %#",
     async (body) => {
       await request(app.getHttpServer())
-        .post(`/api/generation/jobs/${JOB_ID}/select-output`)
+        .post(`/api/admin/v1/generation/jobs/${JOB_ID}/select-output`)
         .send(body)
         .expect(400);
 
@@ -382,39 +382,39 @@ describe("AdminController reads", () => {
     const invalidId = "not-a-uuid";
 
     await request(app.getHttpServer())
-      .get(`/api/generation/jobs/${invalidId}`)
+      .get(`/api/admin/v1/generation/jobs/${invalidId}`)
       .expect(400);
     await request(app.getHttpServer())
-      .patch(`/api/generation/jobs/${invalidId}/draft`)
+      .patch(`/api/admin/v1/generation/jobs/${invalidId}/draft`)
       .send({ prompt: "edited", candidateCount: 2 })
       .expect(400);
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${invalidId}/confirm`)
+      .post(`/api/admin/v1/generation/jobs/${invalidId}/confirm`)
       .expect(400);
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${invalidId}/select-output`)
+      .post(`/api/admin/v1/generation/jobs/${invalidId}/select-output`)
       .send({ mediaId: MEDIA_ID })
       .expect(400);
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${invalidId}/regenerate`)
+      .post(`/api/admin/v1/generation/jobs/${invalidId}/regenerate`)
       .expect(400);
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${invalidId}/start`)
+      .post(`/api/admin/v1/generation/jobs/${invalidId}/start`)
       .expect(400);
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${invalidId}/run`)
+      .post(`/api/admin/v1/generation/jobs/${invalidId}/run`)
       .send({})
       .expect(400);
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${invalidId}/retry`)
+      .post(`/api/admin/v1/generation/jobs/${invalidId}/retry`)
       .send({})
       .expect(400);
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${invalidId}/complete`)
+      .post(`/api/admin/v1/generation/jobs/${invalidId}/complete`)
       .send({ url: "https://cdn.local/generated.png" })
       .expect(400);
     await request(app.getHttpServer())
-      .post(`/api/generation/jobs/${invalidId}/fail`)
+      .post(`/api/admin/v1/generation/jobs/${invalidId}/fail`)
       .send({})
       .expect(400);
   });
@@ -423,7 +423,7 @@ describe("AdminController reads", () => {
     listTopHashtags.mockResolvedValue({ items: [] });
 
     await request(app.getHttpServer())
-      .get("/api/analytics/hashtags")
+      .get("/api/admin/v1/analytics/hashtags")
       .expect(200)
       .expect({ items: [] });
 
@@ -434,7 +434,7 @@ describe("AdminController reads", () => {
     listTopHashtags.mockResolvedValue({ items: [] });
 
     await request(app.getHttpServer())
-      .get("/api/analytics/hashtags")
+      .get("/api/admin/v1/analytics/hashtags")
       .query({ limit: "7" })
       .expect(200)
       .expect({ items: [] });
@@ -446,7 +446,7 @@ describe("AdminController reads", () => {
     runJobNow.mockResolvedValue({ jobId: "job-1" });
 
     await request(app.getHttpServer())
-      .post("/api/generation/worker/run")
+      .post("/api/admin/v1/generation/worker/run")
       .send({})
       .expect(201)
       .expect({ jobId: "job-1" });
@@ -460,7 +460,7 @@ describe("AdminController reads", () => {
     });
 
     await request(app.getHttpServer())
-      .post("/api/generation/worker/run")
+      .post("/api/admin/v1/generation/worker/run")
       .send({ jobId: "0190d8d1-463b-7e36-a9ef-0242ac120002" })
       .expect(201);
 
@@ -473,14 +473,14 @@ describe("AdminController reads", () => {
     runJobNow.mockResolvedValue({ jobId: null });
 
     await request(app.getHttpServer())
-      .post("/api/generation/worker/run")
+      .post("/api/admin/v1/generation/worker/run")
       .send({ jobId: "0190d8d1-463b-7e36-a9ef-0242ac120002" })
       .expect(400);
   });
 
   it("rejects a malformed manual run jobId", async () => {
     await request(app.getHttpServer())
-      .post("/api/generation/worker/run")
+      .post("/api/admin/v1/generation/worker/run")
       .send({ jobId: "not-a-uuid" })
       .expect(400);
 

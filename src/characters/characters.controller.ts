@@ -26,18 +26,21 @@ import { UpdateCharacterMemoryDto } from "./dto/update-character-memory.dto";
 import { UpdateCharacterPersonaDto } from "./dto/update-character-persona.dto";
 import { UpdateCharacterStatusDto } from "./dto/update-character-status.dto";
 import { UpdateCharacterDto } from "./dto/update-character.dto";
+import { UpsertCharacterProfileImageDto } from "./dto/upsert-character-profile-image.dto";
 import { UpsertPostingPolicyDto } from "./dto/upsert-posting-policy.dto";
 import { UpsertVisualProfileDto } from "./dto/upsert-visual-profile.dto";
+import { CharacterProfileImageService } from "./character-profile-image.service";
 import { PostingPolicyService } from "./posting-policy.service";
 import { VisualProfileService } from "./visual-profile.service";
 
-@Controller("api/characters")
+@Controller("api/admin/v1/characters")
 @UseGuards(AdminJwtGuard)
 export class CharactersController {
   constructor(
     private readonly charactersService: CharactersService,
     private readonly postingPolicyService: PostingPolicyService,
     private readonly visualProfileService: VisualProfileService,
+    private readonly profileImageService: CharacterProfileImageService,
   ) {}
 
   @Get()
@@ -87,6 +90,24 @@ export class CharactersController {
     @Body() body: DeleteCharacterDto,
   ) {
     return this.charactersService.deleteCharacter({ id: characterId, ...body });
+  }
+
+  @Get(":id/profile-image")
+  getProfileImage(@Param("id") characterId: string) {
+    return this.profileImageService.get(characterId);
+  }
+
+  @Put(":id/profile-image")
+  setProfileImage(
+    @Param("id") characterId: string,
+    @Body() body: UpsertCharacterProfileImageDto,
+  ) {
+    return this.profileImageService.set(characterId, body);
+  }
+
+  @Delete(":id/profile-image")
+  clearProfileImage(@Param("id") characterId: string) {
+    return this.profileImageService.clear(characterId);
   }
 
   @Get(":id/personas")

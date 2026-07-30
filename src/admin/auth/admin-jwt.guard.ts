@@ -5,6 +5,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { AdminAuthService, AuthenticatedAdmin } from "./admin-auth.service";
+import { readSessionCookie } from "./admin-session";
 
 export type AdminRequest = {
   admin?: AuthenticatedAdmin;
@@ -18,7 +19,9 @@ export class AdminJwtGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AdminRequest>();
-    const token = bearerToken(request.header("authorization"));
+    // 세션은 HttpOnly cookie에만 있다 — JavaScript가 읽을 수 있는 저장소에
+    // 토큰을 두지 않는다 (docs/06-architecture.md:120).
+    const token = readSessionCookie(request.header("cookie"));
     if (!token) {
       throw new UnauthorizedException("Admin login is required");
     }
@@ -27,11 +30,4 @@ export class AdminJwtGuard implements CanActivate {
     request.adminToken = token;
     return true;
   }
-}
-
-function bearerToken(value?: string) {
-  const [scheme, token] = String(value ?? "")
-    .trim()
-    .split(/\s+/, 2);
-  return scheme?.toLowerCase() === "bearer" ? token : "";
 }

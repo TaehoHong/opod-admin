@@ -575,6 +575,9 @@ input[type="checkbox"] {
   background: var(--color-bg);
   border: 1px solid var(--oc-hairline-strong);
 }
+.dialog-profile-image {
+  width: min(760px, 100%);
+}
 .dialog-title {
   font-family: var(--font-heading);
   font-weight: 700;
@@ -589,6 +592,82 @@ input[type="checkbox"] {
   justify-content: flex-end;
   gap: 8px;
   margin-top: var(--space-2);
+}
+.profile-image-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.profile-image-editor-main {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  align-items: center;
+  gap: 24px;
+}
+.profile-image-editor-preview {
+  display: grid;
+  width: 220px;
+  aspect-ratio: 1;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-600);
+  font-size: 12px;
+}
+.profile-crop-controls {
+  display: grid;
+  gap: 12px;
+}
+.profile-crop-controls label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  color: var(--color-neutral-700);
+  font-size: 12px;
+}
+.profile-crop-controls input {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: var(--color-text);
+}
+.profile-media-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.profile-media-heading span,
+.profile-media-empty {
+  color: var(--color-neutral-600);
+  font-size: 12px;
+}
+.profile-media-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.profile-media-tile {
+  overflow: hidden;
+  padding: 3px;
+  aspect-ratio: 1;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  cursor: pointer;
+}
+.profile-media-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.profile-media-tile.is-selected {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+.profile-dialog-spacer {
+  flex: 1;
 }
 
 /* — image lightbox — click a candidate/reference to view it large — */
@@ -908,6 +987,70 @@ input[type="checkbox"] {
   font-family: var(--font-heading);
   font-weight: 600;
   font-size: 15px;
+}
+.profile-avatar-button {
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+.profile-avatar-button:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 3px;
+}
+.character-profile-avatar,
+.character-profile-card-image,
+.profile-image-editor-preview {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+}
+.character-profile-avatar {
+  width: 68px;
+  height: 68px;
+  font-size: 30px;
+}
+.character-profile-avatar img,
+.character-profile-card-image img,
+.profile-image-editor-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: var(--profile-crop-x, 50%) var(--profile-crop-y, 50%);
+  transform: scale(var(--profile-crop-zoom, 1));
+}
+.character-profile-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 560px);
+  align-items: start;
+  gap: 44px;
+}
+.character-profile-image-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+.character-profile-image-card > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.character-profile-image-card span {
+  color: var(--color-neutral-600);
+  font-size: 12px;
+}
+.character-profile-card-image {
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  font-size: 64px;
 }
 .admin-identity-name {
   font-size: 13.5px;
@@ -1305,6 +1448,9 @@ input[type="checkbox"] {
   .home-stats {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
   }
+  .character-profile-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 560px) {
@@ -1314,5 +1460,15 @@ input[type="checkbox"] {
   }
   .home-stats {
     grid-template-columns: 1fr;
+  }
+  .profile-image-editor-main {
+    grid-template-columns: 1fr;
+  }
+  .profile-image-editor-preview {
+    width: min(220px, 100%);
+    justify-self: center;
+  }
+  .profile-media-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }

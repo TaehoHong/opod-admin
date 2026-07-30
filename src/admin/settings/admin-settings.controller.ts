@@ -24,7 +24,7 @@ import { UpdateGenerationSettingsDto } from "./dto/update-generation-settings.dt
 // 생성 프로바이더 설정 조회/저장. API 키 원문은 절대 응답에 싣지 않는다 —
 // 저장 여부 + 마지막 4자리만 노출한다.
 @UseGuards(AdminJwtGuard)
-@Controller("api/settings")
+@Controller("api/admin/v1/settings")
 export class AdminSettingsController {
   constructor(
     private readonly settings: GenerationSettingsService,

@@ -21,7 +21,7 @@ describe("admin authorization", () => {
 
   it("rejects admin routes without an admin JWT", async () => {
     await request(app.getHttpServer())
-      .get("/api/character-action-logs")
+      .get("/api/admin/v1/character-action-logs")
       .expect(401);
   });
 });

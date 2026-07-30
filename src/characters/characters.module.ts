@@ -10,6 +10,8 @@ import {
 } from "../worker/reference-captioner";
 import { CharactersController } from "./characters.controller";
 import { CharactersService } from "./characters.service";
+import { CharacterProfileImageRepository } from "./character-profile-image.repository";
+import { CharacterProfileImageService } from "./character-profile-image.service";
 import { PostingPolicyService } from "./posting-policy.service";
 import { VisualProfileService } from "./visual-profile.service";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
@@ -19,6 +21,8 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
   controllers: [CharactersController],
   providers: [
     CharactersService,
+    CharacterProfileImageRepository,
+    CharacterProfileImageService,
     PostingPolicyService,
     {
       provide: VisualProfileService,
