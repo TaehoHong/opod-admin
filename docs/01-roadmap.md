@@ -52,13 +52,13 @@
 
 ## Decision Log
 
-| 날짜 | 결정 | 상태 |
-| --- | --- | --- |
-| 2026-07-29 | 내부 운영자 전용 콘솔이며 현재 기능 영역 유지 | decided |
-| 2026-07-29 | 생성·LLM 원문과 운영 로그를 현재 영구 보존 | decided |
-| 2026-07-29 | 자동 상호작용은 실행 후 추적·중단 | decided |
-| 2026-07-29 | refund와 moderation control은 admin 소유 | decided |
-| 2026-07-29 | React/Vite/Mantine 기반 UI로 전환 | decided |
-| 2026-07-30 | API는 `/api/admin/v1/*` 사용 | decided |
-| 2026-07-30 | 현재는 수동 생성·승인 게시, 최종적으로 자동 생성·게시 | decided |
+| 날짜       | 결정                                                             | 상태    |
+| ---------- | ---------------------------------------------------------------- | ------- |
+| 2026-07-29 | 내부 운영자 전용 콘솔이며 현재 기능 영역 유지                    | decided |
+| 2026-07-29 | 생성·LLM 원문과 운영 로그를 현재 영구 보존                       | decided |
+| 2026-07-29 | 자동 상호작용은 실행 후 추적·중단                                | decided |
+| 2026-07-29 | refund와 moderation control은 admin 소유                         | decided |
+| 2026-07-29 | React/Vite/Mantine 기반 UI로 전환                                | decided |
+| 2026-07-30 | API는 `/api/admin/v1/*` 사용                                     | decided |
+| 2026-07-30 | 현재는 수동 생성·승인 게시, 최종적으로 자동 생성·게시            | decided |
 | 2026-07-30 | LTS 전 Current 상태를 인지하고 Node 26/npm과 로컬 검증 경로 사용 | decided |

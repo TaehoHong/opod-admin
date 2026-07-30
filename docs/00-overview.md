@@ -104,14 +104,14 @@
 
 ## 현재 구현과 승인된 목표
 
-| 영역 | 현재 저장소 사실 | 승인된 목표 |
-| --- | --- | --- |
-| Backend | NestJS 10, Prisma, API와 worker가 한 process | modular monolith 유지, entity 중심 module과 repository 적용 |
-| Admin API | controller가 `/api/admin/v1/*` 아래에 있고 Swagger/OpenAPI는 제거됨 | `/api/admin/v1/*`, Swagger/OpenAPI 미사용 |
-| Auth | 7일 `__Host-` HttpOnly cookie JWT, 최초 계정은 bootstrap 환경변수로만 생성 | 7일 HttpOnly cookie JWT, bootstrap 환경변수로 최초 계정 생성 |
-| Admin UI | `packages/admin`의 정적 HTML/CSS/JavaScript | React, TypeScript, Vite, Mantine |
-| 게시 자동화 | worker와 수동 승인 흐름이 있으며 자동 실행은 꺼짐 | 튜닝 중 승인 게시, 최종 단계는 생성부터 게시까지 자동 완료 |
-| DB schema | 이 저장소에 Prisma mirror가 있음 | canonical 변경은 backend에서 먼저 수행하고 mirror 동기화 |
+| 영역        | 현재 저장소 사실                                                           | 승인된 목표                                                  |
+| ----------- | -------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Backend     | NestJS 10, Prisma, API와 worker가 한 process                               | modular monolith 유지, entity 중심 module과 repository 적용  |
+| Admin API   | controller가 `/api/admin/v1/*` 아래에 있고 Swagger/OpenAPI는 제거됨        | `/api/admin/v1/*`, Swagger/OpenAPI 미사용                    |
+| Auth        | 7일 `__Host-` HttpOnly cookie JWT, 최초 계정은 bootstrap 환경변수로만 생성 | 7일 HttpOnly cookie JWT, bootstrap 환경변수로 최초 계정 생성 |
+| Admin UI    | `packages/admin`의 정적 HTML/CSS/JavaScript                                | React, TypeScript, Vite, Mantine                             |
+| 게시 자동화 | worker와 수동 승인 흐름이 있으며 자동 실행은 꺼짐                          | 튜닝 중 승인 게시, 최종 단계는 생성부터 게시까지 자동 완료   |
+| DB schema   | 이 저장소에 Prisma mirror가 있음                                           | canonical 변경은 backend에서 먼저 수행하고 mirror 동기화     |
 
 목표 구조는 project-init에서 제품 코드로 구현하지 않는다. 각 변경은 별도
 기능 또는 리팩터링 작업에서 현재 동작과 migration 위험을 확인한 뒤
@@ -119,20 +119,20 @@
 
 ## 필수 결정 영역
 
-| 영역 | 상태 | 결정 |
-| --- | --- | --- |
-| Product actors and permissions | decided | 내부 운영자, 단일 관리자 역할 |
-| Auth/session model | decided | 7일 cookie JWT, 서버 측 logout 무효화 없음, 명시적 bootstrap |
-| Core workflows | decided | 현재 기능 영역 유지, 게시 자동·수동 실행 지원 |
-| API/realtime | decided/deferred | REST `/api/admin/v1/*`; realtime은 POC 동안 비활성 |
-| Data ownership/lifecycle | decided | backend canonical schema, admin direct DB access, 현재 영구 보존 |
-| Privacy/security | decided | 마스킹된 원문 로그, secret 실행 시 주입 |
-| Moderation/safety | decided | 제재와 논리 삭제는 admin, 사용자 영구 삭제 보류 |
-| Payments/credits | decided | 환불은 admin에서 시작, 원장 직접 변경 금지 |
-| Background automation | decided | 현재 승인 게시, 최종 자동 게시, 상호작용 추적·중단 |
-| External providers | deferred | 현재 provider 유지, fal 변경 가능성은 추후 판단 |
-| Deployment/operations | decided | 단일 서버 수동 Docker 배포 |
-| Verification | decided | 빠른 로컬 검증, 의미 있는 테스트, CI·브라우저 E2E 없음 |
+| 영역                           | 상태             | 결정                                                             |
+| ------------------------------ | ---------------- | ---------------------------------------------------------------- |
+| Product actors and permissions | decided          | 내부 운영자, 단일 관리자 역할                                    |
+| Auth/session model             | decided          | 7일 cookie JWT, 서버 측 logout 무효화 없음, 명시적 bootstrap     |
+| Core workflows                 | decided          | 현재 기능 영역 유지, 게시 자동·수동 실행 지원                    |
+| API/realtime                   | decided/deferred | REST `/api/admin/v1/*`; realtime은 POC 동안 비활성               |
+| Data ownership/lifecycle       | decided          | backend canonical schema, admin direct DB access, 현재 영구 보존 |
+| Privacy/security               | decided          | 마스킹된 원문 로그, secret 실행 시 주입                          |
+| Moderation/safety              | decided          | 제재와 논리 삭제는 admin, 사용자 영구 삭제 보류                  |
+| Payments/credits               | decided          | 환불은 admin에서 시작, 원장 직접 변경 금지                       |
+| Background automation          | decided          | 현재 승인 게시, 최종 자동 게시, 상호작용 추적·중단               |
+| External providers             | deferred         | 현재 provider 유지, fal 변경 가능성은 추후 판단                  |
+| Deployment/operations          | decided          | 단일 서버 수동 Docker 배포                                       |
+| Verification                   | decided          | 빠른 로컬 검증, 의미 있는 테스트, CI·브라우저 E2E 없음           |
 
 ## 온보딩
 

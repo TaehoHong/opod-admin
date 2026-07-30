@@ -181,18 +181,18 @@ runtime log는 위 business/audit log와 분리한다.
 
 ## Architecture Decisions
 
-| 결정 | 상태 |
-| --- | --- |
-| Modular monolith, API+worker 같은 process | decided |
-| Entity 중심 module과 repository | decided |
-| Application service 중심 business flow | decided |
-| Prisma/CLS transaction | decided |
-| Concrete repository injection | decided |
-| External capability interface/token | decided |
-| React/Vite/Mantine frontend | decided |
-| REST `/api/admin/v1/*`, no Swagger | decided |
-| Shared DB direct access, backend schema ownership | decided |
-| Automation 분리는 필요가 확인될 때 검토 | deferred |
+| 결정                                              | 상태     |
+| ------------------------------------------------- | -------- |
+| Modular monolith, API+worker 같은 process         | decided  |
+| Entity 중심 module과 repository                   | decided  |
+| Application service 중심 business flow            | decided  |
+| Prisma/CLS transaction                            | decided  |
+| Concrete repository injection                     | decided  |
+| External capability interface/token               | decided  |
+| React/Vite/Mantine frontend                       | decided  |
+| REST `/api/admin/v1/*`, no Swagger                | decided  |
+| Shared DB direct access, backend schema ownership | decided  |
+| Automation 분리는 필요가 확인될 때 검토           | deferred |
 
 ## Known Implementation Gaps
 
