@@ -107,8 +107,8 @@
 | 영역 | 현재 저장소 사실 | 승인된 목표 |
 | --- | --- | --- |
 | Backend | NestJS 10, Prisma, API와 worker가 한 process | modular monolith 유지, entity 중심 module과 repository 적용 |
-| Admin API | controller가 `/api/*` 아래에 있고 Swagger 설정이 존재 | `/api/admin/v1/*`, Swagger/OpenAPI 미사용 |
-| Auth | Bearer JWT와 알려진 기본 관리자 자동 생성 | 7일 HttpOnly cookie JWT, bootstrap 환경변수로 최초 계정 생성 |
+| Admin API | controller가 `/api/*` 아래에 있고 Swagger/OpenAPI는 제거됨 | `/api/admin/v1/*`, Swagger/OpenAPI 미사용 |
+| Auth | Bearer JWT, 최초 계정은 bootstrap 환경변수로만 생성 | 7일 HttpOnly cookie JWT, bootstrap 환경변수로 최초 계정 생성 |
 | Admin UI | `packages/admin`의 정적 HTML/CSS/JavaScript | React, TypeScript, Vite, Mantine |
 | 게시 자동화 | worker와 수동 승인 흐름이 있으며 자동 실행은 꺼짐 | 튜닝 중 승인 게시, 최종 단계는 생성부터 게시까지 자동 완료 |
 | DB schema | 이 저장소에 Prisma mirror가 있음 | canonical 변경은 backend에서 먼저 수행하고 mirror 동기화 |

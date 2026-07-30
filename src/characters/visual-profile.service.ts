@@ -186,7 +186,7 @@ export class VisualProfileService {
     return this.toVisualProfile(profile as PrismaVisualProfile);
   }
 
-  // 레퍼런스 세트를 통째로 교체한다. 순서 = 배열 순서.
+  // 레퍼런스 세트를 동기화한다. 유지된 관계는 캡션을 보존하고 순서만 갱신한다.
   async setReferences(input: {
     characterId: string;
     mediaIds: string[];
@@ -213,15 +213,26 @@ export class VisualProfileService {
         select: { id: true },
       });
       await tx.characterVisualProfileReference.deleteMany({
-        where: { profileId: upserted.id },
+        where: {
+          profileId: upserted.id,
+          ...(mediaIds.length > 0 ? { mediaId: { notIn: mediaIds } } : {}),
+        },
       });
-      if (mediaIds.length > 0) {
-        await tx.characterVisualProfileReference.createMany({
-          data: mediaIds.map((mediaId, index) => ({
+      for (const [index, mediaId] of mediaIds.entries()) {
+        const sortOrder = (index + 1) * 10;
+        await tx.characterVisualProfileReference.upsert({
+          where: {
+            profileId_mediaId: {
+              profileId: upserted.id,
+              mediaId,
+            },
+          },
+          create: {
             profileId: upserted.id,
             mediaId,
-            sortOrder: (index + 1) * 10,
-          })),
+            sortOrder,
+          },
+          update: { sortOrder },
         });
       }
       return tx.characterVisualProfile.findUnique({

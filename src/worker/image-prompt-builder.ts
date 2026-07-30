@@ -25,11 +25,21 @@ const HTTP_TIMEOUT_MS = 60_000;
 export type ImagePromptBuildInput = {
   appearancePrompt: string;
   stylePrompt: string;
-  shots: { scene: string }[];
+  shots: {
+    sortOrder: number;
+    scene: string;
+    captureSetup: string;
+    characterVisible: boolean;
+    targetModelId?: string;
+  }[];
 };
 
 export type ImagePromptBuilder = {
   readonly name: string;
+  readonly targetModelIds?: {
+    t2i?: string;
+    edit?: string;
+  };
   build(
     input: ImagePromptBuildInput,
     context?: LlmLogContext,
@@ -39,18 +49,30 @@ export type ImagePromptBuilder = {
 // 세 값이 모두 있어야 LLM 빌더, 하나라도 없으면 결정적 폴백.
 export function resolveImagePromptBuilder(
   settings: PlannerProviderSettings,
-  options: { targetModelId?: string } = {},
+  options: {
+    t2iModelId?: string;
+    editModelId?: string;
+  } = {},
   fetchFn: typeof fetch = fetch,
   llmLogs?: LlmLogService,
 ): ImagePromptBuilder {
   const apiUrl = settings.apiUrl?.trim();
   const apiKey = settings.apiKey?.trim();
   const model = settings.model?.trim();
+  const targetModelIds = {
+    ...(options.t2iModelId?.trim() ? { t2i: options.t2iModelId.trim() } : {}),
+    ...(options.editModelId?.trim()
+      ? { edit: options.editModelId.trim() }
+      : {}),
+  };
   if (!apiUrl || !apiKey || !model) {
-    return localImagePromptBuilder;
+    return {
+      ...localImagePromptBuilder,
+      ...(Object.keys(targetModelIds).length > 0 ? { targetModelIds } : {}),
+    };
   }
   return createLlmImagePromptBuilder(
-    { apiUrl, apiKey, model, targetModelId: options.targetModelId },
+    { apiUrl, apiKey, model, targetModelIds },
     fetchFn,
     llmLogs,
   );
@@ -64,10 +86,17 @@ export const localImagePromptBuilder: ImagePromptBuilder = {
       prompts: input.shots.map((shot) =>
         compileImagePrompt(
           {
-            appearancePrompt: input.appearancePrompt,
+            appearancePrompt: shot.characterVisible
+              ? input.appearancePrompt
+              : "",
             stylePrompt: input.stylePrompt,
           },
-          shot.scene,
+          [
+            `Final image content: ${shot.scene}`,
+            shot.characterVisible
+              ? "Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment"
+              : "Use a physically plausible camera viewpoint consistent with the final-frame scene; the character, photographer, hands, body, and capture equipment remain entirely outside the frame",
+          ].join(". "),
         ),
       ),
     });
@@ -79,13 +108,17 @@ export function createLlmImagePromptBuilder(
     apiUrl: string;
     apiKey: string;
     model: string;
-    targetModelId?: string;
+    targetModelIds?: {
+      t2i?: string;
+      edit?: string;
+    };
   },
   fetchFn: typeof fetch = fetch,
   llmLogs?: LlmLogService,
 ): ImagePromptBuilder {
   return {
     name: `llm:${config.model}`,
+    ...(config.targetModelIds ? { targetModelIds: config.targetModelIds } : {}),
     async build(input, context) {
       const requestJson = {
         model: config.model,
@@ -94,10 +127,9 @@ export function createLlmImagePromptBuilder(
           {
             role: "user",
             content: buildImagePromptBuilderUserPrompt({
-              targetModelId: config.targetModelId,
               appearancePrompt: input.appearancePrompt,
               stylePrompt: input.stylePrompt,
-              scenes: input.shots.map((shot) => shot.scene),
+              shots: input.shots,
             }),
           },
         ],
@@ -135,6 +167,15 @@ export function createLlmImagePromptBuilder(
   };
 }
 
+export function targetModelIdForShot(
+  builder: ImagePromptBuilder,
+  usesReferences: boolean,
+): string | undefined {
+  return usesReferences
+    ? builder.targetModelIds?.edit
+    : builder.targetModelIds?.t2i;
+}
+
 // LLM 출력에서 컷별 프롬프트를 추출·검증한다 (마크다운 펜스 허용).
 // 컷 수 불일치는 오류 — 조용히 잘리거나 밀리면 컷과 프롬프트가 어긋난다.
 export function parseBuiltImagePrompts(
@@ -154,9 +195,14 @@ export function parseBuiltImagePrompts(
   if (!isRecord(parsed) || !Array.isArray(parsed.shots)) {
     throw new Error("built image prompts are missing shots");
   }
-  const prompts = parsed.shots.map((shot) =>
-    isRecord(shot) && typeof shot.prompt === "string" ? shot.prompt.trim() : "",
-  );
+  const prompts = parsed.shots.map((shot, index) => {
+    if (!isRecord(shot) || shot.sortOrder !== index) {
+      throw new Error(
+        `image prompt builder shot ${index} has invalid sortOrder`,
+      );
+    }
+    return typeof shot.prompt === "string" ? shot.prompt.trim() : "";
+  });
   if (prompts.length !== expectedCount) {
     throw new Error(
       `image prompt builder returned ${prompts.length} prompt(s) for ${expectedCount} shot(s)`,

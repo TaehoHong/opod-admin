@@ -5,7 +5,7 @@ import {
   DraftWorkerService,
   publishedMemoryContent,
 } from "./draft-worker.service";
-import { ContentPlanner } from "./content-planner";
+import { ContentPlan, ContentPlanner } from "./content-planner";
 import { ImagePromptBuilder } from "./image-prompt-builder";
 
 const baseConfig: DraftWorkerConfig = {
@@ -52,10 +52,25 @@ function prismaMock() {
 }
 
 function plannerMock(
-  plan = {
+  plan: ContentPlan = {
     caption: "노을 산책",
     hashtags: ["필름사진"],
-    shots: [{ scene: "해변 역광" }, { scene: "카메라 클로즈업" }],
+    shots: [
+      {
+        sortOrder: 0,
+        scene: "해변 역광",
+        captureSetup: "친구가 눈높이에서 촬영",
+        characterVisible: true,
+        referenceIds: ["r1"],
+      },
+      {
+        sortOrder: 1,
+        scene: "카메라 클로즈업",
+        captureSetup: "소이가 위에서 직접 촬영",
+        characterVisible: false,
+        referenceIds: [],
+      },
+    ],
   },
 ): ContentPlanner & { plan: jest.Mock } {
   return { name: "test-planner", plan: jest.fn().mockResolvedValue(plan) };
@@ -63,9 +78,11 @@ function plannerMock(
 
 function builderMock(
   prompts = ["built shot prompt 0", "built shot prompt 1"],
+  targetModelIds?: { t2i?: string; edit?: string },
 ): ImagePromptBuilder & { build: jest.Mock } {
   return {
     name: "test-builder",
+    ...(targetModelIds ? { targetModelIds } : {}),
     build: jest.fn().mockResolvedValue({ prompts }),
   };
 }
@@ -123,6 +140,13 @@ function plannedDraft(overrides: Record<string, unknown> = {}) {
       visualProfile: {
         appearancePrompt: "young woman, short hair",
         stylePrompt: "film photography",
+        referenceMedia: [
+          {
+            mediaId: "r1",
+            description: "identity portrait",
+            media: { uploadedAt: new Date("2026-07-01T00:00:00.000Z") },
+          },
+        ],
       },
     },
     ...overrides,
@@ -172,6 +196,59 @@ describe("draftWorkerConfigFromEnv", () => {
 });
 
 describe("DraftWorkerService planning", () => {
+  it("fails planning immediately when a character-visible shot has no usable identity reference", async () => {
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "draft-1" }]);
+    prisma.postDraft.findUnique.mockResolvedValue(
+      plannedDraft({
+        character: {
+          ...plannedDraft().character,
+          visualProfile: {
+            appearancePrompt: "young woman, short hair",
+            stylePrompt: "film photography",
+            referenceMedia: [],
+          },
+        },
+      }),
+    );
+    const planner = plannerMock({
+      caption: "노을 산책",
+      hashtags: [],
+      shots: [
+        {
+          sortOrder: 0,
+          scene: "해변 역광",
+          captureSetup: "친구가 눈높이에서 촬영",
+          characterVisible: true,
+          referenceIds: [],
+        },
+        {
+          sortOrder: 1,
+          scene: "빈 해변",
+          captureSetup: "소이가 프레임 밖에서 촬영",
+          characterVisible: false,
+          referenceIds: [],
+        },
+      ],
+    });
+    const builder = builderMock();
+    const service = makeService(prisma, planner, {}, () => 0.5, builder);
+
+    await service.tick();
+
+    expect(builder.build).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.postDraft.updateMany).toHaveBeenCalledWith({
+      where: { id: "draft-1", status: "generating" },
+      data: {
+        status: "failed",
+        errorMessage:
+          "shot 0 shows the character but has no usable identity reference",
+        leaseExpiresAt: null,
+      },
+    });
+  });
+
   it("plans a claimed draft and creates shot jobs with built prompts", async () => {
     const prisma = prismaMock();
     prisma.$queryRaw.mockResolvedValueOnce([{ id: "draft-1" }]);
@@ -180,8 +257,33 @@ describe("DraftWorkerService planning", () => {
     prisma.$transaction.mockImplementation(
       async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
     );
-    const planner = plannerMock();
-    const builder = builderMock();
+    const planner = plannerMock({
+      caption: "노을 산책",
+      hashtags: ["필름사진"],
+      shots: [
+        {
+          sortOrder: 0,
+          scene: "해변 역광",
+          captureSetup: "친구가 눈높이에서 촬영",
+          characterVisible: true,
+          referenceIds: ["r1"],
+        },
+        {
+          sortOrder: 1,
+          scene: "카메라 클로즈업",
+          captureSetup: "소이가 위에서 직접 촬영",
+          characterVisible: false,
+          referenceIds: [],
+        },
+      ],
+    });
+    const builder = builderMock(
+      ["built shot prompt 0", "built shot prompt 1"],
+      {
+        t2i: "fal-ai/nano-banana-pro",
+        edit: "fal-ai/nano-banana-pro/edit",
+      },
+    );
     const service = makeService(prisma, planner, {}, () => 0.5, builder);
 
     await service.tick();
@@ -200,7 +302,22 @@ describe("DraftWorkerService planning", () => {
       {
         appearancePrompt: "young woman, short hair",
         stylePrompt: "film photography",
-        shots: [{ scene: "해변 역광" }, { scene: "카메라 클로즈업" }],
+        shots: [
+          {
+            sortOrder: 0,
+            scene: "해변 역광",
+            captureSetup: "친구가 눈높이에서 촬영",
+            characterVisible: true,
+            targetModelId: "fal-ai/nano-banana-pro/edit",
+          },
+          {
+            sortOrder: 1,
+            scene: "카메라 클로즈업",
+            captureSetup: "소이가 위에서 직접 촬영",
+            characterVisible: false,
+            targetModelId: "fal-ai/nano-banana-pro",
+          },
+        ],
       },
       { requestId: "draft-1", characterId: "ai-1" },
     );
@@ -228,7 +345,14 @@ describe("DraftWorkerService planning", () => {
         sortOrder: 0,
         // 장면 원문은 프롬프트 추적용 메타데이터로 저장된다.
         paramsJson: {
-          _shot: { scene: "해변 역광", referenceMediaIds: [] },
+          _shot: {
+            sortOrder: 0,
+            scene: "해변 역광",
+            captureSetup: "친구가 눈높이에서 촬영",
+            characterVisible: true,
+            referenceMediaIds: ["r1"],
+            targetModelId: "fal-ai/nano-banana-pro/edit",
+          },
         },
       },
     });
@@ -814,7 +938,13 @@ describe("DraftWorkerService manual triggers", () => {
         prompt: "",
         sortOrder: 0,
         paramsJson: {
-          _shot: { scene: "해변 역광", referenceMediaIds: [] },
+          _shot: {
+            sortOrder: 0,
+            scene: "해변 역광",
+            captureSetup: "친구가 눈높이에서 촬영",
+            characterVisible: true,
+            referenceMediaIds: ["r1"],
+          },
         },
       }),
     });
@@ -846,6 +976,12 @@ describe("DraftWorkerService manual triggers", () => {
         visualProfile: {
           appearancePrompt: "young woman, short hair",
           stylePrompt: "film photography",
+          referenceMedia: [
+            {
+              mediaId: "r1",
+              media: { uploadedAt: new Date("2026-07-01T00:00:00.000Z") },
+            },
+          ],
         },
       },
     });
@@ -855,13 +991,25 @@ describe("DraftWorkerService manual triggers", () => {
         id: "job-1",
         sortOrder: 0,
         status: "draft",
-        paramsJson: { _shot: { scene: "해변 역광" } },
+        paramsJson: {
+          _shot: {
+            scene: "해변 역광",
+            captureSetup: "친구가 눈높이에서 촬영",
+            characterVisible: true,
+          },
+        },
       },
       {
         id: "job-2",
         sortOrder: 1,
         status: "draft",
-        paramsJson: { _shot: { scene: "카메라 클로즈업" } },
+        paramsJson: {
+          _shot: {
+            scene: "카메라 클로즈업",
+            captureSetup: "소이가 위에서 직접 촬영",
+            characterVisible: false,
+          },
+        },
       },
       {
         id: "job-0",
@@ -884,18 +1032,51 @@ describe("DraftWorkerService manual triggers", () => {
       {
         appearancePrompt: "young woman, short hair",
         stylePrompt: "film photography",
-        shots: [{ scene: "해변 역광" }, { scene: "카메라 클로즈업" }],
+        shots: [
+          {
+            sortOrder: 0,
+            scene: "해변 역광",
+            captureSetup: "친구가 눈높이에서 촬영",
+            characterVisible: true,
+          },
+          {
+            sortOrder: 1,
+            scene: "카메라 클로즈업",
+            captureSetup: "소이가 위에서 직접 촬영",
+            characterVisible: false,
+          },
+        ],
       },
       { requestId: "draft-1", characterId: "ai-1" },
     );
     // draft 상태 조건부 갱신 — 빌드 중 큐잉된 잡은 건드리지 않는다.
     expect(tx.generationJob.updateMany).toHaveBeenCalledWith({
       where: { id: "job-1", status: "draft" },
-      data: { prompt: "english prompt 0" },
+      data: {
+        prompt: "english prompt 0",
+        paramsJson: {
+          _shot: {
+            scene: "해변 역광",
+            captureSetup: "친구가 눈높이에서 촬영",
+            characterVisible: true,
+            referenceMediaIds: ["r1"],
+          },
+        },
+      },
     });
     expect(tx.generationJob.updateMany).toHaveBeenCalledWith({
       where: { id: "job-2", status: "draft" },
-      data: { prompt: "english prompt 1" },
+      data: {
+        prompt: "english prompt 1",
+        paramsJson: {
+          _shot: {
+            scene: "카메라 클로즈업",
+            captureSetup: "소이가 위에서 직접 촬영",
+            characterVisible: false,
+            referenceMediaIds: [],
+          },
+        },
+      },
     });
     // 기존 conceptJson 키는 보존하고 빌더 이름을 기록한다.
     expect(tx.postDraft.update).toHaveBeenCalledWith({
@@ -912,6 +1093,46 @@ describe("DraftWorkerService manual triggers", () => {
     expect(tx.characterActionLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ actionType: "DRAFT_PROMPTS_BUILT" }),
     });
+  });
+
+  it("buildDraftPromptsNow rejects a character-visible shot after its references become unavailable", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue({
+      id: "draft-1",
+      characterId: "ai-1",
+      conceptJson: { source: "manual", mode: "manual" },
+      character: {
+        visualProfile: {
+          appearancePrompt: "young woman, short hair",
+          stylePrompt: "film photography",
+          referenceMedia: [],
+        },
+      },
+    });
+    prisma.generationJob.findMany.mockResolvedValue([
+      {
+        id: "job-1",
+        sortOrder: 0,
+        status: "draft",
+        paramsJson: {
+          _shot: {
+            scene: "해변 역광",
+            captureSetup: "친구가 눈높이에서 촬영",
+            characterVisible: true,
+            referenceMediaIds: ["removed-ref"],
+          },
+        },
+      },
+    ]);
+    const builder = builderMock(["english prompt"]);
+    const service = makeService(prisma, plannerMock(), {}, () => 0.5, builder);
+
+    await expect(service.buildDraftPromptsNow("draft-1")).resolves.toEqual({
+      built: false,
+      reason: "shot 0 shows the character but has no usable identity reference",
+    });
+    expect(builder.build).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("buildDraftPromptsNow reports when there are no draft-state shots", async () => {
@@ -971,7 +1192,13 @@ describe("DraftWorkerService manual triggers", () => {
         id: "job-1",
         sortOrder: 0,
         status: "draft",
-        paramsJson: { _shot: { scene: "해변 역광" } },
+        paramsJson: {
+          _shot: {
+            scene: "해변 역광",
+            characterVisible: false,
+            referenceMediaIds: [],
+          },
+        },
       },
     ]);
     const builder = builderMock();
@@ -982,6 +1209,51 @@ describe("DraftWorkerService manual triggers", () => {
 
     expect(result).toEqual({ built: false, reason: "builder LLM down" });
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rolls back prompt building when a shot leaves draft state", async () => {
+    const prisma = prismaMock();
+    prisma.postDraft.findFirst.mockResolvedValue({
+      id: "draft-1",
+      characterId: "ai-1",
+      conceptJson: {},
+      character: {
+        visualProfile: {
+          appearancePrompt: "young woman",
+          stylePrompt: "film",
+          referenceMedia: [],
+        },
+      },
+    });
+    prisma.generationJob.findMany.mockResolvedValue([
+      {
+        id: "job-1",
+        sortOrder: 0,
+        status: "draft",
+        paramsJson: {
+          _shot: {
+            scene: "해변",
+            captureSetup: "고정 카메라",
+            characterVisible: false,
+            referenceMediaIds: [],
+          },
+        },
+      },
+    ]);
+    const tx = txMock();
+    tx.generationJob.updateMany.mockResolvedValue({ count: 0 });
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+    const builder = builderMock(["english prompt"]);
+    const service = makeService(prisma, plannerMock(), {}, () => 0.5, builder);
+
+    await expect(service.buildDraftPromptsNow("draft-1")).resolves.toEqual({
+      built: false,
+      reason: "shot 0 left draft state during prompt build",
+    });
+    expect(tx.postDraft.update).not.toHaveBeenCalled();
+    expect(tx.characterActionLog.create).not.toHaveBeenCalled();
   });
 
   it("buildDraftPromptsNow returns false for a missing draft", async () => {

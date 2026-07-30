@@ -18,12 +18,40 @@ import {
 
 export type { ContentPlanInput } from "../../prompts/content-planner";
 
+export type ContentPlanShot = {
+  sortOrder: number;
+  scene: string;
+  captureSetup: string;
+  characterVisible: boolean;
+  referenceIds: string[];
+};
+
 export type ContentPlan = {
   caption: string;
   hashtags: string[];
-  // referenceIds: 카탈로그에서 고른 샷별 레퍼런스 (카탈로그 없으면 빈 배열).
-  shots: { scene: string; referenceIds: string[] }[];
+  // referenceIds: 카탈로그에서 고른 샷별 레퍼런스. 인물 비노출 샷만
+  // 빈 배열을 허용한다.
+  shots: ContentPlanShot[];
 };
+
+export class ShotReferencePolicyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ShotReferencePolicyError";
+  }
+}
+
+export function assertVisibleCharacterHasReference(
+  characterVisible: boolean,
+  referenceCount: number,
+  shotLabel: string,
+): void {
+  if (characterVisible && referenceCount === 0) {
+    throw new ShotReferencePolicyError(
+      `${shotLabel} shows the character but has no usable identity reference`,
+    );
+  }
+}
 
 export type ContentPlanner = {
   readonly name: string;
@@ -156,21 +184,50 @@ export function parseContentPlan(
     throw new Error("content plan is missing a caption");
   }
   const allowed = new Set(allowedReferenceIds);
-  const shots = (Array.isArray(parsed.shots) ? parsed.shots : [])
-    .filter(
-      (shot): shot is { scene: string; referenceIds?: unknown } =>
-        isRecord(shot) &&
-        typeof shot.scene === "string" &&
-        Boolean(shot.scene.trim()),
-    )
-    .map((shot) => ({
-      scene: shot.scene.trim(),
-      referenceIds: cleanReferenceIds(shot.referenceIds, allowed),
-    }))
-    .slice(0, maxShots);
-  if (shots.length === 0) {
-    throw new Error("content plan has no usable shots");
+  const rawShots = Array.isArray(parsed.shots) ? parsed.shots : [];
+  if (rawShots.length !== maxShots) {
+    throw new Error(
+      `content plan returned ${rawShots.length} shot(s) for ${maxShots} requested shot(s)`,
+    );
   }
+  const shots = rawShots.map((shot, index) => {
+    if (
+      !isRecord(shot) ||
+      typeof shot.scene !== "string" ||
+      !shot.scene.trim()
+    ) {
+      throw new Error(`content plan shot ${index} is missing a scene`);
+    }
+    if (typeof shot.captureSetup !== "string" || !shot.captureSetup.trim()) {
+      throw new Error(`content plan shot ${index} is missing captureSetup`);
+    }
+    if (typeof shot.characterVisible !== "boolean") {
+      throw new Error(`content plan shot ${index} is missing characterVisible`);
+    }
+    if (shot.sortOrder !== index) {
+      throw new Error(
+        `content plan shot ${index} has invalid sortOrder ${String(shot.sortOrder)}`,
+      );
+    }
+    const referenceIds = cleanReferenceIds(shot.referenceIds, allowed);
+    assertVisibleCharacterHasReference(
+      shot.characterVisible,
+      referenceIds.length,
+      `shot ${index}`,
+    );
+    if (!shot.characterVisible && referenceIds.length > 0) {
+      throw new Error(
+        `content plan shot ${index} cannot use character references when characterVisible is false`,
+      );
+    }
+    return {
+      sortOrder: index,
+      scene: shot.scene.trim(),
+      captureSetup: shot.captureSetup.trim(),
+      characterVisible: shot.characterVisible,
+      referenceIds: shot.characterVisible ? referenceIds : [],
+    };
+  });
   return {
     caption,
     hashtags: cleanHashtags(

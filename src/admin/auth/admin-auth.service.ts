@@ -13,8 +13,6 @@ import {
 } from "node:crypto";
 import { PrismaService } from "../../domain/database/prisma.service";
 
-const defaultAdminEmail = "admin@opod.com";
-const defaultAdminPassword = "qwer1234";
 const adminJwtTtlSeconds = 7 * 24 * 60 * 60;
 
 export type AuthenticatedAdmin = {
@@ -63,16 +61,33 @@ const publicAdminFields = {
 export class AdminAuthService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService) {}
 
+  // 최초 관리자는 명시적 bootstrap 환경변수로만 만든다
+  // (docs/03-deployment-rules.md "First Admin"). 코드에 기본 계정을 두면
+  // 알려진 자격증명으로 운영 콘솔에 접근할 수 있다.
   async onModuleInit() {
-    const existing = await this.prisma.admin.findUnique({
-      where: { email: defaultAdminEmail },
-      select: adminAuthFields,
-    });
-    if (existing) return;
+    const existingCount = await this.prisma.admin.count();
+    // 이미 관리자가 있으면 bootstrap 값으로 계정을 추가하거나 password를
+    // 바꾸지 않는다.
+    if (existingCount > 0) return;
 
+    const email = process.env.ADMIN_BOOTSTRAP_EMAIL?.trim();
+    const password = process.env.ADMIN_BOOTSTRAP_PASSWORD?.trim();
+    if (!email || !password) {
+      throw new Error(
+        "ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD are required to create the first admin",
+      );
+    }
+    if (!email.includes("@")) {
+      throw new Error("ADMIN_BOOTSTRAP_EMAIL is invalid");
+    }
+    if (password.length < 8) {
+      throw new Error("ADMIN_BOOTSTRAP_PASSWORD must be at least 8 characters");
+    }
+
+    // 평문 password는 로그에 남기지 않는다.
     await this.createAdmin({
-      email: defaultAdminEmail,
-      password: hashAdminPassword(defaultAdminPassword),
+      email: email.toLowerCase(),
+      password: hashAdminPassword(password),
     });
   }
 

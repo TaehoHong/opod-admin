@@ -26,7 +26,7 @@ describe("AdminJwtGuard", () => {
     const guard = new AdminJwtGuard({
       authenticateAdminToken: jest.fn().mockResolvedValue({
         id: "admin-1",
-        email: "admin@opod.com",
+        email: "admin@example.test",
       }),
     } as never);
     const { context, request } = contextWithAuthorization("Bearer token-1");
@@ -35,7 +35,7 @@ describe("AdminJwtGuard", () => {
 
     expect(request.admin).toEqual({
       id: "admin-1",
-      email: "admin@opod.com",
+      email: "admin@example.test",
     });
     expect(request.adminToken).toBe("token-1");
   });

@@ -494,42 +494,83 @@ export class DraftsService {
         id: true,
         characterId: true,
         sortOrder: true,
+        status: true,
+        inputPrompt: true,
         prompt: true,
-        provider: true,
+        candidateCount: true,
+        paramsJson: true,
       },
     });
     if (!job) {
       throw new BadRequestException("Draft shot job not found");
     }
-    const prompt = input.prompt?.trim() || job.prompt;
-
-    const transitioned = await this.prisma.postDraft.updateMany({
-      where: { id: input.draftId, status: { in: ["needs_review", "failed"] } },
-      data: { status: "regenerating", errorMessage: null },
-    });
-    if (transitioned.count === 0) {
-      await this.assertDraftExists(input.draftId);
+    if (job.status !== "completed" && job.status !== "failed") {
       throw new BadRequestException(
-        "Only needs_review or failed drafts can regenerate shots",
+        "Only completed or failed draft shots can be regenerated",
       );
     }
-    await this.prisma.generationJob.create({
-      data: {
-        characterId: job.characterId,
-        mediaType: "image",
-        prompt,
-        draftId: input.draftId,
-        sortOrder: job.sortOrder,
-        originJobId: job.id,
-        ...(job.provider ? { provider: job.provider } : {}),
-      },
+    const prompt = input.prompt?.trim() || job.prompt;
+
+    await this.prisma.$transaction(async (tx) => {
+      const latest = await tx.generationJob.findFirst({
+        where: {
+          draftId: input.draftId,
+          sortOrder: job.sortOrder,
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        select: { id: true },
+      });
+      if (latest?.id !== job.id) {
+        throw new BadRequestException(
+          "Only the latest draft shot can be regenerated",
+        );
+      }
+      const transitioned = await tx.postDraft.updateMany({
+        where: {
+          id: input.draftId,
+          status: { in: ["needs_review", "failed"] },
+        },
+        data: { status: "regenerating", errorMessage: null },
+      });
+      if (transitioned.count === 0) {
+        const draft = await tx.postDraft.findUnique({
+          where: { id: input.draftId },
+          select: { id: true },
+        });
+        if (!draft) {
+          throw new BadRequestException("Draft not found");
+        }
+        throw new BadRequestException(
+          "Only needs_review or failed drafts can regenerate shots",
+        );
+      }
+      await tx.generationJob.create({
+        data: {
+          characterId: job.characterId,
+          mediaType: "image",
+          ...(job.inputPrompt != null ? { inputPrompt: job.inputPrompt } : {}),
+          prompt,
+          ...(job.candidateCount != null
+            ? { candidateCount: job.candidateCount }
+            : {}),
+          ...(job.paramsJson != null
+            ? { paramsJson: job.paramsJson as Prisma.InputJsonValue }
+            : {}),
+          draftId: input.draftId,
+          sortOrder: job.sortOrder,
+          originJobId: job.id,
+        },
+      });
+      await tx.characterActionLog.create({
+        data: {
+          characterId: job.characterId,
+          actionType: "DRAFT_SHOT_REGENERATED",
+          targetTable: "post_drafts",
+          targetId: input.draftId,
+          reason: `shot ${job.sortOrder} regeneration queued`,
+        },
+      });
     });
-    await this.recordActionLog(
-      job.characterId,
-      input.draftId,
-      "DRAFT_SHOT_REGENERATED",
-      `shot ${job.sortOrder} regeneration queued`,
-    );
     return this.getDraft(input.draftId);
   }
 

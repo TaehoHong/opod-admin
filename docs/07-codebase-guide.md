@@ -40,6 +40,7 @@
 | Image provider resolution | `resolveImageGenerationProviders` | 현재 provider를 영구 product abstraction으로 간주하지 않음 | generation worker |
 | Generated media storage | `createGeneratedMediaStore`, `createReferenceUrlSigner` | provider 임시 결과를 owned storage에 보존 | worker, draft publish |
 | Prompt construction | exports under `prompts/` | pure construction; network/DB 없음 | planner, prompt builder |
+| Shot generation contract | `ContentPlanShot`, `paramsJson._shot` | `scene`과 `captureSetup` 분리, 인물 노출 샷은 업로드 완료 identity reference 필수, 빌드 대상 모델과 실행 모델 일치 | planner, draft/generation worker, retry/regeneration |
 | Validation/error boundary | `ValidationPipe`, `AllExceptionsFilter` | whitelist+transform, common error response | all HTTP routes |
 
 ## Current Canonical Examples
@@ -112,9 +113,9 @@ feature를 canonical example로 등록한다.
 ## Known Gaps
 
 - current API는 `/api/*`, 목표는 `/api/admin/v1/*`다.
-- current auth는 Bearer JWT와 알려진 default admin을 사용한다.
+- current auth는 Bearer JWT를 사용한다. 최초 관리자는 `ADMIN_BOOTSTRAP_EMAIL`과
+  `ADMIN_BOOTSTRAP_PASSWORD`로만 생성되며 코드에 기본 계정이 없다.
 - 목표 repository/application-service 구조가 완성되지 않았다.
-- Swagger 설정과 dependency가 남아 있다.
 - frontend가 목표 React stack으로 전환되지 않았다.
 - approved 4-table logging과 token dashboard가 완성되지 않았다.
 - Raw SQL이 queue claim과 lock에 남아 있다.

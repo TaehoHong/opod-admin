@@ -14,7 +14,6 @@
 아래 항목은 승인된 제품·기술 목표지만 이 목록 자체가 구현 우선순위를
 의미하지는 않는다. 실제 순서는 별도 기능 요청에서 정한다.
 
-- 명시적 bootstrap 환경변수로 최초 관리자 생성
 - React/Vite/Mantine 기반 관리자 UI 전환
 - `/api/admin/v1/*` API와 cookie 인증 전환
 - entity 중심 repository 구조로 데이터 접근 분리
@@ -22,8 +21,8 @@
 - 최근 30일 토큰 사용량 합계·추이와 provider/model 집계
 - 환불 시작, 사용자 정지·해제, 콘텐츠 숨김·삭제 control surface
 - 자동 댓글·캐릭터 상호작용의 이력과 중단 제어
-- Helmet과 승인된 보안 경계 적용
-- Swagger/OpenAPI 제거
+- cookie/CSRF/CORS 등 승인된 보안 경계 적용 (Helmet 전역 적용은 완료,
+  CSP 세부값은 React 전환에서 정한다)
 
 ## Final Automation Direction
 

@@ -3,12 +3,17 @@
 // src/worker/image-prompt-builder.ts에 있다.
 
 export type ImagePromptBuilderPromptInput = {
-  // 프롬프트 표현을 맞출 대상 fal.ai 모델 id (없으면 미지정 → generic).
-  targetModelId?: string;
   appearancePrompt: string;
   stylePrompt: string;
-  // sortOrder 순의 한국어 컷 기획 서술.
-  scenes: string[];
+  // sortOrder 순의 구조화된 한국어 컷 기획.
+  shots: {
+    sortOrder: number;
+    scene: string;
+    captureSetup: string;
+    characterVisible: boolean;
+    // 실제 이 샷이 실행될 fal.ai 모델 id (없으면 generic).
+    targetModelId?: string;
+  }[];
 };
 
 // 프롬프트 문법이 다른 이미지 모델 계열. 같은 계열은 프롬프트 작성법이 같다.
@@ -67,31 +72,42 @@ export const IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT = [
   "Given a character appearance prompt, a style prompt, and a Korean scene plan for each shot, create one English image prompt per shot optimized for the target model.",
   "Rules:",
   "- Write every prompt in English only.",
-  "- Resolve conflicts in this order: character identity, the shot's explicit capture setup and physical feasibility, the shot's situation and mood, then global style defaults.",
-  "- Preserve the appearance prompt's identity-defining details across all shots to maintain character consistency.",
+  "- Resolve conflicts in this order: final-frame content and character visibility, capture setup and physical feasibility, visible character identity, situation and mood, then global style defaults.",
+  "- scene contains only what belongs in the final pixels. captureSetup is camera-geometry metadata and is not itself a list of subjects to render.",
+  "- Never depict an off-frame photographer, their hands or body, or their camera merely because captureSetup names them. Express captureSetup through the reachable viewpoint and composition.",
+  "- When characterVisible is false, do not include the character appearance or turn the photographer into a visible subject. When true, preserve the supplied appearance details that are actually visible.",
   "- If the appearance prompt is divided into [labeled] sections, include only sections for features actually visible in each shot. For example, omit face and nail details in a rear-view shot and omit full-body proportions in a hand close-up. Always include core identity sections whenever the character is visible.",
-  "- Preserve the scene's stated photographer, phone or camera placement, mirror relationship, framing, and lighting. Keep the viewpoint physically reachable from that placement, keep hands consistent with the action, and do not invent an unseen photographer, moving follow-camera, or additional people.",
-  "- Translate the scene's location, composition, pose, lighting, and mood into concrete visual language the image model understands. If an appearance feature obscures the scene's subject, reposition it without changing its identity-defining color, length, or form.",
+  "- Preserve the captureSetup's phone or camera placement, mirror relationship, framing, and lighting as a physically reachable viewpoint. Keep visible hands consistent with the action, and do not invent a moving follow-camera or additional people.",
+  "- Translate the scene's location, composition, pose, lighting, and mood into concrete visual language the image model understands. Allow natural occlusion when framing or action hides an appearance feature; do not reposition hair, body, or clothing merely to expose it.",
   "- Treat the style prompt as a visual default. Incorporate only the parts that do not conflict with the scene's capture setup, time, lighting, composition, or physical action.",
   "- Follow the syntax and format in the 'Target model guidance' section exactly; prompt-writing conventions differ by model family.",
   "- Do not create a negative prompt; it is injected separately.",
   "- Return exactly as many shots as the input, in the same order.",
   "Return only the JSON below, with no explanation or Markdown:",
-  '{"shots": [{"prompt": "..."}]}',
+  '{"shots": [{"sortOrder": 0, "prompt": "..."}]}',
 ].join("\n");
 
 export function buildImagePromptBuilderUserPrompt(
   input: ImagePromptBuilderPromptInput,
 ): string {
+  const appearance = input.appearancePrompt.trim() || "(none)";
+  const shots = input.shots
+    .map((shot) =>
+      [
+        `### Shot ${shot.sortOrder}`,
+        `Target image model: ${shot.targetModelId?.trim() || "(unspecified)"}`,
+        `Target model guidance:\n${modelFamilyGuidance(shot.targetModelId)}`,
+        `Final-frame scene: ${shot.scene}`,
+        `Capture setup (viewpoint metadata, not extra subjects): ${shot.captureSetup}`,
+        `Character visible in final frame: ${shot.characterVisible ? "yes" : "no"}`,
+        `Appearance to use in this shot: ${shot.characterVisible ? appearance : "(none)"}`,
+      ].join("\n"),
+    )
+    .join("\n\n");
   const sections = [
-    `## Target image model\n${input.targetModelId?.trim() || "(unspecified)"}`,
-    `## Target model guidance\n${modelFamilyGuidance(input.targetModelId)}`,
-    `## Character appearance prompt\n${input.appearancePrompt.trim() || "(none)"}`,
     `## Style defaults (apply only when compatible with the shot)\n${input.stylePrompt.trim() || "(none)"}`,
-    `## Shot scenes (Korean plan)\n${input.scenes
-      .map((scene, index) => `${index + 1}. ${scene}`)
-      .join("\n")}`,
-    `## Request\nCreate one English image-generation prompt for each of the ${input.scenes.length} shots.`,
+    `## Shot plans\n${shots}`,
+    `## Request\nCreate one English image-generation prompt for each of the ${input.shots.length} shots.`,
   ];
   return sections.join("\n\n");
 }

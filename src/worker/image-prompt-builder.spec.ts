@@ -64,53 +64,139 @@ describe("localImagePromptBuilder", () => {
     const built = await localImagePromptBuilder.build({
       appearancePrompt: "same face",
       stylePrompt: "film grain",
-      shots: [{ scene: "성수동 산책" }, { scene: "카페 창가" }],
+      shots: [
+        {
+          sortOrder: 0,
+          scene: "성수동 산책",
+          captureSetup: "친구가 눈높이에서 촬영",
+          characterVisible: true,
+        },
+        {
+          sortOrder: 1,
+          scene: "카페 창가",
+          captureSetup: "창틀 위 고정 카메라",
+          characterVisible: true,
+        },
+      ],
     });
     expect(built.prompts).toEqual([
-      "same face, 성수동 산책, film grain",
-      "same face, 카페 창가, film grain",
+      "same face, Final image content: 성수동 산책. Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment, film grain",
+      "same face, Final image content: 카페 창가. Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment, film grain",
     ]);
+  });
+
+  it("omits character appearance from shots where the character is not visible", async () => {
+    const built = await localImagePromptBuilder.build({
+      appearancePrompt: "young woman, short black hair",
+      stylePrompt: "film grain",
+      shots: [
+        {
+          sortOrder: 0,
+          scene: "사람이 없는 철길과 노을",
+          captureSetup: "촬영자는 눈높이에서 프레임 밖에 있음",
+          characterVisible: false,
+        },
+      ],
+    } as never);
+
+    expect(built.prompts[0]).not.toContain("young woman");
+    expect(built.prompts[0]).toContain("사람이 없는 철길과 노을");
+    expect(built.prompts[0]).not.toContain(
+      "촬영자는 눈높이에서 프레임 밖에 있음",
+    );
+    expect(built.prompts[0]).toContain(
+      "the character, photographer, hands, body, and capture equipment remain entirely outside the frame",
+    );
   });
 });
 
 describe("buildImagePromptBuilderUserPrompt", () => {
   it("includes model, appearance, style, and numbered scenes", () => {
     const prompt = buildImagePromptBuilderUserPrompt({
-      targetModelId: "fal-ai/flux/dev",
       appearancePrompt: "young woman, short black hair",
       stylePrompt: "film photography",
-      scenes: ["한강 노을 산책", "골목 카페"],
+      shots: [
+        {
+          sortOrder: 0,
+          scene: "한강 노을 산책",
+          captureSetup: "친구가 눈높이에서 촬영",
+          characterVisible: true,
+          targetModelId: "fal-ai/flux/dev",
+        },
+        {
+          sortOrder: 1,
+          scene: "골목 카페",
+          captureSetup: "테이블 위 고정 카메라",
+          characterVisible: true,
+          targetModelId: "fal-ai/flux/dev",
+        },
+      ],
     });
-    expect(prompt).toContain("## Target image model\nfal-ai/flux/dev");
+    expect(prompt).toContain("Target image model: fal-ai/flux/dev");
     // Flux 계열 표현 규칙이 함께 주입된다.
-    expect(prompt).toContain("## Target model guidance");
+    expect(prompt).toContain("Target model guidance");
     expect(prompt).toContain("weighting syntax");
     expect(prompt).toContain("young woman, short black hair");
     expect(prompt).toContain("film photography");
-    expect(prompt).toContain("1. 한강 노을 산책");
-    expect(prompt).toContain("2. 골목 카페");
+    expect(prompt).toContain("Final-frame scene: 한강 노을 산책");
+    expect(prompt).toContain("Final-frame scene: 골목 카페");
     expect(prompt).toContain("the 2 shots");
   });
 
   it("injects the family-specific guidance for the target model", () => {
     const sdxl = buildImagePromptBuilderUserPrompt({
-      targetModelId: "fal-ai/fast-sdxl",
       appearancePrompt: "a",
       stylePrompt: "b",
-      scenes: ["장면"],
+      shots: [
+        {
+          sortOrder: 0,
+          scene: "장면",
+          captureSetup: "눈높이 촬영",
+          characterVisible: true,
+          targetModelId: "fal-ai/fast-sdxl",
+        },
+      ],
     });
     expect(sdxl).toContain("comma-separated tag and keyword list");
     expect(sdxl).not.toContain("Flux ignores");
+  });
+
+  it("marks a hidden-character shot and does not attach appearance to it", () => {
+    const prompt = buildImagePromptBuilderUserPrompt({
+      appearancePrompt: "young woman, short black hair",
+      stylePrompt: "film photography",
+      shots: [
+        {
+          sortOrder: 0,
+          scene: "사람이 없는 철길과 노을",
+          captureSetup: "촬영자는 프레임 밖에서 눈높이로 촬영",
+          characterVisible: false,
+          targetModelId: "fal-ai/nano-banana-pro",
+        },
+      ],
+    } as never);
+
+    expect(prompt).toContain("Character visible in final frame: no");
+    expect(prompt).toContain("사람이 없는 철길과 노을");
+    expect(prompt).toContain("촬영자는 프레임 밖에서 눈높이로 촬영");
+    expect(prompt).toContain("Appearance to use in this shot: (none)");
   });
 
   it("marks missing model and prompts as unspecified", () => {
     const prompt = buildImagePromptBuilderUserPrompt({
       appearancePrompt: "",
       stylePrompt: " ",
-      scenes: ["장면"],
+      shots: [
+        {
+          sortOrder: 0,
+          scene: "장면",
+          captureSetup: "눈높이 촬영",
+          characterVisible: true,
+        },
+      ],
     });
-    expect(prompt).toContain("## Target image model\n(unspecified)");
-    expect(prompt).toContain("## Character appearance prompt\n(none)");
+    expect(prompt).toContain("Target image model: (unspecified)");
+    expect(prompt).toContain("Appearance to use in this shot: (none)");
     expect(prompt).toContain(
       "## Style defaults (apply only when compatible with the shot)\n(none)",
     );
@@ -121,7 +207,12 @@ describe("parseBuiltImagePrompts", () => {
   it("parses prompts and tolerates markdown fences", () => {
     const raw = [
       "```json",
-      JSON.stringify({ shots: [{ prompt: "a" }, { prompt: "b" }] }),
+      JSON.stringify({
+        shots: [
+          { sortOrder: 0, prompt: "a" },
+          { sortOrder: 1, prompt: "b" },
+        ],
+      }),
       "```",
     ].join("\n");
     expect(parseBuiltImagePrompts(raw, 2)).toEqual(["a", "b"]);
@@ -129,17 +220,39 @@ describe("parseBuiltImagePrompts", () => {
 
   it("rejects a shot-count mismatch", () => {
     expect(() =>
-      parseBuiltImagePrompts(JSON.stringify({ shots: [{ prompt: "a" }] }), 2),
+      parseBuiltImagePrompts(
+        JSON.stringify({ shots: [{ sortOrder: 0, prompt: "a" }] }),
+        2,
+      ),
     ).toThrow("image prompt builder returned 1 prompt(s) for 2 shot(s)");
   });
 
   it("rejects empty prompts", () => {
     expect(() =>
       parseBuiltImagePrompts(
-        JSON.stringify({ shots: [{ prompt: "a" }, { prompt: " " }] }),
+        JSON.stringify({
+          shots: [
+            { sortOrder: 0, prompt: "a" },
+            { sortOrder: 1, prompt: " " },
+          ],
+        }),
         2,
       ),
     ).toThrow("image prompt builder returned an empty prompt");
+  });
+
+  it("rejects reordered prompt-builder output", () => {
+    expect(() =>
+      parseBuiltImagePrompts(
+        JSON.stringify({
+          shots: [
+            { sortOrder: 1, prompt: "second" },
+            { sortOrder: 0, prompt: "first" },
+          ],
+        }),
+        2,
+      ),
+    ).toThrow("image prompt builder shot 0 has invalid sortOrder");
   });
 
   it("rejects non-JSON output", () => {
@@ -159,7 +272,22 @@ describe("createLlmImagePromptBuilder", () => {
   const input = {
     appearancePrompt: "young woman, short black hair",
     stylePrompt: "film photography",
-    shots: [{ scene: "한강 노을 산책" }, { scene: "골목 카페" }],
+    shots: [
+      {
+        sortOrder: 0,
+        scene: "한강 노을 산책",
+        captureSetup: "친구가 눈높이에서 촬영",
+        characterVisible: true,
+        targetModelId: "fal-ai/flux/dev",
+      },
+      {
+        sortOrder: 1,
+        scene: "골목 카페",
+        captureSetup: "테이블 위 고정 카메라",
+        characterVisible: true,
+        targetModelId: "fal-ai/flux/dev",
+      },
+    ],
   };
 
   it("calls the chat completions API and parses built prompts", async () => {
@@ -171,8 +299,11 @@ describe("createLlmImagePromptBuilder", () => {
               message: {
                 content: JSON.stringify({
                   shots: [
-                    { prompt: "sunset walk along the Han river" },
-                    { prompt: "alley cafe window seat" },
+                    {
+                      sortOrder: 0,
+                      prompt: "sunset walk along the Han river",
+                    },
+                    { sortOrder: 1, prompt: "alley cafe window seat" },
                   ],
                 }),
               },
@@ -187,7 +318,10 @@ describe("createLlmImagePromptBuilder", () => {
         apiUrl: "https://llm.local/v1",
         apiKey: "k",
         model: "m",
-        targetModelId: "fal-ai/flux/dev",
+        targetModelIds: {
+          t2i: "fal-ai/flux/dev",
+          edit: "fal-ai/nano-banana-pro/edit",
+        },
       },
       fetchMock,
     );
@@ -201,7 +335,9 @@ describe("createLlmImagePromptBuilder", () => {
     expect(body.model).toBe("m");
     expect(body.messages[0].role).toBe("system");
     expect(body.messages[1].content).toContain("fal-ai/flux/dev");
-    expect(body.messages[1].content).toContain("1. 한강 노을 산책");
+    expect(body.messages[1].content).toContain(
+      "Final-frame scene: 한강 노을 산책",
+    );
   });
 
   it("throws on an HTTP error", async () => {

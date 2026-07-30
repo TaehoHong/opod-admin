@@ -80,7 +80,7 @@ describe("AdminController reads", () => {
         canActivate: (context: ExecutionContext) => {
           context.switchToHttp().getRequest().admin = {
             id: "admin-1",
-            email: "admin@opod.com",
+            email: "admin@example.test",
           };
           return true;
         },

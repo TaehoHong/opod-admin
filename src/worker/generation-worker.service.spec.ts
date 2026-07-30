@@ -517,11 +517,18 @@ describe("GenerationWorkerService", () => {
     expect(provider.cancel).toHaveBeenCalledWith("req-1");
   });
 
-  it("routes cold-start jobs (no usable references) to the t2i provider", async () => {
+  it("fails an explicit character-visible shot without usable references before submission", async () => {
     const prisma = prismaMock();
     prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
     prisma.generationJob.findUnique.mockResolvedValue(
       claimedJob({
+        paramsJson: {
+          _shot: {
+            sortOrder: 0,
+            characterVisible: true,
+            referenceMediaIds: ["pending-ref"],
+          },
+        },
         character: {
           visualProfile: {
             negativePrompt: "",
@@ -538,24 +545,22 @@ describe("GenerationWorkerService", () => {
         },
       }),
     );
-    mockSuccessTransaction(prisma);
-    const t2i = providerMock(
-      [{ status: "completed", images: [{ url: "https://p.local/a.png" }] }],
-      "fal:t2i-model",
-    );
+    const t2i = providerMock([], "fal:t2i-model");
     const edit = providerMock([], "fal:edit-model");
     const { service } = makeService(prisma, { t2i, edit });
 
     await service.tick();
 
-    expect(t2i.submit).toHaveBeenCalledWith(
-      expect.objectContaining({ referenceImageUrls: [] }),
-    );
+    expect(t2i.submit).not.toHaveBeenCalled();
     expect(edit.submit).not.toHaveBeenCalled();
-    // provider 컬럼에는 실제 사용된 프로바이더 이름이 기록된다.
     expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
       where: { id: "job-1", status: "running" },
-      data: { providerRequestId: "req-1", provider: "fal:t2i-model" },
+      data: {
+        status: "failed",
+        errorMessage:
+          "shot job-1 shows the character but has no usable identity reference",
+        leaseExpiresAt: null,
+      },
     });
   });
 
@@ -579,6 +584,39 @@ describe("GenerationWorkerService", () => {
       }),
     );
     expect(t2i.submit).not.toHaveBeenCalled();
+  });
+
+  it("fails before submission when the planned target model changed", async () => {
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
+    prisma.generationJob.findUnique.mockResolvedValue(
+      claimedJob({
+        paramsJson: {
+          _shot: {
+            characterVisible: false,
+            referenceMediaIds: [],
+            targetModelId: "old-t2i-model",
+          },
+        },
+      }),
+    );
+    const t2i = providerMock([], "fal:new-t2i-model");
+    const edit = providerMock([], "fal:new-edit-model");
+    const { service } = makeService(prisma, { t2i, edit });
+
+    await service.tick();
+
+    expect(t2i.submit).not.toHaveBeenCalled();
+    expect(edit.submit).not.toHaveBeenCalled();
+    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", status: "running" },
+      data: {
+        status: "failed",
+        errorMessage:
+          "planned target model old-t2i-model does not match resolved provider fal:new-t2i-model",
+        leaseExpiresAt: null,
+      },
+    });
   });
 
   it("runJobNow claims a specific queued job and processes it in the background", async () => {
@@ -720,6 +758,49 @@ describe("GenerationWorkerService", () => {
           "https://cdn.local/r1.png",
         ],
       }),
+    );
+  });
+
+  it("does not send references when the shot marks the character as hidden", async () => {
+    const reference = (mediaId: string) => ({
+      mediaId,
+      media: {
+        url: `https://cdn.local/${mediaId}.png`,
+        uploadedAt: new Date("2026-07-01T00:00:00.000Z"),
+      },
+    });
+    const prisma = prismaMock();
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
+    prisma.generationJob.findUnique.mockResolvedValue(
+      claimedJob({
+        paramsJson: {
+          _shot: {
+            scene: "사람이 없는 철길",
+            captureSetup: "촬영자는 프레임 밖에 있음",
+            characterVisible: false,
+            // 잘못 남은 ID가 있어도 비노출 계약이 우선한다.
+            referenceMediaIds: ["r1"],
+          },
+        },
+        character: {
+          visualProfile: {
+            negativePrompt: "",
+            providerConfig: null,
+            referenceMedia: [reference("r1")],
+          },
+        },
+      }),
+    );
+    mockSuccessTransaction(prisma);
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(prisma, provider);
+
+    await service.tick();
+
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({ referenceImageUrls: [] }),
     );
   });
 

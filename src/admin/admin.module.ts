@@ -77,7 +77,8 @@ import { LlmLogsController } from "./llm-logs/llm-logs.controller";
             return resolveImagePromptBuilder(
               planner,
               {
-                targetModelId: provider.editModel ?? provider.t2iModel,
+                t2iModelId: provider.t2iModel ?? provider.editModel,
+                editModelId: provider.editModel,
               },
               fetch,
               llmLogs,

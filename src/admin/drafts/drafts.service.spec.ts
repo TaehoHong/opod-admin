@@ -327,37 +327,115 @@ describe("DraftsService", () => {
 
   it("regenerates a shot with a new linked job", async () => {
     const prisma = prismaMock();
+    const paramsJson = {
+      aspect_ratio: "4:5",
+      _shot: {
+        scene: "사람이 없는 철길 풍경",
+        referenceMediaIds: [],
+      },
+    };
     prisma.generationJob.findFirst.mockResolvedValue({
       id: "job-1",
       characterId: "ai-1",
       sortOrder: 1,
+      status: "completed",
+      inputPrompt: "사람이 없는 철길 풍경",
       prompt: "원본 프롬프트",
-      provider: "fal:flux",
+      candidateCount: 3,
+      paramsJson,
     });
     prisma.postDraft.findUnique.mockResolvedValue({
       ...draftRow,
       status: "regenerating",
     });
+    const txPostDraftUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const txGenerationJobCreate = jest.fn().mockResolvedValue({});
+    const txActionLogCreate = jest.fn().mockResolvedValue({});
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          postDraft: {
+            updateMany: txPostDraftUpdateMany,
+            findUnique: jest.fn(),
+          },
+          generationJob: {
+            findFirst: jest.fn().mockResolvedValue({ id: "job-1" }),
+            create: txGenerationJobCreate,
+          },
+          characterActionLog: { create: txActionLogCreate },
+        }),
+    );
     const service = makeService(prisma);
 
     await expect(
       service.regenerateShot({ draftId: "draft-1", jobId: "job-1" }),
     ).resolves.toMatchObject({ status: "regenerating" });
-    expect(prisma.postDraft.updateMany).toHaveBeenCalledWith({
+    expect(txPostDraftUpdateMany).toHaveBeenCalledWith({
       where: { id: "draft-1", status: { in: ["needs_review", "failed"] } },
       data: { status: "regenerating", errorMessage: null },
     });
-    expect(prisma.generationJob.create).toHaveBeenCalledWith({
+    expect(txGenerationJobCreate).toHaveBeenCalledWith({
       data: {
         characterId: "ai-1",
         mediaType: "image",
+        inputPrompt: "사람이 없는 철길 풍경",
         prompt: "원본 프롬프트",
+        candidateCount: 3,
+        paramsJson,
         draftId: "draft-1",
         sortOrder: 1,
         originJobId: "job-1",
-        provider: "fal:flux",
       },
     });
+    expect(txActionLogCreate).toHaveBeenCalledWith({
+      data: {
+        characterId: "ai-1",
+        actionType: "DRAFT_SHOT_REGENERATED",
+        targetTable: "post_drafts",
+        targetId: "draft-1",
+        reason: "shot 1 regeneration queued",
+      },
+    });
+    expect(prisma.postDraft.updateMany).not.toHaveBeenCalled();
+    expect(prisma.generationJob.create).not.toHaveBeenCalled();
+    expect(prisma.characterActionLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects regenerating a stale draft shot job", async () => {
+    const prisma = prismaMock();
+    prisma.generationJob.findFirst.mockResolvedValue({
+      id: "job-old",
+      characterId: "ai-1",
+      sortOrder: 1,
+      status: "completed",
+      inputPrompt: null,
+      prompt: "옛 프롬프트",
+      candidateCount: 2,
+      paramsJson: { _shot: { scene: "옛 장면" } },
+    });
+    const txPostDraftUpdateMany = jest.fn();
+    const txGenerationJobCreate = jest.fn();
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          postDraft: {
+            updateMany: txPostDraftUpdateMany,
+            findUnique: jest.fn(),
+          },
+          generationJob: {
+            findFirst: jest.fn().mockResolvedValue({ id: "job-new" }),
+            create: txGenerationJobCreate,
+          },
+          characterActionLog: { create: jest.fn() },
+        }),
+    );
+    const service = makeService(prisma);
+
+    await expect(
+      service.regenerateShot({ draftId: "draft-1", jobId: "job-old" }),
+    ).rejects.toThrow("Only the latest draft shot can be regenerated");
+    expect(txPostDraftUpdateMany).not.toHaveBeenCalled();
+    expect(txGenerationJobCreate).not.toHaveBeenCalled();
   });
 
   it("selects a candidate output and updates the job cache", async () => {

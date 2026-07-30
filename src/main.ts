@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
-import { setupAdminSwagger } from "./admin/swagger";
+import helmet from "helmet";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
@@ -10,7 +10,11 @@ async function bootstrap() {
     httpsOptions: getHttpsOptions(),
   });
 
-  setupAdminSwagger(app);
+  // 전역 보안 헤더. CSP 세부값은 React 전환 시 실제 asset에 맞춘다
+  // (docs/06-architecture.md "Authentication and Web Security") — 현재 정적
+  // SPA는 inline style 속성을 쓰므로 기본 CSP를 켜면 화면이 깨진다.
+  app.use(helmet({ contentSecurityPolicy: false }));
+
   const adminUiRoot = join(process.cwd(), "packages/admin");
   app.useStaticAssets(adminUiRoot);
   app.use(

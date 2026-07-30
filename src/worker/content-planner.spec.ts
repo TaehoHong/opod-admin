@@ -56,11 +56,24 @@ describe("parseContentPlan", () => {
         caption: "노을이 예뻤던 날",
         hashtags: ["#필름사진", "여행", "필름사진"],
         shots: [
-          { scene: "해변 역광 실루엣" },
-          { scene: "필름 카메라 클로즈업" },
+          {
+            sortOrder: 0,
+            scene: "해변 역광 실루엣",
+            captureSetup: "친구가 눈높이에서 촬영",
+            characterVisible: true,
+            referenceIds: ["r1"],
+          },
+          {
+            sortOrder: 1,
+            scene: "필름 카메라 클로즈업",
+            captureSetup: "소이가 위에서 직접 촬영",
+            characterVisible: false,
+            referenceIds: [],
+          },
         ],
       }),
       2,
+      ["r1"],
     );
     expect(plan.caption).toBe("노을이 예뻤던 날");
     // # 제거 + 중복 제거
@@ -68,13 +81,19 @@ describe("parseContentPlan", () => {
     expect(plan.shots).toHaveLength(2);
   });
 
-  it("extracts JSON from a fenced markdown block and clamps shots", () => {
+  it("extracts the requested number of shots from a fenced JSON block", () => {
     const raw = [
       "```json",
       JSON.stringify({
         caption: "c",
         hashtags: [],
-        shots: [{ scene: "a" }, { scene: "b" }, { scene: "c" }, { scene: "d" }],
+        shots: ["a", "b", "c"].map((scene, sortOrder) => ({
+          sortOrder,
+          scene,
+          captureSetup: "눈높이 촬영",
+          characterVisible: false,
+          referenceIds: [],
+        })),
       }),
       "```",
     ].join("\n");
@@ -89,7 +108,10 @@ describe("parseContentPlan", () => {
         hashtags: [],
         shots: [
           {
+            sortOrder: 0,
             scene: "장면",
+            captureSetup: "친구가 눈높이에서 촬영",
+            characterVisible: true,
             // 환각 id(ghost)와 중복은 걸러지고 3개까지만 남는다.
             referenceIds: ["r1", "ghost", "r2", "r2", "r3", "r4"],
           },
@@ -101,22 +123,62 @@ describe("parseContentPlan", () => {
     expect(plan.shots[0].referenceIds).toEqual(["r1", "r2", "r3"]);
   });
 
-  it("returns empty referenceIds without a catalog", () => {
+  it("keeps final-frame content separate from capture setup", () => {
     const plan = parseContentPlan(
       JSON.stringify({
         caption: "c",
         hashtags: [],
-        shots: [{ scene: "장면", referenceIds: ["r1"] }],
+        shots: [
+          {
+            sortOrder: 0,
+            scene: "사람이 없는 연트럴파크 철길과 해질녘 하늘",
+            captureSetup:
+              "소이가 Canon AE-1을 눈높이에 들고 프레임 밖에서 촬영",
+            characterVisible: false,
+            referenceIds: [],
+          },
+        ],
       }),
       1,
+      ["r1"],
     );
-    expect(plan.shots[0].referenceIds).toEqual([]);
+
+    expect(plan.shots[0]).toEqual({
+      sortOrder: 0,
+      scene: "사람이 없는 연트럴파크 철길과 해질녘 하늘",
+      captureSetup: "소이가 Canon AE-1을 눈높이에 들고 프레임 밖에서 촬영",
+      characterVisible: false,
+      referenceIds: [],
+    });
   });
 
-  it("rejects output without usable shots", () => {
+  it("rejects a character-visible shot without a usable catalog reference", () => {
+    expect(() =>
+      parseContentPlan(
+        JSON.stringify({
+          caption: "c",
+          hashtags: [],
+          shots: [
+            {
+              sortOrder: 0,
+              scene: "장면",
+              captureSetup: "눈높이 촬영",
+              characterVisible: true,
+              referenceIds: ["missing"],
+            },
+          ],
+        }),
+        1,
+      ),
+    ).toThrow(
+      "shot 0 shows the character but has no usable identity reference",
+    );
+  });
+
+  it("rejects output with a different shot count", () => {
     expect(() =>
       parseContentPlan(JSON.stringify({ caption: "c", shots: [] }), 2),
-    ).toThrow("content plan has no usable shots");
+    ).toThrow("content plan returned 0 shot(s) for 2 requested shot(s)");
   });
 
   it("rejects non-JSON output", () => {
@@ -134,6 +196,7 @@ describe("createLlmContentPlanner", () => {
     personas: [],
     memories: [],
     recentCaptions: [],
+    maxShots: 1,
   };
 
   it("calls the chat completions API and parses the plan", async () => {
@@ -146,7 +209,15 @@ describe("createLlmContentPlanner", () => {
                 content: JSON.stringify({
                   caption: "골목 산책",
                   hashtags: ["산책"],
-                  shots: [{ scene: "골목길 오후 빛" }],
+                  shots: [
+                    {
+                      sortOrder: 0,
+                      scene: "골목길 오후 빛",
+                      captureSetup: "손에 든 카메라로 눈높이 촬영",
+                      characterVisible: false,
+                      referenceIds: [],
+                    },
+                  ],
                 }),
               },
             },
@@ -162,7 +233,15 @@ describe("createLlmContentPlanner", () => {
 
     await expect(planner.plan(input)).resolves.toMatchObject({
       caption: "골목 산책",
-      shots: [{ scene: "골목길 오후 빛" }],
+      shots: [
+        {
+          sortOrder: 0,
+          scene: "골목길 오후 빛",
+          captureSetup: "손에 든 카메라로 눈높이 촬영",
+          characterVisible: false,
+          referenceIds: [],
+        },
+      ],
     });
     const [url, options] = fetchMock.mock.calls[0];
     expect(url).toBe("https://llm.local/v1");

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   LLM_LOG_TYPE,
   LlmLogContext,
@@ -53,44 +52,35 @@ export type ImageGenerationProviders = {
   edit: ImageGenerationProvider;
 };
 
+const RESERVED_FAL_REQUEST_FIELDS = new Set([
+  "prompt",
+  "image_urls",
+  "num_images",
+  "negative_prompt",
+]);
+
+function safeFalExtraParams(
+  extraParams?: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(extraParams ?? {}).filter(
+      ([key]) => !RESERVED_FAL_REQUEST_FIELDS.has(key),
+    ),
+  );
+}
+
 const HTTP_TIMEOUT_MS = 30_000;
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 
-// 1x1 회색 PNG. 로컬 개발용 플레이스홀더.
-const PLACEHOLDER_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mOsqan5DwAFCAJS0worfgAAAABJRU5ErkJggg==";
-
-export function createLocalImageGenerationProvider(): ImageGenerationProvider {
-  const pendingRequests = new Map<string, ImageGenerationRequest>();
-  return {
-    name: "local",
-    submit(request) {
-      const requestId = `local-${randomUUID()}`;
-      pendingRequests.set(requestId, request);
-      return Promise.resolve({ requestId });
-    },
-    poll(requestId) {
-      const request = pendingRequests.get(requestId);
-      if (!request) {
-        // 프로세스 재시작으로 인메모리 상태가 사라진 경우. 재제출을 유도한다.
-        return Promise.resolve({
-          status: "failed",
-          errorMessage: "Local provider state lost; resubmit required",
-        });
-      }
-      pendingRequests.delete(requestId);
-      const images = Array.from(
-        { length: Math.max(1, request.candidateCount) },
-        () => ({
-          url: `data:image/png;base64,${PLACEHOLDER_PNG_BASE64}`,
-          contentType: "image/png",
-          width: 1,
-          height: 1,
-        }),
-      );
-      return Promise.resolve({ status: "completed", images, costUsd: 0 });
-    },
-  };
+// 이미지 생성 설정 누락. 환경 구분 없이 실패시킨다 — 플레이스홀더 이미지를
+// 성공으로 처리하면 개발용 결과가 운영 검수 큐에 들어간다
+// (docs/02-development-rules.md "필수 설정 누락이나 잘못된 형식은 startup
+// failure로 처리한다").
+export class ImageGenerationConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ImageGenerationConfigError";
+  }
 }
 
 type ProviderEnv = Record<string, string | undefined>;
@@ -104,7 +94,7 @@ export type GenerationProviderSettings = {
 };
 
 // 설정 → t2i/edit 프로바이더 쌍.
-// - apiKey 없음 → 둘 다 로컬 플레이스홀더.
+// - apiKey 또는 editModel 없음 → ImageGenerationConfigError.
 // - editModel: 레퍼런스 컨디셔닝(edit) 모델. 예: fal-ai/nano-banana/edit
 // - t2iModel: 콜드스타트용 text-to-image 모델. 예: fal-ai/nano-banana
 //   미설정이면 edit 모델을 그대로 쓴다 — edit 전용 모델(image_urls 필수)을
@@ -118,16 +108,20 @@ export function resolveImageGenerationProviders(
   const editModel = settings.editModel?.trim();
   const t2iModel = settings.t2iModel?.trim();
   if (!apiKey) {
-    const local = createLocalImageGenerationProvider();
-    return { t2i: local, edit: local };
+    throw new ImageGenerationConfigError(
+      "fal API key is not configured; set it in admin settings or FAL_API_KEY",
+    );
   }
-  const edit = editModel
-    ? createFalImageGenerationProvider(
-        { apiKey, model: editModel },
-        fetchFn,
-        llmLogs,
-      )
-    : createLocalImageGenerationProvider();
+  if (!editModel) {
+    throw new ImageGenerationConfigError(
+      "fal image model is not configured; set it in admin settings or FAL_IMAGE_MODEL",
+    );
+  }
+  const edit = createFalImageGenerationProvider(
+    { apiKey, model: editModel },
+    fetchFn,
+    llmLogs,
+  );
   const t2i = t2iModel
     ? createFalImageGenerationProvider(
         { apiKey, model: t2iModel },
@@ -212,6 +206,7 @@ export function createFalImageGenerationProvider(
 
     async submit(request) {
       const negativePrompt = request.negativePrompt?.trim();
+      const extraParams = safeFalExtraParams(request.extraParams);
       const body: Record<string, unknown> = {
         // 별도 필드를 지원하지 않는 모델도 캐릭터의 제외 조건을 잃지 않도록
         // 자연어 지시로 합친다.
@@ -226,7 +221,7 @@ export function createFalImageGenerationProvider(
         ...(request.referenceImageUrls.length > 0
           ? { image_urls: request.referenceImageUrls }
           : {}),
-        ...request.extraParams,
+        ...extraParams,
       };
       const handle = llmLogs
         ? await llmLogs.start({

@@ -1717,12 +1717,12 @@ test("adminRequestOptions adds the admin bearer token header", () => {
 
 test("adminLoginPayload trims credentials", () => {
   const form = new FormData();
-  form.set("email", " admin@opod.com ");
-  form.set("password", " qwer1234 ");
+  form.set("email", " admin@example.test ");
+  form.set("password", " test-password-1 ");
 
   assert.deepEqual(adminLoginPayload(form), {
-    email: "admin@opod.com",
-    password: "qwer1234",
+    email: "admin@example.test",
+    password: "test-password-1",
   });
 });
 
@@ -1843,10 +1843,10 @@ test("formActionRequest maps form actions to existing endpoints", async () => {
   const cases = [
     {
       action: "admin-login",
-      data: { email: "admin@opod.com", password: "qwer1234" },
+      data: { email: "admin@example.test", password: "test-password-1" },
       path: "/api/admin/login",
       method: "POST",
-      body: { email: "admin@opod.com", password: "qwer1234" },
+      body: { email: "admin@example.test", password: "test-password-1" },
     },
     {
       action: "admin-create",

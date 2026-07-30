@@ -20,6 +20,7 @@ import {
   LLM_LOG_TYPE,
   LlmLogService,
 } from "../domain/llm-logs/llm-log.service";
+import { assertVisibleCharacterHasReference } from "./content-planner";
 
 export type WorkerConfig = {
   enabled: boolean;
@@ -74,9 +75,31 @@ function shotReferenceMediaIds(paramsJson: unknown): string[] | undefined {
   if (!isRecord(paramsJson) || !isRecord(paramsJson._shot)) {
     return undefined;
   }
+  if (paramsJson._shot.characterVisible === false) {
+    return [];
+  }
   const ids = paramsJson._shot.referenceMediaIds;
   return Array.isArray(ids)
     ? ids.filter((id): id is string => typeof id === "string")
+    : undefined;
+}
+
+function shotTargetModelId(paramsJson: unknown): string | undefined {
+  if (!isRecord(paramsJson) || !isRecord(paramsJson._shot)) {
+    return undefined;
+  }
+  const targetModelId = paramsJson._shot.targetModelId;
+  return typeof targetModelId === "string" && targetModelId.trim()
+    ? targetModelId.trim()
+    : undefined;
+}
+
+function shotCharacterVisible(paramsJson: unknown): boolean | undefined {
+  if (!isRecord(paramsJson) || !isRecord(paramsJson._shot)) {
+    return undefined;
+  }
+  return typeof paramsJson._shot.characterVisible === "boolean"
+    ? paramsJson._shot.characterVisible
     : undefined;
 }
 
@@ -166,9 +189,12 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
           `Generation worker enabled (t2i=${providers.t2i.name}, edit=${providers.edit.name}, interval=${this.config.pollIntervalMs}ms)`,
         ),
       )
-      .catch(() =>
-        this.logger.log(
-          `Generation worker enabled (interval=${this.config.pollIntervalMs}ms)`,
+      .catch((error: unknown) =>
+        // 설정이 없으면 잡마다 실패한다 — 시작 시점에 원인을 남긴다.
+        this.logger.warn(
+          `Generation worker enabled but the image provider is unavailable (interval=${this.config.pollIntervalMs}ms): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         ),
       );
     this.scheduleNext();
@@ -363,14 +389,20 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // 레퍼런스가 있으면 edit(컨디셔닝) 모델, 없으면(콜드스타트) t2i 모델.
-    // edit 계열은 image_urls가 필수라 레퍼런스 없는 잡을 보낼 수 없다.
-    const request = await this.buildRequest(job);
-    const providers = await this.resolveProviders();
-    const provider =
-      request.referenceImageUrls.length > 0 ? providers.edit : providers.t2i;
-
     try {
+      // 레퍼런스가 있으면 edit(컨디셔닝) 모델, 없으면 t2i 모델. 단,
+      // characterVisible=true인 구조화 잡은 레퍼런스 없이 실행하지 않는다.
+      const request = await this.buildRequest(job);
+      const providers = await this.resolveProviders();
+      const provider =
+        request.referenceImageUrls.length > 0 ? providers.edit : providers.t2i;
+      const targetModelId = shotTargetModelId(job.paramsJson);
+      if (targetModelId && provider.name !== `fal:${targetModelId}`) {
+        throw new ProviderJobFailedError(
+          `planned target model ${targetModelId} does not match resolved provider ${provider.name}`,
+          true,
+        );
+      }
       const result = await this.generate(job, provider, request);
       await this.persistSuccess(job, result, provider.name);
       this.consecutiveFailures = 0;
@@ -451,6 +483,15 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
               (reference): reference is (typeof uploaded)[number] =>
                 reference !== undefined,
             );
+    try {
+      assertVisibleCharacterHasReference(
+        shotCharacterVisible(job.paramsJson) === true,
+        ordered.length,
+        `shot ${job.id}`,
+      );
+    } catch (error) {
+      throw new ProviderJobFailedError(errorMessage(error), true);
+    }
     // fal edit 계열의 image_urls 상한(10장 초과 시 422 value_error) 안전판.
     if (ordered.length > MAX_REFERENCE_IMAGES) {
       this.logger.warn(

@@ -6057,7 +6057,7 @@ function loginHtml() {
       <div class="brand-kicker">AI SNS</div>
       <div class="brand-title" style="font-size:26px">OPOD Admin</div>
     </div>
-    <div class="field"><label>이메일</label><input class="input" name="email" type="email" value="admin@opod.com" autocomplete="username" required></div>
+    <div class="field"><label>이메일</label><input class="input" name="email" type="email" autocomplete="username" required></div>
     <div class="field"><label>비밀번호</label><input class="input" name="password" type="password" autocomplete="current-password" required></div>
     <button class="btn btn-primary" type="submit" style="width:100%">로그인</button>
   </form></div>`;

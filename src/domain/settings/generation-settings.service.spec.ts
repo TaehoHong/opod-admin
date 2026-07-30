@@ -129,11 +129,13 @@ describe("GenerationSettingsService", () => {
     ).resolves.toMatchObject({ planner: "llm:gpt-5-mini" });
   });
 
-  it("reports unconfigured planner without any key", async () => {
+  // 이미지 설정이 없으면 생성은 실패하지만 설정 화면은 떠야 한다 —
+  // 여기서 예외가 나가면 admin 설정 페이지 전체가 500이 된다.
+  it("reports unconfigured image and planner providers without any key", async () => {
     const prisma = prismaMock();
 
     await expect(makeService(prisma).resolveProviderNames({})).resolves.toEqual(
-      { t2i: "local", edit: "local", planner: "unconfigured" },
+      { t2i: null, edit: null, planner: "unconfigured" },
     );
   });
 

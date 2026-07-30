@@ -6,7 +6,11 @@ import {
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../domain/database/prisma.service";
-import { ContentPlanner } from "./content-planner";
+import {
+  assertVisibleCharacterHasReference,
+  ContentPlanner,
+  ShotReferencePolicyError,
+} from "./content-planner";
 import {
   applyFinishWithMeta,
   downloadMediaBytes,
@@ -20,7 +24,10 @@ import {
   localGeneratedMediaStore,
   ReferenceUrlSigner,
 } from "./generated-media-store";
-import { ImagePromptBuilder } from "./image-prompt-builder";
+import {
+  ImagePromptBuilder,
+  targetModelIdForShot,
+} from "./image-prompt-builder";
 import { errorMessage, isRecord, parsePositiveNumber } from "./value-utils";
 
 export type DraftWorkerConfig = {
@@ -80,7 +87,11 @@ type PlannedDraft = {
     visualProfile: {
       appearancePrompt: string;
       stylePrompt: string;
-      referenceMedia: { mediaId: string; description: string }[];
+      referenceMedia: {
+        mediaId: string;
+        description: string;
+        media: { uploadedAt: Date | null };
+      }[];
     } | null;
   };
 };
@@ -280,7 +291,17 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         character: {
           select: {
             visualProfile: {
-              select: { appearancePrompt: true, stylePrompt: true },
+              select: {
+                appearancePrompt: true,
+                stylePrompt: true,
+                referenceMedia: {
+                  orderBy: { sortOrder: "asc" },
+                  select: {
+                    mediaId: true,
+                    media: { select: { uploadedAt: true } },
+                  },
+                },
+              },
             },
           },
         },
@@ -310,19 +331,59 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         reason: "draft has no draft-state shots to build prompts for",
       };
     }
-    const shots: { scene: string }[] = [];
+    const shots: {
+      sortOrder: number;
+      scene: string;
+      captureSetup: string;
+      characterVisible: boolean;
+      referenceMediaIds?: string[];
+    }[] = [];
     for (const job of targets) {
-      const scene = shotSceneOf(job.paramsJson);
-      if (!scene) {
+      const shot = shotPlanOf(job.paramsJson, job.sortOrder);
+      if (!shot) {
         return {
           built: false,
           reason: `shot ${job.sortOrder} has no planned scene`,
         };
       }
-      shots.push({ scene });
+      shots.push(shot);
     }
     const profile = draft.character.visualProfile;
+    const availableReferenceIds = (profile?.referenceMedia ?? [])
+      .filter((reference) => reference.media.uploadedAt)
+      .map((reference) => reference.mediaId);
+    const effectiveShots = shots.map(({ referenceMediaIds, ...shot }) => {
+      const effectiveReferenceIds = !shot.characterVisible
+        ? []
+        : referenceMediaIds === undefined
+          ? availableReferenceIds
+          : referenceMediaIds.filter((mediaId) =>
+              availableReferenceIds.includes(mediaId),
+            );
+      return {
+        ...shot,
+        referenceMediaIds: effectiveReferenceIds,
+      };
+    });
+    try {
+      for (const shot of effectiveShots) {
+        assertVisibleCharacterHasReference(
+          shot.characterVisible,
+          shot.referenceMediaIds.length,
+          `shot ${shot.sortOrder}`,
+        );
+      }
+    } catch (error) {
+      return { built: false, reason: errorMessage(error).slice(0, 500) };
+    }
     const builder = await this.resolvePromptBuilder();
+    const buildShots = effectiveShots.map((shot) => ({
+      ...shot,
+      targetModelId: targetModelIdForShot(
+        builder,
+        shot.referenceMediaIds.length > 0,
+      ),
+    }));
     let prompts: string[];
     try {
       prompts = (
@@ -330,7 +391,13 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           {
             appearancePrompt: profile?.appearancePrompt ?? "",
             stylePrompt: profile?.stylePrompt ?? "",
-            shots,
+            shots: buildShots.map((shot) => ({
+              sortOrder: shot.sortOrder,
+              scene: shot.scene,
+              captureSetup: shot.captureSetup,
+              characterVisible: shot.characterVisible,
+              targetModelId: shot.targetModelId,
+            })),
           },
           { requestId: draft.id, characterId: draft.characterId },
         )
@@ -339,30 +406,47 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       return { built: false, reason: errorMessage(error).slice(0, 500) };
     }
     const concept = isRecord(draft.conceptJson) ? draft.conceptJson : {};
-    await this.prisma.$transaction(async (tx) => {
-      for (const [index, job] of targets.entries()) {
-        // 빌드 중 큐잉된 잡은 조건 불일치로 건드리지 않는다 (재실행 안전).
-        await tx.generationJob.updateMany({
-          where: { id: job.id, status: "draft" },
-          data: { prompt: prompts[index] },
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        for (const [index, job] of targets.entries()) {
+          // 빌드 중 큐잉된 잡은 전체 트랜잭션을 취소해 부분 갱신을 막는다.
+          const targetModelId = buildShots[index].targetModelId;
+          const updated = await tx.generationJob.updateMany({
+            where: { id: job.id, status: "draft" },
+            data: {
+              prompt: prompts[index],
+              paramsJson: withShotBuildMetadata(
+                job.paramsJson,
+                buildShots[index].referenceMediaIds,
+                targetModelId,
+              ),
+            },
+          });
+          if (updated.count !== 1) {
+            throw new Error(
+              `shot ${job.sortOrder} left draft state during prompt build`,
+            );
+          }
+        }
+        await tx.postDraft.update({
+          where: { id: draft.id },
+          data: {
+            conceptJson: { ...concept, builderName: builder.name } as never,
+          },
         });
-      }
-      await tx.postDraft.update({
-        where: { id: draft.id },
-        data: {
-          conceptJson: { ...concept, builderName: builder.name } as never,
-        },
+        await tx.characterActionLog.create({
+          data: {
+            characterId: draft.characterId,
+            actionType: "DRAFT_PROMPTS_BUILT",
+            targetTable: "post_drafts",
+            targetId: draft.id,
+            reason: `shot prompts built via ${builder.name} (${targets.length} shot(s))`,
+          },
+        });
       });
-      await tx.characterActionLog.create({
-        data: {
-          characterId: draft.characterId,
-          actionType: "DRAFT_PROMPTS_BUILT",
-          targetTable: "post_drafts",
-          targetId: draft.id,
-          reason: `shot prompts built via ${builder.name} (${targets.length} shot(s))`,
-        },
-      });
-    });
+    } catch (error) {
+      return { built: false, reason: errorMessage(error).slice(0, 500) };
+    }
     this.logger.log(
       `Draft ${draft.id} prompts built (${targets.length} shot(s))`,
     );
@@ -463,7 +547,11 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
                 stylePrompt: true,
                 referenceMedia: {
                   orderBy: { sortOrder: "asc" },
-                  select: { mediaId: true, description: true },
+                  select: {
+                    mediaId: true,
+                    description: true,
+                    media: { select: { uploadedAt: true } },
+                  },
                 },
               },
             },
@@ -486,7 +574,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       const referenceCatalog = (
         draft.character.visualProfile?.referenceMedia ?? []
       )
-        .filter((reference) => reference.description)
+        .filter(
+          (reference) => reference.description && reference.media.uploadedAt,
+        )
         .map((reference) => ({
           id: reference.mediaId,
           description: reference.description,
@@ -504,10 +594,27 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         maxShots: this.config.maxShots,
         ...(referenceCatalog.length > 0 ? { referenceCatalog } : {}),
       };
-      const plan = await planner.plan(planInput, {
+      const planned = await planner.plan(planInput, {
         requestId: draft.id,
         characterId: draft.characterId,
       });
+      const availableReferenceIds = new Set(
+        referenceCatalog.map((reference) => reference.id),
+      );
+      const plan = {
+        ...planned,
+        shots: planned.shots.map((shot) => {
+          const referenceIds = shot.characterVisible
+            ? shot.referenceIds.filter((id) => availableReferenceIds.has(id))
+            : [];
+          assertVisibleCharacterHasReference(
+            shot.characterVisible,
+            referenceIds.length,
+            `shot ${shot.sortOrder}`,
+          );
+          return { ...shot, referenceIds };
+        }),
+      };
 
       // 기획·빌드 LLM을 직렬로 부르면 기본 리스(120s)를 넘길 수 있어,
       // 스윕이 중간에 회수해 이중 기획하지 않도록 리스를 연장한다.
@@ -525,12 +632,24 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       // 두고 운영자가 "프롬프트 빌드" 버튼으로 별도 진행한다.
       const profile = draft.character.visualProfile;
       const builder = manualMode ? null : await this.resolvePromptBuilder();
+      const buildShots = builder
+        ? plan.shots.map((shot) => ({
+            sortOrder: shot.sortOrder,
+            scene: shot.scene,
+            captureSetup: shot.captureSetup,
+            characterVisible: shot.characterVisible,
+            targetModelId: targetModelIdForShot(
+              builder,
+              shot.referenceIds.length > 0,
+            ),
+          }))
+        : [];
       const built = builder
         ? await builder.build(
             {
               appearancePrompt: profile?.appearancePrompt ?? "",
               stylePrompt: profile?.stylePrompt ?? "",
-              shots: plan.shots.map((shot) => ({ scene: shot.scene })),
+              shots: buildShots,
             },
             { requestId: draft.id, characterId: draft.characterId },
           )
@@ -575,8 +694,14 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
               // 고른 레퍼런스로 buildRequest가 image_urls를 구성할 때 쓴다.
               paramsJson: {
                 _shot: {
+                  sortOrder: shot.sortOrder,
                   scene: shot.scene,
+                  captureSetup: shot.captureSetup,
+                  characterVisible: shot.characterVisible,
                   referenceMediaIds: referenceIds,
+                  ...(buildShots[index]?.targetModelId
+                    ? { targetModelId: buildShots[index].targetModelId }
+                    : {}),
                 },
               },
             },
@@ -609,7 +734,10 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       `Draft ${draft.id} planning failed: ${message}`,
       error instanceof Error ? error.stack : undefined,
     );
-    if (draft.attemptCount >= this.config.maxAttempts) {
+    if (
+      error instanceof ShotReferencePolicyError ||
+      draft.attemptCount >= this.config.maxAttempts
+    ) {
       const transitioned = await this.prisma.postDraft.updateMany({
         where: { id: draft.id, status: "generating" },
         data: { status: "failed", errorMessage: message, leaseExpiresAt: null },
@@ -1086,13 +1214,61 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
-// 잡 paramsJson._shot.scene — 기획이 남긴 컷 장면 원문 (프롬프트 빌드 입력).
-function shotSceneOf(paramsJson: unknown): string | null {
+// 잡 paramsJson._shot — 기획이 남긴 구조화 컷 계약 (프롬프트 빌드 입력).
+// 구버전 수동 초안은 scene만 있으므로 기존 인물 중심 동작을 보수적으로 유지한다.
+function shotPlanOf(
+  paramsJson: unknown,
+  sortOrder: number,
+): {
+  sortOrder: number;
+  scene: string;
+  captureSetup: string;
+  characterVisible: boolean;
+  referenceMediaIds?: string[];
+} | null {
   if (!isRecord(paramsJson) || !isRecord(paramsJson._shot)) {
     return null;
   }
   const scene = paramsJson._shot.scene;
-  return typeof scene === "string" && scene.trim() ? scene.trim() : null;
+  if (typeof scene !== "string" || !scene.trim()) {
+    return null;
+  }
+  const captureSetup = paramsJson._shot.captureSetup;
+  const referenceMediaIds = Array.isArray(paramsJson._shot.referenceMediaIds)
+    ? paramsJson._shot.referenceMediaIds.filter(
+        (id): id is string => typeof id === "string",
+      )
+    : undefined;
+  return {
+    sortOrder,
+    scene: scene.trim(),
+    captureSetup:
+      typeof captureSetup === "string" && captureSetup.trim()
+        ? captureSetup.trim()
+        : "Legacy plan without capture metadata; use a physically plausible viewpoint.",
+    characterVisible:
+      typeof paramsJson._shot.characterVisible === "boolean"
+        ? paramsJson._shot.characterVisible
+        : true,
+    ...(referenceMediaIds !== undefined ? { referenceMediaIds } : {}),
+  };
+}
+
+function withShotBuildMetadata(
+  paramsJson: unknown,
+  referenceMediaIds: string[],
+  targetModelId?: string,
+): Prisma.InputJsonValue {
+  const params = isRecord(paramsJson) ? paramsJson : {};
+  const shot = isRecord(params._shot) ? params._shot : {};
+  return {
+    ...params,
+    _shot: {
+      ...shot,
+      referenceMediaIds,
+      ...(targetModelId ? { targetModelId } : {}),
+    },
+  } as Prisma.InputJsonValue;
 }
 
 export function publishedMemoryContent(

@@ -11,6 +11,10 @@ if (!envFile.DATABASE_URL) {
 
 process.env.DATABASE_URL = envFile.DATABASE_URL;
 process.env.AUTH_JWT_SECRET = "test-auth-secret";
+// 최초 관리자는 bootstrap 환경변수로만 생성된다 (test/admin-auth.ts가 이 값으로
+// 로그인한다).
+process.env.ADMIN_BOOTSTRAP_EMAIL = "admin@example.test";
+process.env.ADMIN_BOOTSTRAP_PASSWORD = "test-password-1";
 process.env.S3_BUCKET = "ai-sns-test";
 process.env.AWS_REGION = "us-east-1";
 process.env.AWS_ACCESS_KEY_ID = "test-access";

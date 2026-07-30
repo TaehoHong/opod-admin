@@ -12,10 +12,14 @@ import {
 } from "../../domain/database/page";
 import { PrismaService } from "../../domain/database/prisma.service";
 import { assertUploadedMedia } from "../media/media.service";
-import { ContentPlanner } from "../../worker/content-planner";
+import {
+  assertVisibleCharacterHasReference,
+  ContentPlanner,
+} from "../../worker/content-planner";
 import {
   ImagePromptBuilder,
   localImagePromptBuilder,
+  targetModelIdForShot,
 } from "../../worker/image-prompt-builder";
 import { randomUUID } from "node:crypto";
 
@@ -211,10 +215,20 @@ export class GenerationService {
     const planner = await this.resolveScenePlanner();
     const requestId = randomUUID();
     let scene = inputPrompt;
-    let referenceMediaIds: string[] = [];
+    let captureSetup =
+      "No separate capture metadata was provided; follow the scene literally with a physically plausible viewpoint";
+    let characterVisible = true;
+    const availableReferences = (
+      character.visualProfile?.referenceMedia ?? []
+    ).filter((reference) => reference.media.uploadedAt);
+    // 플래너가 없으면 구버전 위저드와 동일하게 사용 가능한 프로필
+    // 레퍼런스를 모두 쓰되, _shot에 명시해 빌드 라우트와 실행 라우트를 맞춘다.
+    let referenceMediaIds: string[] = availableReferences.map(
+      (reference) => reference.mediaId,
+    );
     if (planner) {
       // 캡션 있는 레퍼런스만 카탈로그로 — 장면과 함께 레퍼런스도 고른다.
-      const referenceCatalog = (character.visualProfile?.referenceMedia ?? [])
+      const referenceCatalog = availableReferences
         .filter((reference) => reference.description)
         .map((reference) => ({
           id: reference.mediaId,
@@ -243,13 +257,37 @@ export class GenerationService {
           `Scene planning failed (${planner.name}): ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-      scene = plan.shots[0]?.scene ?? inputPrompt;
-      referenceMediaIds = plan.shots[0]?.referenceIds ?? [];
+      const plannedShot = plan.shots[0];
+      scene = plannedShot?.scene ?? inputPrompt;
+      captureSetup = plannedShot?.captureSetup ?? captureSetup;
+      characterVisible = plannedShot?.characterVisible ?? characterVisible;
+      referenceMediaIds = plannedShot?.referenceIds ?? [];
+    }
+    const uploadedReferenceIds = new Set(
+      availableReferences.map((reference) => reference.mediaId),
+    );
+    referenceMediaIds = characterVisible
+      ? referenceMediaIds.filter((id) => uploadedReferenceIds.has(id))
+      : [];
+    try {
+      assertVisibleCharacterHasReference(
+        characterVisible,
+        referenceMediaIds.length,
+        "shot 0",
+      );
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : String(error),
+      );
     }
 
     // 장면을 이미지 모델용 프롬프트로 변환 — 자동 파이프라인과 같은 빌드 단계.
     // 운영자는 이어지는 프롬프트 확인 카드에서 결과를 검토·수정한다.
     const builder = await this.resolvePromptBuilder();
+    const targetModelId = targetModelIdForShot(
+      builder,
+      referenceMediaIds.length > 0,
+    );
     let prompt: string;
     try {
       prompt = (
@@ -257,7 +295,15 @@ export class GenerationService {
           {
             appearancePrompt: character.visualProfile?.appearancePrompt ?? "",
             stylePrompt: character.visualProfile?.stylePrompt ?? "",
-            shots: [{ scene }],
+            shots: [
+              {
+                sortOrder: 0,
+                scene,
+                captureSetup,
+                characterVisible,
+                targetModelId,
+              },
+            ],
           },
           { requestId, characterId: input.characterId },
         )
@@ -281,12 +327,16 @@ export class GenerationService {
               builderName: builder.name,
               expandedScene: scene,
             },
-            _shot: {
-              scene,
-              referenceMediaIds,
-            },
           }
         : {}),
+      _shot: {
+        sortOrder: 0,
+        scene,
+        captureSetup,
+        characterVisible,
+        referenceMediaIds,
+        ...(targetModelId ? { targetModelId } : {}),
+      },
     };
     const job = await this.prisma.generationJob.create({
       data: {
@@ -538,20 +588,56 @@ export class GenerationService {
     return this.getJob(jobId);
   }
 
-  async retryJob(jobId: string): Promise<GenerationJob> {
-    const job = await this.getJob(jobId);
-    if (job.status !== "failed") {
+  async retryJob(jobId: string, reason?: string): Promise<GenerationJob> {
+    const source = await this.prisma.generationJob.findUnique({
+      where: { id: jobId },
+      include: this.jobWithOutput,
+    });
+    if (!source) {
+      throw new BadRequestException("Generation job not found");
+    }
+    if (source.status !== "failed") {
       throw new BadRequestException(
         "Only failed generation jobs can be retried",
       );
     }
-    return this.enqueueJob({
-      characterId: job.characterId,
-      mediaType: job.mediaType,
-      prompt: job.prompt,
-      provider: job.provider,
-      originJobId: job.id,
+    if (source.draftId) {
+      throw new BadRequestException(
+        "Draft generation jobs must be retried from draft review",
+      );
+    }
+    const job = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.generationJob.create({
+        data: {
+          characterId: source.characterId,
+          mediaType: source.mediaType,
+          ...(source.inputPrompt != null
+            ? { inputPrompt: source.inputPrompt }
+            : {}),
+          prompt: source.prompt,
+          ...(source.candidateCount != null
+            ? { candidateCount: source.candidateCount }
+            : {}),
+          ...(source.paramsJson != null
+            ? { paramsJson: source.paramsJson as Prisma.InputJsonValue }
+            : {}),
+          sortOrder: source.sortOrder,
+          originJobId: source.id,
+        },
+        include: this.jobWithOutput,
+      });
+      await tx.characterActionLog.create({
+        data: {
+          characterId: source.characterId,
+          actionType: "GENERATION_JOB_RETRIED",
+          targetTable: "generation_jobs",
+          targetId: created.id,
+          reason: reason?.trim() || "generation job retried",
+        },
+      });
+      return created;
     });
+    return this.toGenerationJob(job as PrismaGenerationJob);
   }
 
   async failJob(input: {

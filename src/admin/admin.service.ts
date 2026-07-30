@@ -949,15 +949,7 @@ export class AdminService {
   }
 
   async retryGenerationJob(input: { jobId: string; reason?: string }) {
-    const job = await this.generationService.retryJob(input.jobId);
-    await this.recordCharacterActionLog({
-      characterId: job.characterId,
-      actionType: "GENERATION_JOB_RETRIED",
-      targetTable: "generation_jobs",
-      targetId: job.id,
-      reason: input.reason?.trim() || "generation job retried",
-    });
-    return job;
+    return this.generationService.retryJob(input.jobId, input.reason);
   }
 
   async completeGenerationJob(

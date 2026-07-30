@@ -78,7 +78,8 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
             return resolveImagePromptBuilder(
               planner,
               {
-                targetModelId: provider.editModel ?? provider.t2iModel,
+                t2iModelId: provider.t2iModel ?? provider.editModel,
+                editModelId: provider.editModel,
               },
               fetch,
               llmLogs,

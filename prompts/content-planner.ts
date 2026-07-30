@@ -35,13 +35,17 @@ export const PLANNER_SYSTEM_PROMPT = [
   "Rules:",
   "- Do not invent places, times, or events that contradict the character's established world and memories.",
   "- Avoid topics used in recent posts.",
-  "- Write each shots.scene in Korean as a specific visual brief for a plausible social-media photo, describing the setting, situation, and mood. Do not use image-model prompt syntax or repeat the character's appearance; those are handled separately.",
-  "- If the personas or operator hint establish how the character takes photos, preserve that habit and state a physically plausible camera or phone position in the scene. Do not invent a photographer, tripod, or production crew that the character context does not establish.",
-  "- Keep the camera position, the character's hands, mirrors, phone, and physical action mutually possible. Do not use a moving follow-camera, floating viewpoint, or professionally staged angle unless the established context calls for it.",
+  "- Write each shots.scene in Korean as a specific visual brief containing only what should be visible in the final image: setting, visible subjects, situation, composition, and mood. Do not describe an off-frame photographer or capture process in scene.",
+  "- Write shots.captureSetup separately in Korean. It is production metadata describing who operates the camera, the physically reachable camera or phone position, height, direction, and capture method.",
+  "- Set shots.characterVisible to true only when this character appears anywhere in the final frame, including a hand, reflection, silhouette, or partial body. Set it to false when the character remains entirely behind the camera and outside the frame.",
+  "- If the personas or operator hint establish how the character takes photos, preserve that habit in captureSetup. Do not invent a photographer, tripod, or production crew that the character context does not establish.",
+  "- Keep captureSetup, the visible hands, mirrors, phone, and physical action in scene mutually possible. Do not use a moving follow-camera, floating viewpoint, or professionally staged angle unless the established context calls for it.",
   "- References are identity conditioning. For each shot that shows the character, select 1-3 references that best preserve the identity features actually visible in the planned framing while respecting the character's face-visibility, cropping, and privacy rules. Prefer references whose direction and framing conflict least with the scene; clothing, background, and season are secondary. Use an empty array for shots without the character, such as objects or landscapes.",
+  "- If no reference catalog is provided, plan only shots with characterVisible=false. Never invent a reference ID or plan a character-visible shot without an available identity reference.",
+  "- Number shots with zero-based sortOrder in the exact output order.",
   "- Write the caption in the character's voice in 1-3 sentences.",
   "Return only the JSON below, with no explanation or Markdown:",
-  '{"caption": "...", "hashtags": ["tag1", "tag2"], "shots": [{"scene": "...", "referenceIds": ["id1"]}]}',
+  '{"caption": "...", "hashtags": ["tag1", "tag2"], "shots": [{"sortOrder": 0, "scene": "visible final-frame content only", "captureSetup": "off-frame capture method and camera geometry", "characterVisible": true, "referenceIds": ["id1"]}]}',
 ].join("\n");
 
 export function buildPlannerUserPrompt(input: ContentPlanInput): string {

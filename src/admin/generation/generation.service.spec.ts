@@ -39,6 +39,33 @@ const job = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("GenerationService", () => {
+  it("rejects a character-visible image draft without an uploaded identity reference", async () => {
+    const findUnique = jest.fn().mockResolvedValue({
+      id: "ai-1",
+      visualProfile: {
+        appearancePrompt: "same face",
+        stylePrompt: "film grain",
+        negativePrompt: "",
+        referenceMedia: [],
+      },
+    });
+    const create = jest.fn();
+    const service = new (
+      GenerationService as new (prisma: unknown) => GenerationService
+    )({ character: { findUnique }, generationJob: { create } });
+
+    await expect(
+      service.createImageDraft({
+        characterId: "ai-1",
+        inputPrompt: "walking in Seongsu",
+        candidateCount: 2,
+      }),
+    ).rejects.toThrow(
+      "shot 0 shows the character but has no usable identity reference",
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("creates a non-claimable image draft with a compiled prompt", async () => {
     const findUnique = jest.fn().mockResolvedValue({
       id: "ai-1",
@@ -46,15 +73,32 @@ describe("GenerationService", () => {
         appearancePrompt: "same face",
         stylePrompt: "film grain",
         negativePrompt: "blurry",
-        referenceMedia: [{ media: { uploadedAt: new Date() } }],
+        referenceMedia: [
+          {
+            mediaId: "ref-1",
+            description: "portrait",
+            media: { uploadedAt: new Date() },
+          },
+        ],
       },
     });
     const create = jest.fn().mockResolvedValue(
       job({
         status: "draft",
         inputPrompt: "walking in Seongsu",
-        prompt: "same face, walking in Seongsu, film grain",
+        prompt:
+          "same face, Final image content: walking in Seongsu. Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment, film grain",
         candidateCount: 3,
+        paramsJson: {
+          _shot: {
+            sortOrder: 0,
+            scene: "walking in Seongsu",
+            captureSetup:
+              "No separate capture metadata was provided; follow the scene literally with a physically plausible viewpoint",
+            characterVisible: true,
+            referenceMediaIds: ["ref-1"],
+          },
+        },
       }),
     );
     const service = new (
@@ -84,8 +128,19 @@ describe("GenerationService", () => {
         mediaType: "image",
         status: "draft",
         inputPrompt: "walking in Seongsu",
-        prompt: "same face, walking in Seongsu, film grain",
+        prompt:
+          "same face, Final image content: walking in Seongsu. Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment, film grain",
         candidateCount: 3,
+        paramsJson: {
+          _shot: {
+            sortOrder: 0,
+            scene: "walking in Seongsu",
+            captureSetup:
+              "No separate capture metadata was provided; follow the scene literally with a physically plausible viewpoint",
+            characterVisible: true,
+            referenceMediaIds: ["ref-1"],
+          },
+        },
       },
       include: { outputMedia: true },
     });
@@ -98,7 +153,13 @@ describe("GenerationService", () => {
         appearancePrompt: "same face",
         stylePrompt: "film grain",
         negativePrompt: "",
-        referenceMedia: [],
+        referenceMedia: [
+          {
+            mediaId: "ref-1",
+            description: "portrait",
+            media: { uploadedAt: new Date() },
+          },
+        ],
       },
     });
     const create = jest.fn().mockResolvedValue(
@@ -124,7 +185,17 @@ describe("GenerationService", () => {
     ).resolves.toMatchObject({ status: "draft", aspectRatio: "16:9" });
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        paramsJson: { aspect_ratio: "16:9" },
+        paramsJson: {
+          aspect_ratio: "16:9",
+          _shot: {
+            sortOrder: 0,
+            scene: "rooftop at dusk",
+            captureSetup:
+              "No separate capture metadata was provided; follow the scene literally with a physically plausible viewpoint",
+            characterVisible: true,
+            referenceMediaIds: ["ref-1"],
+          },
+        },
       }),
       include: { outputMedia: true },
     });
@@ -143,7 +214,13 @@ describe("GenerationService", () => {
         appearancePrompt: "same face",
         stylePrompt: "film grain",
         negativePrompt: "",
-        referenceMedia: [],
+        referenceMedia: [
+          {
+            mediaId: "ref-1",
+            description: "portrait",
+            media: { uploadedAt: new Date() },
+          },
+        ],
       },
     });
     const create = jest.fn().mockResolvedValue(
@@ -162,7 +239,15 @@ describe("GenerationService", () => {
     const plan = jest.fn().mockResolvedValue({
       caption: "무시됨",
       hashtags: [],
-      shots: [{ scene: "비 오는 오후 창가 카페, 얕은 심도" }],
+      shots: [
+        {
+          sortOrder: 0,
+          scene: "비 오는 오후 창가 카페, 얕은 심도",
+          captureSetup: "창틀 위 고정 카메라로 셀프타이머 촬영",
+          characterVisible: true,
+          referenceIds: ["ref-1"],
+        },
+      ],
     });
     const service = new (
       GenerationService as new (
@@ -197,7 +282,8 @@ describe("GenerationService", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           inputPrompt: "따듯한 카페",
-          prompt: "same face, 비 오는 오후 창가 카페, 얕은 심도, film grain",
+          prompt:
+            "same face, Final image content: 비 오는 오후 창가 카페, 얕은 심도. Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment, film grain",
           paramsJson: {
             _wizard: {
               plannerName: "llm:test",
@@ -206,8 +292,11 @@ describe("GenerationService", () => {
               expandedScene: "비 오는 오후 창가 카페, 얕은 심도",
             },
             _shot: {
+              sortOrder: 0,
               scene: "비 오는 오후 창가 카페, 얕은 심도",
-              referenceMediaIds: [],
+              captureSetup: "창틀 위 고정 카메라로 셀프타이머 촬영",
+              characterVisible: true,
+              referenceMediaIds: ["ref-1"],
             },
           },
         }),
@@ -228,7 +317,13 @@ describe("GenerationService", () => {
         appearancePrompt: "same face",
         stylePrompt: "film grain",
         negativePrompt: "",
-        referenceMedia: [],
+        referenceMedia: [
+          {
+            mediaId: "ref-1",
+            description: "portrait",
+            media: { uploadedAt: new Date() },
+          },
+        ],
       },
     });
     const create = jest
@@ -249,7 +344,15 @@ describe("GenerationService", () => {
           plan: jest.fn().mockResolvedValue({
             caption: "무시됨",
             hashtags: [],
-            shots: [{ scene: "확장된 장면" }],
+            shots: [
+              {
+                sortOrder: 0,
+                scene: "확장된 장면",
+                captureSetup: "친구가 눈높이에서 촬영",
+                characterVisible: true,
+                referenceIds: ["ref-1"],
+              },
+            ],
           }),
         }),
       () => Promise.resolve({ name: "llm:builder", build }),
@@ -265,7 +368,14 @@ describe("GenerationService", () => {
       {
         appearancePrompt: "same face",
         stylePrompt: "film grain",
-        shots: [{ scene: "확장된 장면" }],
+        shots: [
+          {
+            sortOrder: 0,
+            scene: "확장된 장면",
+            captureSetup: "친구가 눈높이에서 촬영",
+            characterVisible: true,
+          },
+        ],
       },
       expect.objectContaining({ characterId: "ai-1" }),
     );
@@ -290,7 +400,18 @@ describe("GenerationService", () => {
       personas: [],
       memories: [],
       posts: [],
-      visualProfile: null,
+      visualProfile: {
+        appearancePrompt: "same face",
+        stylePrompt: "film grain",
+        negativePrompt: "",
+        referenceMedia: [
+          {
+            mediaId: "ref-1",
+            description: "portrait",
+            media: { uploadedAt: new Date() },
+          },
+        ],
+      },
     });
     const create = jest.fn();
     const service = new (
@@ -1282,11 +1403,23 @@ describe("GenerationService", () => {
 
   it("retries only failed jobs and links the origin job", async () => {
     const createdAt = new Date("2026-06-30T00:00:00.000Z");
+    const paramsJson = {
+      aspect_ratio: "4:5",
+      _shot: {
+        scene: "empty railway at dusk",
+        referenceMediaIds: [],
+      },
+    };
     const failedJob = {
       id: "job-1",
       characterId: "ai-1",
       mediaType: "image" as const,
+      inputPrompt: "empty railway at dusk",
       prompt: "portrait",
+      candidateCount: 3,
+      paramsJson,
+      draftId: null,
+      sortOrder: 0,
       status: "failed" as const,
       provider: "fal:flux-kontext",
       outputMedia: null,
@@ -1302,16 +1435,24 @@ describe("GenerationService", () => {
     };
     const findUnique = jest.fn().mockResolvedValue(failedJob);
     const create = jest.fn().mockResolvedValue(retriedJob);
+    const actionLogCreate = jest.fn().mockResolvedValue({});
+    const transaction = jest.fn(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          generationJob: { create },
+          characterActionLog: { create: actionLogCreate },
+        }),
+    );
     const service = new (
       GenerationService as new (prisma: unknown) => GenerationService
     )({
-      generationJob: {
-        create,
-        findUnique,
-      },
+      generationJob: { findUnique },
+      $transaction: transaction,
     });
 
-    await expect(service.retryJob("job-1")).resolves.toMatchObject({
+    await expect(
+      service.retryJob("job-1", "operator retry"),
+    ).resolves.toMatchObject({
       id: "job-2",
       characterId: "ai-1",
       status: "queued",
@@ -1321,14 +1462,50 @@ describe("GenerationService", () => {
       data: {
         characterId: "ai-1",
         mediaType: "image",
+        inputPrompt: "empty railway at dusk",
         prompt: "portrait",
-        provider: "fal:flux-kontext",
+        candidateCount: 3,
+        paramsJson,
+        sortOrder: 0,
         originJobId: "job-1",
       },
       include: {
         outputMedia: true,
       },
     });
+    expect(actionLogCreate).toHaveBeenCalledWith({
+      data: {
+        characterId: "ai-1",
+        actionType: "GENERATION_JOB_RETRIED",
+        targetTable: "generation_jobs",
+        targetId: "job-2",
+        reason: "operator retry",
+      },
+    });
+  });
+
+  it("rejects retrying a draft-owned job through the generic endpoint", async () => {
+    const createdAt = new Date("2026-06-30T00:00:00.000Z");
+    const findUnique = jest.fn().mockResolvedValue({
+      id: "job-1",
+      characterId: "ai-1",
+      mediaType: "image",
+      prompt: "portrait",
+      status: "failed",
+      draftId: "draft-1",
+      outputMedia: null,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    const transaction = jest.fn();
+    const service = new (
+      GenerationService as new (prisma: unknown) => GenerationService
+    )({ generationJob: { findUnique }, $transaction: transaction });
+
+    await expect(service.retryJob("job-1")).rejects.toThrow(
+      "Draft generation jobs must be retried from draft review",
+    );
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   it("rejects retrying a job that has not failed", async () => {

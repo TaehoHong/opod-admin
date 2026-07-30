@@ -12,6 +12,7 @@ function prismaMock(overrides: Record<string, unknown> = {}) {
     characterVisualProfileReference: {
       deleteMany: jest.fn(),
       createMany: jest.fn(),
+      upsert: jest.fn(),
     },
     characterActionLog: {
       create: jest.fn().mockResolvedValue({}),
@@ -128,7 +129,7 @@ describe("VisualProfileService", () => {
       uploadedAt: new Date(),
     });
     const txDeleteMany = jest.fn();
-    const txCreateMany = jest.fn();
+    const txUpsert = jest.fn();
     prisma.$transaction.mockImplementation(
       async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
@@ -138,7 +139,7 @@ describe("VisualProfileService", () => {
           },
           characterVisualProfileReference: {
             deleteMany: txDeleteMany,
-            createMany: txCreateMany,
+            upsert: txUpsert,
           },
         }),
     );
@@ -148,10 +149,25 @@ describe("VisualProfileService", () => {
       service.setReferences({ characterId: "ai-1", mediaIds: ["media-1"] }),
     ).resolves.toMatchObject({ characterId: "ai-1" });
     expect(txDeleteMany).toHaveBeenCalledWith({
-      where: { profileId: "profile-1" },
+      where: {
+        profileId: "profile-1",
+        mediaId: { notIn: ["media-1"] },
+      },
     });
-    expect(txCreateMany).toHaveBeenCalledWith({
-      data: [{ profileId: "profile-1", mediaId: "media-1", sortOrder: 10 }],
+    expect(txUpsert).toHaveBeenCalledWith({
+      where: {
+        profileId_mediaId: {
+          profileId: "profile-1",
+          mediaId: "media-1",
+        },
+      },
+      create: {
+        profileId: "profile-1",
+        mediaId: "media-1",
+        sortOrder: 10,
+      },
+      // 유지된 관계는 description을 건드리지 않고 순서만 바꾼다.
+      update: { sortOrder: 10 },
     });
   });
 

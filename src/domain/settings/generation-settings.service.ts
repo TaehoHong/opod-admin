@@ -7,6 +7,7 @@ import {
 } from "../../worker/content-planner";
 import {
   GenerationProviderSettings,
+  ImageGenerationConfigError,
   resolveImageGenerationProviders,
 } from "../../worker/image-generation.provider";
 
@@ -317,19 +318,29 @@ export class GenerationSettingsService {
   }
 
   // 현재 설정으로 실제 라우팅될 프로바이더/플래너 이름 (UI 상태 표시용).
+  // 이미지 설정이 없으면 생성은 실패하지만 설정 화면 자체는 떠야 하므로
+  // 여기서는 예외 대신 null을 돌려준다 (UI가 "—"로 표시한다).
   async resolveProviderNames(
     env: SettingsEnv = process.env,
-  ): Promise<{ t2i: string; edit: string; planner: string }> {
+  ): Promise<{ t2i: string | null; edit: string | null; planner: string }> {
     const [resolved, plannerResolved] = await Promise.all([
       this.resolveProviderSettings(env),
       this.resolvePlannerSettings(env),
     ]);
-    const providers = resolveImageGenerationProviders(resolved);
-    return {
-      t2i: providers.t2i.name,
-      edit: providers.edit.name,
-      planner: resolveContentPlanner(plannerResolved).name,
-    };
+    const planner = resolveContentPlanner(plannerResolved).name;
+    try {
+      const providers = resolveImageGenerationProviders(resolved);
+      return {
+        t2i: providers.t2i.name,
+        edit: providers.edit.name,
+        planner,
+      };
+    } catch (error) {
+      if (error instanceof ImageGenerationConfigError) {
+        return { t2i: null, edit: null, planner };
+      }
+      throw error;
+    }
   }
 }
 

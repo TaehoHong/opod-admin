@@ -3,6 +3,7 @@ import {
   createImageGenerationProviders,
   falQueueUrls,
   falSupportsNegativePrompt,
+  ImageGenerationConfigError,
   ImageGenerationRequest,
 } from "./image-generation.provider";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
@@ -162,20 +163,32 @@ describe("createFalImageGenerationProvider", () => {
     expect(body).not.toHaveProperty("image_urls");
   });
 
-  it("lets extraParams force provider-specific fields", async () => {
+  it("does not let extraParams override reserved request fields", async () => {
     const fetchFn = jest
       .fn()
       .mockResolvedValue(jsonResponse({ request_id: "req-1" }));
     const provider = createFalImageGenerationProvider(config, fetchFn);
 
     await provider.submit(
-      baseRequest({ extraParams: { num_images: 4, negative_prompt: "text" } }),
+      baseRequest({
+        referenceImageUrls: ["https://cdn.local/ref.png"],
+        extraParams: {
+          prompt: "wrong prompt",
+          image_urls: ["https://wrong.local/ref.png"],
+          num_images: 4,
+          negative_prompt: "wrong negative",
+          aspect_ratio: "4:5",
+        },
+      }),
     );
 
     const [, init] = fetchFn.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
-    expect(body.num_images).toBe(4);
-    expect(body.negative_prompt).toBe("text");
+    expect(body.prompt).toBe("film photo of a beach");
+    expect(body.image_urls).toEqual(["https://cdn.local/ref.png"]);
+    expect(body.num_images).toBe(2);
+    expect(body).not.toHaveProperty("negative_prompt");
+    expect(body.aspect_ratio).toBe("4:5");
   });
 
   it("polls status on the appId root and maps queue states", async () => {
@@ -279,10 +292,18 @@ describe("createFalImageGenerationProvider", () => {
 });
 
 describe("createImageGenerationProviders", () => {
-  it("falls back to the local provider without an API key", () => {
-    const providers = createImageGenerationProviders({});
-    expect(providers.t2i.name).toBe("local");
-    expect(providers.edit.name).toBe("local");
+  // 설정이 빠진 채로 성공하면 플레이스홀더 이미지가 completed 잡으로 검수
+  // 큐에 들어간다. 환경 구분 없이 실패해야 한다.
+  it("fails without an API key instead of returning a placeholder provider", () => {
+    expect(() => createImageGenerationProviders({})).toThrow(
+      ImageGenerationConfigError,
+    );
+  });
+
+  it("fails when the API key is set but the image model is missing", () => {
+    expect(() =>
+      createImageGenerationProviders({ FAL_API_KEY: "secret" }),
+    ).toThrow(ImageGenerationConfigError);
   });
 
   it("uses the edit model for both routes when t2i is not set", () => {
