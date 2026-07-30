@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
@@ -26,8 +26,16 @@ async function bootstrap() {
   // SPA는 inline style 속성을 쓰므로 기본 CSP를 켜면 화면이 깨진다.
   app.use(helmet({ contentSecurityPolicy: false }));
 
-  const adminUiRoot = join(process.cwd(), "packages/admin");
-  app.useStaticAssets(adminUiRoot);
+  // React 전환 중. `npm run admin:build`로 만든 산출물이 있으면 그것을,
+  // 없으면 기존 정적 SPA를 서빙한다. 빌드 여부가 곧 전환 스위치라 운영자가
+  // 되돌릴 때 코드를 고칠 필요가 없다.
+  const legacyUiRoot = join(process.cwd(), "packages/admin");
+  const reactUiRoot = join(legacyUiRoot, "dist");
+  const reactEntry = join(reactUiRoot, "index.react.html");
+  const useReactUi = existsSync(reactEntry);
+  const shellEntry = useReactUi ? reactEntry : join(legacyUiRoot, "index.html");
+
+  app.useStaticAssets(useReactUi ? reactUiRoot : legacyUiRoot);
   app.use(
     (
       request: { method: string; path: string },
@@ -37,7 +45,7 @@ async function bootstrap() {
       const adminUiPath =
         /^\/(?:home|characters|posts|media|drafts|generation|logs|llm-logs|users|credits|payments|moderation|events|analytics|settings)(?:\/[^/]+){0,2}\/?$/;
       if (request.method === "GET" && adminUiPath.test(request.path)) {
-        response.sendFile(join(adminUiRoot, "index.html"));
+        response.sendFile(shellEntry);
         return;
       }
       next();

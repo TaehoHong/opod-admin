@@ -46,7 +46,7 @@
 
 ## Frontend Target Tests
 
-React 전환 시:
+전환이 시작돼 아래 구성이 `packages/admin`에 적용돼 있다:
 
 - test runner: Vitest
 - pure logic: Node environment
@@ -73,7 +73,7 @@ React 전환 시:
 
 | 변경 영역 | 좁은 검증 | 넓은 검증 |
 | --- | --- | --- |
-| 현재 Admin UI | `npm run admin:check` | `npm run format` |
+| Admin UI (legacy/React) | `npm run admin:check` | `npm run format` |
 | Backend logic | 관련 `*.spec.ts` | `npm run test` |
 | API/worker | 관련 spec | `npm run lint`, `npm run test`, `npm run build` |
 | Auth/payment/refund/permission/transaction | 관련 unit | `npm run test:e2e` |

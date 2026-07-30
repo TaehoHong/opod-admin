@@ -20,13 +20,10 @@ test("ships the admin UI shell", async () => {
   );
 });
 
-test("ships the focused image generation workflow without a runtime dependency", async () => {
-  const [source, styles, pkg] = await Promise.all([
+test("ships the focused image generation workflow", async () => {
+  const [source, styles] = await Promise.all([
     readFile(new URL("../main.js", import.meta.url), "utf8"),
     readFile(new URL("../styles.css", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8").then(
-      JSON.parse,
-    ),
   ]);
 
   for (const label of [
@@ -48,5 +45,4 @@ test("ships the focused image generation workflow without a runtime dependency",
   ]) {
     assert.match(styles, new RegExp(`\\.${className}\\b`));
   }
-  assert.deepEqual(pkg.dependencies ?? {}, {});
 });
