@@ -10,7 +10,7 @@
 ## Current Context
 
 - 이 계획 이전 상태는 커밋 `737495a`(project-init)다. 이후 이 계획으로
-  10개 커밋이 쌓였다.
+  16개 커밋이 쌓였다.
 - **병행 세션 주의**: 게시물 생성 품질 작업(`docs/media-generation-quality-improvements.md`)은
   다른 세션이 소유한다. 아래 파일은 건드리지 않는다 —
   `prompts/*`, `src/worker/*`, `src/admin/drafts/drafts.service.ts`,
@@ -35,24 +35,29 @@
 - React 전환 시작: Vite/React/TS/Router/TanStack Query/Mantine/Vitest+RTL+MSW,
   Mantine Theme token, 화면 6개(characters, posts, users, credits,
   moderation, events)
+- React 화면 7개 추가 이관: home, analytics, payments, logs, llm-logs(토큰
+  사용량 대시보드 포함), media, settings. 좌측 네비게이션 대기 배지도 함께
+  붙였다(`shared/api/usePendingCounts`)
 
 ## Checklist
 
-### [ ] 1. React 화면 9개 이관
+### [ ] 1. React 화면 2개 이관 — 병행 세션 종료 후
 
-- 남은 화면: home, media, drafts, generation, llm-logs, logs, payments,
-  analytics, settings
-- 권장 순서: analytics · payments · logs(조회형, 빠름) → llm-logs(토큰
-  대시보드 UI 동시) → media · drafts → generation(위저드, 가장 큼)
+- 남은 화면: drafts, generation. 둘 다 **지금 착수하면 안 된다** —
+  `docs/media-generation-quality-improvements.md:74`가 `packages/admin/main.js`를
+  병행 세션의 변경 대상으로 명시하고 `:257-258`이 초안·생성 화면의 구체적
+  위치를 가리킨다. 그 세션이 끝나고 legacy 화면이 확정된 뒤에 옮긴다.
+- generation은 위저드라 가장 크다. drafts를 먼저 옮긴다.
 - 패턴: `src/features/characters/`를 본뜬다. 목록은
   `shared/api/useCursorList` + `shared/ui/DataPage`, 폼은 `@mantine/form`
-  uncontrolled + built-in `validate`
+  uncontrolled + built-in `validate`. 상세는 목록 아래 `Paper` 패널로
+  펼치고(payments, media, llm-logs 참고) 행 클릭 대신 버튼을 쓴다
 - 색상·spacing은 `src/app/theme.ts` token만 사용한다. legacy `styles.css`
   값을 복사하지 않는다 (`docs/04-design-rules.md:25-26`)
 - 화면을 옮길 때마다 `src/app/routes.tsx`의 `MIGRATED`에 등록한다
 - Verification: `npm run admin:check`, `npm run admin:build`
 
-### [ ] 2. React 전환 마무리
+### [ ] 2. React 전환 마무리 — 1번 이후
 
 - `index.react.html`을 `index.html`로 합치고 legacy `main.js`,
   `styles.css`, `test/*.test.mjs` 제거
@@ -60,7 +65,11 @@
   존재 여부가 전환 스위치)
 - Helmet CSP 활성화 — `docs/06-architecture.md:129`가 "실제 asset에 맞춘다"
   로 미뤄둔 항목. 현재 `contentSecurityPolicy: false`
-- 라우트 단위 lazy import — 빌드 산출물이 500kB를 넘어 Vite가 경고 중
+- 라우트 단위 lazy import — 빌드 산출물이 610kB로 Vite 경고 중
+- legacy `main.js`를 지울 때 거기 있던 payload 단위 테스트도 함께 사라진다.
+  값이 있는 것만 React 쪽으로 옮긴다 — 지금까지 옮긴 것은
+  `features/settings/payload.test.ts` 하나다(빈 값의 의미가 필드마다 달라
+  조용히 키를 지울 수 있는 부분)
 - Verification: `npm run admin:check`, `npm run build`, 수동 로그인 확인
 
 ### [ ] 3. repository 분리 (지금 가능한 것)
