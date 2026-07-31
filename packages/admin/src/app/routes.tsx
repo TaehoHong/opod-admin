@@ -3,6 +3,7 @@ import { AnalyticsPage } from "../features/analytics/AnalyticsPage";
 import { CharactersPage } from "../features/characters/CharactersPage";
 import { CreditsPage } from "../features/credits/CreditsPage";
 import { EventsPage } from "../features/events/EventsPage";
+import { LlmLogsPage } from "../features/llm-logs/LlmLogsPage";
 import { LogsPage } from "../features/logs/LogsPage";
 import { ModerationPage } from "../features/moderation/ModerationPage";
 import { PaymentsPage } from "../features/payments/PaymentsPage";
@@ -41,6 +42,7 @@ const MIGRATED: Record<string, () => React.JSX.Element> = {
   analytics: AnalyticsPage,
   payments: PaymentsPage,
   logs: LogsPage,
+  "llm-logs": LlmLogsPage,
 };
 
 export function AppRoutes() {
