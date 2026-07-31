@@ -65,6 +65,12 @@ example이고 character profile image가 entity mutation 적용 예다. 새 DB �
 이 형태를 따른다. 기존 service의 직접 Prisma 접근은 새 규칙의 example로
 간주하지 않는다.
 
+규모가 있는 적용 예로는 `src/characters/character.repository.ts`(엔티티 셋을
+한 애그리게이트로 묶은 경우)와 `src/worker/generation-job.repository.ts`
+(조건부 갱신·트랜잭션·raw SQL claim을 담은 경우)를 본다. 두 spec
+(`characters.service.spec.ts`, `generation-worker.service.spec.ts`)이
+repository fake로 서비스 판단만 검증하는 형태의 예다.
+
 ## Target Dependency Rules
 
 - 새 DB 접근은 entity repository에 둔다.
@@ -99,10 +105,14 @@ canonical example: auth feature(`src/features/auth/`)가 apiClient, TanStack
 Query, Mantine form과 MSW 테스트를 한 번에 보여준다. characters feature가
 목록 조회와 cursor 페이지네이션의 canonical example이다.
 
-옮긴 화면: characters, posts, users, credits, moderation, events.
-나머지 9개(home, media, drafts, generation, llm-logs, logs, payments,
-analytics, settings)는 `PendingMigrationPage`로 전환 중임을 표시한다.
-생성 위저드(generation)가 가장 크므로 마지막에 옮긴다.
+nav 15개 화면이 모두 React로 렌더된다. 라우트와 화면은 `app/routes.tsx`의
+`NAV_ITEMS` 한 배열이 소유하고, 각 화면은 `lazy()`로 라우트 단위로 받는다.
+
+다만 **쓰기 기능은 아직 legacy에만 있는 것이 있다** — 캐릭터 관리 전체,
+크레딧 지급, 게시물·댓글·반응 작성. `characters.controller.ts`의 쓰기
+endpoint 20개를 React가 하나도 부르지 않는다. `src/main.ts`가
+`packages/admin/dist` 존재 여부로 서빙을 고르므로, 빌드한 환경에서는 그
+기능들에 접근할 수 없다.
 
 색상·typography·radius는 `src/app/theme.ts`의 Mantine Theme token이
 소유한다. 새 화면은 legacy `styles.css` 값을 복사하지 않는다
@@ -139,20 +149,25 @@ analytics, settings)는 `PendingMigrationPage`로 전환 중임을 표시한다.
 - auth는 `__Host-` HttpOnly cookie 세션이다. 최초 관리자는
   `ADMIN_BOOTSTRAP_EMAIL`과 `ADMIN_BOOTSTRAP_PASSWORD`로만 생성된다.
 - repository 분리 완료: health, admin auth, media, settings audit,
-  posting policy, character profile image.
-- repository 분리 대기: `admin.service.ts`, `drafts.service.ts`,
-  `generation.service.ts`, `characters.service.ts`, `visual-profile.service.ts`,
-  `llm-log.service.ts`, worker service들. 대부분 병행 세션이 편집 중이라
-  충돌을 피해 미뤘다.
+  posting policy, character profile image, llm-log, visual-profile,
+  generation-worker(queue), characters.
+- repository 분리 대기: `admin.service.ts`(Prisma 호출 71곳),
+  `draft-worker.service.ts`(43), `drafts.service.ts`(30),
+  `generation.service.ts`(30), `generation-settings.service.ts`(3).
+  절차와 함정은 `.codex/pave/plans/admin-modernization.md` 4번에 있다.
 - 부팅 설정은 `AppConfigService`로 주입한다. worker와 provider 설정 함수는
   아직 `env` 파라미터(기본값 `process.env`)를 받는다.
-- frontend 전환 진행 중이다. auth와 characters만 React로 옮겼고 나머지 13개
-  화면은 legacy SPA가 담당한다. Helmet CSP는 전환이 끝날 때 실제 asset에
-  맞춰 켠다.
-- 토큰 사용량 집계는 `GET /api/admin/v1/llm-logs/usage`로 제공한다(UI 미연결).
+- frontend는 nav 15개 화면이 React로 렌더되지만 캐릭터 관리·크레딧 지급·
+  게시물 작성 등 쓰기 화면이 이관되지 않아, 그 기능은 지금 콘솔에서 쓸 수
+  없다. legacy `main.js`는 그래서 아직 지우지 않았다.
+- Helmet CSP는 켜져 있다. `style-src`에 `'unsafe-inline'`이 남아 있고
+  (Mantine이 런타임에 CSS 변수 `<style>`을 주입한다) `img-src`는 저장된
+  미디어 URL 호스트가 고정돼 있지 않아 `https:`를 허용한다.
 - approved 4-table logging은 새 테이블이 필요해 `opod-service-backend`의
   canonical schema 변경이 선행돼야 한다.
-- Raw SQL이 queue claim과 lock에 남아 있다.
+- Raw SQL은 생성 워커 claim만 repository 안으로 옮겼다
+  (`worker/generation-job.repository.ts`). draft worker의 claim/lock은 아직
+  service에 있다.
 - 실제 provider refund, 사용자 제재와 자동 상호작용 중단 기능이
   완성되지 않았다.
 - `GET /api/health`가 DB 도달성을 확인한다. automated smoke와 rollback
