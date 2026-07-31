@@ -1,81 +1,104 @@
+import { lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
-import { AnalyticsPage } from "../features/analytics/AnalyticsPage";
-import { CharactersPage } from "../features/characters/CharactersPage";
-import { CreditsPage } from "../features/credits/CreditsPage";
-import { DraftsPage } from "../features/drafts/DraftsPage";
-import { EventsPage } from "../features/events/EventsPage";
-import { GenerationPage } from "../features/generation/GenerationPage";
-import { HomePage } from "../features/home/HomePage";
-import { LlmLogsPage } from "../features/llm-logs/LlmLogsPage";
-import { LogsPage } from "../features/logs/LogsPage";
-import { MediaPage } from "../features/media/MediaPage";
-import { ModerationPage } from "../features/moderation/ModerationPage";
-import { PaymentsPage } from "../features/payments/PaymentsPage";
-import { PostsPage } from "../features/posts/PostsPage";
-import { SettingsPage } from "../features/settings/SettingsPage";
-import { UsersPage } from "../features/users/UsersPage";
 import { AppLayout } from "./AppLayout";
-import { PendingMigrationPage } from "./PendingMigrationPage";
 
-// 기존 정적 SPA의 라우트 집합. 아직 옮기지 않은 화면은 전환 중임을 명시적으로
-// 알리고, 옮긴 화면부터 차례로 실제 컴포넌트로 바꾼다.
+// 화면은 라우트 단위로 잘라서 받는다. 전부 한 번에 묶으면 초기 번들이 커지고,
+// 운영자는 보통 한두 화면만 쓴다. feature가 named export를 쓰므로 default로
+// 감싸 준다.
+const HomePage = lazy(() =>
+  import("../features/home/HomePage").then((m) => ({ default: m.HomePage })),
+);
+const CharactersPage = lazy(() =>
+  import("../features/characters/CharactersPage").then((m) => ({
+    default: m.CharactersPage,
+  })),
+);
+const PostsPage = lazy(() =>
+  import("../features/posts/PostsPage").then((m) => ({ default: m.PostsPage })),
+);
+const MediaPage = lazy(() =>
+  import("../features/media/MediaPage").then((m) => ({ default: m.MediaPage })),
+);
+const DraftsPage = lazy(() =>
+  import("../features/drafts/DraftsPage").then((m) => ({
+    default: m.DraftsPage,
+  })),
+);
+const GenerationPage = lazy(() =>
+  import("../features/generation/GenerationPage").then((m) => ({
+    default: m.GenerationPage,
+  })),
+);
+const LlmLogsPage = lazy(() =>
+  import("../features/llm-logs/LlmLogsPage").then((m) => ({
+    default: m.LlmLogsPage,
+  })),
+);
+const LogsPage = lazy(() =>
+  import("../features/logs/LogsPage").then((m) => ({ default: m.LogsPage })),
+);
+const UsersPage = lazy(() =>
+  import("../features/users/UsersPage").then((m) => ({ default: m.UsersPage })),
+);
+const CreditsPage = lazy(() =>
+  import("../features/credits/CreditsPage").then((m) => ({
+    default: m.CreditsPage,
+  })),
+);
+const PaymentsPage = lazy(() =>
+  import("../features/payments/PaymentsPage").then((m) => ({
+    default: m.PaymentsPage,
+  })),
+);
+const ModerationPage = lazy(() =>
+  import("../features/moderation/ModerationPage").then((m) => ({
+    default: m.ModerationPage,
+  })),
+);
+const EventsPage = lazy(() =>
+  import("../features/events/EventsPage").then((m) => ({
+    default: m.EventsPage,
+  })),
+);
+const AnalyticsPage = lazy(() =>
+  import("../features/analytics/AnalyticsPage").then((m) => ({
+    default: m.AnalyticsPage,
+  })),
+);
+const SettingsPage = lazy(() =>
+  import("../features/settings/SettingsPage").then((m) => ({
+    default: m.SettingsPage,
+  })),
+);
+
+// 네비게이션 항목과 화면을 한 배열이 소유한다. 따로 두면 화면 없는 nav 항목이
+// 생길 수 있다.
 export const NAV_ITEMS = [
-  { id: "home", label: "홈" },
-  { id: "characters", label: "캐릭터" },
-  { id: "posts", label: "게시글" },
-  { id: "media", label: "미디어" },
-  { id: "drafts", label: "초안" },
-  { id: "generation", label: "생성" },
-  { id: "llm-logs", label: "LLM 로그" },
-  { id: "logs", label: "로그" },
-  { id: "users", label: "사용자" },
-  { id: "credits", label: "크레딧" },
-  { id: "payments", label: "결제" },
-  { id: "moderation", label: "신고" },
-  { id: "events", label: "이벤트" },
-  { id: "analytics", label: "분석" },
-  { id: "settings", label: "설정" },
+  { id: "home", label: "홈", Page: HomePage },
+  { id: "characters", label: "캐릭터", Page: CharactersPage },
+  { id: "posts", label: "게시글", Page: PostsPage },
+  { id: "media", label: "미디어", Page: MediaPage },
+  { id: "drafts", label: "초안", Page: DraftsPage },
+  { id: "generation", label: "생성", Page: GenerationPage },
+  { id: "llm-logs", label: "LLM 로그", Page: LlmLogsPage },
+  { id: "logs", label: "로그", Page: LogsPage },
+  { id: "users", label: "사용자", Page: UsersPage },
+  { id: "credits", label: "크레딧", Page: CreditsPage },
+  { id: "payments", label: "결제", Page: PaymentsPage },
+  { id: "moderation", label: "신고", Page: ModerationPage },
+  { id: "events", label: "이벤트", Page: EventsPage },
+  { id: "analytics", label: "분석", Page: AnalyticsPage },
+  { id: "settings", label: "설정", Page: SettingsPage },
 ] as const;
-
-const MIGRATED: Record<string, () => React.JSX.Element> = {
-  home: HomePage,
-  characters: CharactersPage,
-  posts: PostsPage,
-  users: UsersPage,
-  credits: CreditsPage,
-  moderation: ModerationPage,
-  events: EventsPage,
-  analytics: AnalyticsPage,
-  payments: PaymentsPage,
-  logs: LogsPage,
-  "llm-logs": LlmLogsPage,
-  media: MediaPage,
-  settings: SettingsPage,
-  drafts: DraftsPage,
-  generation: GenerationPage,
-};
 
 export function AppRoutes() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<Navigate to="/home" replace />} />
-        {NAV_ITEMS.map((item) => {
-          const Migrated = MIGRATED[item.id];
-          return (
-            <Route
-              key={item.id}
-              path={item.id}
-              element={
-                Migrated ? (
-                  <Migrated />
-                ) : (
-                  <PendingMigrationPage label={item.label} />
-                )
-              }
-            />
-          );
-        })}
+        {NAV_ITEMS.map(({ id, Page }) => (
+          <Route key={id} path={id} element={<Page />} />
+        ))}
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Route>
     </Routes>

@@ -4,11 +4,13 @@ import {
   Burger,
   Button,
   Group,
+  Loader,
   NavLink,
   Text,
   Title,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
+import { Suspense } from "react";
 import { NavLink as RouterNavLink, Outlet } from "react-router-dom";
 import { useLogout, useSession } from "../features/auth/useSession";
 import {
@@ -78,7 +80,12 @@ export function AppLayout() {
         })}
       </AppShell.Navbar>
       <AppShell.Main>
-        <Outlet />
+        {/* 화면은 라우트 단위로 늦게 받는다. 받는 동안에도 셸과 네비게이션은
+            남아 있어야 이동 중인 상태가 드러난다
+            (docs/04-design-rules.md:66). */}
+        <Suspense fallback={<Loader aria-label="화면 불러오는 중" />}>
+          <Outlet />
+        </Suspense>
       </AppShell.Main>
     </AppShell>
   );

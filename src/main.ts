@@ -21,10 +21,38 @@ async function bootstrap() {
       : {}),
   });
 
-  // 전역 보안 헤더. CSP 세부값은 React 전환 시 실제 asset에 맞춘다
-  // (docs/06-architecture.md "Authentication and Web Security") — 현재 정적
-  // SPA는 inline style 속성을 쓰므로 기본 CSP를 켜면 화면이 깨진다.
-  app.use(helmet({ contentSecurityPolicy: false }));
+  // 전역 보안 헤더 (docs/06-architecture.md "Authentication and Web Security").
+  // CSP는 실제로 서빙하는 asset에 맞춘다.
+  //
+  // - script-src 'self': 번들과 legacy main.js 모두 외부 파일이고 inline
+  //   script나 eval을 쓰지 않는다. 여기가 CSP의 실질적인 이득이다.
+  // - style-src에 'unsafe-inline': Mantine이 런타임에 CSS 변수 <style>을
+  //   주입하고, React·legacy 양쪽 다 inline style 속성을 쓴다. nonce로 좁히려면
+  //   HTML을 서버에서 렌더해야 하는데 지금은 정적 파일 그대로 내보낸다.
+  // - img-src에 https:: 미디어는 S3/CDN에 있고 DB에 저장된 URL의 호스트가
+  //   과거 데이터까지 포함해 하나로 고정돼 있지 않다. 특정 origin으로 좁히면
+  //   조용히 안 보이는 이미지가 생긴다.
+  // - upgrade-insecure-requests는 끈다. TLS는 선택이고 로컬은 http로 띄운다.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          "default-src": ["'self'"],
+          "script-src": ["'self'"],
+          "style-src": ["'self'", "'unsafe-inline'"],
+          "img-src": ["'self'", "data:", "https:"],
+          "font-src": ["'self'", "data:"],
+          "connect-src": ["'self'"],
+          "form-action": ["'self'"],
+          "frame-ancestors": ["'none'"],
+          "object-src": ["'none'"],
+          "base-uri": ["'self'"],
+          "upgrade-insecure-requests": null,
+        },
+      },
+    }),
+  );
 
   // React 전환 중. `npm run admin:build`로 만든 산출물이 있으면 그것을,
   // 없으면 기존 정적 SPA를 서빙한다. 빌드 여부가 곧 전환 스위치라 운영자가
