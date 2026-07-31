@@ -126,7 +126,9 @@ React 이관에서 지켜야 했던 것 두 가지 (반복하지 않도록 기�
   `llm-log` → `visual-profile` → `generation-worker` → `characters` →
   `drafts` → `generation` → `draft-worker` → `admin`.
 - 진행: `llm-log`(4b36c05), `visual-profile`(9a218df),
-  `generation-worker`(110a35d) 완료. 남은 5개 = 호출 199곳.
+  `generation-worker`(110a35d), `characters`(a17a883) 완료.
+  남은 4개 = `drafts`(30) · `generation`(30) · `draft-worker`(43) ·
+  `admin`(71), 합계 호출 174곳.
 - 매번 함께 나오는 두 가지:
   - spec이 Prisma 호출 형태를 검증하고 있으면 repository fake로 바꾸면서
     "무엇을 결정했는가"만 남긴다. 트랜잭션 콜백을 테이블 목으로 재현하던
