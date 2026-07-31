@@ -9,6 +9,7 @@ import { MediaPage } from "../features/media/MediaPage";
 import { ModerationPage } from "../features/moderation/ModerationPage";
 import { PaymentsPage } from "../features/payments/PaymentsPage";
 import { PostsPage } from "../features/posts/PostsPage";
+import { SettingsPage } from "../features/settings/SettingsPage";
 import { UsersPage } from "../features/users/UsersPage";
 import { AppLayout } from "./AppLayout";
 import { PendingMigrationPage } from "./PendingMigrationPage";
@@ -45,6 +46,7 @@ const MIGRATED: Record<string, () => React.JSX.Element> = {
   logs: LogsPage,
   "llm-logs": LlmLogsPage,
   media: MediaPage,
+  settings: SettingsPage,
 };
 
 export function AppRoutes() {
