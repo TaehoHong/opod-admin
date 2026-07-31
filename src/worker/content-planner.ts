@@ -63,8 +63,6 @@ const HASHTAG_MAX = 5;
 // 샷당 선별 레퍼런스 상한.
 const SHOT_REFERENCES_MAX = 3;
 
-type PlannerEnv = Record<string, string | undefined>;
-
 // 플래너 구성 값 — 출처는 env 또는 admin_settings(DB)이며 이 계층은 출처를
 // 모른다. 병합/우선순위는 GenerationSettingsService가 담당한다.
 export type PlannerProviderSettings = {
@@ -90,21 +88,6 @@ export function resolveContentPlanner(
     };
   }
   return createLlmContentPlanner({ apiUrl, apiKey, model }, fetchFn, llmLogs);
-}
-
-// env 전용 진입점 (DB 설정 없이 쓰는 테스트/스크립트용).
-export function createContentPlanner(
-  env: PlannerEnv = process.env,
-  fetchFn: typeof fetch = fetch,
-): ContentPlanner {
-  return resolveContentPlanner(
-    {
-      apiUrl: env.LLM_API_URL,
-      apiKey: env.LLM_API_KEY,
-      model: env.LLM_MODEL,
-    },
-    fetchFn,
-  );
 }
 
 export function createLlmContentPlanner(

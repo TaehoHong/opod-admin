@@ -9,6 +9,7 @@ import {
   LlmLogContext,
   LlmLogService,
 } from "../domain/llm-logs/llm-log.service";
+import { S3Config } from "../domain/config/app-config";
 
 // 레퍼런스 이미지 캡셔닝 — 비전 LLM(기획 LLM과 동일 설정)으로 장면·구도·의상·
 // 조명 서술을 생성한다. 이 서술이 기획 LLM의 샷별 레퍼런스 선별 카탈로그가
@@ -36,25 +37,27 @@ export type MediaBytesReader = (
   image: ReferenceImage,
 ) => Promise<{ bytes: Buffer; contentType: string }>;
 
-type ReaderEnv = Record<string, string | undefined>;
-
 export function createMediaBytesReader(
-  env: ReaderEnv = process.env,
+  config: S3Config | undefined,
   fetchFn: typeof fetch = fetch,
 ): MediaBytesReader {
-  const bucket = env.S3_BUCKET?.trim();
-  const region = env.AWS_REGION?.trim();
-  const accessKeyId = env.AWS_ACCESS_KEY_ID?.trim();
-  const secretAccessKey = env.AWS_SECRET_ACCESS_KEY?.trim();
-  const client =
-    bucket && region && accessKeyId && secretAccessKey
-      ? new S3Client({ region, credentials: { accessKeyId, secretAccessKey } })
-      : null;
+  const client = config
+    ? new S3Client({
+        region: config.region,
+        credentials: {
+          accessKeyId: config.accessKeyId,
+          secretAccessKey: config.secretAccessKey,
+        },
+      })
+    : null;
 
   return async (image) => {
-    if (client && image.storageKey) {
+    if (client && config && image.storageKey) {
       const object = await client.send(
-        new GetObjectCommand({ Bucket: bucket, Key: image.storageKey }),
+        new GetObjectCommand({
+          Bucket: config.bucket,
+          Key: image.storageKey,
+        }),
       );
       if (!object.Body) {
         throw new Error("reference image object has no body");

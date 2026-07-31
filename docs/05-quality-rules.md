@@ -73,15 +73,16 @@
 
 | 변경 영역                                  | 좁은 검증              | 넓은 검증                                       |
 | ------------------------------------------ | ---------------------- | ----------------------------------------------- |
-| Admin UI (legacy/React)                    | `npm run admin:check`  | `npm run format`                                |
+| Admin UI                                   | `npm run admin:check`  | `npm run format`, `npm run admin:build`         |
 | Backend logic                              | 관련 `*.spec.ts`       | `npm run test`                                  |
 | API/worker                                 | 관련 spec              | `npm run lint`, `npm run test`, `npm run build` |
 | Auth/payment/refund/permission/transaction | 관련 unit              | `npm run test:e2e`                              |
 | Prisma mirror                              | `npm run schema:check` | `npm run db:generate`, `npm run build`          |
 | PAVE/docs                                  | link/path review       | PAVE doctor, `git diff --check`                 |
 
-React 전환 후에도 `npm run admin:check`처럼 하나의 빠른 UI 검증 진입점을
-유지하되 내부 command 구성은 전환 작업에서 정한다.
+`npm run admin:check`는 TypeScript와 Vitest/RTL/MSW suite를 실행하는 빠른
+UI 검증 진입점이다. production bundle 계약은 `npm run admin:build`로
+검증한다.
 
 ## High-risk Regression Areas
 

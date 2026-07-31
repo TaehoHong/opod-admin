@@ -16,7 +16,7 @@
 | ----------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
 | Bootstrap/HTTP    | `src/main.ts`, `src/app.module.ts`, `src/common/`                                      | Nest 시작, static UI, validation, exception, HTTP log                | `bootstrap`, `AppModule`                                             | `src/main.ts`, `src/app.module.ts`, `src/common/`           |
 | Admin auth        | `src/admin/auth/`                                                                      | login, admin 생성, cookie 세션, CSRF/JWT guard                       | `AdminAuthController`, `AdminAuthService`, `AdminJwtGuard`           | `src/admin/auth/*.spec.ts`, `test/admin-auth.e2e-spec.ts`   |
-| General admin     | `src/admin/admin.controller.ts`, `src/admin/admin.service.ts`, `src/admin/dto/`        | user/content/credit/payment/report/analytics                         | `AdminController`, `AdminService`                                    | colocated specs, `test/admin-analytics.e2e-spec.ts`         |
+| General admin     | `src/admin/admin.controller.ts`, `src/admin/admin.service.ts`, `src/admin/admin-*.repository.ts`, `src/admin/dto/` | user/content/credit/payment/report/analytics                         | `AdminController`, `AdminService`                                    | colocated specs, `test/admin-analytics.e2e-spec.ts`         |
 | Drafts            | `src/admin/drafts/`                                                                    | draft CRUD, planning, generation, approval, publish                  | `DraftsController`, `DraftsService`                                  | `drafts.service.spec.ts`, generation E2E                    |
 | Generation        | `src/admin/generation/`, `src/worker/`                                                 | job 생성, provider 호출, lease/retry, planning, publish              | `GenerationService`, `GenerationWorkerService`, `DraftWorkerService` | colocated specs, `test/generation.e2e-spec.ts`              |
 | Characters        | `src/characters/`                                                                      | character/persona/memory/profile image/posting policy/visual profile | `CharactersController`, feature services와 repositories              | colocated specs, `test/character-profile-image.e2e-spec.ts` |
@@ -27,8 +27,7 @@
 | Config            | `src/domain/config/`                                                                   | 부팅 설정 로드·검증과 typed 주입                                     | `AppConfigService`, `loadAppConfig`, `ConfigModule`                  | `admin-auth.service.spec.ts`가 주입 경로 사용               |
 | Health            | `src/health/`                                                                          | 인증 없는 liveness/readiness와 DB 도달성 확인                        | `HealthController`, `HealthService`, `HealthRepository`              | `health.controller.spec.ts`                                 |
 | Prisma/schema     | `src/domain/database/`, `prisma/`, `scripts/check-schema-sync.mjs`                     | Prisma client와 admin schema mirror                                  | `PrismaModule`, `PrismaService`                                      | schema check, E2E setup                                     |
-| Admin UI (legacy) | `packages/admin/`                                                                      | 정적 SPA shell과 `/api/admin/v1/*` 호출                              | `index.html`, `main.js`                                              | `packages/admin/test/*.test.mjs`                            |
-| Admin UI (React)  | `packages/admin/src/`                                                                  | 전환 중인 React 앱                                                   | `main.tsx`, `app/`, `features/`                                      | `src/**/*.test.tsx`, `npm run admin:check`                  |
+| Admin UI          | `packages/admin/src/`, `packages/admin/index.html`                                     | React admin과 `/api/admin/v1/*` 호출                                 | `main.tsx`, `app/`, `features/`                                      | `src/**/*.test.tsx`, `npm run admin:check`                  |
 | E2E               | `test/`                                                                                | Testcontainers PostgreSQL와 API contract                             | Jest global setup                                                    | `test/jest-e2e.json`, `test/e2e-global-setup.ts`            |
 
 ## Shared Capability Catalog
@@ -44,7 +43,7 @@
 | Generated media storage   | `createGeneratedMediaStore`, `createReferenceUrlSigner` | provider 임시 결과를 owned storage에 보존                                                                          | worker, draft publish                                |
 | Prompt construction       | exports under `prompts/`                                | pure construction; network/DB 없음                                                                                 | planner, prompt builder                              |
 | Shot generation contract  | `ContentPlanShot`, `paramsJson._shot`                   | `scene`과 `captureSetup` 분리, 인물 노출 샷은 업로드 완료 identity reference 필수, 빌드 대상 모델과 실행 모델 일치 | planner, draft/generation worker, retry/regeneration |
-| Bootstrap config          | `AppConfigService` (`ConfigModule`은 `@Global`)         | 부팅 필수 값만 소유. DB 우선인 provider 설정은 `GenerationSettingsService`가 유지                                  | `main.ts`, `PrismaService`, `AdminAuthService`       |
+| Runtime config            | `AppConfigService` (`ConfigModule`은 `@Global`)         | database/auth/TLS/S3/worker의 부팅 고정값 소유. DB 우선 provider 설정은 `GenerationSettingsService`가 유지           | `app-config.spec.ts`, module factories               |
 | Validation/error boundary | `ValidationPipe`, `AllExceptionsFilter`                 | whitelist+transform, common error response                                                                         | all HTTP routes                                      |
 
 ## Current Canonical Examples
@@ -58,7 +57,7 @@
 | Observable behavior tests           | draft/generation worker specs   | 상태 전이와 결과를 보호                                                                         | `src/admin/drafts/drafts.service.spec.ts`, `src/worker/*.spec.ts` |
 | Cross-module DB contract            | auth/generation E2E             | 실제 PostgreSQL과 API 경계 검증                                                                 | `test/admin-auth.e2e-spec.ts`, `test/generation.e2e-spec.ts`      |
 | Pure prompt logic                   | prompt builders                 | network/persistence 없이 deterministic 구성                                                     | `prompts/`, 관련 specs                                            |
-| Repository/application-service 구조 | health, character profile image | controller → application service → repository 방향이고 `PrismaService`가 repository 안에만 있음 | `src/health/`, `src/characters/character-profile-image.*`         |
+| Repository/application-service 구조 | health, characters, admin        | controller → application service → repository 방향이고 `PrismaService`가 repository 안에만 있음 | `src/health/`, `src/characters/`, `src/admin/admin-*.repository.ts` |
 
 health feature가 승인된 repository/application-service 구조의 첫 canonical
 example이고 character profile image가 entity mutation 적용 예다. 새 DB 접근은
@@ -88,34 +87,36 @@ repository fake로 서비스 판단만 검증하는 형태의 예다.
 
 ## Current and Target Frontend
 
-| 항목         | 현재                                      | 목표                                   |
-| ------------ | ----------------------------------------- | -------------------------------------- |
-| Framework    | 전환 중 — legacy 정적 SPA + React/TS/Vite | React + TypeScript + Vite              |
-| Routing      | legacy custom routing / React Router      | React Router                           |
-| Server state | legacy fetch helper / TanStack Query      | TanStack Query                         |
-| UI/form      | legacy custom CSS / Mantine uncontrolled  | Mantine + `@mantine/form` uncontrolled |
-| Tests        | legacy `node:test` + Vitest/RTL/MSW       | Vitest + RTL/jsdom, MSW Node           |
+| 항목         | 현재                                       |
+| ------------ | ------------------------------------------ |
+| Framework    | React + TypeScript + Vite                  |
+| Routing      | React Router                               |
+| Server state | TanStack Query                             |
+| UI/form      | Mantine + `@mantine/form` uncontrolled     |
+| Tests        | Vitest + RTL/jsdom + MSW Node              |
 
-전환 전략: React 앱은 `packages/admin/src/`에서 병행 개발하고
-`npm run admin:build` 산출물(`packages/admin/dist/`)이 있을 때만 Nest가
-서빙한다. 빌드 여부가 곧 전환 스위치이므로 되돌릴 때 코드를 고치지 않는다.
-legacy UI test는 화면을 다 옮길 때까지 유지한다.
+React 앱은 `packages/admin/src/`가 소유하고 `npm run admin:build`가
+`packages/admin/dist/index.html`을 만든다. Nest는 이 entry만 서빙한다.
+root `npm run build`가 admin bundle 후 Nest를 빌드하므로 application과
+Docker build가 동일한 frontend 계약을 사용한다.
 
 canonical example: auth feature(`src/features/auth/`)가 apiClient, TanStack
 Query, Mantine form과 MSW 테스트를 한 번에 보여준다. characters feature가
-목록 조회와 cursor 페이지네이션의 canonical example이다.
+목록 조회·cursor 페이지네이션과 modal/tab 기반 entity 쓰기 관리의 canonical
+example이다. `features/media/api.ts`의 `uploadMediaFile`은 한 화면에서 파일
+선택부터 연결까지 끝내야 할 때 쓰는 presign → PUT → confirm owner다.
 
 nav 15개 화면이 모두 React로 렌더된다. 라우트와 화면은 `app/routes.tsx`의
 `NAV_ITEMS` 한 배열이 소유하고, 각 화면은 `lazy()`로 라우트 단위로 받는다.
 
-다만 **쓰기 기능은 아직 legacy에만 있는 것이 있다** — 캐릭터 관리 전체,
-크레딧 지급, 게시물·댓글·반응 작성. `characters.controller.ts`의 쓰기
-endpoint 20개를 React가 하나도 부르지 않는다. `src/main.ts`가
-`packages/admin/dist` 존재 여부로 서빙을 고르므로, 빌드한 환경에서는 그
-기능들에 접근할 수 없다.
+캐릭터 관리 쓰기 endpoint, 게시물·댓글·반응 작성, 크레딧 지급, 영상 생성
+job 등록/실행/완료/재시도가 모두 React에 있다. 사용자·게시물 상세와 캐릭터
+게시글·활동 탭도 React 화면에서 접근한다. mutation modal은 pending 중 닫기와
+중복 제출을 막는다.
 
 색상·typography·radius는 `src/app/theme.ts`의 Mantine Theme token이
-소유한다. 새 화면은 legacy `styles.css` 값을 복사하지 않는다
+소유한다. 삭제된 legacy stylesheet에서 승인된 palette만 옮겼고 새 화면은
+그 값을 직접 복사하지 않는다
 (docs/04-design-rules.md:25-26). 목록 화면의 반복(제목·로딩·오류·빈
 상태·더 보기)은 `shared/ui/DataPage`와 `shared/api/useCursorList`로
 공통화했다.
@@ -150,24 +151,22 @@ endpoint 20개를 React가 하나도 부르지 않는다. `src/main.ts`가
   `ADMIN_BOOTSTRAP_EMAIL`과 `ADMIN_BOOTSTRAP_PASSWORD`로만 생성된다.
 - repository 분리 완료: health, admin auth, media, settings audit,
   posting policy, character profile image, llm-log, visual-profile,
-  generation-worker(queue), characters.
-- repository 분리 대기: `admin.service.ts`(Prisma 호출 71곳),
-  `draft-worker.service.ts`(43), `drafts.service.ts`(30),
-  `generation.service.ts`(30), `generation-settings.service.ts`(3).
-  절차와 함정은 `.codex/pave/plans/admin-modernization.md` 4번에 있다.
-- 부팅 설정은 `AppConfigService`로 주입한다. worker와 provider 설정 함수는
-  아직 `env` 파라미터(기본값 `process.env`)를 받는다.
-- frontend는 nav 15개 화면이 React로 렌더되지만 캐릭터 관리·크레딧 지급·
-  게시물 작성 등 쓰기 화면이 이관되지 않아, 그 기능은 지금 콘솔에서 쓸 수
-  없다. legacy `main.js`는 그래서 아직 지우지 않았다.
+  generation-worker(queue), characters, generation settings, drafts,
+  generation, draft-worker, general admin. application service는 직접
+  `PrismaService`나 raw SQL을 사용하지 않는다.
+- 부팅 고정 설정은 `AppConfigService`로 주입한다. media upload, reference
+  captioning과 worker service는 같은 typed S3/worker config를 사용하고
+  `process.env`를 직접 읽지 않는다. DB 우선 provider/planner 설정은
+  `GenerationSettingsService`가 요청마다 재해석한다.
+- frontend는 nav 15개 화면과 admin 쓰기·상세 workflow를 React로 렌더한다.
+  legacy entry, script, stylesheet, node:test suite는 제거했다.
 - Helmet CSP는 켜져 있다. `style-src`에 `'unsafe-inline'`이 남아 있고
   (Mantine이 런타임에 CSS 변수 `<style>`을 주입한다) `img-src`는 저장된
   미디어 URL 호스트가 고정돼 있지 않아 `https:`를 허용한다.
 - approved 4-table logging은 새 테이블이 필요해 `opod-service-backend`의
   canonical schema 변경이 선행돼야 한다.
-- Raw SQL은 생성 워커 claim만 repository 안으로 옮겼다
-  (`worker/generation-job.repository.ts`). draft worker의 claim/lock은 아직
-  service에 있다.
+- generation/draft worker의 raw SQL claim과 lock은 각각 repository가
+  소유한다.
 - 실제 provider refund, 사용자 제재와 자동 상호작용 중단 기능이
   완성되지 않았다.
 - `GET /api/health`가 DB 도달성을 확인한다. automated smoke와 rollback

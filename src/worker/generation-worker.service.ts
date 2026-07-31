@@ -4,6 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
+import { AppConfig } from "../domain/config/app-config";
 import { GenerationJobRepository } from "./generation-job.repository";
 import {
   GeneratedMediaStore,
@@ -15,54 +16,14 @@ import {
   ImageGenerationProviders,
   ImageGenerationRequest,
 } from "./image-generation.provider";
-import { errorMessage, isRecord, parsePositiveNumber } from "./value-utils";
+import { errorMessage, isRecord } from "./value-utils";
 import {
   LLM_LOG_TYPE,
   LlmLogService,
 } from "../domain/llm-logs/llm-log.service";
 import { assertVisibleCharacterHasReference } from "./content-planner";
 
-export type WorkerConfig = {
-  enabled: boolean;
-  pollIntervalMs: number;
-  jobsPerTick: number;
-  leaseSeconds: number;
-  maxAttempts: number;
-  providerPollIntervalMs: number;
-  providerTimeoutMs: number;
-  candidateCount: number;
-  // 미설정이면 예산 게이트를 걸지 않는다.
-  dailyBudgetUsd?: number;
-  // fal 등은 요청별 비용을 응답에 싣지 않으므로, 모델 단가 × 후보 수로 맞춘
-  // 추정 단가를 기록·예산 계산에 쓴다.
-  jobCostEstimateUsd: number;
-  circuitBreakerThreshold: number;
-  circuitBreakerCooldownMs: number;
-};
-
-export function workerConfigFromEnv(
-  env: Record<string, string | undefined> = process.env,
-): WorkerConfig {
-  return {
-    enabled: env.WORKER_ENABLED === "true" || env.WORKER_ENABLED === "1",
-    pollIntervalMs: parsePositiveNumber(env.WORKER_POLL_INTERVAL_MS) ?? 15_000,
-    jobsPerTick: parsePositiveNumber(env.WORKER_JOBS_PER_TICK) ?? 1,
-    leaseSeconds: parsePositiveNumber(env.WORKER_LEASE_SECONDS) ?? 600,
-    maxAttempts: parsePositiveNumber(env.WORKER_MAX_ATTEMPTS) ?? 3,
-    providerPollIntervalMs:
-      parsePositiveNumber(env.WORKER_PROVIDER_POLL_INTERVAL_MS) ?? 5_000,
-    providerTimeoutMs:
-      parsePositiveNumber(env.WORKER_PROVIDER_TIMEOUT_MS) ?? 5 * 60_000,
-    candidateCount: parsePositiveNumber(env.WORKER_CANDIDATE_COUNT) ?? 2,
-    dailyBudgetUsd: parsePositiveNumber(env.WORKER_DAILY_BUDGET_USD),
-    jobCostEstimateUsd:
-      parsePositiveNumber(env.WORKER_JOB_COST_ESTIMATE_USD) ?? 0.2,
-    circuitBreakerThreshold:
-      parsePositiveNumber(env.WORKER_CIRCUIT_BREAKER_THRESHOLD) ?? 5,
-    circuitBreakerCooldownMs:
-      parsePositiveNumber(env.WORKER_CIRCUIT_BREAKER_COOLDOWN_MS) ?? 5 * 60_000,
-  };
-}
+export type WorkerConfig = AppConfig["worker"];
 
 // fal edit 계열(nano-banana/edit 등)의 image_urls 상한 — 초과 시 422
 // value_error. 장면별 레퍼런스 선별(LLM 선별)이 들어와도 전송 직전 안전판으로

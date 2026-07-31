@@ -1,7 +1,6 @@
 import {
   GenerationWorkerService,
   WorkerConfig,
-  workerConfigFromEnv,
 } from "./generation-worker.service";
 import {
   GenerationPollResult,
@@ -151,24 +150,6 @@ function makeService(
   );
   return { service, store, downloadBytes };
 }
-
-describe("workerConfigFromEnv", () => {
-  it("is disabled by default and parses overrides", () => {
-    expect(workerConfigFromEnv({}).enabled).toBe(false);
-    const config = workerConfigFromEnv({
-      WORKER_ENABLED: "true",
-      WORKER_POLL_INTERVAL_MS: "5000",
-      WORKER_DAILY_BUDGET_USD: "10",
-      WORKER_MAX_ATTEMPTS: "2",
-    });
-    expect(config).toMatchObject({
-      enabled: true,
-      pollIntervalMs: 5000,
-      dailyBudgetUsd: 10,
-      maxAttempts: 2,
-    });
-  });
-});
 
 describe("GenerationWorkerService", () => {
   it("processes a claimed job end to end", async () => {

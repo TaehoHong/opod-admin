@@ -1,7 +1,8 @@
 import { Module } from "@nestjs/common";
+import { S3Config } from "../domain/config/app-config";
+import { AppConfigService } from "../domain/config/app-config.service";
 import { CharactersModule } from "../characters/characters.module";
 import { PrismaModule } from "../domain/database/prisma.module";
-import { PrismaService } from "../domain/database/prisma.service";
 import { GenerationSettingsService } from "../domain/settings/generation-settings.service";
 import { SettingsModule } from "../domain/settings/settings.module";
 import { createLlmContentPlanner } from "../worker/content-planner";
@@ -9,10 +10,17 @@ import { createReferenceUrlSigner } from "../worker/generated-media-store";
 import { resolveImagePromptBuilder } from "../worker/image-prompt-builder";
 import { WorkerModule } from "../worker/worker.module";
 import { AdminAuthModule } from "./auth/admin-auth.module";
+import { AdminAnalyticsRepository } from "./admin-analytics.repository";
+import { AdminContentRepository } from "./admin-content.repository";
 import { AdminController } from "./admin.controller";
+import { AdminCreditPaymentRepository } from "./admin-credit-payment.repository";
+import { AdminModerationRepository } from "./admin-moderation.repository";
 import { AdminService } from "./admin.service";
+import { AdminUserRepository } from "./admin-user.repository";
 import { DraftsController } from "./drafts/drafts.controller";
+import { DraftsRepository } from "./drafts/drafts.repository";
 import { DraftsService } from "./drafts/drafts.service";
+import { GenerationRepository } from "./generation/generation.repository";
 import { GenerationService } from "./generation/generation.service";
 import { FilmFinishController } from "./media/film-finish.controller";
 import { FilmFinishService } from "./media/film-finish.service";
@@ -24,6 +32,18 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 import { LlmLogsController } from "./llm-logs/llm-logs.controller";
 import { TokenUsageRepository } from "./llm-logs/token-usage.repository";
 import { TokenUsageService } from "./llm-logs/token-usage.service";
+
+function storageEnv(config: S3Config | undefined) {
+  return config
+    ? {
+        S3_BUCKET: config.bucket,
+        AWS_REGION: config.region,
+        AWS_ACCESS_KEY_ID: config.accessKeyId,
+        AWS_SECRET_ACCESS_KEY: config.secretAccessKey,
+        S3_PUBLIC_BASE_URL: config.publicBaseUrl,
+      }
+    : {};
+}
 
 @Module({
   // WorkerModule은 수동 실행(generation/worker/run)용 — 의존 방향은
@@ -44,7 +64,14 @@ import { TokenUsageService } from "./llm-logs/token-usage.service";
   ],
   providers: [
     AdminService,
+    AdminUserRepository,
+    AdminContentRepository,
+    AdminCreditPaymentRepository,
+    AdminModerationRepository,
+    AdminAnalyticsRepository,
     DraftsService,
+    DraftsRepository,
+    GenerationRepository,
     SettingsAuditRepository,
     TokenUsageService,
     TokenUsageRepository,
@@ -54,12 +81,12 @@ import { TokenUsageService } from "./llm-logs/token-usage.service";
       // 요청 시마다 재해석한다 (admin 설정 DB > env, 재시작 불필요).
       // 셋 중 하나라도 없으면 null — 위저드는 운영자 원문을 그대로 쓴다.
       useFactory: (
-        prisma: PrismaService,
+        generation: GenerationRepository,
         settings: GenerationSettingsService,
         llmLogs: LlmLogService,
       ) =>
         new GenerationService(
-          prisma,
+          generation,
           async () => {
             const resolved = await settings.resolvePlannerSettings();
             const apiUrl = resolved.apiUrl?.trim();
@@ -92,16 +119,19 @@ import { TokenUsageService } from "./llm-logs/token-usage.service";
             );
           },
         ),
-      inject: [PrismaService, GenerationSettingsService, LlmLogService],
+      inject: [GenerationRepository, GenerationSettingsService, LlmLogService],
     },
     MediaService,
     MediaRepository,
     {
       provide: FilmFinishService,
       // 비공개 S3 원본은 레퍼런스 전달과 동일하게 presigned URL로 읽는다.
-      useFactory: (media: MediaRepository) =>
-        new FilmFinishService(media, createReferenceUrlSigner()),
-      inject: [MediaRepository],
+      useFactory: (media: MediaRepository, config: AppConfigService) =>
+        new FilmFinishService(
+          media,
+          createReferenceUrlSigner(storageEnv(config.s3)),
+        ),
+      inject: [MediaRepository, AppConfigService],
     },
   ],
 })

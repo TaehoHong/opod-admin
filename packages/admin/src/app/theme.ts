@@ -1,11 +1,9 @@
 import { createTheme, type MantineColorsTuple } from "@mantine/core";
 
 // 승인된 톤앤매너를 Theme token으로 옮긴다 (docs/04-design-rules.md
-// "Visual Direction"). 새 화면은 legacy styles.css 값을 복사하지 않고 이
-// token을 쓴다.
-//
-// 값의 출처는 packages/admin/styles.css의 :root 변수다. Mantine 색상은
-// 10단계 tuple을 요구하므로 기존 사다리를 그대로 채운다.
+// "Visual Direction"). 삭제한 legacy stylesheet에서 승인된 색상값만
+// Theme token으로 옮겼다. Mantine 색상은 10단계 tuple을 요구하므로 기존
+// 사다리를 그대로 채운다.
 
 const accent: MantineColorsTuple = [
   "#e5f1ff",

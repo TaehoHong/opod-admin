@@ -14,9 +14,20 @@ export type CreditEntry = {
   createdAt: string;
 };
 
+export type CreditGrant = {
+  userId: string;
+  amount: number;
+  reason: string;
+  externalReference?: string;
+};
+
 export function fetchCreditLedger(params: {
   userId?: string;
   cursor?: string;
 }): Promise<CursorPage<CreditEntry>> {
   return apiRequest(`/credits/ledger${toQuery(params)}`);
+}
+
+export function grantCredits(body: CreditGrant): Promise<CreditEntry> {
+  return apiRequest("/credits/grants", { method: "POST", body });
 }

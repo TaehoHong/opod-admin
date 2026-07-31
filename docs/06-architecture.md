@@ -197,9 +197,10 @@ runtime log는 위 business/audit log와 분리한다.
 ## Known Implementation Gaps
 
 - 최초 계정은 bootstrap 환경변수로만 만든다.
-- 일부 service가 아직 Prisma를 직접 사용한다. controller에는 남아 있지 않다.
-- frontend는 전환 중이다. React 앱은 auth와 characters를 덮고, 나머지
-  화면은 legacy 정적 SPA가 담당한다.
-- 토큰 사용량 집계 API는 있고 UI는 아직 없다.
+- application service와 controller는 Prisma를 직접 사용하지 않는다.
+  query, transaction과 raw SQL은 feature/entity repository가 소유한다.
+- frontend는 React/TypeScript/Vite 단일 앱이다. Nest와 Docker build는 root
+  `npm run build`에서 React bundle을 먼저 만든다.
+- 토큰 사용량 집계 API와 React dashboard가 있다.
 - approved 4-table log 구조는 canonical schema 변경이 선행돼야 한다.
 - 현재 Raw SQL은 queue claim, row/advisory lock에 사용된다.

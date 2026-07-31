@@ -1,13 +1,12 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
 import {
   decodeCursor,
   Page,
   PageInput,
   pageFromRows,
 } from "../../domain/database/page";
-import { PrismaService } from "../../domain/database/prisma.service";
 import { parseFinishPreset } from "../../worker/film-finish";
+import { DraftJobRow, DraftRow, DraftsRepository } from "./drafts.repository";
 
 type DraftStatus =
   | "planned"
@@ -85,35 +84,6 @@ type AdminDraft = {
   updatedAt: string;
 };
 
-type PrismaDraftRow = Prisma.PostDraftGetPayload<Prisma.PostDraftDefaultArgs>;
-
-const draftJobFields = {
-  id: true,
-  sortOrder: true,
-  status: true,
-  prompt: true,
-  paramsJson: true,
-  candidateCount: true,
-  provider: true,
-  costUsd: true,
-  errorMessage: true,
-  createdAt: true,
-  outputs: {
-    orderBy: { candidateIndex: "asc" as const },
-    select: {
-      mediaId: true,
-      candidateIndex: true,
-      selected: true,
-      filterPreset: true,
-      media: { select: { url: true } },
-    },
-  },
-} as const;
-
-type PrismaDraftJob = Prisma.GenerationJobGetPayload<{
-  select: typeof draftJobFields;
-}>;
-
 // paramsJson._shot — 기획이 남긴 샷 메타데이터(장면 원문, 선별 레퍼런스).
 function shotMeta(paramsJson: unknown): {
   scene?: string;
@@ -139,55 +109,45 @@ function shotMeta(paramsJson: unknown): {
 
 @Injectable()
 export class DraftsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly repository: DraftsRepository) {}
 
   async listDrafts(
     input: { status?: string; characterId?: string } & PageInput,
   ): Promise<Page<AdminDraft>> {
     const status = this.parseOptionalStatus(input.status);
     const characterId = input.characterId?.trim();
-    const where = {
+    const filter = {
       ...(status ? { status } : {}),
       ...(characterId ? { characterId } : {}),
     };
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
-      !(await this.prisma.postDraft.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.repository.cursorMatchesFilter(cursorId, filter))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const drafts = await this.prisma.postDraft.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    const drafts = await this.repository.findMany({
+      ...filter,
       take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+      ...(cursorId ? { cursorId } : {}),
     });
     return pageFromRows(
-      drafts.map((draft) => this.toDraft(draft as PrismaDraftRow)),
+      drafts.map((draft) => this.toDraft(draft)),
       input.limit,
     );
   }
 
   async getDraft(draftId: string): Promise<AdminDraft> {
-    const draft = await this.prisma.postDraft.findUnique({
-      where: { id: draftId },
-    });
+    const draft = await this.repository.findDraft(draftId);
     if (!draft) {
       throw new BadRequestException("Draft not found");
     }
-    const jobs = await this.prisma.generationJob.findMany({
-      where: { draftId },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: draftJobFields,
-    });
+    const jobs = await this.repository.findDraftJobs(draftId);
 
     // 컷별 최신 잡만 노출한다 (재생성 이력은 최신이 대체).
-    const latestPerShot = new Map<number, PrismaDraftJob>();
+    const latestPerShot = new Map<number, DraftJobRow>();
     for (const job of jobs) {
       if (!latestPerShot.has(job.sortOrder)) {
         latestPerShot.set(job.sortOrder, job);
@@ -202,12 +162,9 @@ export class DraftsService {
     ];
     const referenceUrls = new Map(
       referenceIds.length > 0
-        ? (
-            await this.prisma.media.findMany({
-              where: { id: { in: referenceIds } },
-              select: { id: true, url: true },
-            })
-          ).map((media) => [media.id, media.url] as const)
+        ? (await this.repository.findMediaUrls(referenceIds)).map(
+            (media) => [media.id, media.url] as const,
+          )
         : [],
     );
 
@@ -244,7 +201,7 @@ export class DraftsService {
         };
       });
 
-    return { ...this.toDraft(draft as PrismaDraftRow), shots };
+    return { ...this.toDraft(draft), shots };
   }
 
   // 운영자 초안 생성. mode='manual'이면 어떤 단계도 자동으로 넘어가지 않는다 —
@@ -257,11 +214,7 @@ export class DraftsService {
     contentType?: string;
     mode?: string;
   }): Promise<AdminDraft> {
-    const character = await this.prisma.character.findUnique({
-      where: { id: input.characterId },
-      select: { id: true },
-    });
-    if (!character) {
+    if (!(await this.repository.characterExists(input.characterId))) {
       throw new BadRequestException("Character not found");
     }
     const contentType = input.contentType?.trim() || "feed";
@@ -275,17 +228,15 @@ export class DraftsService {
     const scheduledAt = this.parseOptionalDate(input.scheduledAt);
     const sceneHint = input.sceneHint?.trim();
 
-    const draft = await this.prisma.postDraft.create({
-      data: {
-        characterId: input.characterId,
-        contentType: contentType as never,
-        conceptJson: {
-          source: "manual",
-          mode,
-          ...(sceneHint ? { sceneHint } : {}),
-        },
-        ...(scheduledAt ? { scheduledAt } : {}),
+    const draft = await this.repository.createDraft({
+      characterId: input.characterId,
+      contentType,
+      conceptJson: {
+        source: "manual",
+        mode,
+        ...(sceneHint ? { sceneHint } : {}),
       },
+      ...(scheduledAt ? { scheduledAt } : {}),
     });
     await this.recordActionLog(
       input.characterId,
@@ -293,7 +244,7 @@ export class DraftsService {
       "DRAFT_CREATED",
       `manual draft created (mode: ${mode}${sceneHint ? `, hint: ${sceneHint.slice(0, 100)}` : ""})`,
     );
-    return this.toDraft(draft as PrismaDraftRow);
+    return this.toDraft(draft);
   }
 
   async updateDraft(input: {
@@ -333,10 +284,7 @@ export class DraftsService {
       if (!clear && !preset) {
         throw new BadRequestException("Unknown finish preset");
       }
-      const existing = await this.prisma.postDraft.findUnique({
-        where: { id: input.draftId },
-        select: { conceptJson: true },
-      });
+      const existing = await this.repository.findDraftConcept(input.draftId);
       if (!existing) {
         throw new BadRequestException("Draft not found");
       }
@@ -357,11 +305,12 @@ export class DraftsService {
       throw new BadRequestException("Nothing to update");
     }
 
-    const transitioned = await this.prisma.postDraft.updateMany({
-      where: { id: input.draftId, status: { in: EDITABLE_STATUSES } },
-      data: data as never,
-    });
-    if (transitioned.count === 0) {
+    const transitioned = await this.repository.updateEditableDraft(
+      input.draftId,
+      EDITABLE_STATUSES,
+      data,
+    );
+    if (!transitioned) {
       await this.assertDraftExists(input.draftId);
       throw new BadRequestException(
         "Only needs_review or approved drafts can be edited",
@@ -385,11 +334,8 @@ export class DraftsService {
         "Select one image for every shot before approval",
       );
     }
-    const transitioned = await this.prisma.postDraft.updateMany({
-      where: { id: draftId, status: "needs_review" },
-      data: { status: "approved", errorMessage: null },
-    });
-    if (transitioned.count === 0) {
+    const transitioned = await this.repository.approveDraft(draftId);
+    if (!transitioned) {
       await this.assertDraftExists(draftId);
       throw new BadRequestException("Only needs_review drafts can be approved");
     }
@@ -409,11 +355,8 @@ export class DraftsService {
     draftId: string;
     reason?: string;
   }): Promise<AdminDraft> {
-    const transitioned = await this.prisma.postDraft.updateMany({
-      where: { id: input.draftId, status: "needs_review" },
-      data: { status: "rejected" },
-    });
-    if (transitioned.count === 0) {
+    const transitioned = await this.repository.rejectDraft(input.draftId);
+    if (!transitioned) {
       await this.assertDraftExists(input.draftId);
       throw new BadRequestException("Only needs_review drafts can be rejected");
     }
@@ -442,36 +385,31 @@ export class DraftsService {
     // 프롬프트 빌드 전(빈 프롬프트) 컷은 생성 실행을 막는다 — 운영자가
     // 직접 프롬프트를 넘긴 경우는 예외.
     if (!prompt) {
-      const existing = await this.prisma.generationJob.findFirst({
-        where: { id: input.jobId, draftId: input.draftId, status: "draft" },
-        select: { prompt: true },
-      });
+      const existing = await this.repository.findDraftShotPrompt(
+        input.draftId,
+        input.jobId,
+      );
       if (existing && !existing.prompt.trim()) {
         throw new BadRequestException(
           "Shot prompt is empty — run prompt build first or provide a prompt",
         );
       }
     }
-    const transitioned = await this.prisma.generationJob.updateMany({
-      where: { id: input.jobId, draftId: input.draftId, status: "draft" },
-      data: {
-        status: "queued",
-        ...(prompt ? { prompt } : {}),
-        ...(input.candidateCount != null
-          ? { candidateCount: input.candidateCount }
-          : {}),
-      },
+    const transitioned = await this.repository.queueDraftShot({
+      draftId: input.draftId,
+      jobId: input.jobId,
+      ...(prompt ? { prompt } : {}),
+      ...(input.candidateCount != null
+        ? { candidateCount: input.candidateCount }
+        : {}),
     });
-    if (transitioned.count === 0) {
+    if (!transitioned) {
       await this.assertDraftExists(input.draftId);
       throw new BadRequestException(
         "Only draft-state shots of this draft can start generation",
       );
     }
-    const job = await this.prisma.generationJob.findUnique({
-      where: { id: input.jobId },
-      select: { characterId: true, sortOrder: true },
-    });
+    const job = await this.repository.findShotIdentity(input.jobId);
     if (job) {
       await this.recordActionLog(
         job.characterId,
@@ -488,19 +426,10 @@ export class DraftsService {
     jobId: string;
     prompt?: string;
   }): Promise<AdminDraft> {
-    const job = await this.prisma.generationJob.findFirst({
-      where: { id: input.jobId, draftId: input.draftId },
-      select: {
-        id: true,
-        characterId: true,
-        sortOrder: true,
-        status: true,
-        inputPrompt: true,
-        prompt: true,
-        candidateCount: true,
-        paramsJson: true,
-      },
-    });
+    const job = await this.repository.findRegenerationSource(
+      input.draftId,
+      input.jobId,
+    );
     if (!job) {
       throw new BadRequestException("Draft shot job not found");
     }
@@ -511,66 +440,24 @@ export class DraftsService {
     }
     const prompt = input.prompt?.trim() || job.prompt;
 
-    await this.prisma.$transaction(async (tx) => {
-      const latest = await tx.generationJob.findFirst({
-        where: {
-          draftId: input.draftId,
-          sortOrder: job.sortOrder,
-        },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        select: { id: true },
-      });
-      if (latest?.id !== job.id) {
-        throw new BadRequestException(
-          "Only the latest draft shot can be regenerated",
-        );
-      }
-      const transitioned = await tx.postDraft.updateMany({
-        where: {
-          id: input.draftId,
-          status: { in: ["needs_review", "failed"] },
-        },
-        data: { status: "regenerating", errorMessage: null },
-      });
-      if (transitioned.count === 0) {
-        const draft = await tx.postDraft.findUnique({
-          where: { id: input.draftId },
-          select: { id: true },
-        });
-        if (!draft) {
-          throw new BadRequestException("Draft not found");
-        }
-        throw new BadRequestException(
-          "Only needs_review or failed drafts can regenerate shots",
-        );
-      }
-      await tx.generationJob.create({
-        data: {
-          characterId: job.characterId,
-          mediaType: "image",
-          ...(job.inputPrompt != null ? { inputPrompt: job.inputPrompt } : {}),
-          prompt,
-          ...(job.candidateCount != null
-            ? { candidateCount: job.candidateCount }
-            : {}),
-          ...(job.paramsJson != null
-            ? { paramsJson: job.paramsJson as Prisma.InputJsonValue }
-            : {}),
-          draftId: input.draftId,
-          sortOrder: job.sortOrder,
-          originJobId: job.id,
-        },
-      });
-      await tx.characterActionLog.create({
-        data: {
-          characterId: job.characterId,
-          actionType: "DRAFT_SHOT_REGENERATED",
-          targetTable: "post_drafts",
-          targetId: input.draftId,
-          reason: `shot ${job.sortOrder} regeneration queued`,
-        },
-      });
+    const result = await this.repository.regenerateShot({
+      draftId: input.draftId,
+      source: job,
+      prompt,
     });
+    if (result === "stale-job") {
+      throw new BadRequestException(
+        "Only the latest draft shot can be regenerated",
+      );
+    }
+    if (result === "draft-not-found") {
+      throw new BadRequestException("Draft not found");
+    }
+    if (result === "invalid-draft-status") {
+      throw new BadRequestException(
+        "Only needs_review or failed drafts can regenerate shots",
+      );
+    }
     return this.getDraft(input.draftId);
   }
 
@@ -580,13 +467,10 @@ export class DraftsService {
     jobId: string;
     mediaId: string;
   }): Promise<AdminDraft> {
-    const job = await this.prisma.generationJob.findFirst({
-      where: { id: input.jobId, draftId: input.draftId, status: "completed" },
-      select: {
-        id: true,
-        outputs: { select: { mediaId: true } },
-      },
-    });
+    const job = await this.repository.findCompletedShotCandidates(
+      input.draftId,
+      input.jobId,
+    );
     if (!job) {
       throw new BadRequestException("Completed draft shot job not found");
     }
@@ -596,20 +480,7 @@ export class DraftsService {
       );
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.generationJobOutput.updateMany({
-        where: { jobId: input.jobId },
-        data: { selected: false },
-      });
-      await tx.generationJobOutput.updateMany({
-        where: { jobId: input.jobId, mediaId: input.mediaId },
-        data: { selected: true },
-      });
-      await tx.generationJob.update({
-        where: { id: input.jobId },
-        data: { outputMediaId: input.mediaId },
-      });
-    });
+    await this.repository.selectShotOutput(input.jobId, input.mediaId);
     return this.getDraft(input.draftId);
   }
 
@@ -625,34 +496,21 @@ export class DraftsService {
     ) {
       throw new BadRequestException("Unknown filter preset");
     }
-    const output = await this.prisma.generationJobOutput.findFirst({
-      where: {
-        jobId: input.jobId,
-        mediaId: input.mediaId,
-        job: {
-          draftId: input.draftId,
-          status: "completed",
-          draft: { status: { in: FILTER_EDITABLE_STATUSES } },
-        },
-      },
-      select: { id: true },
+    const output = await this.repository.findEditableOutput({
+      draftId: input.draftId,
+      jobId: input.jobId,
+      mediaId: input.mediaId,
+      draftStatuses: FILTER_EDITABLE_STATUSES,
     });
     if (!output) {
       throw new BadRequestException("Completed candidate output not found");
     }
-    await this.prisma.generationJobOutput.update({
-      where: { id: output.id },
-      data: { filterPreset: input.filterPreset },
-    });
+    await this.repository.updateOutputFilter(output.id, input.filterPreset);
     return this.getDraft(input.draftId);
   }
 
   private async assertDraftExists(draftId: string): Promise<void> {
-    const draft = await this.prisma.postDraft.findUnique({
-      where: { id: draftId },
-      select: { id: true },
-    });
-    if (!draft) {
+    if (!(await this.repository.draftExists(draftId))) {
       throw new BadRequestException("Draft not found");
     }
   }
@@ -708,18 +566,15 @@ export class DraftsService {
     actionType: string,
     reason: string,
   ): Promise<void> {
-    await this.prisma.characterActionLog.create({
-      data: {
-        characterId,
-        actionType,
-        targetTable: "post_drafts",
-        targetId: draftId,
-        reason,
-      },
+    await this.repository.recordActionLog({
+      characterId,
+      draftId,
+      actionType,
+      reason,
     });
   }
 
-  private toDraft(draft: PrismaDraftRow): AdminDraft {
+  private toDraft(draft: DraftRow): AdminDraft {
     return {
       id: draft.id,
       characterId: draft.characterId,

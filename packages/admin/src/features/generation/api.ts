@@ -50,6 +50,33 @@ export function fetchGenerationJob(jobId: string): Promise<GenerationJob> {
   return apiRequest(`/generation/jobs/${encodeURIComponent(jobId)}`);
 }
 
+export type EnqueueGenerationJobInput = {
+  characterId: string;
+  mediaType: "image" | "video";
+  prompt: string;
+};
+
+export function enqueueGenerationJob(
+  body: EnqueueGenerationJobInput,
+): Promise<GenerationJob> {
+  return apiRequest("/generation/jobs", { method: "POST", body });
+}
+
+export type CompleteGenerationJobInput = {
+  mediaId?: string;
+  url?: string;
+};
+
+export function completeGenerationJob(
+  jobId: string,
+  body: CompleteGenerationJobInput,
+): Promise<GenerationJob> {
+  return apiRequest(`/generation/jobs/${encodeURIComponent(jobId)}/complete`, {
+    method: "POST",
+    body,
+  });
+}
+
 // ── 이미지 위저드 ────────────────────────────────────────────────────────
 // 확정(confirm) 전에는 프로바이더를 호출하지 않으므로 비용이 들지 않는다.
 

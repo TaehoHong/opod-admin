@@ -1,6 +1,6 @@
 import { Injectable, Optional } from "@nestjs/common";
-import { PrismaService } from "../database/prisma.service";
 import { LLM_LOG_TYPE, LlmLogService } from "../llm-logs/llm-log.service";
+import { GenerationSettingsRepository } from "./generation-settings.repository";
 import {
   PlannerProviderSettings,
   resolveContentPlanner,
@@ -105,15 +105,14 @@ export type ResolvedChatSettings = {
 @Injectable()
 export class GenerationSettingsService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repository: GenerationSettingsRepository,
     @Optional() private readonly llmLogs?: LlmLogService,
   ) {}
 
   async getSettings(): Promise<GenerationSettings> {
-    const rows = await this.prisma.adminSetting.findMany({
-      where: { key: { in: Object.values(GENERATION_SETTING_KEYS) } },
-      select: { key: true, value: true },
-    });
+    const rows = await this.repository.findByKeys(
+      Object.values(GENERATION_SETTING_KEYS),
+    );
     const byKey = new Map(rows.map((row) => [row.key, row.value]));
     const settings: GenerationSettings = {};
     for (const field of Object.keys(
@@ -140,14 +139,10 @@ export class GenerationSettingsService {
       const raw = update[field];
       const value = typeof raw === "string" ? raw.trim() : "";
       if (!value) {
-        await this.prisma.adminSetting.deleteMany({ where: { key } });
+        await this.repository.deleteByKey(key);
         continue;
       }
-      await this.prisma.adminSetting.upsert({
-        where: { key },
-        create: { key, value },
-        update: { value },
-      });
+      await this.repository.upsertValue(key, value);
     }
     return this.getSettings();
   }

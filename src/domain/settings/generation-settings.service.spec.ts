@@ -1,46 +1,48 @@
 import {
+  GENERATION_SETTING_KEYS,
   GenerationSettingsService,
   settingsChangeEntries,
 } from "./generation-settings.service";
 
-type PrismaMock = {
-  adminSetting: {
-    findMany: jest.Mock;
-    upsert: jest.Mock;
-    deleteMany: jest.Mock;
-  };
+type RepositoryMock = {
+  findByKeys: jest.Mock;
+  upsertValue: jest.Mock;
+  deleteByKey: jest.Mock;
 };
 
-function prismaMock(rows: { key: string; value: string }[] = []): PrismaMock {
+function repositoryMock(
+  rows: { key: string; value: string }[] = [],
+): RepositoryMock {
   return {
-    adminSetting: {
-      findMany: jest.fn().mockResolvedValue(rows),
-      upsert: jest.fn().mockResolvedValue({}),
-      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-    },
+    findByKeys: jest.fn().mockResolvedValue(rows),
+    upsertValue: jest.fn().mockResolvedValue(undefined),
+    deleteByKey: jest.fn().mockResolvedValue(undefined),
   };
 }
 
-function makeService(prisma: PrismaMock) {
-  return new GenerationSettingsService(prisma as never);
+function makeService(repository: RepositoryMock) {
+  return new GenerationSettingsService(repository as never);
 }
 
 describe("GenerationSettingsService", () => {
   it("maps stored rows to named fields", async () => {
-    const prisma = prismaMock([
+    const repository = repositoryMock([
       { key: "generation.falApiKey", value: "fal-secret-1234" },
       { key: "generation.falImageModel", value: "fal-ai/nano-banana/edit" },
     ]);
 
-    await expect(makeService(prisma).getSettings()).resolves.toEqual({
+    await expect(makeService(repository).getSettings()).resolves.toEqual({
       falApiKey: "fal-secret-1234",
       falImageModel: "fal-ai/nano-banana/edit",
     });
+    expect(repository.findByKeys).toHaveBeenCalledWith(
+      Object.values(GENERATION_SETTING_KEYS),
+    );
   });
 
   it("upserts values, deletes null/blank fields, and keeps missing fields", async () => {
-    const prisma = prismaMock();
-    const service = makeService(prisma);
+    const repository = repositoryMock();
+    const service = makeService(repository);
 
     await service.updateSettings({
       falApiKey: " fal-secret-5678 ",
@@ -48,35 +50,36 @@ describe("GenerationSettingsService", () => {
       // falImageT2iModel 누락 = 유지
     });
 
-    expect(prisma.adminSetting.upsert).toHaveBeenCalledTimes(1);
-    expect(prisma.adminSetting.upsert).toHaveBeenCalledWith({
-      where: { key: "generation.falApiKey" },
-      create: { key: "generation.falApiKey", value: "fal-secret-5678" },
-      update: { value: "fal-secret-5678" },
-    });
-    expect(prisma.adminSetting.deleteMany).toHaveBeenCalledTimes(1);
-    expect(prisma.adminSetting.deleteMany).toHaveBeenCalledWith({
-      where: { key: "generation.falImageModel" },
-    });
+    expect(repository.upsertValue).toHaveBeenCalledTimes(1);
+    expect(repository.upsertValue).toHaveBeenCalledWith(
+      "generation.falApiKey",
+      "fal-secret-5678",
+    );
+    expect(repository.deleteByKey).toHaveBeenCalledTimes(1);
+    expect(repository.deleteByKey).toHaveBeenCalledWith(
+      "generation.falImageModel",
+    );
   });
 
   it("treats an empty string update as a delete", async () => {
-    const prisma = prismaMock();
+    const repository = repositoryMock();
 
-    await makeService(prisma).updateSettings({ falImageT2iModel: "  " });
-
-    expect(prisma.adminSetting.upsert).not.toHaveBeenCalled();
-    expect(prisma.adminSetting.deleteMany).toHaveBeenCalledWith({
-      where: { key: "generation.falImageT2iModel" },
+    await makeService(repository).updateSettings({
+      falImageT2iModel: "  ",
     });
+
+    expect(repository.upsertValue).not.toHaveBeenCalled();
+    expect(repository.deleteByKey).toHaveBeenCalledWith(
+      "generation.falImageT2iModel",
+    );
   });
 
   it("prefers DB values over env and reports sources", async () => {
-    const prisma = prismaMock([
+    const repository = repositoryMock([
       { key: "generation.falApiKey", value: "db-key" },
     ]);
 
-    const resolved = await makeService(prisma).resolveProviderSettings({
+    const resolved = await makeService(repository).resolveProviderSettings({
       FAL_API_KEY: "env-key",
       FAL_IMAGE_MODEL: "fal-ai/nano-banana/edit",
     });
@@ -90,27 +93,27 @@ describe("GenerationSettingsService", () => {
   });
 
   it("resolves the provider names the worker would route to", async () => {
-    const prisma = prismaMock([
+    const repository = repositoryMock([
       { key: "generation.falApiKey", value: "db-key" },
       { key: "generation.falImageModel", value: "fal-ai/nano-banana/edit" },
     ]);
 
-    await expect(makeService(prisma).resolveProviderNames({})).resolves.toEqual(
-      {
-        // t2i 모델 미설정 → edit 모델 공용
-        t2i: "fal:fal-ai/nano-banana/edit",
-        edit: "fal:fal-ai/nano-banana/edit",
-        planner: "unconfigured",
-      },
-    );
+    await expect(
+      makeService(repository).resolveProviderNames({}),
+    ).resolves.toEqual({
+      // t2i 모델 미설정 → edit 모델 공용
+      t2i: "fal:fal-ai/nano-banana/edit",
+      edit: "fal:fal-ai/nano-banana/edit",
+      planner: "unconfigured",
+    });
   });
 
   it("resolves the LLM planner when url/key/model are all present", async () => {
-    const prisma = prismaMock([
+    const repository = repositoryMock([
       { key: "planner.llmApiKey", value: "sk-db" },
       { key: "planner.llmModel", value: "gpt-5-mini" },
     ]);
-    const service = makeService(prisma);
+    const service = makeService(repository);
 
     const resolved = await service.resolvePlannerSettings({
       LLM_API_URL: "https://llm.example/v1/chat/completions",
@@ -132,16 +135,22 @@ describe("GenerationSettingsService", () => {
   // 이미지 설정이 없으면 생성은 실패하지만 설정 화면은 떠야 한다 —
   // 여기서 예외가 나가면 admin 설정 페이지 전체가 500이 된다.
   it("reports unconfigured image and planner providers without any key", async () => {
-    const prisma = prismaMock();
+    const repository = repositoryMock();
 
-    await expect(makeService(prisma).resolveProviderNames({})).resolves.toEqual(
-      { t2i: null, edit: null, planner: "unconfigured" },
-    );
+    await expect(
+      makeService(repository).resolveProviderNames({}),
+    ).resolves.toEqual({
+      t2i: null,
+      edit: null,
+      planner: "unconfigured",
+    });
   });
 
   it("testConnection distinguishes auth failure from success and merges form input over effective settings", async () => {
-    const prisma = prismaMock([{ key: "planner.llmApiKey", value: "db-key" }]);
-    const service = makeService(prisma);
+    const repository = repositoryMock([
+      { key: "planner.llmApiKey", value: "db-key" },
+    ]);
+    const service = makeService(repository);
     const fetchMock = jest.fn();
 
     // fal: 401 = 키 무효, 404(존재하지 않는 요청) = 키 유효.

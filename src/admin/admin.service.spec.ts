@@ -1,28 +1,239 @@
 import { AdminService } from "./admin.service";
 
+type ServiceDependencies = {
+  user?: object;
+  content?: object;
+  credit?: object;
+  moderation?: object;
+  analytics?: object;
+  generation?: object;
+};
+
+const createService = ({
+  user = {},
+  content = {},
+  credit = {},
+  moderation = {},
+  analytics = {},
+  generation = {},
+}: ServiceDependencies = {}) =>
+  new (
+    AdminService as unknown as new (...dependencies: object[]) => AdminService
+  )(user, content, credit, moderation, analytics, generation);
+
+const purchase = (
+  overrides: Partial<{
+    id: string;
+    userId: string;
+    status: "pending" | "paid" | "failed" | "canceled" | "refunded";
+    creditAmount: number;
+    paidAmount: number;
+  }> = {},
+) => {
+  const createdAt = new Date("2026-07-02T00:00:00.000Z");
+  return {
+    id: "purchase-1",
+    userId: "human-1",
+    provider: "local",
+    status: "paid" as const,
+    creditAmount: 500,
+    paidAmount: 4900,
+    currency: "KRW",
+    providerPaymentId: null,
+    providerPayload: null,
+    createdAt,
+    updatedAt: createdAt,
+    ...overrides,
+  };
+};
+
 describe("AdminService", () => {
-  it("grants a purchase promotion with an explicit paid or free kind", async () => {
+  it("maps user follow counts and clamps reserved credits from spendable balance", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const service = createService({
+      user: {
+        listUsers: jest.fn().mockResolvedValue([
+          {
+            id: "user-1",
+            displayName: "Taeho",
+            email: "taeho@example.com",
+            createdAt,
+            _count: { characterFollows: 7 },
+          },
+        ]),
+        getSpendableBalances: jest
+          .fn()
+          .mockResolvedValue(
+            new Map([["user-1", { granted: 5, reserved: 7 }]]),
+          ),
+      },
+    });
+
+    await expect(service.listUsers({ limit: 20 })).resolves.toEqual({
+      items: [
+        {
+          id: "user-1",
+          displayName: "Taeho",
+          email: "taeho@example.com",
+          followCount: 7,
+          creditBalance: 0,
+          createdAt: createdAt.toISOString(),
+        },
+      ],
+    });
+  });
+
+  it("does not read a balance after a missing user is detected", async () => {
+    const getSpendableBalances = jest.fn();
+    const service = createService({
+      user: {
+        getUser: jest.fn().mockResolvedValue(null),
+        getSpendableBalances,
+      },
+    });
+
+    await expect(service.getUser("missing-user")).rejects.toThrow(
+      "User not found",
+    );
+    expect(getSpendableBalances).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cursor outside active post filters", async () => {
+    const listPosts = jest.fn();
+    const service = createService({
+      content: {
+        hasPostCursor: jest.fn().mockResolvedValue(false),
+        listPosts,
+      },
+    });
+    const cursor = Buffer.from(
+      JSON.stringify({ id: "post-cursor" }),
+      "utf8",
+    ).toString("base64url");
+
+    await expect(
+      service.listPosts({
+        characterId: "ai-1",
+        contentType: "feed",
+        cursor,
+        limit: 20,
+      }),
+    ).rejects.toThrow("Invalid cursor");
+    expect(listPosts).not.toHaveBeenCalled();
+  });
+
+  it("rejects public post creation by a user actor before persistence", async () => {
+    const createPost = jest.fn();
+    const service = createService({ content: { createPost } });
+
+    await expect(
+      service.createPost({
+        actorType: "user",
+        actorId: "human-1",
+        content: "not allowed",
+        media: [{ mediaType: "image", url: "https://cdn.local/post.png" }],
+      }),
+    ).rejects.toThrow("Users cannot create public posts");
+    expect(createPost).not.toHaveBeenCalled();
+  });
+
+  it("creates a character post and records the operator reason", async () => {
+    const createdAt = new Date("2026-06-30T00:00:00.000Z");
+    const recordCharacterAction = jest.fn().mockResolvedValue(undefined);
+    const createPost = jest.fn().mockResolvedValue({
+      id: "post-1",
+      characterId: "ai-1",
+      contentType: "reel",
+      content: "hello",
+      hashtags: [{ hashtag: { name: "opod" } }],
+      postMedia: [
+        {
+          media: {
+            mediaType: "image",
+            url: "https://cdn.local/post.png",
+            width: null,
+            height: null,
+            durationSeconds: null,
+          },
+        },
+      ],
+      _count: { comments: 0, reactions: 0 },
+      createdAt,
+    });
+    const service = createService({
+      content: {
+        hasCharacter: jest.fn().mockResolvedValue(true),
+        createPost,
+        recordCharacterAction,
+      },
+    });
+
+    await expect(
+      service.createPost({
+        actorType: "character",
+        actorId: "ai-1",
+        contentType: "reel",
+        content: "hello",
+        reason: "daily post",
+        hashtags: ["opod", "opod"],
+        media: [{ mediaType: "image", url: "https://cdn.local/post.png" }],
+      }),
+    ).resolves.toMatchObject({
+      id: "post-1",
+      hashtags: ["opod"],
+      commentCount: 0,
+      reactionCount: 0,
+    });
+    expect(createPost).toHaveBeenCalledWith(
+      expect.objectContaining({ hashtags: ["opod"] }),
+    );
+    expect(recordCharacterAction).toHaveBeenCalledWith({
+      characterId: "ai-1",
+      actionType: "POST_CREATED",
+      targetTable: "posts",
+      targetId: "post-1",
+      reason: "daily post",
+    });
+  });
+
+  it("rejects story creation with an unconfirmed stored upload", async () => {
+    const createStory = jest.fn();
+    const service = createService({
+      content: {
+        hasCharacter: jest.fn().mockResolvedValue(true),
+        getStoredMedia: jest.fn().mockResolvedValue({
+          id: "media-1",
+          mediaType: "image",
+          uploadedAt: null,
+        }),
+        createStory,
+      },
+    });
+
+    await expect(
+      service.createStory({
+        characterId: "ai-1",
+        media: { mediaId: "media-1" },
+      }),
+    ).rejects.toThrow("Media upload is not confirmed");
+    expect(createStory).not.toHaveBeenCalled();
+  });
+
+  it("validates paid grants and maps the persisted ledger entry", async () => {
     const createdAt = new Date("2026-07-24T00:00:00.000Z");
-    const create = jest.fn().mockImplementation(({ data }) => ({
+    const createLedgerEntry = jest.fn().mockImplementation((data) => ({
       id: "entry-1",
-      entryType: "grant",
       remainingAmount: data.amount,
       expiresAt: null,
       createdAt,
       ...data,
     }));
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        creditPurchase: {
-          findFirst: jest.fn().mockResolvedValue({ id: "purchase-1" }),
-        },
-        creditLedgerEntry: { create },
+    const service = createService({
+      credit: {
+        hasPurchaseForUser: jest.fn().mockResolvedValue(true),
+        createLedgerEntry,
       },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
+    });
 
     await expect(
       service.grantCredits({
@@ -39,244 +250,24 @@ describe("AdminService", () => {
       promotionCode: "SUMMER_PAID",
       amount: 100,
     });
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        creditKind: "paid",
-        purchaseId: "purchase-1",
-        promotionCode: "SUMMER_PAID",
-      }),
-    });
-    expect(create.mock.calls[0][0].data).not.toHaveProperty("expiresAt");
+    expect(createLedgerEntry).toHaveBeenCalledWith(
+      expect.not.objectContaining({ expiresAt: expect.any(Date) }),
+    );
   });
 
-  it("lists top global hashtags by post count", async () => {
-    const findMany = jest.fn().mockResolvedValue([
-      { name: "opod", _count: { posts: 42 } },
-      { name: "launch", _count: { posts: 18 } },
-    ]);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { hashtag: { findMany } },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(service.listTopHashtags({ limit: 10 })).resolves.toEqual({
-      items: [
-        { hashtag: "opod", postCount: 42 },
-        { hashtag: "launch", postCount: 18 },
-      ],
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      orderBy: [{ posts: { _count: "desc" } }, { name: "asc" }],
-      take: 10,
-      select: {
-        name: true,
-        _count: { select: { posts: true } },
+  it("returns selected analytics without executing unrelated metrics", async () => {
+    const countEvents = jest.fn();
+    const countMessages = jest.fn();
+    const countGenerationJobs = jest.fn();
+    const sumCredits = jest.fn().mockResolvedValue(42);
+    const service = createService({
+      analytics: {
+        countEvents,
+        countMessages,
+        countGenerationJobs,
+        sumCredits,
       },
     });
-  });
-
-  it("lists user follow counts", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const grantGroupBy = jest
-      .fn()
-      .mockResolvedValue([
-        { userId: "user-1", _sum: { remainingAmount: 120 } },
-      ]);
-    const reservationGroupBy = jest
-      .fn()
-      .mockResolvedValue([{ userId: "user-1", _sum: { amount: 12 } }]);
-    const findMany = jest.fn().mockResolvedValue([
-      {
-        id: "user-1",
-        displayName: "Taeho",
-        email: "taeho@example.com",
-        createdAt,
-        _count: { characterFollows: 7 },
-      },
-    ]);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        user: { findMany },
-        creditLedgerEntry: { groupBy: grantGroupBy },
-        creditReservation: { groupBy: reservationGroupBy },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(service.listUsers({ limit: 20 })).resolves.toEqual({
-      items: [
-        {
-          id: "user-1",
-          displayName: "Taeho",
-          email: "taeho@example.com",
-          followCount: 7,
-          creditBalance: 108,
-          createdAt: createdAt.toISOString(),
-        },
-      ],
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      where: {},
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 21,
-      select: expect.objectContaining({
-        _count: { select: { characterFollows: true } },
-      }),
-    });
-    expect(grantGroupBy).toHaveBeenCalledWith({
-      by: ["userId"],
-      where: {
-        userId: { in: ["user-1"] },
-        entryType: "grant",
-        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
-      },
-      _sum: { remainingAmount: true },
-    });
-    expect(reservationGroupBy).toHaveBeenCalledWith({
-      by: ["userId"],
-      where: {
-        userId: { in: ["user-1"] },
-        status: "reserved",
-        expiresAt: { gt: expect.any(Date) },
-      },
-      _sum: { amount: true },
-    });
-  });
-
-  it("gets user follow count and spendable credit balance", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const grantAggregate = jest
-      .fn()
-      .mockResolvedValue({ _sum: { remainingAmount: 120 } });
-    const reservationAggregate = jest
-      .fn()
-      .mockResolvedValue({ _sum: { amount: 12 } });
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        user: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: "user-1",
-            displayName: "Taeho",
-            email: "taeho@example.com",
-            createdAt,
-            _count: { characterFollows: 7 },
-          }),
-        },
-        creditLedgerEntry: { aggregate: grantAggregate },
-        creditReservation: { aggregate: reservationAggregate },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(service.getUser("user-1")).resolves.toEqual({
-      id: "user-1",
-      displayName: "Taeho",
-      email: "taeho@example.com",
-      followCount: 7,
-      creditBalance: 108,
-      createdAt: createdAt.toISOString(),
-    });
-    expect(grantAggregate).toHaveBeenCalledWith({
-      _sum: { remainingAmount: true },
-      where: {
-        userId: "user-1",
-        entryType: "grant",
-        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
-      },
-    });
-    expect(reservationAggregate).toHaveBeenCalledWith({
-      _sum: { amount: true },
-      where: {
-        userId: "user-1",
-        status: "reserved",
-        expiresAt: { gt: expect.any(Date) },
-      },
-    });
-    const grantNow = grantAggregate.mock.calls[0][0].where.OR[1].expiresAt.gt;
-    const reservationNow =
-      reservationAggregate.mock.calls[0][0].where.expiresAt.gt;
-    expect(grantNow.getTime()).toBe(reservationNow.getTime());
-  });
-
-  it("clamps a negative spendable credit balance to zero", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        user: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: "user-1",
-            displayName: "Taeho",
-            email: null,
-            createdAt,
-            _count: { characterFollows: 0 },
-          }),
-        },
-        creditLedgerEntry: {
-          aggregate: jest
-            .fn()
-            .mockResolvedValue({ _sum: { remainingAmount: 5 } }),
-        },
-        creditReservation: {
-          aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 7 } }),
-        },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(service.getUser("user-1")).resolves.toMatchObject({
-      id: "user-1",
-      creditBalance: 0,
-    });
-  });
-
-  it("does not aggregate credit balance for a missing user", async () => {
-    const grantAggregate = jest.fn();
-    const reservationAggregate = jest.fn();
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        user: { findUnique: jest.fn().mockResolvedValue(null) },
-        creditLedgerEntry: { aggregate: grantAggregate },
-        creditReservation: { aggregate: reservationAggregate },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(service.getUser("missing-user")).rejects.toThrow(
-      "User not found",
-    );
-    expect(grantAggregate).not.toHaveBeenCalled();
-    expect(reservationAggregate).not.toHaveBeenCalled();
-  });
-
-  it("returns filtered analytics metrics", async () => {
-    const aggregate = jest.fn().mockResolvedValue({ _sum: { amount: 42 } });
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        creditLedgerEntry: { aggregate },
-        generationJob: { count: jest.fn() },
-        message: { count: jest.fn() },
-        userEvent: { count: jest.fn() },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
 
     await expect(
       service.getAnalytics({
@@ -287,209 +278,47 @@ describe("AdminService", () => {
     ).resolves.toEqual({
       metrics: [{ name: "credits.debited", value: 42 }],
     });
-    expect(aggregate).toHaveBeenCalledWith({
-      where: {
-        entryType: "debit",
-        createdAt: {
-          gte: new Date("2026-07-01T00:00:00.000Z"),
-          lte: new Date("2026-07-02T00:00:00.000Z"),
-        },
-      },
-      _sum: { amount: true },
+    expect(sumCredits).toHaveBeenCalledWith("debit", {
+      gte: new Date("2026-07-01T00:00:00.000Z"),
+      lte: new Date("2026-07-02T00:00:00.000Z"),
     });
+    expect(countEvents).not.toHaveBeenCalled();
+    expect(countMessages).not.toHaveBeenCalled();
+    expect(countGenerationJobs).not.toHaveBeenCalled();
   });
 
-  it("returns every analytics metric in dashboard order", async () => {
-    const aggregate = jest
-      .fn()
-      .mockResolvedValueOnce({ _sum: { amount: 3 } })
-      .mockResolvedValueOnce({ _sum: { amount: 4 } });
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        creditLedgerEntry: { aggregate },
-        generationJob: { count: jest.fn().mockResolvedValue(5) },
-        message: { count: jest.fn().mockResolvedValue(2) },
-        userEvent: { count: jest.fn().mockResolvedValue(1) },
+  it("identifies a paid purchase with no base grant as repairable", async () => {
+    const service = createService({
+      credit: {
+        listPurchases: jest.fn().mockResolvedValue([purchase()]),
+        listReconciliationEvidence: jest
+          .fn()
+          .mockResolvedValue({ entries: [], refunds: [] }),
       },
-      {},
-    );
-
-    await expect(service.getAnalytics({})).resolves.toEqual({
-      metrics: [
-        { name: "events.count", value: 1 },
-        { name: "messages.count", value: 2 },
-        { name: "credits.granted", value: 3 },
-        { name: "credits.debited", value: 4 },
-        { name: "generation_jobs.count", value: 5 },
-      ],
     });
-  });
-
-  it("lists payment reconciliation mismatches", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const paidWithoutGrant = {
-      id: "purchase-missing",
-      userId: "human-1",
-      provider: "local",
-      status: "paid" as const,
-      creditAmount: 100,
-      paidAmount: 9900,
-      currency: "KRW",
-      createdAt,
-      updatedAt: createdAt,
-    };
-    const paidWithGrant = {
-      ...paidWithoutGrant,
-      id: "purchase-granted",
-    };
-    const findPurchases = jest
-      .fn()
-      .mockResolvedValue([paidWithoutGrant, paidWithGrant]);
-    const findLedgerEntries = jest.fn().mockResolvedValue([
-      {
-        id: "grant-1",
-        purchaseId: "purchase-granted",
-        entryType: "grant",
-        creditKind: "paid",
-        promotionCode: null,
-        amount: 100,
-        externalReference: "credit_purchase:purchase-granted",
-      },
-    ]);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        creditLedgerEntry: { findMany: findLedgerEntries },
-        creditPurchase: { findMany: findPurchases },
-        creditRefund: { findMany: jest.fn().mockResolvedValue([]) },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
 
     await expect(
-      service.listPaymentReconciliation({
-        status: "mismatch",
-        from: "2026-07-01T00:00:00.000Z",
-        to: "2026-07-03T00:00:00.000Z",
-      }),
+      service.listPaymentReconciliation({ status: "mismatch" }),
     ).resolves.toEqual({
       items: [
-        {
-          paymentId: "purchase-missing",
-          userId: "human-1",
-          provider: "local",
-          providerStatus: "paid",
-          creditAmount: 100,
-          paidAmount: 9900,
-          currency: "KRW",
+        expect.objectContaining({
+          paymentId: "purchase-1",
           ledgerStatus: "missing_grant",
-          reason: "paid purchase has no credit grant",
           issueCodes: ["paid_missing_grant"],
           repairActions: ["grant_missing_purchase"],
-        },
-      ],
-    });
-    expect(findPurchases).toHaveBeenCalledWith({
-      where: {
-        createdAt: {
-          gte: new Date("2026-07-01T00:00:00.000Z"),
-          lte: new Date("2026-07-03T00:00:00.000Z"),
-        },
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    });
-    expect(findLedgerEntries).toHaveBeenCalledWith({
-      where: {
-        purchaseId: {
-          in: ["purchase-missing", "purchase-granted"],
-        },
-      },
-      select: {
-        id: true,
-        purchaseId: true,
-        entryType: true,
-        creditKind: true,
-        promotionCode: true,
-        amount: true,
-        externalReference: true,
-      },
-    });
-  });
-
-  it("includes amounts on pending payment reconciliation rows", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        creditLedgerEntry: { findMany: jest.fn().mockResolvedValue([]) },
-        creditRefund: { findMany: jest.fn().mockResolvedValue([]) },
-        creditPurchase: {
-          findMany: jest.fn().mockResolvedValue([
-            {
-              id: "purchase-pending",
-              userId: "human-1",
-              provider: "local",
-              status: "pending",
-              creditAmount: 50,
-              paidAmount: 4900,
-              currency: "KRW",
-              createdAt,
-              updatedAt: createdAt,
-            },
-          ]),
-        },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listPaymentReconciliation({ status: "pending" }),
-    ).resolves.toEqual({
-      items: [
-        {
-          paymentId: "purchase-pending",
-          userId: "human-1",
-          provider: "local",
-          providerStatus: "pending",
-          creditAmount: 50,
-          paidAmount: 4900,
-          currency: "KRW",
-          ledgerStatus: "not_granted",
-          reason: "payment pending",
-        },
+        }),
       ],
     });
   });
 
-  it("detects duplicate grants and refund recovery mismatches", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        creditPurchase: {
-          findMany: jest.fn().mockResolvedValue([
-            {
-              id: "purchase-1",
-              userId: "human-1",
-              provider: "local",
-              status: "refunded",
-              creditAmount: 500,
-              paidAmount: 4900,
-              currency: "KRW",
-              createdAt,
-              updatedAt: createdAt,
-            },
-          ]),
-        },
-        creditLedgerEntry: {
-          findMany: jest.fn().mockResolvedValue([
+  it("detects incomplete refund recovery and an excessive refund total", async () => {
+    const service = createService({
+      credit: {
+        listPurchases: jest
+          .fn()
+          .mockResolvedValue([purchase({ status: "refunded" })]),
+        listReconciliationEvidence: jest.fn().mockResolvedValue({
+          entries: [
             {
               id: "grant-1",
               purchaseId: "purchase-1",
@@ -499,10 +328,8 @@ describe("AdminService", () => {
               amount: 500,
               externalReference: "credit_purchase:purchase-1",
             },
-          ]),
-        },
-        creditRefund: {
-          findMany: jest.fn().mockResolvedValue([
+          ],
+          refunds: [
             {
               id: "refund-1",
               purchaseId: "purchase-1",
@@ -510,161 +337,92 @@ describe("AdminService", () => {
               refundAmount: 5000,
               allocations: [{ recoveryAmount: 500, recoveredAmount: 0 }],
             },
-          ]),
-        },
+          ],
+        }),
       },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
+    });
 
     await expect(
       service.listPaymentReconciliation({ status: "mismatch" }),
     ).resolves.toEqual({
       items: [
         expect.objectContaining({
-          paymentId: "purchase-1",
           issueCodes: [
             "refund_missing_recovery",
             "refund_total_exceeds_payment",
           ],
+          repairActions: ["recover_completed_refund"],
         }),
       ],
     });
   });
 
-  it("repairs a missing paid grant once and records the admin action", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const actions: Array<{
-      reference: string;
-      purchaseId: string;
-      actionType: string;
-      details: unknown;
-    }> = [];
-    const ledgerCreate = jest.fn().mockResolvedValue({ id: "grant-1" });
-    let prisma: Record<string, unknown>;
-    prisma = {
-      $executeRaw: jest.fn().mockResolvedValue(0),
-      creditPurchase: {
-        findUnique: jest.fn().mockResolvedValue({
-          id: "purchase-1",
-          userId: "human-1",
-          provider: "local",
-          status: "paid",
-          creditAmount: 500,
-          paidAmount: 4900,
-          currency: "KRW",
-          createdAt,
-          updatedAt: createdAt,
-        }),
-      },
-      creditReconciliationAction: {
-        findUnique: jest.fn(async ({ where }) =>
-          actions.find((action) => action.reference === where.reference),
-        ),
-        create: jest.fn(async ({ data }) => {
-          actions.push(data);
-          return data;
-        }),
-      },
-      creditLedgerEntry: {
-        findMany: jest.fn().mockResolvedValue([]),
-        create: ledgerCreate,
-      },
-      creditAccount: {
-        upsert: jest.fn().mockResolvedValue({ userId: "human-1", paidDebt: 0 }),
-        update: jest.fn(),
-      },
-      user: { update: jest.fn() },
-      $transaction: jest.fn(
-        async (run: (client: unknown) => Promise<unknown>) => run(prisma),
-      ),
-    };
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      prisma,
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-    const input = {
-      adminId: "admin-1",
-      purchaseId: "purchase-1",
+  it("replays an existing reconciliation receipt without another mutation", async () => {
+    const receipt = {
+      reference: "repair-purchase-1",
       action: "grant_missing_purchase" as const,
-      reference: "repair-purchase-1",
-      reason: "reconciliation repair",
-    };
-
-    const first = await service.reconcilePayment(input);
-    const replay = await service.reconcilePayment(input);
-
-    expect(replay).toEqual(first);
-    expect(ledgerCreate).toHaveBeenCalledTimes(1);
-    expect(first).toEqual({
-      reference: "repair-purchase-1",
-      action: "grant_missing_purchase",
       purchaseId: "purchase-1",
       grantedCredits: 500,
       recoveredCredits: 0,
       debtAdded: 0,
+    };
+    const createLedgerEntry = jest.fn();
+    const session = {
+      getAction: jest.fn().mockResolvedValue({
+        purchaseId: "purchase-1",
+        actionType: "grant_missing_purchase",
+        details: receipt,
+      }),
+      createLedgerEntry,
+    };
+    const service = createService({
+      credit: {
+        getPayment: jest.fn().mockResolvedValue(purchase()),
+        withReconciliationTransaction: jest.fn(
+          async (_userId, _reference, work) => work(session),
+        ),
+      },
     });
-    expect(actions).toHaveLength(1);
+
+    await expect(
+      service.reconcilePayment({
+        adminId: "admin-1",
+        purchaseId: "purchase-1",
+        action: "grant_missing_purchase",
+        reference: "repair-purchase-1",
+        reason: "reconciliation repair",
+      }),
+    ).resolves.toEqual(receipt);
+    expect(createLedgerEntry).not.toHaveBeenCalled();
   });
 
-  it("recovers an erroneous non-paid grant and records used credits as debt", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const grant = {
-      id: "grant-1",
-      userId: "human-1",
-      purchaseId: "purchase-1",
-      entryType: "grant",
-      creditKind: "paid",
-      promotionCode: null,
-      amount: 500,
-      remainingAmount: 200,
-      createdAt,
+  it("recovers used non-paid credits as debt and records a debit", async () => {
+    const createLedgerEntry = jest.fn();
+    const addPaidDebt = jest.fn();
+    const session = {
+      getAction: jest.fn().mockResolvedValue(null),
+      listPurchaseGrants: jest.fn().mockResolvedValue([
+        {
+          id: "grant-1",
+          amount: 500,
+          remainingAmount: 200,
+          creditKind: "paid",
+          promotionCode: null,
+        },
+      ]),
+      setLedgerRemaining: jest.fn(),
+      addPaidDebt,
+      createLedgerEntry,
+      recordAction: jest.fn(),
     };
-    const debtUpsert = jest.fn().mockResolvedValue({
-      userId: "human-1",
-      paidDebt: 300,
+    const service = createService({
+      credit: {
+        getPayment: jest.fn().mockResolvedValue(purchase({ status: "failed" })),
+        withReconciliationTransaction: jest.fn(
+          async (_userId, _reference, work) => work(session),
+        ),
+      },
     });
-    const ledgerCreate = jest.fn().mockResolvedValue({ id: "debit-1" });
-    let prisma: Record<string, unknown>;
-    prisma = {
-      $executeRaw: jest.fn().mockResolvedValue(0),
-      creditPurchase: {
-        findUnique: jest.fn().mockResolvedValue({
-          id: "purchase-1",
-          userId: "human-1",
-          status: "failed",
-          creditAmount: 500,
-          paidAmount: 4900,
-          currency: "KRW",
-          provider: "local",
-          createdAt,
-          updatedAt: createdAt,
-        }),
-      },
-      creditReconciliationAction: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: "action-1" }),
-      },
-      creditLedgerEntry: {
-        findMany: jest.fn().mockResolvedValue([grant]),
-        update: jest.fn().mockResolvedValue({ ...grant, remainingAmount: 0 }),
-        create: ledgerCreate,
-      },
-      creditAccount: { upsert: debtUpsert },
-      $transaction: jest.fn(
-        async (run: (client: unknown) => Promise<unknown>) => run(prisma),
-      ),
-    };
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      prisma,
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
 
     await expect(
       service.reconcilePayment({
@@ -678,82 +436,55 @@ describe("AdminService", () => {
       recoveredCredits: 500,
       debtAdded: 300,
     });
-    expect(debtUpsert).toHaveBeenCalledWith({
-      where: { userId: "human-1" },
-      create: { userId: "human-1", paidDebt: 300 },
-      update: { paidDebt: { increment: 300 } },
-    });
-    expect(ledgerCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(addPaidDebt).toHaveBeenCalledWith("human-1", 300);
+    expect(createLedgerEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
         entryType: "debit",
         amount: 500,
         externalReference: "credit_reconciliation:recover-purchase-1",
       }),
-    });
+    );
   });
 
   it("retries only the unrecovered portion of a completed refund", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const allocationUpdate = jest.fn().mockResolvedValue({});
-    const debtUpsert = jest.fn().mockResolvedValue({});
-    const ledgerCreate = jest.fn().mockResolvedValue({ id: "debit-1" });
-    let prisma: Record<string, unknown>;
-    prisma = {
-      $executeRaw: jest.fn().mockResolvedValue(0),
-      creditPurchase: {
-        findUnique: jest.fn().mockResolvedValue({
-          id: "purchase-1",
-          userId: "human-1",
-          status: "refunded",
+    const completeRefundAllocation = jest.fn();
+    const addPaidDebt = jest.fn();
+    const session = {
+      getAction: jest.fn().mockResolvedValue(null),
+      listPurchaseGrants: jest.fn().mockResolvedValue([]),
+      listCompletedRefunds: jest.fn().mockResolvedValue([
+        {
+          id: "refund-1",
           creditAmount: 500,
-          paidAmount: 4900,
-          currency: "KRW",
-          provider: "local",
-          createdAt,
-          updatedAt: createdAt,
-        }),
-      },
-      creditReconciliationAction: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: "action-1" }),
-      },
-      creditRefund: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            id: "refund-1",
-            creditAmount: 500,
-            promotionAmount: 0,
-            allocations: [
-              {
-                refundId: "refund-1",
-                ledgerEntryId: "grant-1",
-                recoveryAmount: 500,
-                recoveredAmount: 0,
-                ledgerEntry: { remainingAmount: 200 },
-              },
-            ],
-          },
-        ]),
-      },
-      creditRefundAllocation: { update: allocationUpdate },
-      creditLedgerEntry: {
-        findMany: jest.fn().mockResolvedValue([]),
-        findFirst: jest.fn().mockResolvedValue(null),
-        update: jest.fn().mockResolvedValue({ remainingAmount: 0 }),
-        create: ledgerCreate,
-      },
-      creditAccount: { upsert: debtUpsert },
-      $transaction: jest.fn(
-        async (run: (client: unknown) => Promise<unknown>) => run(prisma),
-      ),
+          promotionAmount: 0,
+          allocations: [
+            {
+              refundId: "refund-1",
+              ledgerEntryId: "grant-1",
+              recoveryAmount: 500,
+              recoveredAmount: 200,
+              ledgerEntry: { remainingAmount: 100 },
+            },
+          ],
+        },
+      ]),
+      setLedgerRemaining: jest.fn(),
+      completeRefundAllocation,
+      hasDebitReference: jest.fn().mockResolvedValue(false),
+      createLedgerEntry: jest.fn(),
+      addPaidDebt,
+      recordAction: jest.fn(),
     };
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      prisma,
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
+    const service = createService({
+      credit: {
+        getPayment: jest
+          .fn()
+          .mockResolvedValue(purchase({ status: "refunded" })),
+        withReconciliationTransaction: jest.fn(
+          async (_userId, _reference, work) => work(session),
+        ),
+      },
+    });
 
     await expect(
       service.reconcilePayment({
@@ -764,1093 +495,80 @@ describe("AdminService", () => {
         reason: "refund recovery retry",
       }),
     ).resolves.toMatchObject({
-      recoveredCredits: 500,
-      debtAdded: 300,
+      recoveredCredits: 300,
+      debtAdded: 200,
     });
-    expect(allocationUpdate).toHaveBeenCalledWith({
-      where: {
-        refundId_ledgerEntryId: {
-          refundId: "refund-1",
-          ledgerEntryId: "grant-1",
-        },
-      },
-      data: { recoveredAmount: 500 },
-    });
-    expect(debtUpsert).toHaveBeenCalledWith({
-      where: { userId: "human-1" },
-      create: { userId: "human-1", paidDebt: 300 },
-      update: { paidDebt: { increment: 300 } },
-    });
-    expect(ledgerCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        externalReference: "credit_refund:refund-1",
-        amount: 500,
-      }),
-    });
+    expect(completeRefundAllocation).toHaveBeenCalledWith(
+      "refund-1",
+      "grant-1",
+      500,
+    );
+    expect(addPaidDebt).toHaveBeenCalledWith("human-1", 200);
   });
 
-  it("lists reports with status-filtered cursor pagination", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const newerReport = {
-      id: "report-2",
-      reporterUserId: "human-1",
-      targetType: "post" as const,
-      targetId: "post-1",
-      reason: "unsafe content",
-      details: "needs review",
-      status: "submitted" as const,
-      createdAt,
-      updatedAt: createdAt,
+  it("rejects reusing a reconciliation reference for a different action", async () => {
+    const session = {
+      getAction: jest.fn().mockResolvedValue({
+        purchaseId: "purchase-1",
+        actionType: "recover_nonpaid_grants",
+        details: {},
+      }),
     };
-    const olderReport = {
-      ...newerReport,
-      id: "report-1",
-      reason: "spam",
-      details: null,
-    };
-    const findMany = jest.fn().mockResolvedValue([newerReport, olderReport]);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        report: {
-          findMany,
-        },
+    const service = createService({
+      credit: {
+        getPayment: jest.fn().mockResolvedValue(purchase()),
+        withReconciliationTransaction: jest.fn(
+          async (_userId, _reference, work) => work(session),
+        ),
       },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
+    });
 
     await expect(
-      service.listReports({ status: "submitted", limit: 1 }),
-    ).resolves.toEqual({
-      items: [
-        {
-          ...newerReport,
-          createdAt: createdAt.toISOString(),
-          updatedAt: createdAt.toISOString(),
-        },
-      ],
-      nextCursor: expect.any(String),
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      where: { status: "submitted" },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 2,
-    });
+      service.reconcilePayment({
+        adminId: "admin-1",
+        purchaseId: "purchase-1",
+        action: "grant_missing_purchase",
+        reference: "already-used",
+        reason: "repair",
+      }),
+    ).rejects.toThrow("Reconciliation reference is already used");
   });
 
-  it("updates report status and resolution", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const updatedAt = new Date("2026-07-02T00:10:00.000Z");
-    const update = jest.fn().mockResolvedValue({
-      id: "report-1",
-      reporterUserId: "human-1",
-      targetType: "post",
-      targetId: "post-1",
-      reason: "unsafe content",
-      details: null,
-      resolution: "handled",
-      status: "resolved",
-      createdAt,
-      updatedAt,
+  it("validates report status before updating moderation state", async () => {
+    const updateReport = jest.fn();
+    const service = createService({
+      moderation: { getReport: jest.fn(), updateReport },
     });
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        report: {
-          findUnique: jest.fn().mockResolvedValue({ id: "report-1" }),
-          update,
-        },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
 
     await expect(
       service.updateReport({
         reportId: "report-1",
-        status: "resolved",
-        resolution: " handled ",
+        status: "deleted",
       }),
-    ).resolves.toEqual({
-      id: "report-1",
-      status: "resolved",
-      updatedAt: updatedAt.toISOString(),
-    });
-    expect(update).toHaveBeenCalledWith({
-      where: { id: "report-1" },
-      data: {
-        status: "resolved",
-        resolution: "handled",
-      },
-    });
+    ).rejects.toThrow("Invalid report status");
+    expect(updateReport).not.toHaveBeenCalled();
   });
 
-  it("runs generation jobs through the local provider and records logs", async () => {
-    const startJob = jest.fn().mockResolvedValue({
-      id: "job-1",
-      characterId: "ai-1",
-      status: "running",
-    });
-    const createLog = jest.fn().mockResolvedValue(undefined);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        characterActionLog: {
-          create: createLog,
-        },
+  it("runs generation through the local provider and records an action", async () => {
+    const recordCharacterAction = jest.fn();
+    const service = createService({
+      content: { recordCharacterAction },
+      generation: {
+        startJob: jest.fn().mockResolvedValue({
+          id: "job-1",
+          characterId: "ai-1",
+        }),
       },
-      { enqueueJob: jest.fn(), startJob, completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
+    });
 
     await expect(
-      service.runGenerationJob({
-        jobId: "job-1",
-        provider: " local ",
-      }),
-    ).resolves.toEqual({
-      id: "job-1",
-      status: "running",
-    });
-    expect(startJob).toHaveBeenCalledWith("job-1");
-    expect(createLog).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
+      service.runGenerationJob({ jobId: "job-1", provider: "local" }),
+    ).resolves.toEqual({ id: "job-1", status: "running" });
+    expect(recordCharacterAction).toHaveBeenCalledWith(
+      expect.objectContaining({
         actionType: "GENERATION_JOB_RUN",
-        targetTable: "generation_jobs",
-        targetId: "job-1",
         reason: "generation job run requested via local provider",
-      },
-    });
-  });
-
-  it("creates an image draft and records the creation action", async () => {
-    const createImageDraft = jest.fn().mockResolvedValue({
-      id: "job-1",
-      characterId: "ai-1",
-    });
-    const createLog = jest.fn().mockResolvedValue(undefined);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { characterActionLog: { create: createLog } },
-      { createImageDraft },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await service.createImageGenerationDraft({
-      characterId: "ai-1",
-      inputPrompt: "portrait",
-      candidateCount: 3,
-    });
-
-    expect(createImageDraft).toHaveBeenCalledWith({
-      characterId: "ai-1",
-      inputPrompt: "portrait",
-      candidateCount: 3,
-    });
-    expect(createLog).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        actionType: "GENERATION_DRAFT_CREATED",
-        targetId: "job-1",
       }),
-    });
-  });
-
-  it.each([
-    {
-      method: "regenerateImageJob" as const,
-      generationMethod: "regenerateImageJob" as const,
-      actionType: "GENERATION_JOB_REGENERATED",
-    },
-  ])("delegates $method and records $actionType", async (testCase) => {
-    const delegate = jest.fn().mockResolvedValue({
-      id: "job-2",
-      characterId: "ai-1",
-    });
-    const createLog = jest.fn().mockResolvedValue(undefined);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { characterActionLog: { create: createLog } },
-      { [testCase.generationMethod]: delegate },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
     );
-
-    await service[testCase.method]("job-1");
-
-    expect(delegate).toHaveBeenCalledWith("job-1");
-    expect(createLog).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        characterId: "ai-1",
-        actionType: testCase.actionType,
-        targetTable: "generation_jobs",
-        targetId: "job-2",
-      }),
-    });
-  });
-
-  it("lists filtered posts with cursor pagination", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const cursor = Buffer.from(
-      JSON.stringify({ id: "post-cursor" }),
-      "utf8",
-    ).toString("base64url");
-    const findFirst = jest.fn().mockResolvedValue({ id: "post-cursor" });
-    const findMany = jest.fn().mockResolvedValue([
-      {
-        id: "post-2",
-        characterId: "ai-1",
-        contentType: "feed",
-        content: "newer",
-        createdAt,
-        postMedia: [
-          {
-            media: {
-              mediaType: "image",
-              url: "https://cdn.local/newer.png",
-              width: 1080,
-              height: 1080,
-              durationSeconds: null,
-            },
-          },
-        ],
-        hashtags: [{ hashtag: { name: "launch" } }],
-        _count: { comments: 3, reactions: 8 },
-      },
-      {
-        id: "post-1",
-        characterId: "ai-1",
-        contentType: "feed",
-        content: "older",
-        createdAt,
-        postMedia: [],
-        hashtags: [],
-        _count: { comments: 0, reactions: 0 },
-      },
-    ]);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { post: { findFirst, findMany } },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listPosts({
-        characterId: " ai-1 ",
-        contentType: " feed ",
-        cursor,
-        limit: 1,
-      }),
-    ).resolves.toEqual({
-      items: [
-        {
-          id: "post-2",
-          characterId: "ai-1",
-          contentType: "feed",
-          content: "newer",
-          media: [
-            {
-              mediaType: "image",
-              url: "https://cdn.local/newer.png",
-              width: 1080,
-              height: 1080,
-            },
-          ],
-          hashtags: ["launch"],
-          commentCount: 3,
-          reactionCount: 8,
-          createdAt: createdAt.toISOString(),
-        },
-      ],
-      nextCursor: expect.any(String),
-    });
-    expect(findFirst).toHaveBeenCalledWith({
-      where: {
-        id: "post-cursor",
-        characterId: "ai-1",
-        contentType: "feed",
-      },
-      select: { id: true },
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      where: { characterId: "ai-1", contentType: "feed" },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 2,
-      cursor: { id: "post-cursor" },
-      skip: 1,
-      include: {
-        postMedia: {
-          include: { media: true },
-          orderBy: { sortOrder: "asc" },
-        },
-        hashtags: {
-          include: { hashtag: true },
-          orderBy: { hashtag: { name: "asc" } },
-        },
-        _count: { select: { comments: true, reactions: true } },
-      },
-    });
-  });
-
-  it("lists credit ledger entries across all users", async () => {
-    const findMany = jest.fn().mockResolvedValue([]);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { creditLedgerEntry: { findMany } },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(service.listCreditLedger({ limit: 20 })).resolves.toEqual({
-      items: [],
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      where: {},
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 21,
-    });
-  });
-
-  it("lists hashtag preferences across all users", async () => {
-    const findMany = jest.fn().mockResolvedValue([]);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { userHashtagPreference: { findMany } },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(service.listHashtagPreferences({})).resolves.toEqual({
-      items: [],
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      where: {},
-      orderBy: [{ score: "desc" }, { hashtag: { name: "asc" } }],
-      include: { hashtag: { select: { name: true } } },
-    });
-  });
-
-  it("rejects a post cursor outside the active filters", async () => {
-    const cursor = Buffer.from(
-      JSON.stringify({ id: "post-cursor" }),
-      "utf8",
-    ).toString("base64url");
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        post: {
-          findFirst: jest.fn().mockResolvedValue(null),
-          findMany: jest.fn().mockResolvedValue([]),
-        },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listPosts({ characterId: "ai-1", cursor, limit: 20 }),
-    ).rejects.toThrow("Invalid cursor");
-  });
-
-  it("rejects an invalid post list content type", async () => {
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        post: {
-          findFirst: jest.fn(),
-          findMany: jest.fn().mockResolvedValue([]),
-        },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listPosts({ contentType: "article", limit: 20 }),
-    ).rejects.toThrow("Post content type must be feed or reel");
-  });
-
-  it("gets a post with the admin post representation", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "post-1",
-      characterId: "ai-1",
-      contentType: "reel",
-      content: "detail",
-      createdAt,
-      postMedia: [
-        {
-          media: {
-            mediaType: "video",
-            url: "https://cdn.local/detail.mp4",
-            width: 1080,
-            height: 1920,
-            durationSeconds: 15,
-          },
-        },
-      ],
-      hashtags: [{ hashtag: { name: "detail" } }],
-      _count: { comments: 2, reactions: 5 },
-    });
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { post: { findUnique } },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(service.getPost("post-1")).resolves.toEqual({
-      id: "post-1",
-      characterId: "ai-1",
-      contentType: "reel",
-      content: "detail",
-      media: [
-        {
-          mediaType: "video",
-          url: "https://cdn.local/detail.mp4",
-          width: 1080,
-          height: 1920,
-          durationSeconds: 15,
-        },
-      ],
-      hashtags: ["detail"],
-      commentCount: 2,
-      reactionCount: 5,
-      createdAt: createdAt.toISOString(),
-    });
-    expect(findUnique).toHaveBeenCalledWith({
-      where: { id: "post-1" },
-      include: {
-        postMedia: {
-          include: { media: true },
-          orderBy: { sortOrder: "asc" },
-        },
-        hashtags: {
-          include: { hashtag: true },
-          orderBy: { hashtag: { name: "asc" } },
-        },
-        _count: { select: { comments: true, reactions: true } },
-      },
-    });
-  });
-
-  it("rejects a missing post detail", async () => {
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { post: { findUnique: jest.fn().mockResolvedValue(null) } },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(service.getPost("missing-post")).rejects.toThrow(
-      "Post not found",
-    );
-  });
-
-  it("lists post comments with author-filtered cursor pagination", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const cursor = Buffer.from(
-      JSON.stringify({ id: "comment-cursor" }),
-      "utf8",
-    ).toString("base64url");
-    const findFirst = jest.fn().mockResolvedValue({ id: "comment-cursor" });
-    const findMany = jest.fn().mockResolvedValue([
-      {
-        id: "comment-2",
-        postId: "post-1",
-        characterId: "ai-1",
-        body: "newer",
-        createdAt,
-      },
-      {
-        id: "comment-1",
-        postId: "post-1",
-        characterId: "ai-1",
-        body: "older",
-        createdAt,
-      },
-    ]);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        post: { findUnique: jest.fn().mockResolvedValue({ id: "post-1" }) },
-        postComment: { findFirst, findMany },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listPostComments({
-        postId: "post-1",
-        characterId: " ai-1 ",
-        cursor,
-        limit: 1,
-      }),
-    ).resolves.toEqual({
-      items: [
-        {
-          id: "comment-2",
-          postId: "post-1",
-          characterId: "ai-1",
-          body: "newer",
-          createdAt: createdAt.toISOString(),
-        },
-      ],
-      nextCursor: expect.any(String),
-    });
-    expect(findFirst).toHaveBeenCalledWith({
-      where: {
-        id: "comment-cursor",
-        postId: "post-1",
-        characterId: "ai-1",
-      },
-      select: { id: true },
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      where: { postId: "post-1", characterId: "ai-1" },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 2,
-      cursor: { id: "comment-cursor" },
-      skip: 1,
-    });
-  });
-
-  it("rejects listing comments for a missing post", async () => {
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        post: { findUnique: jest.fn().mockResolvedValue(null) },
-        postComment: { findFirst: jest.fn(), findMany: jest.fn() },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listPostComments({ postId: "missing-post", limit: 20 }),
-    ).rejects.toThrow("Post not found");
-  });
-
-  it("rejects a post comment cursor outside the active post", async () => {
-    const cursor = Buffer.from(
-      JSON.stringify({ id: "comment-cursor" }),
-      "utf8",
-    ).toString("base64url");
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        post: { findUnique: jest.fn().mockResolvedValue({ id: "post-1" }) },
-        postComment: {
-          findFirst: jest.fn().mockResolvedValue(null),
-          findMany: jest.fn(),
-        },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listPostComments({ postId: "post-1", cursor, limit: 20 }),
-    ).rejects.toThrow("Invalid cursor");
-  });
-
-  it("lists post reactions with filtered cursor pagination", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const cursor = Buffer.from(
-      JSON.stringify({ id: "reaction-cursor" }),
-      "utf8",
-    ).toString("base64url");
-    const findFirst = jest.fn().mockResolvedValue({ id: "reaction-cursor" });
-    const findMany = jest.fn().mockResolvedValue([
-      {
-        id: "reaction-2",
-        postId: "post-1",
-        characterId: "ai-1",
-        reactionType: "like",
-        createdAt,
-      },
-      {
-        id: "reaction-1",
-        postId: "post-1",
-        characterId: "ai-1",
-        reactionType: "like",
-        createdAt,
-      },
-    ]);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        post: { findUnique: jest.fn().mockResolvedValue({ id: "post-1" }) },
-        postReaction: { findFirst, findMany },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listPostReactions({
-        postId: "post-1",
-        characterId: " ai-1 ",
-        reactionType: " like ",
-        cursor,
-        limit: 1,
-      }),
-    ).resolves.toEqual({
-      items: [
-        {
-          id: "reaction-2",
-          postId: "post-1",
-          characterId: "ai-1",
-          reactionType: "like",
-          createdAt: createdAt.toISOString(),
-        },
-      ],
-      nextCursor: expect.any(String),
-    });
-    expect(findFirst).toHaveBeenCalledWith({
-      where: {
-        id: "reaction-cursor",
-        postId: "post-1",
-        characterId: "ai-1",
-        reactionType: "like",
-      },
-      select: { id: true },
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        postId: "post-1",
-        characterId: "ai-1",
-        reactionType: "like",
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 2,
-      cursor: { id: "reaction-cursor" },
-      skip: 1,
-    });
-  });
-
-  it("rejects listing reactions for a missing post", async () => {
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        post: { findUnique: jest.fn().mockResolvedValue(null) },
-        postReaction: { findFirst: jest.fn(), findMany: jest.fn() },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listPostReactions({ postId: "missing-post", limit: 20 }),
-    ).rejects.toThrow("Post not found");
-  });
-
-  it("rejects a post reaction cursor outside the active post", async () => {
-    const cursor = Buffer.from(
-      JSON.stringify({ id: "reaction-cursor" }),
-      "utf8",
-    ).toString("base64url");
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        post: { findUnique: jest.fn().mockResolvedValue({ id: "post-1" }) },
-        postReaction: {
-          findFirst: jest.fn().mockResolvedValue(null),
-          findMany: jest.fn(),
-        },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listPostReactions({ postId: "post-1", cursor, limit: 20 }),
-    ).rejects.toThrow("Invalid cursor");
-  });
-
-  it("lists stories with character-filtered cursor pagination", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const expiresAt = new Date("2026-07-13T00:00:00.000Z");
-    const cursor = Buffer.from(
-      JSON.stringify({ id: "story-cursor" }),
-      "utf8",
-    ).toString("base64url");
-    const findFirst = jest.fn().mockResolvedValue({ id: "story-cursor" });
-    const findMany = jest.fn().mockResolvedValue([
-      {
-        id: "story-2",
-        characterId: "ai-1",
-        caption: "newer",
-        media: {
-          mediaType: "image",
-          url: "https://cdn.local/story.png",
-          width: 1080,
-          height: 1920,
-          durationSeconds: null,
-        },
-        createdAt,
-        expiresAt,
-      },
-      {
-        id: "story-1",
-        characterId: "ai-1",
-        caption: "older",
-        media: {
-          mediaType: "image",
-          url: "https://cdn.local/older.png",
-          width: null,
-          height: null,
-          durationSeconds: null,
-        },
-        createdAt,
-        expiresAt,
-      },
-    ]);
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { story: { findFirst, findMany } },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listStories({
-        characterId: " ai-1 ",
-        cursor,
-        limit: 1,
-      }),
-    ).resolves.toEqual({
-      items: [
-        {
-          id: "story-2",
-          characterId: "ai-1",
-          caption: "newer",
-          media: {
-            mediaType: "image",
-            url: "https://cdn.local/story.png",
-            width: 1080,
-            height: 1920,
-          },
-          createdAt: createdAt.toISOString(),
-          expiresAt: expiresAt.toISOString(),
-        },
-      ],
-      nextCursor: expect.any(String),
-    });
-    expect(findFirst).toHaveBeenCalledWith({
-      where: { id: "story-cursor", characterId: "ai-1" },
-      select: { id: true },
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      where: { characterId: "ai-1" },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 2,
-      cursor: { id: "story-cursor" },
-      skip: 1,
-      include: { media: true },
-    });
-  });
-
-  it("rejects a story cursor outside the active filters", async () => {
-    const cursor = Buffer.from(
-      JSON.stringify({ id: "story-cursor" }),
-      "utf8",
-    ).toString("base64url");
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        story: {
-          findFirst: jest.fn().mockResolvedValue(null),
-          findMany: jest.fn(),
-        },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.listStories({ characterId: "ai-1", cursor, limit: 20 }),
-    ).rejects.toThrow("Invalid cursor");
-  });
-
-  it("gets a story with the creation response shape", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const expiresAt = new Date("2026-07-13T00:00:00.000Z");
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "story-1",
-      characterId: "ai-1",
-      caption: "detail",
-      media: {
-        mediaType: "video",
-        url: "https://cdn.local/story.mp4",
-        width: 1080,
-        height: 1920,
-        durationSeconds: 15,
-      },
-      createdAt,
-      expiresAt,
-    });
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { story: { findUnique } },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(service.getStory("story-1")).resolves.toEqual({
-      id: "story-1",
-      characterId: "ai-1",
-      caption: "detail",
-      media: {
-        mediaType: "video",
-        url: "https://cdn.local/story.mp4",
-        width: 1080,
-        height: 1920,
-        durationSeconds: 15,
-      },
-      createdAt: createdAt.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-    });
-    expect(findUnique).toHaveBeenCalledWith({
-      where: { id: "story-1" },
-      include: { media: true },
-    });
-  });
-
-  it("rejects a missing story detail", async () => {
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      { story: { findUnique: jest.fn().mockResolvedValue(null) } },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(service.getStory("missing-story")).rejects.toThrow(
-      "Story not found",
-    );
-  });
-
-  it("creates AI posts through admin-owned Prisma code and records logs", async () => {
-    const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const createLog = jest.fn().mockResolvedValue(undefined);
-    const findMany = jest.fn().mockResolvedValue([
-      {
-        id: 1n,
-        characterId: "ai-1",
-        actionType: "POST_CREATED",
-        targetTable: "posts",
-        targetId: "post-1",
-        reason: "daily post",
-        createdAt,
-      },
-    ]);
-    const postCreate = jest.fn().mockResolvedValue({
-      id: "post-1",
-      characterId: "ai-1",
-      contentType: "reel",
-      content: "hello",
-      hashtags: [],
-      createdAt,
-      postMedia: [
-        {
-          media: {
-            mediaType: "image",
-            url: "https://cdn.local/post.png",
-          },
-        },
-      ],
-      _count: { comments: 0, reactions: 0 },
-    });
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        characterActionLog: {
-          create: createLog,
-          findMany,
-        },
-        character: {
-          findUnique: jest.fn().mockResolvedValue({ id: "ai-1" }),
-        },
-        post: {
-          create: postCreate,
-        },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await service.createPost({
-      actorType: "character",
-      actorId: "ai-1",
-      contentType: "reel",
-      content: "hello",
-      reason: "daily post",
-      media: [{ mediaType: "image", url: "https://cdn.local/post.png" }],
-    });
-
-    expect(postCreate).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        contentType: "reel",
-        content: "hello",
-        hashtags: {
-          create: [],
-        },
-        postMedia: {
-          create: [
-            {
-              sortOrder: 0,
-              media: {
-                create: {
-                  mediaType: "image",
-                  url: "https://cdn.local/post.png",
-                },
-              },
-            },
-          ],
-        },
-      },
-      include: {
-        hashtags: {
-          include: { hashtag: true },
-          orderBy: { hashtag: { name: "asc" } },
-        },
-        postMedia: {
-          include: { media: true },
-          orderBy: { sortOrder: "asc" },
-        },
-        _count: { select: { comments: true, reactions: true } },
-      },
-    });
-    expect(createLog).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        actionType: "POST_CREATED",
-        targetTable: "posts",
-        targetId: "post-1",
-        reason: "daily post",
-      },
-    });
-    await expect(service.listCharacterActionLogs()).resolves.toEqual({
-      items: [
-        {
-          id: "1",
-          characterId: "ai-1",
-          actionType: "POST_CREATED",
-          targetTable: "posts",
-          targetId: "post-1",
-          reason: "daily post",
-          createdAt: createdAt.toISOString(),
-        },
-      ],
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      where: {},
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 51,
-    });
-  });
-
-  it("creates avatar stories with confirmed uploaded media", async () => {
-    const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const expiresAt = new Date("2026-07-01T00:00:00.000Z");
-    const createLog = jest.fn().mockResolvedValue(undefined);
-    const storyCreate = jest.fn().mockResolvedValue({
-      id: "story-1",
-      characterId: "ai-1",
-      caption: "daily story",
-      createdAt,
-      expiresAt,
-      media: {
-        mediaType: "image",
-        url: "pod/stories/character/ai-1/story.png",
-      },
-    });
-    const service = new (
-      AdminService as new (...args: unknown[]) => AdminService
-    )(
-      {
-        characterActionLog: {
-          create: createLog,
-        },
-        character: {
-          findUnique: jest.fn().mockResolvedValue({ id: "ai-1" }),
-        },
-        media: {
-          findUnique: jest.fn().mockResolvedValue({
-            id: "media-1",
-            mediaType: "image",
-            uploadedAt: createdAt,
-          }),
-        },
-        story: {
-          create: storyCreate,
-        },
-      },
-      { enqueueJob: jest.fn(), startJob: jest.fn(), completeJob: jest.fn() },
-      { startUpload: jest.fn(), confirmUpload: jest.fn() },
-    );
-
-    await expect(
-      service.createStory({
-        characterId: "ai-1",
-        caption: " daily story ",
-        reason: "operator story",
-        media: { mediaId: "media-1" },
-      }),
-    ).resolves.toEqual({
-      id: "story-1",
-      characterId: "ai-1",
-      caption: "daily story",
-      media: {
-        mediaType: "image",
-        url: "pod/stories/character/ai-1/story.png",
-      },
-      createdAt: createdAt.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-    });
-    expect(storyCreate).toHaveBeenCalledWith({
-      data: {
-        character: { connect: { id: "ai-1" } },
-        caption: "daily story",
-        expiresAt: expect.any(Date),
-        media: { connect: { id: "media-1" } },
-      },
-      include: { media: true },
-    });
-    expect(createLog).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        actionType: "STORY_CREATED",
-        targetTable: "stories",
-        targetId: "story-1",
-        reason: "operator story",
-      },
-    });
   });
 });

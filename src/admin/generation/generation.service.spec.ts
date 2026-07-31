@@ -1,58 +1,109 @@
+import {
+  GenerationRepository,
+  type GenerationJobDetailRow,
+} from "./generation.repository";
 import { GenerationService } from "./generation.service";
 
-const detailInclude = {
-  outputMedia: true,
-  outputs: {
-    orderBy: { candidateIndex: "asc" },
-    include: { media: { select: { url: true } } },
-  },
-  character: {
-    select: {
-      visualProfile: {
-        select: {
-          negativePrompt: true,
-          referenceMedia: {
-            select: { media: { select: { uploadedAt: true } } },
-          },
-        },
-      },
-    },
-  },
-};
+const job = (overrides: Record<string, unknown> = {}) =>
+  ({
+    id: "job-1",
+    characterId: "ai-1",
+    mediaType: "image",
+    prompt: "portrait",
+    inputPrompt: null,
+    candidateCount: null,
+    status: "queued",
+    outputMediaId: null,
+    outputMedia: null,
+    outputs: [],
+    character: { visualProfile: null },
+    paramsJson: null,
+    provider: null,
+    attemptCount: 0,
+    draftId: null,
+    originJobId: null,
+    errorMessage: null,
+    costUsd: null,
+    sortOrder: 0,
+    createdAt: new Date("2026-07-12T00:00:00.000Z"),
+    updatedAt: new Date("2026-07-12T00:01:00.000Z"),
+    ...overrides,
+  }) as unknown as GenerationJobDetailRow;
 
-const job = (overrides: Record<string, unknown> = {}) => ({
-  id: "job-1",
-  characterId: "ai-1",
-  mediaType: "image" as const,
-  prompt: "portrait",
-  inputPrompt: null,
-  candidateCount: null,
-  status: "queued" as const,
-  outputMediaId: null,
-  outputMedia: null,
-  outputs: [],
-  character: { visualProfile: null },
-  paramsJson: null,
-  createdAt: new Date("2026-07-12T00:00:00.000Z"),
-  updatedAt: new Date("2026-07-12T00:01:00.000Z"),
+const character = (overrides: Record<string, unknown> = {}) => ({
+  id: "ai-1",
+  displayName: "한소이",
+  bio: "",
+  interests: [],
+  personas: [],
+  memories: [],
+  posts: [],
+  visualProfile: {
+    appearancePrompt: "same face",
+    stylePrompt: "film grain",
+    negativePrompt: "blurry",
+    referenceMedia: [
+      {
+        mediaId: "ref-1",
+        description: "portrait",
+        media: { uploadedAt: new Date("2026-07-12T00:00:00.000Z") },
+      },
+    ],
+  },
   ...overrides,
 });
 
+const repositoryFake = (
+  overrides: Partial<jest.Mocked<GenerationRepository>> = {},
+): jest.Mocked<GenerationRepository> =>
+  ({
+    findCharacterForImageDraft: jest.fn().mockResolvedValue(character()),
+    createImageDraft: jest.fn().mockResolvedValue(job({ status: "draft" })),
+    updateImageDraft: jest.fn().mockResolvedValue(true),
+    confirmImageDraft: jest.fn().mockResolvedValue(true),
+    selectOutput: jest.fn().mockResolvedValue("selected"),
+    findJob: jest.fn().mockResolvedValue(job()),
+    createRegeneratedImageJob: jest
+      .fn()
+      .mockResolvedValue(job({ status: "draft", originJobId: "job-1" })),
+    cursorMatchesFilter: jest.fn().mockResolvedValue(true),
+    findManyForList: jest.fn().mockResolvedValue([]),
+    enqueueJob: jest.fn().mockResolvedValue(job()),
+    startJob: jest.fn().mockResolvedValue(true),
+    retryJob: jest
+      .fn()
+      .mockResolvedValue(job({ id: "job-2", originJobId: "job-1" })),
+    failJob: jest.fn().mockResolvedValue(true),
+    findUploadedMedia: jest.fn().mockResolvedValue({
+      id: "media-1",
+      mediaType: "image",
+      url: "https://cdn.example/media-1.jpg",
+      width: 1024,
+      height: 1024,
+      durationSeconds: null,
+      uploadedAt: new Date("2026-07-12T00:00:00.000Z"),
+    }),
+    completeJobWithMediaId: jest.fn().mockResolvedValue(true),
+    completeJobWithUrl: jest.fn().mockResolvedValue(true),
+    findJobDetail: jest.fn().mockResolvedValue(job()),
+    ...overrides,
+  }) as unknown as jest.Mocked<GenerationRepository>;
+
 describe("GenerationService", () => {
   it("rejects a character-visible image draft without an uploaded identity reference", async () => {
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "ai-1",
-      visualProfile: {
-        appearancePrompt: "same face",
-        stylePrompt: "film grain",
-        negativePrompt: "",
-        referenceMedia: [],
-      },
+    const repository = repositoryFake({
+      findCharacterForImageDraft: jest.fn().mockResolvedValue(
+        character({
+          visualProfile: {
+            appearancePrompt: "same face",
+            stylePrompt: "film grain",
+            negativePrompt: "",
+            referenceMedia: [],
+          },
+        }),
+      ),
     });
-    const create = jest.fn();
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ character: { findUnique }, generationJob: { create } });
+    const service = new GenerationService(repository);
 
     await expect(
       service.createImageDraft({
@@ -63,199 +114,112 @@ describe("GenerationService", () => {
     ).rejects.toThrow(
       "shot 0 shows the character but has no usable identity reference",
     );
-    expect(create).not.toHaveBeenCalled();
+    expect(repository.createImageDraft).not.toHaveBeenCalled();
   });
 
-  it("creates a non-claimable image draft with a compiled prompt", async () => {
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "ai-1",
-      visualProfile: {
-        appearancePrompt: "same face",
-        stylePrompt: "film grain",
-        negativePrompt: "blurry",
-        referenceMedia: [
-          {
-            mediaId: "ref-1",
-            description: "portrait",
-            media: { uploadedAt: new Date() },
+  it("compiles and persists a draft with generation context and aspect ratio", async () => {
+    const repository = repositoryFake({
+      createImageDraft: jest.fn().mockResolvedValue(
+        job({
+          status: "draft",
+          inputPrompt: "walking in Seongsu",
+          prompt:
+            "same face, Final image content: walking in Seongsu. Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment, film grain",
+          candidateCount: 3,
+          paramsJson: {
+            aspect_ratio: "16:9",
+            _shot: {
+              sortOrder: 0,
+              scene: "walking in Seongsu",
+              captureSetup:
+                "No separate capture metadata was provided; follow the scene literally with a physically plausible viewpoint",
+              characterVisible: true,
+              referenceMediaIds: ["ref-1"],
+            },
           },
-        ],
-      },
+        }),
+      ),
     });
-    const create = jest.fn().mockResolvedValue(
-      job({
-        status: "draft",
-        inputPrompt: "walking in Seongsu",
-        prompt:
-          "same face, Final image content: walking in Seongsu. Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment, film grain",
-        candidateCount: 3,
-        paramsJson: {
-          _shot: {
-            sortOrder: 0,
-            scene: "walking in Seongsu",
-            captureSetup:
-              "No separate capture metadata was provided; follow the scene literally with a physically plausible viewpoint",
-            characterVisible: true,
-            referenceMediaIds: ["ref-1"],
-          },
-        },
-      }),
-    );
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ character: { findUnique }, generationJob: { create } });
+    const service = new GenerationService(repository);
 
     await expect(
       service.createImageDraft({
         characterId: "ai-1",
         inputPrompt: " walking in Seongsu ",
         candidateCount: 3,
+        aspectRatio: "16:9",
       }),
     ).resolves.toMatchObject({
       status: "draft",
       inputPrompt: "walking in Seongsu",
       candidateCount: 3,
+      aspectRatio: "16:9",
       generationContext: {
         negativePrompt: "blurry",
         referenceImageCount: 1,
         route: "edit",
       },
     });
-    expect(findUnique).toHaveBeenCalledTimes(1);
-    expect(create).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        mediaType: "image",
-        status: "draft",
-        inputPrompt: "walking in Seongsu",
-        prompt:
-          "same face, Final image content: walking in Seongsu. Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment, film grain",
-        candidateCount: 3,
-        paramsJson: {
-          _shot: {
-            sortOrder: 0,
-            scene: "walking in Seongsu",
-            captureSetup:
-              "No separate capture metadata was provided; follow the scene literally with a physically plausible viewpoint",
-            characterVisible: true,
-            referenceMediaIds: ["ref-1"],
-          },
+    expect(repository.createImageDraft).toHaveBeenCalledWith({
+      characterId: "ai-1",
+      inputPrompt: "walking in Seongsu",
+      prompt:
+        "same face, Final image content: walking in Seongsu. Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment, film grain",
+      candidateCount: 3,
+      paramsJson: {
+        aspect_ratio: "16:9",
+        _shot: {
+          sortOrder: 0,
+          scene: "walking in Seongsu",
+          captureSetup:
+            "No separate capture metadata was provided; follow the scene literally with a physically plausible viewpoint",
+          characterVisible: true,
+          referenceMediaIds: ["ref-1"],
         },
       },
-      include: { outputMedia: true },
     });
   });
 
-  it("stores the aspect ratio as a provider param and echoes it on the job", async () => {
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "ai-1",
-      visualProfile: {
-        appearancePrompt: "same face",
-        stylePrompt: "film grain",
-        negativePrompt: "",
-        referenceMedia: [
-          {
-            mediaId: "ref-1",
-            description: "portrait",
-            media: { uploadedAt: new Date() },
-          },
-        ],
-      },
+  it("expands the scene and builds the prompt with injected providers", async () => {
+    const repository = repositoryFake({
+      findCharacterForImageDraft: jest.fn().mockResolvedValue(
+        character({
+          bio: "필름 사진",
+          interests: ["필름사진"],
+          personas: [{ title: "말투", content: "차분한 존댓말" }],
+          memories: [{ content: "제주 애월 여행 (2026-07)" }],
+          posts: [{ content: "지난 캡션" }],
+        }),
+      ),
+      createImageDraft: jest.fn().mockImplementation((input) =>
+        Promise.resolve(
+          job({
+            status: "draft",
+            inputPrompt: input.inputPrompt,
+            prompt: input.prompt,
+            paramsJson: input.paramsJson,
+          }),
+        ),
+      ),
     });
-    const create = jest.fn().mockResolvedValue(
-      job({
-        status: "draft",
-        inputPrompt: "rooftop at dusk",
-        prompt: "same face, rooftop at dusk, film grain",
-        candidateCount: 2,
-        paramsJson: { aspect_ratio: "16:9" },
-      }),
-    );
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ character: { findUnique }, generationJob: { create } });
-
-    await expect(
-      service.createImageDraft({
-        characterId: "ai-1",
-        inputPrompt: "rooftop at dusk",
-        candidateCount: 2,
-        aspectRatio: "16:9",
-      }),
-    ).resolves.toMatchObject({ status: "draft", aspectRatio: "16:9" });
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        paramsJson: {
-          aspect_ratio: "16:9",
-          _shot: {
-            sortOrder: 0,
-            scene: "rooftop at dusk",
-            captureSetup:
-              "No separate capture metadata was provided; follow the scene literally with a physically plausible viewpoint",
-            characterVisible: true,
-            referenceMediaIds: ["ref-1"],
-          },
-        },
-      }),
-      include: { outputMedia: true },
-    });
-  });
-
-  it("expands the scene with the wizard planner and stores wizard metadata", async () => {
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "ai-1",
-      displayName: "한소이",
-      bio: "필름 사진",
-      interests: ["필름사진"],
-      personas: [{ title: "말투", content: "차분한 존댓말" }],
-      memories: [{ content: "제주 애월 여행 (2026-07)" }],
-      posts: [{ content: "지난 캡션" }],
-      visualProfile: {
-        appearancePrompt: "same face",
-        stylePrompt: "film grain",
-        negativePrompt: "",
-        referenceMedia: [
-          {
-            mediaId: "ref-1",
-            description: "portrait",
-            media: { uploadedAt: new Date() },
-          },
-        ],
-      },
-    });
-    const create = jest.fn().mockResolvedValue(
-      job({
-        status: "draft",
-        inputPrompt: "따듯한 카페",
-        prompt: "same face, 비 오는 오후 창가 카페, 얕은 심도, film grain",
-        paramsJson: {
-          _wizard: {
-            plannerName: "llm:test",
-            expandedScene: "비 오는 오후 창가 카페, 얕은 심도",
-          },
-        },
-      }),
-    );
     const plan = jest.fn().mockResolvedValue({
       caption: "무시됨",
       hashtags: [],
       shots: [
         {
           sortOrder: 0,
-          scene: "비 오는 오후 창가 카페, 얕은 심도",
-          captureSetup: "창틀 위 고정 카메라로 셀프타이머 촬영",
+          scene: "비 오는 오후 창가 카페",
+          captureSetup: "창틀 위 고정 카메라",
           characterVisible: true,
           referenceIds: ["ref-1"],
         },
       ],
     });
-    const service = new (
-      GenerationService as new (
-        prisma: unknown,
-        resolveScenePlanner: unknown,
-      ) => GenerationService
-    )({ character: { findUnique }, generationJob: { create } }, () =>
-      Promise.resolve({ name: "llm:test", plan }),
+    const build = jest.fn().mockResolvedValue({ prompts: ["english prompt"] });
+    const service = new GenerationService(
+      repository,
+      async () => ({ name: "llm:planner", plan }),
+      async () => ({ name: "llm:builder", build }),
     );
 
     await expect(
@@ -265,8 +229,8 @@ describe("GenerationService", () => {
         candidateCount: 1,
       }),
     ).resolves.toMatchObject({
-      expandedScene: "비 오는 오후 창가 카페, 얕은 심도",
-      plannerName: "llm:test",
+      expandedScene: "비 오는 오후 창가 카페",
+      plannerName: "llm:planner",
     });
     expect(plan).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -278,92 +242,6 @@ describe("GenerationService", () => {
       }),
       expect.objectContaining({ characterId: "ai-1" }),
     );
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          inputPrompt: "따듯한 카페",
-          prompt:
-            "same face, Final image content: 비 오는 오후 창가 카페, 얕은 심도. Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment, film grain",
-          paramsJson: {
-            _wizard: {
-              plannerName: "llm:test",
-              // 빌더 기본값은 결정적 폴백 — 이름 "local"이 기록된다.
-              builderName: "local",
-              expandedScene: "비 오는 오후 창가 카페, 얕은 심도",
-            },
-            _shot: {
-              sortOrder: 0,
-              scene: "비 오는 오후 창가 카페, 얕은 심도",
-              captureSetup: "창틀 위 고정 카메라로 셀프타이머 촬영",
-              characterVisible: true,
-              referenceMediaIds: ["ref-1"],
-            },
-          },
-        }),
-      }),
-    );
-  });
-
-  it("builds the final prompt with the injected prompt builder", async () => {
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "ai-1",
-      displayName: "한소이",
-      bio: "",
-      interests: [],
-      personas: [],
-      memories: [],
-      posts: [],
-      visualProfile: {
-        appearancePrompt: "same face",
-        stylePrompt: "film grain",
-        negativePrompt: "",
-        referenceMedia: [
-          {
-            mediaId: "ref-1",
-            description: "portrait",
-            media: { uploadedAt: new Date() },
-          },
-        ],
-      },
-    });
-    const create = jest
-      .fn()
-      .mockResolvedValue(job({ status: "draft", prompt: "english prompt" }));
-    const build = jest.fn().mockResolvedValue({ prompts: ["english prompt"] });
-    const service = new (
-      GenerationService as new (
-        prisma: unknown,
-        resolveScenePlanner: unknown,
-        resolvePromptBuilder: unknown,
-      ) => GenerationService
-    )(
-      { character: { findUnique }, generationJob: { create } },
-      () =>
-        Promise.resolve({
-          name: "llm:test",
-          plan: jest.fn().mockResolvedValue({
-            caption: "무시됨",
-            hashtags: [],
-            shots: [
-              {
-                sortOrder: 0,
-                scene: "확장된 장면",
-                captureSetup: "친구가 눈높이에서 촬영",
-                characterVisible: true,
-                referenceIds: ["ref-1"],
-              },
-            ],
-          }),
-        }),
-      () => Promise.resolve({ name: "llm:builder", build }),
-    );
-
-    await service.createImageDraft({
-      characterId: "ai-1",
-      inputPrompt: "따듯한 카페",
-      candidateCount: 1,
-    });
-
     expect(build).toHaveBeenCalledWith(
       {
         appearancePrompt: "same face",
@@ -371,113 +249,69 @@ describe("GenerationService", () => {
         shots: [
           {
             sortOrder: 0,
-            scene: "확장된 장면",
-            captureSetup: "친구가 눈높이에서 촬영",
+            scene: "비 오는 오후 창가 카페",
+            captureSetup: "창틀 위 고정 카메라",
             characterVisible: true,
           },
         ],
       },
       expect.objectContaining({ characterId: "ai-1" }),
     );
-    expect(create).toHaveBeenCalledWith(
+    expect(repository.createImageDraft).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          prompt: "english prompt",
-          paramsJson: expect.objectContaining({
-            _wizard: expect.objectContaining({ builderName: "llm:builder" }),
-          }),
-        }),
-      }),
-    );
-  });
-
-  it("fails the draft creation with 502 when prompt building fails", async () => {
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "ai-1",
-      displayName: "한소이",
-      bio: "",
-      interests: [],
-      personas: [],
-      memories: [],
-      posts: [],
-      visualProfile: {
-        appearancePrompt: "same face",
-        stylePrompt: "film grain",
-        negativePrompt: "",
-        referenceMedia: [
-          {
-            mediaId: "ref-1",
-            description: "portrait",
-            media: { uploadedAt: new Date() },
+        prompt: "english prompt",
+        paramsJson: expect.objectContaining({
+          _wizard: {
+            plannerName: "llm:planner",
+            builderName: "llm:builder",
+            expandedScene: "비 오는 오후 창가 카페",
           },
-        ],
-      },
-    });
-    const create = jest.fn();
-    const service = new (
-      GenerationService as new (
-        prisma: unknown,
-        resolveScenePlanner: unknown,
-        resolvePromptBuilder: unknown,
-      ) => GenerationService
-    )(
-      { character: { findUnique }, generationJob: { create } },
-      () => Promise.resolve(null),
-      () =>
-        Promise.resolve({
-          name: "llm:builder",
-          build: jest.fn().mockRejectedValue(new Error("builder timeout")),
         }),
-    );
-
-    await expect(
-      service.createImageDraft({
-        characterId: "ai-1",
-        inputPrompt: "따듯한 카페",
-        candidateCount: 1,
-      }),
-    ).rejects.toThrow("Prompt build failed (llm:builder): builder timeout");
-    expect(create).not.toHaveBeenCalled();
-  });
-
-  it("fails the draft creation with 502 when scene planning fails", async () => {
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "ai-1",
-      displayName: "한소이",
-      bio: "",
-      interests: [],
-      personas: [],
-      memories: [],
-      posts: [],
-      visualProfile: null,
-    });
-    const create = jest.fn();
-    const service = new (
-      GenerationService as new (
-        prisma: unknown,
-        resolveScenePlanner: unknown,
-      ) => GenerationService
-    )({ character: { findUnique }, generationJob: { create } }, () =>
-      Promise.resolve({
-        name: "llm:test",
-        plan: jest.fn().mockRejectedValue(new Error("LLM timeout")),
       }),
     );
-
-    await expect(
-      service.createImageDraft({
-        characterId: "ai-1",
-        inputPrompt: "따듯한 카페",
-        candidateCount: 1,
-      }),
-    ).rejects.toThrow("Scene planning failed (llm:test): LLM timeout");
-    expect(create).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      provider: "planner",
+      makeService: (repository: jest.Mocked<GenerationRepository>) =>
+        new GenerationService(repository, async () => ({
+          name: "llm:planner",
+          plan: jest.fn().mockRejectedValue(new Error("LLM timeout")),
+        })),
+      message: "Scene planning failed (llm:planner): LLM timeout",
+    },
+    {
+      provider: "builder",
+      makeService: (repository: jest.Mocked<GenerationRepository>) =>
+        new GenerationService(
+          repository,
+          async () => null,
+          async () => ({
+            name: "llm:builder",
+            build: jest.fn().mockRejectedValue(new Error("builder timeout")),
+          }),
+        ),
+      message: "Prompt build failed (llm:builder): builder timeout",
+    },
+  ])(
+    "reports $provider failures without persisting",
+    async ({ makeService, message }) => {
+      const repository = repositoryFake();
+
+      await expect(
+        makeService(repository).createImageDraft({
+          characterId: "ai-1",
+          inputPrompt: "따듯한 카페",
+          candidateCount: 1,
+        }),
+      ).rejects.toThrow(message);
+      expect(repository.createImageDraft).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([0, 5, 1.5])("rejects candidateCount %p", async (candidateCount) => {
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({});
+    const service = new GenerationService(repositoryFake());
 
     await expect(
       service.createImageDraft({
@@ -488,16 +322,15 @@ describe("GenerationService", () => {
     ).rejects.toThrow("Candidate count must be an integer from 1 to 4");
   });
 
-  it("updates only image drafts", async () => {
-    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const findUnique = jest
-      .fn()
-      .mockResolvedValue(
-        job({ status: "draft", prompt: "edited prompt", candidateCount: 4 }),
-      );
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { updateMany, findUnique } });
+  it("updates only drafts and forwards trimmed values", async () => {
+    const repository = repositoryFake({
+      findJobDetail: jest
+        .fn()
+        .mockResolvedValue(
+          job({ status: "draft", prompt: "edited prompt", candidateCount: 4 }),
+        ),
+    });
+    const service = new GenerationService(repository);
 
     await expect(
       service.updateImageDraft("job-1", {
@@ -509,1022 +342,390 @@ describe("GenerationService", () => {
       prompt: "edited prompt",
       candidateCount: 4,
     });
-    expect(updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "draft" },
-      data: { prompt: "edited prompt", candidateCount: 4 },
+    expect(repository.updateImageDraft).toHaveBeenCalledWith("job-1", {
+      prompt: "edited prompt",
+      candidateCount: 4,
     });
+
+    repository.updateImageDraft.mockResolvedValue(false);
+    repository.findJobDetail.mockResolvedValue(job({ status: "completed" }));
+    await expect(
+      service.updateImageDraft("job-1", {
+        prompt: "edited prompt",
+        candidateCount: 4,
+      }),
+    ).rejects.toThrow("Only draft generation jobs can be edited");
   });
 
-  it.each(["completed", "failed"])(
-    "rejects editing a %s image job",
-    async (status) => {
-      const updateMany = jest.fn().mockResolvedValue({ count: 0 });
-      const findUnique = jest.fn().mockResolvedValue(job({ status }));
-      const service = new (
-        GenerationService as new (prisma: unknown) => GenerationService
-      )({ generationJob: { updateMany, findUnique } });
-
-      await expect(
-        service.updateImageDraft("job-1", {
-          prompt: "edited prompt",
-          candidateCount: 4,
-        }),
-      ).rejects.toThrow("Only draft generation jobs can be edited");
-    },
-  );
-
-  it("confirms a draft and records its action in one transaction", async () => {
-    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const findDraft = jest.fn().mockResolvedValue({ characterId: "ai-1" });
-    const createLog = jest.fn().mockResolvedValue({});
-    const $transaction = jest.fn(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          generationJob: { findUnique: findDraft, updateMany },
-          characterActionLog: { create: createLog },
-        }),
-    );
-    const findUnique = jest.fn().mockResolvedValue(job({ status: "queued" }));
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique }, $transaction });
+  it("confirms drafts while preserving idempotent non-draft results", async () => {
+    const repository = repositoryFake({
+      findJobDetail: jest.fn().mockResolvedValue(job({ status: "queued" })),
+    });
+    const service = new GenerationService(repository);
 
     await expect(service.confirmImageDraft("job-1")).resolves.toMatchObject({
       status: "queued",
     });
-    expect(updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "draft" },
-      data: { status: "queued" },
+
+    repository.confirmImageDraft.mockResolvedValue(false);
+    await expect(service.confirmImageDraft("job-1")).resolves.toMatchObject({
+      status: "queued",
     });
-    expect(createLog).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        actionType: "GENERATION_DRAFT_CONFIRMED",
-        targetTable: "generation_jobs",
-        targetId: "job-1",
-        reason: "generation draft confirmed",
-      },
-    });
-    expect($transaction).toHaveBeenCalledTimes(1);
+
+    repository.findJobDetail.mockResolvedValue(job({ status: "draft" }));
+    await expect(service.confirmImageDraft("job-1")).rejects.toThrow(
+      "Only draft generation jobs can be confirmed",
+    );
   });
 
-  it("rolls back draft confirmation when its action log fails", async () => {
-    const logError = new Error("log unavailable");
-    const $transaction = jest.fn(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          generationJob: {
-            findUnique: jest.fn().mockResolvedValue({ characterId: "ai-1" }),
-            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-          },
-          characterActionLog: {
-            create: jest.fn().mockRejectedValue(logError),
-          },
-        }),
-    );
-    const findUnique = jest.fn();
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique }, $transaction });
-
-    await expect(service.confirmImageDraft("job-1")).rejects.toBe(logError);
-    expect(findUnique).not.toHaveBeenCalled();
-  });
-
-  it.each(["queued", "running", "completed", "failed"])(
-    "returns an already %s job when confirm is retried",
-    async (status) => {
-      const updateMany = jest.fn().mockResolvedValue({ count: 0 });
-      const createLog = jest.fn();
-      const $transaction = jest.fn(
-        async (callback: (tx: unknown) => Promise<unknown>) =>
-          callback({
-            generationJob: {
-              findUnique: jest.fn().mockResolvedValue({ characterId: "ai-1" }),
-              updateMany,
-            },
-            characterActionLog: { create: createLog },
-          }),
-      );
-      const findUnique = jest.fn().mockResolvedValue(job({ status }));
-      const service = new (
-        GenerationService as new (prisma: unknown) => GenerationService
-      )({ generationJob: { findUnique }, $transaction });
-
-      await expect(service.confirmImageDraft("job-1")).resolves.toMatchObject({
-        status,
-      });
-      expect(createLog).not.toHaveBeenCalled();
-    },
-  );
-
-  it("selects an owned output from a completed job in one transaction", async () => {
-    const lockJob = jest.fn().mockResolvedValue([{ id: "job-1" }]);
-    const findFirst = jest.fn().mockResolvedValue({
-      selected: false,
-      job: { characterId: "ai-1", outputMediaId: null },
-    });
-    const clearSelections = jest.fn().mockResolvedValue({ count: 2 });
-    const setSelection = jest.fn().mockResolvedValue({ count: 1 });
-    const update = jest.fn().mockResolvedValue({});
-    const createLog = jest.fn().mockResolvedValue({});
-    const $transaction = jest.fn(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          $queryRaw: lockJob,
-          generationJobOutput: {
-            findFirst,
-            updateMany: jest
-              .fn()
-              .mockImplementationOnce(clearSelections)
-              .mockImplementationOnce(setSelection),
-          },
-          generationJob: { update },
-          characterActionLog: { create: createLog },
-        }),
-    );
-    const findUnique = jest
-      .fn()
-      .mockResolvedValue(
-        job({ status: "completed", outputMediaId: "media-2" }),
-      );
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({
-      generationJob: { findUnique },
-      $transaction,
+  it("rejects an output that is not owned by a completed job", async () => {
+    const repository = repositoryFake({
+      selectOutput: jest.fn().mockResolvedValue("missing"),
     });
 
     await expect(
-      service.selectOutput("job-1", "media-2"),
-    ).resolves.toMatchObject({ outputMediaId: "media-2" });
-    expect(findFirst).toHaveBeenCalledWith({
-      where: {
-        jobId: "job-1",
-        mediaId: "media-2",
-        job: { status: "completed" },
-      },
-      select: {
-        selected: true,
-        job: { select: { characterId: true, outputMediaId: true } },
-      },
-    });
-    expect(lockJob).toHaveBeenCalledTimes(1);
-    expect(lockJob.mock.invocationCallOrder[0]).toBeLessThan(
-      findFirst.mock.invocationCallOrder[0],
-    );
-    expect(clearSelections).toHaveBeenCalledWith({
-      where: { jobId: "job-1" },
-      data: { selected: false },
-    });
-    expect(setSelection).toHaveBeenCalledWith({
-      where: { jobId: "job-1", mediaId: "media-2" },
-      data: { selected: true },
-    });
-    expect(update).toHaveBeenCalledWith({
-      where: { id: "job-1" },
-      data: { outputMediaId: "media-2" },
-    });
-    expect(createLog).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        actionType: "GENERATION_OUTPUT_SELECTED",
-        targetTable: "generation_jobs",
-        targetId: "job-1",
-        reason: "selected generation output media-2",
-      },
-    });
-    expect($transaction).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not rewrite flags or log when the output is already selected", async () => {
-    const lockJob = jest.fn().mockResolvedValue([{ id: "job-1" }]);
-    const findFirst = jest.fn().mockResolvedValue({
-      selected: true,
-      job: { characterId: "ai-1", outputMediaId: "media-2" },
-    });
-    const updateMany = jest.fn();
-    const update = jest.fn();
-    const createLog = jest.fn();
-    const $transaction = jest.fn(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          $queryRaw: lockJob,
-          generationJobOutput: { findFirst, updateMany },
-          generationJob: { update },
-          characterActionLog: { create: createLog },
-        }),
-    );
-    const findUnique = jest
-      .fn()
-      .mockResolvedValue(
-        job({ status: "completed", outputMediaId: "media-2" }),
-      );
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique }, $transaction });
-
-    await expect(
-      service.selectOutput("job-1", "media-2"),
-    ).resolves.toMatchObject({ outputMediaId: "media-2" });
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(update).not.toHaveBeenCalled();
-    expect(createLog).not.toHaveBeenCalled();
-  });
-
-  it("rejects selecting media that is not owned by the completed job", async () => {
-    const lockJob = jest.fn().mockResolvedValue([{ id: "job-1" }]);
-    const $transaction = jest.fn(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          $queryRaw: lockJob,
-          generationJobOutput: {
-            findFirst: jest.fn().mockResolvedValue(null),
-          },
-        }),
-    );
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({
-      $transaction,
-    });
-
-    await expect(
-      service.selectOutput("job-1", "foreign-media"),
+      new GenerationService(repository).selectOutput("job-1", "media-x"),
     ).rejects.toThrow("Generation output not found for completed job");
-    expect($transaction).toHaveBeenCalledTimes(1);
+    expect(repository.findJobDetail).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { sourceStatus: "completed", candidateCount: 4 },
-    { sourceStatus: "failed", candidateCount: 4 },
-    { sourceStatus: "completed", candidateCount: null },
-  ])(
-    "regenerates a $sourceStatus image job with candidateCount $candidateCount as a draft",
-    async ({ sourceStatus, candidateCount }) => {
-      const findUnique = jest.fn().mockResolvedValue(
-        job({
-          status: sourceStatus,
-          inputPrompt: "portrait request",
-          prompt: "edited prompt",
-          candidateCount,
-          paramsJson: { aspect_ratio: "4:5" },
-        }),
-      );
-      const create = jest.fn().mockResolvedValue(
-        job({
-          id: "job-2",
-          status: "draft",
-          originJobId: "job-1",
-          inputPrompt: "portrait request",
-          prompt: "edited prompt",
-          candidateCount,
-        }),
-      );
-      const service = new (
-        GenerationService as new (prisma: unknown) => GenerationService
-      )({ generationJob: { findUnique, create } });
-
-      const regenerated = await service.regenerateImageJob("job-1");
-
-      expect(regenerated).toMatchObject({
-        status: "draft",
-        originJobId: "job-1",
-        inputPrompt: "portrait request",
-        prompt: "edited prompt",
+  it.each(["completed", "failed"] as const)(
+    "regenerates a %s image job as a linked draft",
+    async (status) => {
+      const source = job({ status });
+      const repository = repositoryFake({
+        findJob: jest.fn().mockResolvedValue(source),
       });
-      if (candidateCount === null) {
-        expect(regenerated).not.toHaveProperty("candidateCount");
-      } else {
-        expect(regenerated).toMatchObject({ candidateCount });
-      }
-      expect(create).toHaveBeenCalledWith({
-        data: {
-          characterId: "ai-1",
-          mediaType: "image",
-          status: "draft",
-          inputPrompt: "portrait request",
-          prompt: "edited prompt",
-          candidateCount,
-          paramsJson: { aspect_ratio: "4:5" },
-          originJobId: "job-1",
-        },
-        include: { outputMedia: true },
-      });
+
+      await expect(
+        new GenerationService(repository).regenerateImageJob("job-1"),
+      ).resolves.toMatchObject({ status: "draft", originJobId: "job-1" });
+      expect(repository.createRegeneratedImageJob).toHaveBeenCalledWith(source);
     },
   );
 
   it.each([
-    ["video", "completed"],
-    ["image", "running"],
-  ])("rejects regenerating a %s %s job", async (mediaType, status) => {
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({
-      generationJob: {
-        findUnique: jest.fn().mockResolvedValue(job({ mediaType, status })),
-      },
+    ["queued", "image"],
+    ["completed", "video"],
+  ])("rejects regenerating a %s %s job", async (status, mediaType) => {
+    const repository = repositoryFake({
+      findJob: jest.fn().mockResolvedValue(job({ status, mediaType })),
     });
 
-    await expect(service.regenerateImageJob("job-1")).rejects.toThrow(
-      "Only completed or failed image jobs can be regenerated",
-    );
-  });
-
-  it("requires image or video jobs", async () => {
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({});
-
     await expect(
-      service.enqueueJob({
-        characterId: "ai-1",
-        mediaType: "audio",
-        prompt: "sing",
-      }),
-    ).rejects.toThrow("Generation media type must be image or video");
+      new GenerationService(repository).regenerateImageJob("job-1"),
+    ).rejects.toThrow("Only completed or failed image jobs can be regenerated");
   });
 
-  it("lists filtered generation jobs with cursor pagination", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const updatedAt = new Date("2026-07-12T00:01:00.000Z");
-    const completedJob = {
-      id: "job-2",
-      characterId: "ai-1",
-      mediaType: "image" as const,
-      prompt: "sunset portrait",
-      status: "completed" as const,
-      outputMediaId: "media-2",
-      outputMedia: {
-        mediaType: "image" as const,
-        url: "https://cdn.local/generated.png",
-        width: 1024,
-        height: 1024,
-        durationSeconds: null,
-      },
-      createdAt,
-      updatedAt,
-    };
-    const cursor = Buffer.from(
-      JSON.stringify({ id: "job-cursor" }),
-      "utf8",
-    ).toString("base64url");
-    const findFirst = jest.fn().mockResolvedValue({ id: "job-cursor" });
-    const findMany = jest.fn().mockResolvedValue([
-      completedJob,
-      {
-        ...completedJob,
-        id: "job-1",
-        status: "queued" as const,
-        outputMedia: null,
-      },
-    ]);
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findFirst, findMany } });
+  it("lists filtered jobs with validated cursor pagination", async () => {
+    const repository = repositoryFake({
+      findManyForList: jest
+        .fn()
+        .mockResolvedValue([
+          job({ id: "job-3" }),
+          job({ id: "job-2" }),
+          job({ id: "job-1" }),
+        ]),
+    });
+    const service = new GenerationService(repository);
 
     await expect(
       service.listJobs({
         characterId: " ai-1 ",
-        status: " completed ",
-        mediaType: " image ",
-        cursor,
-        limit: 1,
+        status: "completed",
+        mediaType: "image",
+        cursor: Buffer.from(JSON.stringify({ id: "job-cursor" })).toString(
+          "base64url",
+        ),
+        limit: 2,
       }),
-    ).resolves.toEqual({
-      items: [
-        {
-          id: "job-2",
-          characterId: "ai-1",
-          mediaType: "image",
-          prompt: "sunset portrait",
-          status: "completed",
-          outputMediaId: "media-2",
-          attemptCount: 0,
-          outputMedia: {
-            mediaType: "image",
-            url: "https://cdn.local/generated.png",
-            width: 1024,
-            height: 1024,
-          },
-          createdAt: createdAt.toISOString(),
-          updatedAt: updatedAt.toISOString(),
-        },
-      ],
+    ).resolves.toMatchObject({
+      items: [{ id: "job-3" }, { id: "job-2" }],
       nextCursor: expect.any(String),
     });
-    expect(findFirst).toHaveBeenCalledWith({
-      where: {
-        id: "job-cursor",
-        characterId: "ai-1",
-        status: "completed",
-        mediaType: "image",
-      },
-      select: { id: true },
+    expect(repository.cursorMatchesFilter).toHaveBeenCalledWith("job-cursor", {
+      characterId: "ai-1",
+      status: "completed",
+      mediaType: "image",
     });
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        characterId: "ai-1",
-        status: "completed",
-        mediaType: "image",
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 2,
-      cursor: { id: "job-cursor" },
-      skip: 1,
-      include: { outputMedia: true },
+    expect(repository.findManyForList).toHaveBeenCalledWith({
+      characterId: "ai-1",
+      status: "completed",
+      mediaType: "image",
+      take: 3,
+      cursor: "job-cursor",
     });
   });
 
-  it("accepts the failed status filter", async () => {
-    const findMany = jest.fn().mockResolvedValue([]);
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findMany } });
-
-    await expect(
-      service.listJobs({ status: "failed", limit: 20 }),
-    ).resolves.toEqual({ items: [] });
-    expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { status: "failed" } }),
-    );
-  });
-
-  it("accepts the draft status filter", async () => {
-    const findMany = jest.fn().mockResolvedValue([]);
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findMany } });
-
-    await expect(
-      service.listJobs({ status: "draft", limit: 20 }),
-    ).resolves.toEqual({ items: [] });
-    expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { status: "draft" } }),
-    );
-  });
-
-  it("rejects a generation job cursor outside the active filters", async () => {
-    const cursor = Buffer.from(
-      JSON.stringify({ id: "job-cursor" }),
-      "utf8",
-    ).toString("base64url");
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({
-      generationJob: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
+  it("rejects cursors outside filters and invalid filters", async () => {
+    const repository = repositoryFake({
+      cursorMatchesFilter: jest.fn().mockResolvedValue(false),
     });
-
+    const service = new GenerationService(repository);
     await expect(
-      service.listJobs({ characterId: "ai-1", cursor, limit: 20 }),
+      service.listJobs({
+        status: "failed",
+        cursor: Buffer.from(JSON.stringify({ id: "job-cursor" })).toString(
+          "base64url",
+        ),
+        limit: 10,
+      }),
     ).rejects.toThrow("Invalid cursor");
-  });
-
-  it("rejects an invalid generation job status filter", async () => {
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findMany: jest.fn().mockResolvedValue([]) } });
-
     await expect(
-      service.listJobs({ status: "archived", limit: 20 }),
+      service.listJobs({ status: "paused", limit: 10 }),
     ).rejects.toThrow(
       "Generation job status must be draft, queued, running, completed, or failed",
     );
-  });
-
-  it("rejects an invalid generation job media type filter", async () => {
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findMany: jest.fn().mockResolvedValue([]) } });
-
     await expect(
-      service.listJobs({ mediaType: "audio", limit: 20 }),
+      service.listJobs({ mediaType: "audio", limit: 10 }),
     ).rejects.toThrow("Generation media type must be image or video");
   });
 
-  it("gets a generation job with the lifecycle response shape", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "job-1",
-      characterId: "ai-1",
-      mediaType: "video",
-      prompt: "city reel",
-      inputPrompt: null,
-      candidateCount: null,
-      status: "queued",
-      outputMediaId: null,
-      provider: null,
-      attemptCount: 0,
-      originJobId: null,
-      errorMessage: null,
-      costUsd: null,
-      paramsJson: null,
-      outputMedia: null,
-      outputs: [],
-      character: {
-        visualProfile: {
-          negativePrompt: "avoid artifacts",
-          referenceMedia: [
-            { media: { uploadedAt: new Date("2026-07-11T00:00:00.000Z") } },
-            { media: { uploadedAt: null } },
-          ],
-        },
-      },
-      createdAt,
-      updatedAt: createdAt,
-    });
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique } });
+  it("validates and trims manually enqueued jobs", async () => {
+    const repository = repositoryFake();
+    const service = new GenerationService(repository);
 
-    await expect(service.getJob("job-1")).resolves.toEqual({
-      id: "job-1",
+    await service.enqueueJob({
       characterId: "ai-1",
       mediaType: "video",
-      prompt: "city reel",
-      status: "queued",
-      attemptCount: 0,
+      prompt: " cinematic pan ",
+      provider: "manual",
+    });
+    expect(repository.enqueueJob).toHaveBeenCalledWith({
+      characterId: "ai-1",
+      mediaType: "video",
+      prompt: "cinematic pan",
+      provider: "manual",
+    });
+    await expect(
+      service.enqueueJob({
+        characterId: "ai-1",
+        mediaType: "audio",
+        prompt: "sound",
+      }),
+    ).rejects.toThrow("Generation media type must be image or video");
+    await expect(
+      service.enqueueJob({
+        characterId: "ai-1",
+        mediaType: "image",
+        prompt: " ",
+      }),
+    ).rejects.toThrow("Generation prompt is required");
+  });
+
+  it("returns lifecycle detail with candidates and generation context", async () => {
+    const repository = repositoryFake({
+      findJobDetail: jest.fn().mockResolvedValue(
+        job({
+          status: "completed",
+          attemptCount: 2,
+          provider: "replicate",
+          costUsd: { toString: () => "0.250000" },
+          outputMediaId: "media-2",
+          outputMedia: {
+            mediaType: "image",
+            url: "https://cdn.example/media-2.jpg",
+            width: 1024,
+            height: 1024,
+            durationSeconds: null,
+          },
+          outputs: [
+            {
+              mediaId: "media-1",
+              candidateIndex: 0,
+              selected: false,
+              media: { url: "https://cdn.example/media-1.jpg" },
+            },
+            {
+              mediaId: "media-2",
+              candidateIndex: 1,
+              selected: true,
+              media: { url: "https://cdn.example/media-2.jpg" },
+            },
+          ],
+          character: {
+            visualProfile: {
+              negativePrompt: "blurry",
+              referenceMedia: [
+                { media: { uploadedAt: new Date("2026-07-12T00:00:00Z") } },
+              ],
+            },
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      new GenerationService(repository).getJob("job-1"),
+    ).resolves.toMatchObject({
+      status: "completed",
+      attemptCount: 2,
+      provider: "replicate",
+      costUsd: "0.250000",
+      outputMediaId: "media-2",
+      outputs: [
+        { mediaId: "media-1", selected: false },
+        { mediaId: "media-2", selected: true },
+      ],
       generationContext: {
-        negativePrompt: "avoid artifacts",
+        negativePrompt: "blurry",
         referenceImageCount: 1,
         route: "edit",
       },
-      createdAt: createdAt.toISOString(),
-      updatedAt: createdAt.toISOString(),
-    });
-    expect(findUnique).toHaveBeenCalledWith({
-      where: { id: "job-1" },
-      include: detailInclude,
     });
   });
 
-  it("exposes output candidates on the job detail", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "job-1",
-      characterId: "ai-1",
-      mediaType: "image",
-      prompt: "portrait",
-      status: "completed",
-      attemptCount: 1,
-      outputMedia: null,
-      outputs: [
-        {
-          mediaId: "media-1",
-          candidateIndex: 0,
-          selected: true,
-          media: { url: "https://cdn.local/candidate-0.png" },
-        },
-        {
-          mediaId: "media-2",
-          candidateIndex: 1,
-          selected: false,
-          media: { url: "https://cdn.local/candidate-1.png" },
-        },
-      ],
-      createdAt,
-      updatedAt: createdAt,
+  it("rejects a missing generation job", async () => {
+    const repository = repositoryFake({
+      findJobDetail: jest.fn().mockResolvedValue(null),
     });
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique } });
-
-    await expect(service.getJob("job-1")).resolves.toMatchObject({
-      outputs: [
-        {
-          mediaId: "media-1",
-          url: "https://cdn.local/candidate-0.png",
-          candidateIndex: 0,
-          selected: true,
-        },
-        {
-          mediaId: "media-2",
-          url: "https://cdn.local/candidate-1.png",
-          candidateIndex: 1,
-          selected: false,
-        },
-      ],
-    });
+    await expect(
+      new GenerationService(repository).getJob("missing"),
+    ).rejects.toThrow("Generation job not found");
   });
 
-  it("rejects a missing generation job detail", async () => {
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique: jest.fn().mockResolvedValue(null) } });
-
-    await expect(service.getJob("missing-job")).rejects.toThrow(
-      "Generation job not found",
-    );
-  });
-
-  it("starts queued jobs atomically with a lease", async () => {
-    const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "job-1",
-      characterId: "ai-1",
-      mediaType: "image",
-      prompt: "portrait",
-      status: "running",
-      attemptCount: 1,
-      outputMedia: null,
-      outputs: [],
-      createdAt,
-      updatedAt: createdAt,
+  it("starts only queued jobs and assigns a recovery lease", async () => {
+    const repository = repositoryFake({
+      findJobDetail: jest.fn().mockResolvedValue(job({ status: "running" })),
     });
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { updateMany, findUnique } });
+    const service = new GenerationService(repository);
 
     await expect(service.startJob("job-1")).resolves.toMatchObject({
-      id: "job-1",
       status: "running",
-      attemptCount: 1,
     });
-    expect(updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "queued" },
-      data: {
-        status: "running",
-        leaseExpiresAt: expect.any(Date),
-        attemptCount: { increment: 1 },
-      },
-    });
-  });
+    expect(repository.startJob).toHaveBeenCalledWith("job-1", expect.any(Date));
 
-  it("rejects starting a job that is not queued", async () => {
-    const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const updateMany = jest.fn().mockResolvedValue({ count: 0 });
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "job-1",
-      characterId: "ai-1",
-      mediaType: "image",
-      prompt: "portrait",
-      status: "running",
-      outputMedia: null,
-      outputs: [],
-      createdAt,
-      updatedAt: createdAt,
-    });
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { updateMany, findUnique } });
-
+    repository.startJob.mockResolvedValue(false);
     await expect(service.startJob("job-1")).rejects.toThrow(
       "Only queued generation jobs can start",
     );
   });
 
-  it("completes a running job from a URL inside one transaction", async () => {
-    const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const runningJob = {
-      id: "job-1",
-      characterId: "ai-1",
-      mediaType: "image" as const,
-      prompt: "portrait",
-      status: "running" as const,
-      outputMedia: null,
-      outputs: [],
-      createdAt,
-      updatedAt: createdAt,
-    };
-    const completedJob = {
-      ...runningJob,
-      status: "completed" as const,
-      outputMedia: {
-        mediaType: "image" as const,
-        url: "https://cdn.local/generated.png",
-        width: 1024,
-        height: 1024,
-        durationSeconds: null,
-      },
-    };
-    const findUnique = jest
-      .fn()
-      .mockResolvedValueOnce(runningJob)
-      .mockResolvedValueOnce(completedJob);
-    const txMediaCreate = jest.fn().mockResolvedValue({ id: "media-1" });
-    const txUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const $transaction = jest.fn(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          media: { create: txMediaCreate },
-          generationJob: { updateMany: txUpdateMany },
-        }),
-    );
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique }, $transaction });
+  it("completes a running job from a URL and preserves idempotency", async () => {
+    const repository = repositoryFake({
+      findJobDetail: jest
+        .fn()
+        .mockResolvedValueOnce(job({ status: "running" }))
+        .mockResolvedValue(job({ status: "completed" })),
+    });
+    const service = new GenerationService(repository);
 
     await expect(
       service.completeJob({
         jobId: "job-1",
-        url: "https://cdn.local/generated.png",
+        url: " https://cdn.example/output.jpg ",
         width: 1024,
-        height: 1024,
       }),
-    ).resolves.toMatchObject({
-      id: "job-1",
-      status: "completed",
-      outputMedia: {
-        mediaType: "image",
-        url: "https://cdn.local/generated.png",
-      },
+    ).resolves.toMatchObject({ status: "completed" });
+    expect(repository.completeJobWithUrl).toHaveBeenCalledWith({
+      jobId: "job-1",
+      mediaType: "image",
+      url: "https://cdn.example/output.jpg",
+      width: 1024,
+      height: undefined,
+      durationSeconds: undefined,
     });
-    expect(txMediaCreate).toHaveBeenCalledWith({
-      data: {
-        mediaType: "image",
-        url: "https://cdn.local/generated.png",
-        width: 1024,
-        height: 1024,
-        durationSeconds: undefined,
-      },
-      select: { id: true },
-    });
-    expect(txUpdateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "running" },
-      data: {
-        status: "completed",
-        outputMediaId: "media-1",
-        leaseExpiresAt: null,
-      },
-    });
+
+    repository.completeJobWithUrl.mockResolvedValue(false);
+    await expect(
+      service.completeJob({
+        jobId: "job-1",
+        url: "https://cdn.example/output.jpg",
+      }),
+    ).resolves.toMatchObject({ status: "completed" });
   });
 
-  it("returns the completed job as-is when complete is retried", async () => {
-    const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const completedJob = {
-      id: "job-1",
-      characterId: "ai-1",
-      mediaType: "image" as const,
-      prompt: "portrait",
-      status: "completed" as const,
-      outputMedia: {
-        mediaType: "image" as const,
-        url: "https://cdn.local/generated.png",
+  it("completes with confirmed media of the matching type", async () => {
+    const repository = repositoryFake({
+      findJobDetail: jest
+        .fn()
+        .mockResolvedValueOnce(job({ status: "running" }))
+        .mockResolvedValue(
+          job({ status: "completed", outputMediaId: "media-1" }),
+        ),
+    });
+    const service = new GenerationService(repository);
+
+    await expect(
+      service.completeJob({ jobId: "job-1", mediaId: "media-1" }),
+    ).resolves.toMatchObject({
+      status: "completed",
+      outputMediaId: "media-1",
+    });
+    expect(repository.findUploadedMedia).toHaveBeenCalledWith("media-1");
+    expect(repository.completeJobWithMediaId).toHaveBeenCalledWith(
+      "job-1",
+      "media-1",
+    );
+  });
+
+  it("rejects unconfirmed or wrong-type completion media", async () => {
+    const repository = repositoryFake({
+      findJobDetail: jest.fn().mockResolvedValue(job({ status: "running" })),
+      findUploadedMedia: jest.fn().mockResolvedValue({
+        id: "media-1",
+        mediaType: "video",
+        url: "https://cdn.example/output.mp4",
         width: null,
         height: null,
-        durationSeconds: null,
-      },
-      outputs: [],
-      createdAt,
-      updatedAt: createdAt,
-    };
-    const findUnique = jest.fn().mockResolvedValue(completedJob);
-    const $transaction = jest.fn(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          media: { create: jest.fn().mockResolvedValue({ id: "media-x" }) },
-          generationJob: {
-            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-          },
-        }),
-    );
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique }, $transaction });
-
-    await expect(
-      service.completeJob({
-        jobId: "job-1",
-        url: "https://cdn.local/generated.png",
+        durationSeconds: 10,
+        uploadedAt: new Date("2026-07-12T00:00:00Z"),
       }),
-    ).resolves.toMatchObject({ id: "job-1", status: "completed" });
-  });
-
-  it("completes a running job with uploaded media by id", async () => {
-    const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const uploadedAt = new Date("2026-06-30T00:01:00.000Z");
-    const runningJob = {
-      id: "job-1",
-      characterId: "ai-1",
-      mediaType: "image" as const,
-      prompt: "portrait",
-      status: "running" as const,
-      outputMedia: null,
-      outputs: [],
-      createdAt,
-      updatedAt: createdAt,
-    };
-    const completedJob = {
-      ...runningJob,
-      status: "completed" as const,
-      outputMedia: {
-        mediaType: "image" as const,
-        url: "https://cdn.example.com/media/image/generated.png",
-        width: 1024,
-        height: 1024,
-        durationSeconds: null,
-      },
-    };
-    const findUniqueJob = jest
-      .fn()
-      .mockResolvedValueOnce(runningJob)
-      .mockResolvedValueOnce(completedJob);
-    const findUniqueMedia = jest.fn().mockResolvedValue({
-      id: "media-1",
-      mediaType: "image",
-      uploadedAt,
     });
-    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({
-      media: {
-        findUnique: findUniqueMedia,
-      },
-      generationJob: {
-        findUnique: findUniqueJob,
-        updateMany,
-      },
-    });
-
     await expect(
-      service.completeJob({
+      new GenerationService(repository).completeJob({
         jobId: "job-1",
         mediaId: "media-1",
       }),
-    ).resolves.toMatchObject({
-      id: "job-1",
-      status: "completed",
-      outputMedia: {
-        mediaType: "image",
-        url: "https://cdn.example.com/media/image/generated.png",
-      },
-    });
-    expect(updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "running" },
-      data: {
-        status: "completed",
-        outputMediaId: "media-1",
-        leaseExpiresAt: null,
-      },
-    });
+    ).rejects.toThrow("Media type does not match generation job");
+    expect(repository.completeJobWithMediaId).not.toHaveBeenCalled();
   });
 
-  it("fails queued or running jobs with an error message", async () => {
-    const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "job-1",
-      characterId: "ai-1",
-      mediaType: "image",
-      prompt: "portrait",
-      status: "failed",
-      attemptCount: 3,
-      errorMessage: "provider timeout",
-      outputMedia: null,
-      outputs: [],
-      createdAt,
-      updatedAt: createdAt,
+  it("fails queued or running jobs and keeps repeated failure idempotent", async () => {
+    const repository = repositoryFake({
+      findJobDetail: jest.fn().mockResolvedValue(job({ status: "failed" })),
     });
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { updateMany, findUnique } });
+    const service = new GenerationService(repository);
 
     await expect(
       service.failJob({ jobId: "job-1", errorMessage: "provider timeout" }),
-    ).resolves.toMatchObject({
-      id: "job-1",
-      status: "failed",
-      errorMessage: "provider timeout",
-    });
-    expect(updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: { in: ["queued", "running"] } },
-      data: {
-        status: "failed",
-        errorMessage: "provider timeout",
-        leaseExpiresAt: null,
-      },
-    });
+    ).resolves.toMatchObject({ status: "failed" });
+    expect(repository.failJob).toHaveBeenCalledWith(
+      "job-1",
+      "provider timeout",
+    );
+
+    repository.failJob.mockResolvedValue(false);
+    await expect(
+      service.failJob({ jobId: "job-1", errorMessage: "provider timeout" }),
+    ).resolves.toMatchObject({ status: "failed" });
+
+    repository.findJobDetail.mockResolvedValue(job({ status: "completed" }));
+    await expect(
+      service.failJob({ jobId: "job-1", errorMessage: "provider timeout" }),
+    ).rejects.toThrow("Only queued or running generation jobs can fail");
   });
 
-  it("retries only failed jobs and links the origin job", async () => {
-    const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const paramsJson = {
-      aspect_ratio: "4:5",
-      _shot: {
-        scene: "empty railway at dusk",
-        referenceMediaIds: [],
-      },
-    };
-    const failedJob = {
-      id: "job-1",
-      characterId: "ai-1",
-      mediaType: "image" as const,
-      inputPrompt: "empty railway at dusk",
-      prompt: "portrait",
-      candidateCount: 3,
-      paramsJson,
-      draftId: null,
-      sortOrder: 0,
-      status: "failed" as const,
-      provider: "fal:flux-kontext",
-      outputMedia: null,
-      outputs: [],
-      createdAt,
-      updatedAt: createdAt,
-    };
-    const retriedJob = {
-      ...failedJob,
-      id: "job-2",
-      status: "queued" as const,
-      originJobId: "job-1",
-    };
-    const findUnique = jest.fn().mockResolvedValue(failedJob);
-    const create = jest.fn().mockResolvedValue(retriedJob);
-    const actionLogCreate = jest.fn().mockResolvedValue({});
-    const transaction = jest.fn(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          generationJob: { create },
-          characterActionLog: { create: actionLogCreate },
-        }),
-    );
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({
-      generationJob: { findUnique },
-      $transaction: transaction,
+  it("retries only standalone failed jobs with a trimmed reason", async () => {
+    const source = job({ status: "failed" });
+    const repository = repositoryFake({
+      findJob: jest.fn().mockResolvedValue(source),
     });
+    const service = new GenerationService(repository);
 
     await expect(
-      service.retryJob("job-1", "operator retry"),
-    ).resolves.toMatchObject({
-      id: "job-2",
-      characterId: "ai-1",
-      status: "queued",
-      originJobId: "job-1",
-    });
-    expect(create).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        mediaType: "image",
-        inputPrompt: "empty railway at dusk",
-        prompt: "portrait",
-        candidateCount: 3,
-        paramsJson,
-        sortOrder: 0,
-        originJobId: "job-1",
-      },
-      include: {
-        outputMedia: true,
-      },
-    });
-    expect(actionLogCreate).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        actionType: "GENERATION_JOB_RETRIED",
-        targetTable: "generation_jobs",
-        targetId: "job-2",
-        reason: "operator retry",
-      },
-    });
-  });
+      service.retryJob("job-1", " operator retry "),
+    ).resolves.toMatchObject({ id: "job-2", originJobId: "job-1" });
+    expect(repository.retryJob).toHaveBeenCalledWith(source, "operator retry");
 
-  it("rejects retrying a draft-owned job through the generic endpoint", async () => {
-    const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "job-1",
-      characterId: "ai-1",
-      mediaType: "image",
-      prompt: "portrait",
-      status: "failed",
-      draftId: "draft-1",
-      outputMedia: null,
-      createdAt,
-      updatedAt: createdAt,
-    });
-    const transaction = jest.fn();
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique }, $transaction: transaction });
-
+    repository.findJob.mockResolvedValue(
+      job({ status: "failed", draftId: "draft-1" }),
+    );
     await expect(service.retryJob("job-1")).rejects.toThrow(
       "Draft generation jobs must be retried from draft review",
     );
-    expect(transaction).not.toHaveBeenCalled();
-  });
 
-  it("rejects retrying a job that has not failed", async () => {
-    const createdAt = new Date("2026-06-30T00:00:00.000Z");
-    const findUnique = jest.fn().mockResolvedValue({
-      id: "job-1",
-      characterId: "ai-1",
-      mediaType: "image",
-      prompt: "portrait",
-      status: "completed",
-      outputMedia: null,
-      outputs: [],
-      createdAt,
-      updatedAt: createdAt,
-    });
-    const service = new (
-      GenerationService as new (prisma: unknown) => GenerationService
-    )({ generationJob: { findUnique } });
-
+    repository.findJob.mockResolvedValue(job({ status: "completed" }));
     await expect(service.retryJob("job-1")).rejects.toThrow(
       "Only failed generation jobs can be retried",
     );

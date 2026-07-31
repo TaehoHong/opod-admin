@@ -36,8 +36,9 @@
 - `@mantine/form` uncontrolled mode
 - Mantine Theme token + CSS Modules
 
-현재 `packages/admin`은 정적 HTML/CSS/JavaScript다. framework 전환은 별도
-작업이며 project-init에서는 제품 코드를 바꾸지 않는다.
+현재 `packages/admin`은 이 stack으로 구현된 React 단일 frontend다.
+`packages/admin/index.html`과 `src/main.tsx`가 entry이며 legacy 정적 SPA는
+제거했다.
 
 ## Styling
 

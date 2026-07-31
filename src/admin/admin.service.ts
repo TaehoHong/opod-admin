@@ -3,14 +3,38 @@ import {
   ConflictException,
   Injectable,
 } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
 import {
   decodeCursor,
   Page,
   PageInput,
   pageFromRows,
 } from "../domain/database/page";
-import { PrismaService } from "../domain/database/prisma.service";
+import { AdminAnalyticsRepository } from "./admin-analytics.repository";
+import {
+  AdminContentRepository,
+  AdminMediaRecord,
+  AdminPostCommentRecord,
+  AdminPostReactionRecord,
+  AdminPostRecord,
+  AdminStoryRecord,
+} from "./admin-content.repository";
+import {
+  AdminCreditEntryRecord,
+  AdminCreditPaymentRepository,
+  AdminCreditPurchaseRecord,
+  AdminReconciliationLedgerRow,
+  AdminReconciliationRefundRow,
+} from "./admin-credit-payment.repository";
+import {
+  AdminModerationRepository,
+  AdminReportRecord,
+} from "./admin-moderation.repository";
+import {
+  AdminHashtagPreferenceRecord,
+  AdminUserEventRecord,
+  AdminUserRecord,
+  AdminUserRepository,
+} from "./admin-user.repository";
 import { GenerationService } from "./generation/generation.service";
 import { Media } from "./media/media.service";
 
@@ -55,10 +79,6 @@ type AdminUser = {
 
 type AdminUserDetail = AdminUser;
 
-type PrismaAdminUser = Prisma.UserGetPayload<{ select: typeof userFields }>;
-
-type PrismaAdminMedia = Prisma.MediaGetPayload<{ select: typeof mediaFields }>;
-
 type AdminUserEvent = {
   id: string;
   userId: string;
@@ -69,18 +89,12 @@ type AdminUserEvent = {
   createdAt: string;
 };
 
-type PrismaUserEvent = Prisma.UserEventGetPayload<Prisma.UserEventDefaultArgs>;
-
 type AdminHashtagPreference = {
   userId: string;
   hashtag: string;
   score: number;
   updatedAt: string;
 };
-
-type PrismaHashtagPreference = Prisma.UserHashtagPreferenceGetPayload<{
-  include: { hashtag: { select: { name: true } } };
-}>;
 
 type DirectMediaInput = {
   mediaType: MediaType;
@@ -106,8 +120,6 @@ type AdminPost = {
   createdAt: string;
 };
 
-type PrismaPost = Prisma.PostGetPayload<{ include: typeof postWithMedia }>;
-
 type AdminStory = {
   id: string;
   characterId: string;
@@ -116,8 +128,6 @@ type AdminStory = {
   createdAt: string;
   expiresAt: string;
 };
-
-type PrismaStory = Prisma.StoryGetPayload<{ include: { media: true } }>;
 
 // 댓글/리액션 액터는 캐릭터 또는 사용자다 (canonical 스키마의 nullable 쌍).
 type AdminPostComment = {
@@ -129,9 +139,6 @@ type AdminPostComment = {
   createdAt: string;
 };
 
-type PrismaPostComment =
-  Prisma.PostCommentGetPayload<Prisma.PostCommentDefaultArgs>;
-
 type AdminPostReaction = {
   id: string;
   postId: string;
@@ -140,9 +147,6 @@ type AdminPostReaction = {
   reactionType: string;
   createdAt: string;
 };
-
-type PrismaPostReaction =
-  Prisma.PostReactionGetPayload<Prisma.PostReactionDefaultArgs>;
 
 type CreditEntryType = "grant" | "debit";
 
@@ -158,12 +162,6 @@ type CreditEntry = {
   externalReference?: string;
   createdAt: string;
 };
-
-type PrismaCreditEntry =
-  Prisma.CreditLedgerEntryGetPayload<Prisma.CreditLedgerEntryDefaultArgs>;
-
-type PrismaCreditPurchase =
-  Prisma.CreditPurchaseGetPayload<Prisma.CreditPurchaseDefaultArgs>;
 
 type PaymentReconciliationItem = {
   paymentId: string;
@@ -223,8 +221,6 @@ type AdminReport = {
   updatedAt: string;
 };
 
-type PrismaReport = Prisma.ReportGetPayload<Prisma.ReportDefaultArgs>;
-
 type ReportUpdateReceipt = {
   id: string;
   status: ReportStatus;
@@ -238,155 +234,63 @@ type CreatedAtWhere = {
   };
 };
 
-const userFields = {
-  id: true,
-  displayName: true,
-  email: true,
-  createdAt: true,
-  _count: { select: { characterFollows: true } },
-} as const;
-
-const mediaFields = {
-  id: true,
-  mediaType: true,
-  url: true,
-  contentType: true,
-  byteSize: true,
-  width: true,
-  height: true,
-  durationSeconds: true,
-  uploadedAt: true,
-  createdAt: true,
-} as const;
-
-const postWithMedia = {
-  postMedia: {
-    include: { media: true },
-    orderBy: { sortOrder: "asc" },
-  },
-  hashtags: {
-    include: { hashtag: true },
-    orderBy: { hashtag: { name: "asc" } },
-  },
-  _count: { select: { comments: true, reactions: true } },
-} as const;
-
 @Injectable()
 export class AdminService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly userRepository: AdminUserRepository,
+    private readonly contentRepository: AdminContentRepository,
+    private readonly creditPaymentRepository: AdminCreditPaymentRepository,
+    private readonly moderationRepository: AdminModerationRepository,
+    private readonly analyticsRepository: AdminAnalyticsRepository,
     private readonly generationService: GenerationService,
   ) {}
 
   async listUsers(input: { q?: string } & PageInput): Promise<Page<AdminUser>> {
     const term = input.q?.trim();
-    const where = term
-      ? {
-          OR: [
-            { email: { contains: term, mode: "insensitive" as const } },
-            { displayName: { contains: term, mode: "insensitive" as const } },
-          ],
-        }
-      : {};
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
-      !(await this.prisma.user.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.userRepository.hasUserCursor(cursorId, term))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const users = await this.prisma.user.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
-      select: userFields,
+    const users = await this.userRepository.listUsers({
+      term,
+      cursorId,
+      limit: input.limit,
     });
-    const userIds = users.map((user) => user.id);
-    const now = new Date();
-    const [grants, reservations] =
-      userIds.length === 0
-        ? [[], []]
-        : await Promise.all([
-            this.prisma.creditLedgerEntry.groupBy({
-              by: ["userId"],
-              where: {
-                userId: { in: userIds },
-                entryType: "grant",
-                OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-              },
-              _sum: { remainingAmount: true },
-            }),
-            this.prisma.creditReservation.groupBy({
-              by: ["userId"],
-              where: {
-                userId: { in: userIds },
-                status: "reserved",
-                expiresAt: { gt: now },
-              },
-              _sum: { amount: true },
-            }),
-          ]);
-    const grantedByUser = new Map(
-      grants.map((grant) => [grant.userId, grant._sum.remainingAmount ?? 0]),
-    );
-    const reservedByUser = new Map(
-      reservations.map((reservation) => [
-        reservation.userId,
-        reservation._sum.amount ?? 0,
-      ]),
+    const balances = await this.userRepository.getSpendableBalances(
+      users.map((user) => user.id),
+      new Date(),
     );
     return pageFromRows(
-      users.map((user) =>
-        this.toAdminUser(
+      users.map((user) => {
+        const balance = balances.get(user.id);
+        return this.toAdminUser(
           user,
-          Math.max(
-            0,
-            (grantedByUser.get(user.id) ?? 0) -
-              (reservedByUser.get(user.id) ?? 0),
-          ),
-        ),
-      ),
+          Math.max(0, (balance?.granted ?? 0) - (balance?.reserved ?? 0)),
+        );
+      }),
       input.limit,
     );
   }
 
   async getUser(userId: string): Promise<AdminUserDetail> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: userFields,
-    });
+    const user = await this.userRepository.getUser(userId);
     if (!user) {
       throw new BadRequestException("User not found");
     }
-    const now = new Date();
-    const [grants, reservations] = await Promise.all([
-      this.prisma.creditLedgerEntry.aggregate({
-        _sum: { remainingAmount: true },
-        where: {
-          userId,
-          entryType: "grant",
-          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-        },
-      }),
-      this.prisma.creditReservation.aggregate({
-        _sum: { amount: true },
-        where: {
-          userId,
-          status: "reserved",
-          expiresAt: { gt: now },
-        },
-      }),
-    ]);
+    const balances = await this.userRepository.getSpendableBalances(
+      [userId],
+      new Date(),
+    );
+    const balance = balances.get(userId);
     return {
       ...this.toAdminUser(user, 0),
       creditBalance: Math.max(
         0,
-        (grants._sum.remainingAmount ?? 0) - (reservations._sum.amount ?? 0),
+        (balance?.granted ?? 0) - (balance?.reserved ?? 0),
       ),
     };
   }
@@ -408,19 +312,15 @@ export class AdminService {
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
-      !(await this.prisma.userEvent.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.userRepository.hasEventCursor(cursorId, where))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const events = await this.prisma.userEvent.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+    const events = await this.userRepository.listEvents({
+      filters: where,
+      cursorId,
+      limit: input.limit,
     });
     return pageFromRows(
       events.map((event) => this.toUserEvent(event)),
@@ -432,11 +332,8 @@ export class AdminService {
     userId?: string;
   }): Promise<{ items: AdminHashtagPreference[] }> {
     const userId = input.userId?.trim();
-    const preferences = await this.prisma.userHashtagPreference.findMany({
-      where: userId ? { userId } : {},
-      orderBy: [{ score: "desc" }, { hashtag: { name: "asc" } }],
-      include: { hashtag: { select: { name: true } } },
-    });
+    const preferences =
+      await this.userRepository.listHashtagPreferences(userId);
     return {
       items: preferences.map((preference) =>
         this.toHashtagPreference(preference),
@@ -447,14 +344,7 @@ export class AdminService {
   async listTopHashtags(input: { limit: number }): Promise<{
     items: Array<{ hashtag: string; postCount: number }>;
   }> {
-    const hashtags = await this.prisma.hashtag.findMany({
-      orderBy: [{ posts: { _count: "desc" } }, { name: "asc" }],
-      take: input.limit,
-      select: {
-        name: true,
-        _count: { select: { posts: true } },
-      },
-    });
+    const hashtags = await this.userRepository.listTopHashtags(input.limit);
     return {
       items: hashtags.map((hashtag) => ({
         hashtag: hashtag.name,
@@ -468,29 +358,19 @@ export class AdminService {
   ): Promise<Page<Media>> {
     const mediaType = this.parseOptionalMediaType(input.mediaType);
     const uploaded = this.parseOptionalBoolean(input.uploaded, "uploaded");
-    const where = {
-      ...(mediaType ? { mediaType } : {}),
-      ...(uploaded === undefined
-        ? {}
-        : { uploadedAt: uploaded ? { not: null } : null }),
-    };
+    const filters = { mediaType, uploaded };
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
-      !(await this.prisma.media.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.contentRepository.hasMediaCursor(cursorId, filters))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const media = await this.prisma.media.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
-      select: mediaFields,
+    const media = await this.contentRepository.listMedia({
+      filters,
+      cursorId,
+      limit: input.limit,
     });
     return pageFromRows(
       media.map((item) => this.toMedia(item)),
@@ -499,10 +379,7 @@ export class AdminService {
   }
 
   async getMedia(mediaId: string): Promise<Media> {
-    const media = await this.prisma.media.findUnique({
-      where: { id: mediaId },
-      select: mediaFields,
-    });
+    const media = await this.contentRepository.getMedia(mediaId);
     if (!media) {
       throw new BadRequestException("Media not found");
     }
@@ -523,20 +400,15 @@ export class AdminService {
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
-      !(await this.prisma.post.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.contentRepository.hasPostCursor(cursorId, where))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const posts = await this.prisma.post.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
-      include: postWithMedia,
+    const posts = await this.contentRepository.listPosts({
+      filters: where,
+      cursorId,
+      limit: input.limit,
     });
     return pageFromRows(
       posts.map((post) => this.toPost(post)),
@@ -545,10 +417,7 @@ export class AdminService {
   }
 
   async getPost(postId: string): Promise<AdminPost> {
-    const post = await this.prisma.post.findUnique({
-      where: { id: postId },
-      include: postWithMedia,
-    });
+    const post = await this.contentRepository.getPost(postId);
     if (!post) {
       throw new BadRequestException("Post not found");
     }
@@ -578,32 +447,12 @@ export class AdminService {
     await this.assertStoredMedia(input.media);
     const hashtags = this.cleanHashtags(input.hashtags);
     const post = this.toPost(
-      await this.prisma.post.create({
-        data: {
-          characterId: input.actorId,
-          contentType,
-          content: input.content,
-          hashtags: {
-            create: hashtags.map((name) => ({
-              hashtag: {
-                connectOrCreate: {
-                  where: { name },
-                  create: { name },
-                },
-              },
-            })),
-          },
-          postMedia: {
-            create: input.media.map((item, index) => ({
-              sortOrder: index,
-              media:
-                "mediaId" in item
-                  ? { connect: { id: item.mediaId } }
-                  : { create: item },
-            })),
-          },
-        },
-        include: postWithMedia,
+      await this.contentRepository.createPost({
+        characterId: input.actorId,
+        contentType,
+        content: input.content,
+        hashtags,
+        media: input.media,
       }),
     );
     await this.recordCharacterActionLog({
@@ -620,24 +469,18 @@ export class AdminService {
     input: { characterId?: string } & PageInput,
   ): Promise<Page<AdminStory>> {
     const characterId = input.characterId?.trim();
-    const where = characterId ? { characterId } : {};
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
-      !(await this.prisma.story.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.contentRepository.hasStoryCursor(cursorId, characterId))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const stories = await this.prisma.story.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
-      include: { media: true },
+    const stories = await this.contentRepository.listStories({
+      characterId,
+      cursorId,
+      limit: input.limit,
     });
     return pageFromRows(
       stories.map((story) => this.toStory(story)),
@@ -646,10 +489,7 @@ export class AdminService {
   }
 
   async getStory(storyId: string): Promise<AdminStory> {
-    const story = await this.prisma.story.findUnique({
-      where: { id: storyId },
-      include: { media: true },
-    });
+    const story = await this.contentRepository.getStory(storyId);
     if (!story) {
       throw new BadRequestException("Story not found");
     }
@@ -668,17 +508,11 @@ export class AdminService {
 
     await this.assertStoredMedia([input.media]);
     const story = this.toStory(
-      await this.prisma.story.create({
-        data: {
-          character: { connect: { id: input.characterId } },
-          caption: input.caption?.trim() ?? "",
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-          media:
-            "mediaId" in input.media
-              ? { connect: { id: input.media.mediaId } }
-              : { create: input.media },
-        },
-        include: { media: true },
+      await this.contentRepository.createStory({
+        characterId: input.characterId,
+        caption: input.caption?.trim() ?? "",
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        media: input.media,
       }),
     );
     await this.recordCharacterActionLog({
@@ -705,19 +539,15 @@ export class AdminService {
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
-      !(await this.prisma.postComment.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.contentRepository.hasCommentCursor(cursorId, where))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const comments = await this.prisma.postComment.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+    const comments = await this.contentRepository.listComments({
+      filters: where,
+      cursorId,
+      limit: input.limit,
     });
     return pageFromRows(
       comments.map((comment) => this.toPostComment(comment)),
@@ -743,12 +573,10 @@ export class AdminService {
     }
 
     const comment = this.toPostComment(
-      await this.prisma.postComment.create({
-        data: {
-          postId: input.postId,
-          characterId: input.characterId,
-          body,
-        },
+      await this.contentRepository.createComment({
+        postId: input.postId,
+        characterId: input.characterId,
+        body,
       }),
     );
     await this.recordCharacterActionLog({
@@ -781,19 +609,15 @@ export class AdminService {
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
-      !(await this.prisma.postReaction.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.contentRepository.hasReactionCursor(cursorId, where))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const reactions = await this.prisma.postReaction.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+    const reactions = await this.contentRepository.listReactions({
+      filters: where,
+      cursorId,
+      limit: input.limit,
     });
     return pageFromRows(
       reactions.map((reaction) => this.toPostReaction(reaction)),
@@ -819,12 +643,10 @@ export class AdminService {
     }
 
     const reaction = this.toPostReaction(
-      await this.prisma.postReaction.create({
-        data: {
-          postId: input.postId,
-          characterId: input.characterId,
-          reactionType,
-        },
+      await this.contentRepository.createReaction({
+        postId: input.postId,
+        characterId: input.characterId,
+        reactionType,
       }),
     );
     await this.recordCharacterActionLog({
@@ -853,23 +675,18 @@ export class AdminService {
     input: { userId?: string } & PageInput,
   ): Promise<Page<CreditEntry>> {
     const userId = input.userId?.trim();
-    const where = userId ? { userId } : {};
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
-      !(await this.prisma.creditLedgerEntry.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.creditPaymentRepository.hasLedgerCursor(cursorId, userId))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const entries = await this.prisma.creditLedgerEntry.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+    const entries = await this.creditPaymentRepository.listLedger({
+      userId,
+      cursorId,
+      limit: input.limit,
     });
     return pageFromRows(
       entries.map((entry) => this.toCreditEntry(entry)),
@@ -989,7 +806,6 @@ export class AdminService {
   ) {
     const limit = input.limit ?? 50;
     const characterId = input.characterId?.trim();
-    const where = characterId ? { characterId } : {};
     const cursorId = decodeCursor(input.cursor);
     let cursor: bigint | undefined;
     if (cursorId !== undefined) {
@@ -1000,11 +816,10 @@ export class AdminService {
       }
     }
 
-    const logs = await this.prisma.characterActionLog.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: limit + 1,
-      ...(cursor !== undefined ? { cursor: { id: cursor }, skip: 1 } : {}),
+    const logs = await this.contentRepository.listCharacterActions({
+      characterId,
+      cursor,
+      limit,
     });
     return pageFromRows(
       logs.map((log) => ({
@@ -1029,21 +844,24 @@ export class AdminService {
   }> {
     const metric = this.parseAnalyticsMetric(input.metric);
     const where = this.parseCreatedAtWhere(input.from, input.to);
-    const creditTotal = async (entryType: CreditEntryType) => {
-      const result = await this.prisma.creditLedgerEntry.aggregate({
-        where: { entryType, ...where },
-        _sum: { amount: true },
-      });
-      return result._sum.amount ?? 0;
-    };
+    const createdAt = where.createdAt;
     const descriptors: Array<[AnalyticsMetricName, () => Promise<number>]> = [
-      ["events.count", () => this.prisma.userEvent.count({ where })],
-      ["messages.count", () => this.prisma.message.count({ where })],
-      ["credits.granted", () => creditTotal("grant")],
-      ["credits.debited", () => creditTotal("debit")],
+      ["events.count", () => this.analyticsRepository.countEvents(createdAt)],
+      [
+        "messages.count",
+        () => this.analyticsRepository.countMessages(createdAt),
+      ],
+      [
+        "credits.granted",
+        () => this.analyticsRepository.sumCredits("grant", createdAt),
+      ],
+      [
+        "credits.debited",
+        () => this.analyticsRepository.sumCredits("debit", createdAt),
+      ],
       [
         "generation_jobs.count",
-        () => this.prisma.generationJob.count({ where }),
+        () => this.analyticsRepository.countGenerationJobs(createdAt),
       ],
     ];
     const selected = metric
@@ -1062,43 +880,14 @@ export class AdminService {
     to?: string;
   }): Promise<{ items: PaymentReconciliationItem[] }> {
     const status = this.parseReconciliationStatus(input.status);
-    const purchases = await this.prisma.creditPurchase.findMany({
-      where: this.parsePaymentCreatedAtWhere(input.from, input.to),
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    });
+    const purchases = await this.creditPaymentRepository.listPurchases(
+      this.parsePaymentCreatedAtWhere(input.from, input.to).createdAt,
+    );
     const purchaseIds = purchases.map((purchase) => purchase.id);
-    const [entries, refunds] =
-      purchaseIds.length === 0
-        ? [[], []]
-        : await Promise.all([
-            this.prisma.creditLedgerEntry.findMany({
-              where: { purchaseId: { in: purchaseIds } },
-              select: {
-                id: true,
-                purchaseId: true,
-                entryType: true,
-                creditKind: true,
-                promotionCode: true,
-                amount: true,
-                externalReference: true,
-              },
-            }),
-            this.prisma.creditRefund.findMany({
-              where: { purchaseId: { in: purchaseIds } },
-              select: {
-                id: true,
-                purchaseId: true,
-                status: true,
-                refundAmount: true,
-                allocations: {
-                  select: {
-                    recoveryAmount: true,
-                    recoveredAmount: true,
-                  },
-                },
-              },
-            }),
-          ]);
+    const { entries, refunds } =
+      await this.creditPaymentRepository.listReconciliationEvidence(
+        purchaseIds,
+      );
 
     return {
       items: purchases
@@ -1129,9 +918,7 @@ export class AdminService {
   }
 
   async getPayment(paymentId: string): Promise<AdminPayment> {
-    const payment = await this.prisma.creditPurchase.findUnique({
-      where: { id: paymentId },
-    });
+    const payment = await this.creditPaymentRepository.getPayment(paymentId);
     if (!payment) {
       throw new BadRequestException("Payment not found");
     }
@@ -1153,77 +940,57 @@ export class AdminService {
       );
     }
 
-    const purchase = await this.prisma.creditPurchase.findUnique({
-      where: { id: input.purchaseId },
-    });
+    const purchase = await this.creditPaymentRepository.getPayment(
+      input.purchaseId,
+    );
     if (!purchase) {
       throw new BadRequestException("Payment not found");
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${purchase.userId}, 0))`;
-      const actionLock = `credit_reconciliation:${reference}`;
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${actionLock}, 0))`;
-
-      const existing = await tx.creditReconciliationAction.findUnique({
-        where: { reference },
-      });
-      if (existing) {
-        if (
-          existing.purchaseId !== input.purchaseId ||
-          existing.actionType !== input.action
-        ) {
-          throw new ConflictException(
-            "Reconciliation reference is already used",
-          );
-        }
-        return existing.details as ReconciliationActionReceipt;
-      }
-
-      const grants = await tx.creditLedgerEntry.findMany({
-        where: {
-          purchaseId: purchase.id,
-          entryType: "grant",
-        },
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      });
-      let grantedCredits = 0;
-      let recoveredCredits = 0;
-      let debtAdded = 0;
-
-      if (input.action === "grant_missing_purchase") {
-        if (purchase.status !== "paid") {
-          throw new ConflictException("Payment is not paid");
-        }
-        const baseGrants = grants.filter(
-          (grant) =>
-            grant.creditKind === "paid" && grant.promotionCode === null,
-        );
-        if (baseGrants.length > 0) {
-          throw new ConflictException("Payment already has a base grant");
-        }
-
-        const account = await tx.creditAccount.upsert({
-          where: { userId: purchase.userId },
-          create: { userId: purchase.userId },
-          update: {},
-        });
-        const offset = Math.min(account.paidDebt, purchase.creditAmount);
-        if (offset > 0) {
-          const nextDebt = account.paidDebt - offset;
-          await tx.creditAccount.update({
-            where: { userId: purchase.userId },
-            data: { paidDebt: nextDebt },
-          });
-          if (nextDebt === 0) {
-            await tx.user.update({
-              where: { id: purchase.userId },
-              data: { debtIdentityHash: null },
-            });
+    return this.creditPaymentRepository.withReconciliationTransaction(
+      purchase.userId,
+      reference,
+      async (session) => {
+        const existing = await session.getAction(reference);
+        if (existing) {
+          if (
+            existing.purchaseId !== input.purchaseId ||
+            existing.actionType !== input.action
+          ) {
+            throw new ConflictException(
+              "Reconciliation reference is already used",
+            );
           }
+          return existing.details as ReconciliationActionReceipt;
         }
-        await tx.creditLedgerEntry.create({
-          data: {
+
+        const grants = await session.listPurchaseGrants(purchase.id);
+        let grantedCredits = 0;
+        let recoveredCredits = 0;
+        let debtAdded = 0;
+
+        if (input.action === "grant_missing_purchase") {
+          if (purchase.status !== "paid") {
+            throw new ConflictException("Payment is not paid");
+          }
+          const baseGrants = grants.filter(
+            (grant) =>
+              grant.creditKind === "paid" && grant.promotionCode === null,
+          );
+          if (baseGrants.length > 0) {
+            throw new ConflictException("Payment already has a base grant");
+          }
+
+          const account = await session.ensureCreditAccount(purchase.userId);
+          const offset = Math.min(account.paidDebt, purchase.creditAmount);
+          if (offset > 0) {
+            const nextDebt = account.paidDebt - offset;
+            await session.setPaidDebt(purchase.userId, nextDebt);
+            if (nextDebt === 0) {
+              await session.clearDebtIdentity(purchase.userId);
+            }
+          }
+          await session.createLedgerEntry({
             userId: purchase.userId,
             purchaseId: purchase.id,
             entryType: "grant",
@@ -1232,187 +999,148 @@ export class AdminService {
             remainingAmount: purchase.creditAmount - offset,
             reason,
             externalReference: `credit_purchase:${purchase.id}`,
-          },
-        });
-        grantedCredits = purchase.creditAmount;
-      } else if (input.action === "recover_completed_refund") {
-        const refunds = await tx.creditRefund.findMany({
-          where: { purchaseId: purchase.id, status: "refunded" },
-          include: {
-            allocations: { include: { ledgerEntry: true } },
-          },
-        });
-        let repaired = false;
-        for (const refund of refunds) {
-          const totalRecovery = refund.creditAmount + refund.promotionAmount;
-          if (totalRecovery === 0) {
-            continue;
-          }
-          for (const allocation of refund.allocations) {
-            const recoveryLeft =
-              allocation.recoveryAmount - allocation.recoveredAmount;
-            if (recoveryLeft <= 0) {
+          });
+          grantedCredits = purchase.creditAmount;
+        } else if (input.action === "recover_completed_refund") {
+          const refunds = await session.listCompletedRefunds(purchase.id);
+          let repaired = false;
+          for (const refund of refunds) {
+            const totalRecovery = refund.creditAmount + refund.promotionAmount;
+            if (totalRecovery === 0) {
               continue;
             }
-            const remaining = allocation.ledgerEntry.remainingAmount ?? 0;
-            const recovered = Math.min(remaining, recoveryLeft);
-            if (recovered > 0) {
-              await tx.creditLedgerEntry.update({
-                where: { id: allocation.ledgerEntryId },
-                data: { remainingAmount: remaining - recovered },
-              });
+            for (const allocation of refund.allocations) {
+              const recoveryLeft =
+                allocation.recoveryAmount - allocation.recoveredAmount;
+              if (recoveryLeft <= 0) {
+                continue;
+              }
+              const remaining = allocation.ledgerEntry.remainingAmount ?? 0;
+              const recovered = Math.min(remaining, recoveryLeft);
+              if (recovered > 0) {
+                await session.setLedgerRemaining(
+                  allocation.ledgerEntryId,
+                  remaining - recovered,
+                );
+              }
+              debtAdded += recoveryLeft - recovered;
+              recoveredCredits += recoveryLeft;
+              await session.completeRefundAllocation(
+                allocation.refundId,
+                allocation.ledgerEntryId,
+                allocation.recoveryAmount,
+              );
+              repaired = true;
             }
-            debtAdded += recoveryLeft - recovered;
-            recoveredCredits += recoveryLeft;
-            await tx.creditRefundAllocation.update({
-              where: {
-                refundId_ledgerEntryId: {
-                  refundId: allocation.refundId,
-                  ledgerEntryId: allocation.ledgerEntryId,
-                },
-              },
-              data: { recoveredAmount: allocation.recoveryAmount },
-            });
-            repaired = true;
-          }
-          const debitReference = `credit_refund:${refund.id}`;
-          if (
-            !(await tx.creditLedgerEntry.findFirst({
-              where: {
-                entryType: "debit",
-                externalReference: debitReference,
-              },
-              select: { id: true },
-            }))
-          ) {
-            await tx.creditLedgerEntry.create({
-              data: {
+            const debitReference = `credit_refund:${refund.id}`;
+            if (!(await session.hasDebitReference(debitReference))) {
+              await session.createLedgerEntry({
                 userId: purchase.userId,
                 purchaseId: purchase.id,
                 entryType: "debit",
                 amount: totalRecovery,
                 reason,
                 externalReference: debitReference,
-              },
-            });
-            repaired = true;
+              });
+              repaired = true;
+            }
           }
-        }
-        if (!repaired) {
-          throw new ConflictException("No incomplete refund recovery found");
-        }
-        if (debtAdded > 0) {
-          await tx.creditAccount.upsert({
-            where: { userId: purchase.userId },
-            create: { userId: purchase.userId, paidDebt: debtAdded },
-            update: { paidDebt: { increment: debtAdded } },
-          });
-        }
-      } else {
-        if (
-          input.action === "recover_nonpaid_grants" &&
-          purchase.status === "paid"
-        ) {
-          throw new ConflictException("Payment is paid");
-        }
+          if (!repaired) {
+            throw new ConflictException("No incomplete refund recovery found");
+          }
+          if (debtAdded > 0) {
+            await session.addPaidDebt(purchase.userId, debtAdded);
+          }
+        } else {
+          if (
+            input.action === "recover_nonpaid_grants" &&
+            purchase.status === "paid"
+          ) {
+            throw new ConflictException("Payment is paid");
+          }
 
-        let targets = grants;
-        if (input.action === "recover_duplicate_grants") {
-          if (purchase.status !== "paid") {
-            throw new ConflictException("Payment is not paid");
-          }
-          const baseGrants = grants.filter(
-            (grant) =>
-              grant.creditKind === "paid" && grant.promotionCode === null,
-          );
-          const keeper = baseGrants.find(
-            (grant) => grant.amount === purchase.creditAmount,
-          );
-          if (!keeper || baseGrants.length < 2) {
-            throw new ConflictException(
-              "No safely repairable duplicate grant exists",
+          let targets = grants;
+          if (input.action === "recover_duplicate_grants") {
+            if (purchase.status !== "paid") {
+              throw new ConflictException("Payment is not paid");
+            }
+            const baseGrants = grants.filter(
+              (grant) =>
+                grant.creditKind === "paid" && grant.promotionCode === null,
             );
+            const keeper = baseGrants.find(
+              (grant) => grant.amount === purchase.creditAmount,
+            );
+            if (!keeper || baseGrants.length < 2) {
+              throw new ConflictException(
+                "No safely repairable duplicate grant exists",
+              );
+            }
+            targets = baseGrants.filter((grant) => grant.id !== keeper.id);
           }
-          targets = baseGrants.filter((grant) => grant.id !== keeper.id);
-        }
-        if (targets.length === 0) {
-          throw new ConflictException("No recoverable grants found");
-        }
+          if (targets.length === 0) {
+            throw new ConflictException("No recoverable grants found");
+          }
 
-        for (const grant of targets) {
-          const remaining = grant.remainingAmount ?? 0;
-          if (remaining > 0) {
-            await tx.creditLedgerEntry.update({
-              where: { id: grant.id },
-              data: { remainingAmount: 0 },
-            });
+          for (const grant of targets) {
+            const remaining = grant.remainingAmount ?? 0;
+            if (remaining > 0) {
+              await session.setLedgerRemaining(grant.id, 0);
+            }
+            recoveredCredits += grant.amount;
+            debtAdded += grant.amount - remaining;
           }
-          recoveredCredits += grant.amount;
-          debtAdded += grant.amount - remaining;
-        }
-        if (debtAdded > 0) {
-          await tx.creditAccount.upsert({
-            where: { userId: purchase.userId },
-            create: { userId: purchase.userId, paidDebt: debtAdded },
-            update: { paidDebt: { increment: debtAdded } },
-          });
-        }
-        await tx.creditLedgerEntry.create({
-          data: {
+          if (debtAdded > 0) {
+            await session.addPaidDebt(purchase.userId, debtAdded);
+          }
+          await session.createLedgerEntry({
             userId: purchase.userId,
             purchaseId: purchase.id,
             entryType: "debit",
             amount: recoveredCredits,
             reason,
             externalReference: `credit_reconciliation:${reference}`,
-          },
-        });
-      }
+          });
+        }
 
-      const receipt: ReconciliationActionReceipt = {
-        reference,
-        action: input.action,
-        purchaseId: purchase.id,
-        grantedCredits,
-        recoveredCredits,
-        debtAdded,
-      };
-      await tx.creditReconciliationAction.create({
-        data: {
+        const receipt: ReconciliationActionReceipt = {
+          reference,
+          action: input.action,
+          purchaseId: purchase.id,
+          grantedCredits,
+          recoveredCredits,
+          debtAdded,
+        };
+        await session.recordAction({
           actionType: input.action,
           reference,
           purchaseId: purchase.id,
           adminId: input.adminId,
           reason,
           details: receipt,
-        },
-      });
-      return receipt;
-    });
+        });
+        return receipt;
+      },
+    );
   }
 
   async listReports(
     input: { status?: string } & PageInput,
   ): Promise<Page<AdminReport>> {
     const status = this.parseReportStatus(input.status);
-    const where = status ? { status } : {};
     const cursorId = decodeCursor(input.cursor);
 
     if (
       cursorId &&
-      !(await this.prisma.report.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.moderationRepository.hasReportCursor(cursorId, status))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const reports = await this.prisma.report.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+    const reports = await this.moderationRepository.listReports({
+      status,
+      cursorId,
+      limit: input.limit,
     });
     return pageFromRows(
       reports.map((report) => this.toReport(report)),
@@ -1421,9 +1149,7 @@ export class AdminService {
   }
 
   async getReport(reportId: string): Promise<AdminReport> {
-    const report = await this.prisma.report.findUnique({
-      where: { id: reportId },
-    });
+    const report = await this.moderationRepository.getReport(reportId);
     if (!report) {
       throw new BadRequestException("Report not found");
     }
@@ -1439,21 +1165,14 @@ export class AdminService {
     if (!status) {
       throw new BadRequestException("Report status is required");
     }
-    if (
-      !(await this.prisma.report.findUnique({
-        where: { id: input.reportId },
-        select: { id: true },
-      }))
-    ) {
+    if (!(await this.moderationRepository.getReport(input.reportId))) {
       throw new BadRequestException("Report not found");
     }
 
-    const report = await this.prisma.report.update({
-      where: { id: input.reportId },
-      data: {
-        status,
-        resolution: input.resolution?.trim() || null,
-      },
+    const report = await this.moderationRepository.updateReport({
+      reportId: input.reportId,
+      status,
+      resolution: input.resolution?.trim() || null,
     });
     return {
       id: report.id,
@@ -1469,13 +1188,7 @@ export class AdminService {
     targetId: string;
     reason: string;
   }) {
-    if (!this.prisma) {
-      return;
-    }
-
-    await this.prisma.characterActionLog.create({
-      data: input,
-    });
+    await this.contentRepository.recordCharacterAction(input);
   }
 
   private async appendCreditEntry(
@@ -1503,63 +1216,45 @@ export class AdminService {
     }
     if (
       input.purchaseId &&
-      !(await this.prisma.creditPurchase.findFirst({
-        where: { id: input.purchaseId, userId: input.userId },
-        select: { id: true },
-      }))
+      !(await this.creditPaymentRepository.hasPurchaseForUser(
+        input.purchaseId,
+        input.userId,
+      ))
     ) {
       throw new BadRequestException("Credit purchase not found");
     }
 
-    const entry = await this.prisma.creditLedgerEntry.create({
-      data: {
-        userId: input.userId,
-        entryType,
-        amount: input.amount,
-        ...(entryType === "grant"
-          ? {
-              remainingAmount: input.amount,
-              creditKind,
-              purchaseId: input.purchaseId,
-              promotionCode,
-              ...(creditKind === "free"
-                ? {
-                    expiresAt: new Date(
-                      Date.now() + freeCreditTtlDays * 24 * 60 * 60 * 1000,
-                    ),
-                  }
-                : {}),
-            }
-          : {}),
-        reason: input.reason.trim(),
-        externalReference: input.externalReference,
-      },
+    const entry = await this.creditPaymentRepository.createLedgerEntry({
+      userId: input.userId,
+      entryType,
+      amount: input.amount,
+      ...(entryType === "grant"
+        ? {
+            remainingAmount: input.amount,
+            creditKind,
+            purchaseId: input.purchaseId,
+            promotionCode,
+            ...(creditKind === "free"
+              ? {
+                  expiresAt: new Date(
+                    Date.now() + freeCreditTtlDays * 24 * 60 * 60 * 1000,
+                  ),
+                }
+              : {}),
+          }
+        : {}),
+      reason: input.reason.trim(),
+      externalReference: input.externalReference,
     });
     return this.toCreditEntry(entry);
   }
 
   private async hasCharacter(characterId: string): Promise<boolean> {
-    const character = await this.prisma.character.findUnique({
-      where: { id: characterId },
-      select: { id: true },
-    });
-    return character !== null;
+    return this.contentRepository.hasCharacter(characterId);
   }
 
   private async hasPost(postId: string): Promise<boolean> {
-    const post = await this.prisma.post.findUnique({
-      where: { id: postId },
-      select: { id: true },
-    });
-    return post !== null;
-  }
-
-  private async hasUser(userId: string): Promise<boolean> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true },
-    });
-    return user !== null;
+    return this.contentRepository.hasPost(postId);
   }
 
   private cleanHashtags(hashtags: string[] | undefined): string[] {
@@ -1585,14 +1280,7 @@ export class AdminService {
         continue;
       }
 
-      const stored = await this.prisma.media.findUnique({
-        where: { id: item.mediaId },
-        select: {
-          id: true,
-          mediaType: true,
-          uploadedAt: true,
-        },
-      });
+      const stored = await this.contentRepository.getStoredMedia(item.mediaId);
       if (!stored) {
         throw new BadRequestException("Media not found");
       }
@@ -1602,7 +1290,7 @@ export class AdminService {
     }
   }
 
-  private toCreditEntry(entry: PrismaCreditEntry): CreditEntry {
+  private toCreditEntry(entry: AdminCreditEntryRecord): CreditEntry {
     return {
       id: entry.id,
       userId: entry.userId,
@@ -1617,7 +1305,7 @@ export class AdminService {
     };
   }
 
-  private toPost(post: PrismaPost): AdminPost {
+  private toPost(post: AdminPostRecord): AdminPost {
     return {
       id: post.id,
       characterId: post.characterId,
@@ -1639,7 +1327,7 @@ export class AdminService {
     };
   }
 
-  private toStory(story: PrismaStory): AdminStory {
+  private toStory(story: AdminStoryRecord): AdminStory {
     return {
       id: story.id,
       characterId: story.characterId,
@@ -1658,7 +1346,7 @@ export class AdminService {
     };
   }
 
-  private toPostComment(comment: PrismaPostComment): AdminPostComment {
+  private toPostComment(comment: AdminPostCommentRecord): AdminPostComment {
     return {
       id: comment.id,
       postId: comment.postId,
@@ -1669,7 +1357,7 @@ export class AdminService {
     };
   }
 
-  private toPostReaction(reaction: PrismaPostReaction): AdminPostReaction {
+  private toPostReaction(reaction: AdminPostReactionRecord): AdminPostReaction {
     return {
       id: reaction.id,
       postId: reaction.postId,
@@ -1680,7 +1368,7 @@ export class AdminService {
     };
   }
 
-  private toAdminUser(user: PrismaAdminUser, creditBalance: number): AdminUser {
+  private toAdminUser(user: AdminUserRecord, creditBalance: number): AdminUser {
     return {
       id: user.id,
       displayName: user.displayName,
@@ -1691,7 +1379,7 @@ export class AdminService {
     };
   }
 
-  private toUserEvent(event: PrismaUserEvent): AdminUserEvent {
+  private toUserEvent(event: AdminUserEventRecord): AdminUserEvent {
     return {
       id: event.id,
       userId: event.userId,
@@ -1704,7 +1392,7 @@ export class AdminService {
   }
 
   private toHashtagPreference(
-    preference: PrismaHashtagPreference,
+    preference: AdminHashtagPreferenceRecord,
   ): AdminHashtagPreference {
     return {
       userId: preference.userId,
@@ -1714,7 +1402,7 @@ export class AdminService {
     };
   }
 
-  private toMedia(media: PrismaAdminMedia): Media {
+  private toMedia(media: AdminMediaRecord): Media {
     return {
       id: media.id,
       mediaType: media.mediaType,
@@ -1731,7 +1419,7 @@ export class AdminService {
     };
   }
 
-  private toPayment(payment: PrismaCreditPurchase): AdminPayment {
+  private toPayment(payment: AdminCreditPurchaseRecord): AdminPayment {
     return {
       id: payment.id,
       userId: payment.userId,
@@ -1745,7 +1433,7 @@ export class AdminService {
     };
   }
 
-  private toReport(report: PrismaReport): AdminReport {
+  private toReport(report: AdminReportRecord): AdminReport {
     return {
       id: report.id,
       reporterUserId: report.reporterUserId,
@@ -1761,26 +1449,9 @@ export class AdminService {
   }
 
   private toPaymentReconciliationRow(
-    purchase: PrismaCreditPurchase,
-    entries: Array<{
-      id: string;
-      purchaseId: string | null;
-      entryType: CreditEntryType;
-      creditKind: "free" | "paid" | null;
-      promotionCode: string | null;
-      amount: number;
-      externalReference: string | null;
-    }>,
-    refunds: Array<{
-      id: string;
-      purchaseId: string;
-      status: "reserved" | "refunded" | "released";
-      refundAmount: number;
-      allocations?: Array<{
-        recoveryAmount: number;
-        recoveredAmount: number;
-      }>;
-    }>,
+    purchase: AdminCreditPurchaseRecord,
+    entries: AdminReconciliationLedgerRow[],
+    refunds: AdminReconciliationRefundRow[],
   ): PaymentReconciliationRow {
     const payment = {
       paymentId: purchase.id,

@@ -30,4 +30,16 @@ export class AppConfigService {
   get bootstrapAdmin(): AppConfig["bootstrapAdmin"] {
     return this.config.bootstrapAdmin;
   }
+
+  get s3(): AppConfig["s3"] {
+    return this.config.s3;
+  }
+
+  get worker(): AppConfig["worker"] {
+    return this.config.worker;
+  }
+
+  get draftWorker(): AppConfig["draftWorker"] {
+    return this.config.draftWorker;
+  }
 }

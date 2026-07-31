@@ -3,13 +3,34 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
-import { GenerationWorkerService } from "../src/worker/generation-worker.service";
+import type { GeneratedMediaStore } from "../src/worker/generated-media-store";
+import { GenerationJobRepository } from "../src/worker/generation-job.repository";
+import {
+  GenerationWorkerService,
+  WorkerConfig,
+} from "../src/worker/generation-worker.service";
+import type {
+  ImageGenerationProvider,
+  ImageGenerationRequest,
+} from "../src/worker/image-generation.provider";
 import { adminHeaders } from "./admin-auth";
 
 const uniqueHandle = (base: string) => `${base}-${randomUUID().slice(0, 8)}`;
-
 const wait = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
+const disabledWorkerConfig: WorkerConfig = {
+  enabled: false,
+  pollIntervalMs: 15_000,
+  jobsPerTick: 1,
+  leaseSeconds: 600,
+  maxAttempts: 3,
+  providerPollIntervalMs: 5_000,
+  providerTimeoutMs: 5 * 60_000,
+  candidateCount: 2,
+  jobCostEstimateUsd: 0.2,
+  circuitBreakerThreshold: 5,
+  circuitBreakerCooldownMs: 5 * 60_000,
+};
 
 describe("generation", () => {
   it("enqueues, starts, and completes an image generation job", async () => {
@@ -285,7 +306,7 @@ describe("generation", () => {
     await app.close();
   });
 
-  it("runs the image draft workflow through generation and regeneration", async () => {
+  it("runs the image draft workflow through confirmation and regeneration", async () => {
     const generationEnv = {
       S3_BUCKET: process.env.S3_BUCKET,
       AWS_REGION: process.env.AWS_REGION,
@@ -309,9 +330,55 @@ describe("generation", () => {
       delete process.env.FAL_IMAGE_MODEL;
       delete process.env.FAL_IMAGE_T2I_MODEL;
 
+      const providerRequests: ImageGenerationRequest[] = [];
+      const provider: ImageGenerationProvider = {
+        name: "e2e-fake-provider",
+        async submit(input) {
+          providerRequests.push(input);
+          return { requestId: "e2e-request-1" };
+        },
+        async poll() {
+          return {
+            status: "completed",
+            images: Array.from({ length: 3 }, (_, index) => ({
+              url: `https://provider.local/candidate-${index + 1}.png`,
+              contentType: "image/png",
+              width: 1024,
+              height: 1024,
+            })),
+          };
+        },
+      };
+      let storedFile = 0;
+      const store: GeneratedMediaStore = async () => {
+        storedFile += 1;
+        return {
+          url: `https://cdn.local/generated/candidate-${storedFile}.png`,
+          storageKey: `pod/generated/e2e/candidate-${storedFile}.png`,
+        };
+      };
+
       moduleRef = await Test.createTestingModule({
         imports: [AppModule],
-      }).compile();
+      })
+        .overrideProvider(GenerationWorkerService)
+        .useFactory({
+          inject: [GenerationJobRepository],
+          factory: (jobs: GenerationJobRepository) =>
+            new GenerationWorkerService(
+              jobs,
+              async () => ({ t2i: provider, edit: provider }),
+              store,
+              {
+                ...disabledWorkerConfig,
+                providerPollIntervalMs: 1,
+                providerTimeoutMs: 1_000,
+              },
+              async () => {},
+              async (url) => Buffer.from(`downloaded:${url}`),
+            ),
+        })
+        .compile();
       app = moduleRef.createNestApplication();
       await app.init();
       const headers = await adminHeaders(app);
@@ -325,6 +392,45 @@ describe("generation", () => {
           interests: ["art"],
         })
         .expect(201);
+
+      // 인물이 보이는 이미지 draft는 업로드가 끝난 신원 레퍼런스가 필요하다.
+      // 외부 S3 없이 API만으로 confirmed media를 만들기 위해 일반 생성 잡을
+      // URL 결과로 완료한 뒤 캐릭터의 비주얼 레퍼런스로 연결한다.
+      const referenceJob = await request(app.getHttpServer())
+        .post("/api/admin/v1/generation/jobs")
+        .set(headers)
+        .send({
+          characterId: character.body.id,
+          mediaType: "image",
+          prompt: "identity reference fixture",
+        })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/admin/v1/generation/jobs/${referenceJob.body.id}/start`)
+        .set(headers)
+        .expect(201);
+      const reference = await request(app.getHttpServer())
+        .post(`/api/admin/v1/generation/jobs/${referenceJob.body.id}/complete`)
+        .set(headers)
+        .send({
+          url: "https://cdn.local/generation-draft-reference.png",
+          width: 1024,
+          height: 1024,
+        })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(
+          `/api/admin/v1/media/${reference.body.outputMediaId}/confirm-upload`,
+        )
+        .set(headers)
+        .expect(201);
+      await request(app.getHttpServer())
+        .put(
+          `/api/admin/v1/characters/${character.body.id}/visual-profile/references`,
+        )
+        .set(headers)
+        .send({ mediaIds: [reference.body.outputMediaId] })
+        .expect(200);
 
       const created = await request(app.getHttpServer())
         .post("/api/admin/v1/generation/image-jobs/draft")
@@ -396,15 +502,13 @@ describe("generation", () => {
         .expect(201)
         .expect({ jobId: created.body.id });
 
-      const deadline = Date.now() + 10_000;
+      const deadline = Date.now() + 5_000;
       let completed: Record<string, unknown> | undefined;
-      let lastObserved: Record<string, unknown> | undefined;
       while (Date.now() < deadline) {
         const response = await request(app.getHttpServer())
           .get(`/api/admin/v1/generation/jobs/${created.body.id}`)
           .set(headers)
           .expect(200);
-        lastObserved = response.body;
         if (response.body.status === "completed") {
           completed = response.body;
           break;
@@ -414,17 +518,24 @@ describe("generation", () => {
             `Generation job failed: ${response.body.errorMessage ?? "unknown error"}`,
           );
         }
-        await wait(50);
+        await wait(20);
+      }
+      if (!completed) {
+        throw new Error("Generation job did not complete before deadline");
       }
 
-      if (!completed) {
-        throw new Error(
-          `Generation job did not complete before deadline (last status=${String(lastObserved?.status ?? "unknown")}, error=${String(lastObserved?.errorMessage ?? "none")})`,
-        );
-      }
+      expect(providerRequests).toEqual([
+        expect.objectContaining({
+          prompt: "edited final prompt",
+          candidateCount: 3,
+          referenceImageUrls: [
+            "https://cdn.local/generation-draft-reference.png",
+          ],
+        }),
+      ]);
       expect(completed).toMatchObject({
         status: "completed",
-        provider: "local",
+        provider: "e2e-fake-provider",
       });
       const outputs = completed.outputs as Array<{
         mediaId: string;

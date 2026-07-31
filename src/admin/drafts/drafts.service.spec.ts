@@ -1,37 +1,38 @@
+import { DraftsRepository } from "./drafts.repository";
 import { DraftsService } from "./drafts.service";
 
-function prismaMock() {
+type RepositoryFake = jest.Mocked<DraftsRepository>;
+
+function repositoryFake(overrides: Partial<DraftsRepository> = {}) {
   return {
-    postDraft: {
-      findMany: jest.fn().mockResolvedValue([]),
-      findFirst: jest.fn().mockResolvedValue(null),
-      findUnique: jest.fn().mockResolvedValue(null),
-      create: jest.fn(),
-      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-    },
-    generationJob: {
-      findMany: jest.fn().mockResolvedValue([]),
-      findFirst: jest.fn().mockResolvedValue(null),
-      findUnique: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockResolvedValue({}),
-      update: jest.fn().mockResolvedValue({}),
-      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-    },
-    generationJobOutput: {
-      findFirst: jest.fn().mockResolvedValue(null),
-      update: jest.fn().mockResolvedValue({}),
-      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-    },
-    character: {
-      findUnique: jest.fn().mockResolvedValue({ id: "ai-1" }),
-    },
-    characterActionLog: { create: jest.fn().mockResolvedValue({}) },
-    $transaction: jest.fn(),
-  };
+    cursorMatchesFilter: jest.fn().mockResolvedValue(true),
+    findMany: jest.fn().mockResolvedValue([]),
+    findDraft: jest.fn().mockResolvedValue(null),
+    findDraftJobs: jest.fn().mockResolvedValue([]),
+    findMediaUrls: jest.fn().mockResolvedValue([]),
+    characterExists: jest.fn().mockResolvedValue(true),
+    createDraft: jest.fn(),
+    findDraftConcept: jest.fn().mockResolvedValue(null),
+    updateEditableDraft: jest.fn().mockResolvedValue(true),
+    approveDraft: jest.fn().mockResolvedValue(true),
+    rejectDraft: jest.fn().mockResolvedValue(true),
+    draftExists: jest.fn().mockResolvedValue(true),
+    findDraftShotPrompt: jest.fn().mockResolvedValue(null),
+    queueDraftShot: jest.fn().mockResolvedValue(true),
+    findShotIdentity: jest.fn().mockResolvedValue(null),
+    findRegenerationSource: jest.fn().mockResolvedValue(null),
+    regenerateShot: jest.fn().mockResolvedValue("regenerated"),
+    findCompletedShotCandidates: jest.fn().mockResolvedValue(null),
+    selectShotOutput: jest.fn().mockResolvedValue(undefined),
+    findEditableOutput: jest.fn().mockResolvedValue(null),
+    updateOutputFilter: jest.fn().mockResolvedValue(undefined),
+    recordActionLog: jest.fn().mockResolvedValue(undefined),
+    ...overrides,
+  } as unknown as RepositoryFake;
 }
 
-function makeService(prisma: ReturnType<typeof prismaMock>) {
-  return new (DraftsService as new (prisma: unknown) => DraftsService)(prisma);
+function makeService(repository: RepositoryFake) {
+  return new DraftsService(repository);
 }
 
 const draftRow = {
@@ -49,361 +50,253 @@ const draftRow = {
   conceptJson: { plan: {} },
   createdAt: new Date("2026-07-12T00:00:00.000Z"),
   updatedAt: new Date("2026-07-12T00:00:00.000Z"),
-};
+} as const;
+
+const selectedJob = {
+  id: "job-1",
+  sortOrder: 0,
+  status: "completed",
+  prompt: "p",
+  paramsJson: null,
+  candidateCount: 1,
+  provider: null,
+  costUsd: null,
+  errorMessage: null,
+  createdAt: new Date("2026-07-12T02:00:00.000Z"),
+  outputs: [
+    {
+      mediaId: "media-1",
+      candidateIndex: 0,
+      selected: true,
+      filterPreset: "film",
+      media: { url: "https://cdn.local/a.png" },
+    },
+  ],
+} as const;
 
 describe("DraftsService", () => {
-  it("rejects an unknown status filter", async () => {
-    const service = makeService(prismaMock());
+  it("rejects an unknown status filter before querying", async () => {
+    const repository = repositoryFake();
+    const service = makeService(repository);
+
     await expect(
       service.listDrafts({ status: "archived", limit: 20 }),
     ).rejects.toThrow("Draft status must be one of");
+    expect(repository.findMany).not.toHaveBeenCalled();
   });
 
-  it("lists drafts with filters", async () => {
-    const prisma = prismaMock();
-    prisma.postDraft.findMany.mockResolvedValue([draftRow]);
-    const service = makeService(prisma);
+  it("lists drafts with filters and limit-plus-one pagination", async () => {
+    const repository = repositoryFake({
+      findMany: jest.fn().mockResolvedValue([draftRow]),
+    });
+    const service = makeService(repository);
 
     await expect(
       service.listDrafts({ status: "needs_review", limit: 20 }),
     ).resolves.toMatchObject({
       items: [{ id: "draft-1", status: "needs_review" }],
     });
-    expect(prisma.postDraft.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { status: "needs_review" } }),
-    );
-  });
-
-  it("returns the draft detail with latest-per-shot jobs and candidates", async () => {
-    const prisma = prismaMock();
-    prisma.postDraft.findUnique.mockResolvedValue(draftRow);
-    prisma.generationJob.findMany.mockResolvedValue([
-      {
-        id: "job-new",
-        sortOrder: 0,
-        status: "completed",
-        prompt: "p",
-        errorMessage: null,
-        createdAt: new Date("2026-07-12T02:00:00.000Z"),
-        outputs: [
-          {
-            mediaId: "media-1",
-            candidateIndex: 0,
-            selected: true,
-            filterPreset: "film",
-            media: { url: "https://cdn.local/a.png" },
-          },
-        ],
-      },
-      {
-        id: "job-old",
-        sortOrder: 0,
-        status: "failed",
-        prompt: "p",
-        errorMessage: "boom",
-        createdAt: new Date("2026-07-12T01:00:00.000Z"),
-        outputs: [],
-      },
-    ]);
-    const service = makeService(prisma);
-
-    const draft = await service.getDraft("draft-1");
-    expect(draft.shots).toEqual([
-      {
-        sortOrder: 0,
-        jobId: "job-new",
-        status: "completed",
-        prompt: "p",
-        outputs: [
-          {
-            mediaId: "media-1",
-            url: "https://cdn.local/a.png",
-            candidateIndex: 0,
-            selected: true,
-            filterPreset: "film",
-          },
-        ],
-      },
-    ]);
-  });
-
-  it("creates a manual draft with a scene hint, defaulting to auto mode", async () => {
-    const prisma = prismaMock();
-    prisma.postDraft.create.mockResolvedValue({
-      ...draftRow,
-      status: "planned",
-      caption: "",
-      hashtags: [],
-      scheduledAt: null,
-      conceptJson: { source: "manual", mode: "auto", sceneHint: "카페" },
+    expect(repository.findMany).toHaveBeenCalledWith({
+      status: "needs_review",
+      take: 21,
     });
-    const service = makeService(prisma);
+  });
+
+  it("rejects a cursor that does not belong to the active filters", async () => {
+    const repository = repositoryFake({
+      cursorMatchesFilter: jest.fn().mockResolvedValue(false),
+    });
+    const service = makeService(repository);
 
     await expect(
-      service.createDraft({ characterId: "ai-1", sceneHint: "카페" }),
-    ).resolves.toMatchObject({ status: "planned" });
-    expect(prisma.postDraft.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        characterId: "ai-1",
+      service.listDrafts({
+        status: "approved",
+        characterId: " ai-1 ",
+        limit: 20,
+        cursor: Buffer.from("draft-1").toString("base64url"),
+      }),
+    ).rejects.toThrow("Invalid cursor");
+    expect(repository.findMany).not.toHaveBeenCalled();
+  });
+
+  it("returns only the latest job per shot with its selected candidates", async () => {
+    const repository = repositoryFake({
+      findDraft: jest.fn().mockResolvedValue(draftRow),
+      findDraftJobs: jest.fn().mockResolvedValue([
+        selectedJob,
+        {
+          ...selectedJob,
+          id: "job-old",
+          status: "failed",
+          createdAt: new Date("2026-07-12T01:00:00.000Z"),
+          outputs: [],
+        },
+      ]),
+    });
+    const service = makeService(repository);
+
+    await expect(service.getDraft("draft-1")).resolves.toMatchObject({
+      shots: [
+        {
+          jobId: "job-1",
+          outputs: [{ mediaId: "media-1", selected: true }],
+        },
+      ],
+    });
+  });
+
+  it("creates a manual draft with normalized operator intent", async () => {
+    const repository = repositoryFake({
+      createDraft: jest.fn().mockResolvedValue({
+        ...draftRow,
+        status: "planned",
+        caption: "",
+        hashtags: [],
+        scheduledAt: null,
         conceptJson: { source: "manual", mode: "auto", sceneHint: "카페" },
       }),
     });
-    expect(prisma.characterActionLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ actionType: "DRAFT_CREATED" }),
+    const service = makeService(repository);
+
+    await expect(
+      service.createDraft({ characterId: "ai-1", sceneHint: " 카페 " }),
+    ).resolves.toMatchObject({ status: "planned" });
+    expect(repository.createDraft).toHaveBeenCalledWith({
+      characterId: "ai-1",
+      contentType: "feed",
+      conceptJson: { source: "manual", mode: "auto", sceneHint: "카페" },
     });
+    expect(repository.recordActionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ actionType: "DRAFT_CREATED" }),
+    );
   });
 
-  it("records mode=manual in conceptJson so the pipeline stays operator-driven", async () => {
-    const prisma = prismaMock();
-    prisma.postDraft.create.mockResolvedValue({
-      ...draftRow,
-      status: "planned",
-      conceptJson: { source: "manual", mode: "manual" },
-    });
-    const service = makeService(prisma);
+  it("rejects unknown draft modes without persisting", async () => {
+    const repository = repositoryFake();
+    const service = makeService(repository);
 
-    await service.createDraft({ characterId: "ai-1", mode: "manual" });
-
-    expect(prisma.postDraft.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        conceptJson: { source: "manual", mode: "manual" },
-      }),
-    });
-  });
-
-  it("rejects an unknown draft mode", async () => {
-    const service = makeService(prismaMock());
     await expect(
       service.createDraft({ characterId: "ai-1", mode: "semi" }),
     ).rejects.toThrow("Draft mode must be manual or auto");
+    expect(repository.createDraft).not.toHaveBeenCalled();
   });
 
-  it("queues a draft-state shot with the edited prompt and candidate count", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.updateMany.mockResolvedValue({ count: 1 });
-    prisma.generationJob.findUnique.mockResolvedValue({
-      characterId: "ai-1",
-      sortOrder: 0,
-    });
-    const service = makeService(prisma);
-
-    await service.queueShot({
-      draftId: "draft-1",
-      jobId: "job-1",
-      prompt: "수정된 프롬프트",
-      candidateCount: 3,
-    });
-
-    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", draftId: "draft-1", status: "draft" },
-      data: { status: "queued", prompt: "수정된 프롬프트", candidateCount: 3 },
-    });
-    expect(prisma.characterActionLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        actionType: "DRAFT_SHOT_GENERATION_STARTED",
+  it("records manual mode so the pipeline remains operator-driven", async () => {
+    const repository = repositoryFake({
+      createDraft: jest.fn().mockResolvedValue({
+        ...draftRow,
+        status: "planned",
+        conceptJson: { source: "manual", mode: "manual" },
       }),
     });
+    const service = makeService(repository);
+
+    await service.createDraft({ characterId: "ai-1", mode: "manual" });
+
+    expect(repository.createDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conceptJson: { source: "manual", mode: "manual" },
+      }),
+    );
   });
 
-  it("refuses to generate a shot whose prompt is empty and none is provided", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.findFirst.mockResolvedValue({ prompt: "" });
-    const service = makeService(prisma);
+  it("refuses to queue a shot whose stored prompt is empty", async () => {
+    const repository = repositoryFake({
+      findDraftShotPrompt: jest.fn().mockResolvedValue({ prompt: "" }),
+    });
+    const service = makeService(repository);
 
     await expect(
       service.queueShot({ draftId: "draft-1", jobId: "job-1" }),
     ).rejects.toThrow(
       "Shot prompt is empty — run prompt build first or provide a prompt",
     );
-    expect(prisma.generationJob.updateMany).not.toHaveBeenCalled();
+    expect(repository.queueDraftShot).not.toHaveBeenCalled();
   });
 
-  it("refuses to generate a shot that is not in draft state", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.updateMany.mockResolvedValue({ count: 0 });
-    prisma.postDraft.findUnique.mockResolvedValue(draftRow);
-    const service = makeService(prisma);
+  it("queues a draft-state shot with the edited generation inputs", async () => {
+    const repository = repositoryFake({
+      findShotIdentity: jest
+        .fn()
+        .mockResolvedValue({ characterId: "ai-1", sortOrder: 0 }),
+    });
+    const service = makeService(repository);
 
-    await expect(
-      service.queueShot({ draftId: "draft-1", jobId: "job-1" }),
-    ).rejects.toThrow(
-      "Only draft-state shots of this draft can start generation",
+    await service.queueShot({
+      draftId: "draft-1",
+      jobId: "job-1",
+      prompt: " 수정된 프롬프트 ",
+      candidateCount: 3,
+    });
+
+    expect(repository.queueDraftShot).toHaveBeenCalledWith({
+      draftId: "draft-1",
+      jobId: "job-1",
+      prompt: "수정된 프롬프트",
+      candidateCount: 3,
+    });
+    expect(repository.recordActionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionType: "DRAFT_SHOT_GENERATION_STARTED",
+      }),
     );
-    expect(prisma.characterActionLog.create).not.toHaveBeenCalled();
   });
 
-  it("edits caption only in reviewable statuses", async () => {
-    const prisma = prismaMock();
-    prisma.postDraft.updateMany.mockResolvedValue({ count: 0 });
-    prisma.postDraft.findUnique.mockResolvedValue(draftRow);
-    const service = makeService(prisma);
+  it("rejects edits when the draft no longer has an editable status", async () => {
+    const repository = repositoryFake({
+      updateEditableDraft: jest.fn().mockResolvedValue(false),
+    });
+    const service = makeService(repository);
 
     await expect(
-      service.updateDraft({ draftId: "draft-1", caption: "새 캡션" }),
+      service.updateDraft({ draftId: "draft-1", caption: " 새 캡션 " }),
     ).rejects.toThrow("Only needs_review or approved drafts can be edited");
-    expect(prisma.postDraft.updateMany).toHaveBeenCalledWith({
-      where: { id: "draft-1", status: { in: ["needs_review", "approved"] } },
-      data: { caption: "새 캡션" },
-    });
+    expect(repository.updateEditableDraft).toHaveBeenCalledWith(
+      "draft-1",
+      ["needs_review", "approved"],
+      { caption: "새 캡션" },
+    );
   });
 
-  it("approves a needs_review draft atomically", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.findMany.mockResolvedValue([
-      {
-        id: "job-1",
-        sortOrder: 0,
-        status: "completed",
-        prompt: "p",
-        outputs: [
-          {
-            mediaId: "media-1",
-            candidateIndex: 0,
-            selected: true,
-            filterPreset: "none",
-            media: { url: "https://cdn.local/a.png" },
-          },
-        ],
-      },
-    ]);
-    prisma.postDraft.findUnique
-      .mockResolvedValueOnce(draftRow)
-      .mockResolvedValueOnce({ ...draftRow, status: "approved" });
-    const service = makeService(prisma);
-
-    await expect(service.approveDraft("draft-1")).resolves.toMatchObject({
-      status: "approved",
+  it("requires a selected image for every shot before approval", async () => {
+    const repository = repositoryFake({
+      findDraft: jest.fn().mockResolvedValue(draftRow),
+      findDraftJobs: jest.fn().mockResolvedValue([
+        {
+          ...selectedJob,
+          outputs: [{ ...selectedJob.outputs[0], selected: false }],
+        },
+      ]),
     });
-    expect(prisma.postDraft.updateMany).toHaveBeenCalledWith({
-      where: { id: "draft-1", status: "needs_review" },
-      data: { status: "approved", errorMessage: null },
-    });
-    expect(prisma.characterActionLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ actionType: "DRAFT_APPROVED" }),
-    });
-  });
-
-  it("rejects approval until every shot has a selected image", async () => {
-    const prisma = prismaMock();
-    prisma.postDraft.findUnique.mockResolvedValue(draftRow);
-    prisma.generationJob.findMany.mockResolvedValue([
-      {
-        id: "job-1",
-        sortOrder: 0,
-        status: "completed",
-        prompt: "p",
-        outputs: [
-          {
-            mediaId: "media-1",
-            candidateIndex: 0,
-            selected: false,
-            filterPreset: "none",
-            media: { url: "https://cdn.local/a.png" },
-          },
-        ],
-      },
-    ]);
-    const service = makeService(prisma);
+    const service = makeService(repository);
 
     await expect(service.approveDraft("draft-1")).rejects.toThrow(
       "Select one image for every shot before approval",
     );
-    expect(prisma.postDraft.updateMany).not.toHaveBeenCalled();
+    expect(repository.approveDraft).not.toHaveBeenCalled();
   });
 
-  it("rejects approving a draft in the wrong status", async () => {
-    const prisma = prismaMock();
-    prisma.postDraft.updateMany.mockResolvedValue({ count: 0 });
-    prisma.postDraft.findUnique.mockResolvedValue({
-      ...draftRow,
+  it("approves a fully reviewed draft and records the decision", async () => {
+    const repository = repositoryFake({
+      findDraft: jest
+        .fn()
+        .mockResolvedValueOnce(draftRow)
+        .mockResolvedValueOnce({ ...draftRow, status: "approved" }),
+      findDraftJobs: jest.fn().mockResolvedValue([selectedJob]),
+    });
+    const service = makeService(repository);
+
+    await expect(service.approveDraft("draft-1")).resolves.toMatchObject({
       status: "approved",
     });
-    const service = makeService(prisma);
-
-    await expect(service.approveDraft("draft-1")).rejects.toThrow(
-      "Only needs_review drafts can be approved",
+    expect(repository.approveDraft).toHaveBeenCalledWith("draft-1");
+    expect(repository.recordActionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ actionType: "DRAFT_APPROVED" }),
     );
   });
 
-  it("regenerates a shot with a new linked job", async () => {
-    const prisma = prismaMock();
-    const paramsJson = {
-      aspect_ratio: "4:5",
-      _shot: {
-        scene: "사람이 없는 철길 풍경",
-        referenceMediaIds: [],
-      },
-    };
-    prisma.generationJob.findFirst.mockResolvedValue({
-      id: "job-1",
-      characterId: "ai-1",
-      sortOrder: 1,
-      status: "completed",
-      inputPrompt: "사람이 없는 철길 풍경",
-      prompt: "원본 프롬프트",
-      candidateCount: 3,
-      paramsJson,
-    });
-    prisma.postDraft.findUnique.mockResolvedValue({
-      ...draftRow,
-      status: "regenerating",
-    });
-    const txPostDraftUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const txGenerationJobCreate = jest.fn().mockResolvedValue({});
-    const txActionLogCreate = jest.fn().mockResolvedValue({});
-    prisma.$transaction.mockImplementation(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          postDraft: {
-            updateMany: txPostDraftUpdateMany,
-            findUnique: jest.fn(),
-          },
-          generationJob: {
-            findFirst: jest.fn().mockResolvedValue({ id: "job-1" }),
-            create: txGenerationJobCreate,
-          },
-          characterActionLog: { create: txActionLogCreate },
-        }),
-    );
-    const service = makeService(prisma);
-
-    await expect(
-      service.regenerateShot({ draftId: "draft-1", jobId: "job-1" }),
-    ).resolves.toMatchObject({ status: "regenerating" });
-    expect(txPostDraftUpdateMany).toHaveBeenCalledWith({
-      where: { id: "draft-1", status: { in: ["needs_review", "failed"] } },
-      data: { status: "regenerating", errorMessage: null },
-    });
-    expect(txGenerationJobCreate).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        mediaType: "image",
-        inputPrompt: "사람이 없는 철길 풍경",
-        prompt: "원본 프롬프트",
-        candidateCount: 3,
-        paramsJson,
-        draftId: "draft-1",
-        sortOrder: 1,
-        originJobId: "job-1",
-      },
-    });
-    expect(txActionLogCreate).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        actionType: "DRAFT_SHOT_REGENERATED",
-        targetTable: "post_drafts",
-        targetId: "draft-1",
-        reason: "shot 1 regeneration queued",
-      },
-    });
-    expect(prisma.postDraft.updateMany).not.toHaveBeenCalled();
-    expect(prisma.generationJob.create).not.toHaveBeenCalled();
-    expect(prisma.characterActionLog.create).not.toHaveBeenCalled();
-  });
-
-  it("rejects regenerating a stale draft shot job", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.findFirst.mockResolvedValue({
+  it("maps stale regeneration attempts to the operator-facing error", async () => {
+    const source = {
       id: "job-old",
       characterId: "ai-1",
       sortOrder: 1,
@@ -412,76 +305,27 @@ describe("DraftsService", () => {
       prompt: "옛 프롬프트",
       candidateCount: 2,
       paramsJson: { _shot: { scene: "옛 장면" } },
+    } as const;
+    const repository = repositoryFake({
+      findRegenerationSource: jest.fn().mockResolvedValue(source),
+      regenerateShot: jest.fn().mockResolvedValue("stale-job"),
     });
-    const txPostDraftUpdateMany = jest.fn();
-    const txGenerationJobCreate = jest.fn();
-    prisma.$transaction.mockImplementation(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          postDraft: {
-            updateMany: txPostDraftUpdateMany,
-            findUnique: jest.fn(),
-          },
-          generationJob: {
-            findFirst: jest.fn().mockResolvedValue({ id: "job-new" }),
-            create: txGenerationJobCreate,
-          },
-          characterActionLog: { create: jest.fn() },
-        }),
-    );
-    const service = makeService(prisma);
+    const service = makeService(repository);
 
     await expect(
       service.regenerateShot({ draftId: "draft-1", jobId: "job-old" }),
     ).rejects.toThrow("Only the latest draft shot can be regenerated");
-    expect(txPostDraftUpdateMany).not.toHaveBeenCalled();
-    expect(txGenerationJobCreate).not.toHaveBeenCalled();
   });
 
-  it("selects a candidate output and updates the job cache", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.findFirst.mockResolvedValue({
-      id: "job-1",
-      outputs: [{ mediaId: "media-1" }, { mediaId: "media-2" }],
+  it("selects only a media candidate owned by the completed shot", async () => {
+    const repository = repositoryFake({
+      findCompletedShotCandidates: jest.fn().mockResolvedValue({
+        id: "job-1",
+        outputs: [{ mediaId: "media-1" }],
+      }),
+      findDraft: jest.fn().mockResolvedValue(draftRow),
     });
-    prisma.postDraft.findUnique.mockResolvedValue(draftRow);
-    const txOutputsUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const txJobUpdate = jest.fn().mockResolvedValue({});
-    prisma.$transaction.mockImplementation(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          generationJobOutput: { updateMany: txOutputsUpdateMany },
-          generationJob: { update: txJobUpdate },
-        }),
-    );
-    const service = makeService(prisma);
-
-    await service.selectShotOutput({
-      draftId: "draft-1",
-      jobId: "job-1",
-      mediaId: "media-2",
-    });
-    expect(txOutputsUpdateMany).toHaveBeenCalledWith({
-      where: { jobId: "job-1" },
-      data: { selected: false },
-    });
-    expect(txOutputsUpdateMany).toHaveBeenCalledWith({
-      where: { jobId: "job-1", mediaId: "media-2" },
-      data: { selected: true },
-    });
-    expect(txJobUpdate).toHaveBeenCalledWith({
-      where: { id: "job-1" },
-      data: { outputMediaId: "media-2" },
-    });
-  });
-
-  it("rejects selecting media that is not a candidate", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.findFirst.mockResolvedValue({
-      id: "job-1",
-      outputs: [{ mediaId: "media-1" }],
-    });
-    const service = makeService(prisma);
+    const service = makeService(repository);
 
     await expect(
       service.selectShotOutput({
@@ -490,16 +334,15 @@ describe("DraftsService", () => {
         mediaId: "media-x",
       }),
     ).rejects.toThrow("Media is not a candidate output of this job");
+    expect(repository.selectShotOutput).not.toHaveBeenCalled();
   });
 
-  it("stores a filter on a completed candidate before draft review", async () => {
-    const prisma = prismaMock();
-    prisma.generationJobOutput.findFirst.mockResolvedValue({ id: "output-1" });
-    prisma.postDraft.findUnique.mockResolvedValue({
-      ...draftRow,
-      status: "generating",
+  it("stores a valid filter only on an editable completed output", async () => {
+    const repository = repositoryFake({
+      findEditableOutput: jest.fn().mockResolvedValue({ id: "output-1" }),
+      findDraft: jest.fn().mockResolvedValue(draftRow),
     });
-    const service = makeService(prisma);
+    const service = makeService(repository);
 
     await service.updateShotOutputFilter({
       draftId: "draft-1",
@@ -508,31 +351,21 @@ describe("DraftsService", () => {
       filterPreset: "mono-film",
     });
 
-    expect(prisma.generationJobOutput.findFirst).toHaveBeenCalledWith({
-      where: {
-        jobId: "job-1",
-        mediaId: "media-1",
-        job: {
-          draftId: "draft-1",
-          status: "completed",
-          draft: {
-            status: {
-              in: [
-                "generating",
-                "regenerating",
-                "needs_review",
-                "approved",
-                "failed",
-              ],
-            },
-          },
-        },
-      },
-      select: { id: true },
+    expect(repository.findEditableOutput).toHaveBeenCalledWith({
+      draftId: "draft-1",
+      jobId: "job-1",
+      mediaId: "media-1",
+      draftStatuses: [
+        "generating",
+        "regenerating",
+        "needs_review",
+        "approved",
+        "failed",
+      ],
     });
-    expect(prisma.generationJobOutput.update).toHaveBeenCalledWith({
-      where: { id: "output-1" },
-      data: { filterPreset: "mono-film" },
-    });
+    expect(repository.updateOutputFilter).toHaveBeenCalledWith(
+      "output-1",
+      "mono-film",
+    );
   });
 });

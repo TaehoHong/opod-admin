@@ -1,13 +1,13 @@
 import { buildPlannerUserPrompt } from "../../prompts/content-planner";
 import {
-  createContentPlanner,
   createLlmContentPlanner,
   parseContentPlan,
+  resolveContentPlanner,
 } from "./content-planner";
 
-describe("createContentPlanner", () => {
-  it("rejects planning without complete LLM env", async () => {
-    const planner = createContentPlanner({});
+describe("resolveContentPlanner", () => {
+  it("rejects planning without complete provider settings", async () => {
+    const planner = resolveContentPlanner({});
     expect(planner.name).toBe("unconfigured");
     await expect(
       planner.plan({
@@ -21,11 +21,11 @@ describe("createContentPlanner", () => {
     ).rejects.toThrow("content planner LLM is not configured");
   });
 
-  it("uses the LLM planner when env is configured", () => {
-    const planner = createContentPlanner({
-      LLM_API_URL: "https://llm.local/v1/chat/completions",
-      LLM_API_KEY: "key",
-      LLM_MODEL: "test-model",
+  it("uses the LLM planner when provider settings are configured", () => {
+    const planner = resolveContentPlanner({
+      apiUrl: "https://llm.local/v1/chat/completions",
+      apiKey: "key",
+      model: "test-model",
     });
     expect(planner.name).toBe("llm:test-model");
   });

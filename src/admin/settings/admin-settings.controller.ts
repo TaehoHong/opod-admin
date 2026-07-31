@@ -7,15 +7,13 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
+import { AppConfigService } from "../../domain/config/app-config.service";
 import {
   GenerationSettings,
   GenerationSettingsService,
   settingsChangeEntries,
 } from "../../domain/settings/generation-settings.service";
-import {
-  startOfKstDay,
-  workerConfigFromEnv,
-} from "../../worker/generation-worker.service";
+import { startOfKstDay } from "../../worker/generation-worker.service";
 import { AdminJwtGuard, AdminRequest } from "../auth/admin-jwt.guard";
 import { TestGenerationSettingsDto } from "./dto/test-generation-settings.dto";
 import { SettingsAuditRepository } from "./settings-audit.repository";
@@ -29,6 +27,7 @@ export class AdminSettingsController {
   constructor(
     private readonly settings: GenerationSettingsService,
     private readonly audit: SettingsAuditRepository,
+    private readonly config: AppConfigService,
   ) {}
 
   @Get("generation")
@@ -102,7 +101,7 @@ export class AdminSettingsController {
         this.settings.resolveProviderNames(),
         this.audit.sumGenerationCostSince(startOfKstDay()),
       ]);
-    const worker = workerConfigFromEnv();
+    const worker = this.config.worker;
     return {
       falApiKey: saved.falApiKey
         ? { set: true, last4: saved.falApiKey.slice(-4) }

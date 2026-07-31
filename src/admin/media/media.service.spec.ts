@@ -4,15 +4,16 @@ import {
 } from "@nestjs/common";
 import { MediaService, createS3UploadSigner } from "./media.service";
 
+const s3 = {
+  bucket: "bucket",
+  region: "us-east-1",
+  accessKeyId: "test-access",
+  secretAccessKey: "test-secret",
+  publicBaseUrl: "https://cdn.example.com",
+};
+
 describe("MediaService", () => {
   it("starts an S3 upload as pending media", async () => {
-    const restoreS3Env = setS3Env({
-      S3_BUCKET: "bucket",
-      AWS_REGION: "us-east-1",
-      AWS_ACCESS_KEY_ID: "test-access",
-      AWS_SECRET_ACCESS_KEY: "test-secret",
-      S3_PUBLIC_BASE_URL: "https://cdn.example.com",
-    });
     const createdAt = new Date("2026-06-30T00:00:00.000Z");
     const create = jest.fn().mockImplementation((data) =>
       Promise.resolve({
@@ -25,42 +26,21 @@ describe("MediaService", () => {
     );
     const service = new (
       MediaService as new (...args: unknown[]) => MediaService
-    )({ create });
+    )({ create }, { s3 });
 
-    try {
-      await expect(
-        service.startUpload({
-          mediaType: "image",
-          contentType: "image/png",
-          fileName: " photo.png ",
-          width: 1024,
-          height: 768,
-          byteSize: 12345,
-        }),
-      ).resolves.toMatchObject({
-        media: {
-          id: "media-1",
-          mediaType: "image",
-          url: expect.stringMatching(
-            /^https:\/\/cdn\.example\.com\/media\/image\/.+\.png$/,
-          ),
-          contentType: "image/png",
-          byteSize: 12345,
-          width: 1024,
-          height: 768,
-          uploadedAt: null,
-          createdAt: createdAt.toISOString(),
-        },
-        uploadUrl: expect.stringContaining(
-          "https://bucket.s3.us-east-1.amazonaws.com/media/image/",
-        ),
-        method: "PUT",
-        headers: { "content-type": "image/png" },
-        expiresAt: expect.any(String),
-      });
-      expect(create.mock.calls[0][0]).toMatchObject({
+    await expect(
+      service.startUpload({
         mediaType: "image",
-        storageKey: expect.stringMatching(/^media\/image\/.+\.png$/),
+        contentType: "image/png",
+        fileName: " photo.png ",
+        width: 1024,
+        height: 768,
+        byteSize: 12345,
+      }),
+    ).resolves.toMatchObject({
+      media: {
+        id: "media-1",
+        mediaType: "image",
         url: expect.stringMatching(
           /^https:\/\/cdn\.example\.com\/media\/image\/.+\.png$/,
         ),
@@ -68,20 +48,30 @@ describe("MediaService", () => {
         byteSize: 12345,
         width: 1024,
         height: 768,
-      });
-    } finally {
-      restoreS3Env();
-    }
+        uploadedAt: null,
+        createdAt: createdAt.toISOString(),
+      },
+      uploadUrl: expect.stringContaining(
+        "https://bucket.s3.us-east-1.amazonaws.com/media/image/",
+      ),
+      method: "PUT",
+      headers: { "content-type": "image/png" },
+      expiresAt: expect.any(String),
+    });
+    expect(create.mock.calls[0][0]).toMatchObject({
+      mediaType: "image",
+      storageKey: expect.stringMatching(/^media\/image\/.+\.png$/),
+      url: expect.stringMatching(
+        /^https:\/\/cdn\.example\.com\/media\/image\/.+\.png$/,
+      ),
+      contentType: "image/png",
+      byteSize: 12345,
+      width: 1024,
+      height: 768,
+    });
   });
 
   it("starts an avatar content upload under the requested S3 prefix", async () => {
-    const restoreS3Env = setS3Env({
-      S3_BUCKET: "bucket",
-      AWS_REGION: "us-east-1",
-      AWS_ACCESS_KEY_ID: "test-access",
-      AWS_SECRET_ACCESS_KEY: "test-secret",
-      S3_PUBLIC_BASE_URL: "https://cdn.example.com",
-    });
     const createdAt = new Date("2026-06-30T00:00:00.000Z");
     const create = jest.fn().mockImplementation((data) =>
       Promise.resolve({
@@ -94,59 +84,50 @@ describe("MediaService", () => {
     );
     const service = new (
       MediaService as new (...args: unknown[]) => MediaService
-    )({ create });
+    )({ create }, { s3 });
 
-    try {
-      await expect(
-        service.startUpload({
-          mediaType: "video",
-          contentType: "video/mp4",
-          fileName: " reel.mp4 ",
-          storagePrefix: "pod/reels/character/character-1",
-        }),
-      ).resolves.toMatchObject({
-        media: {
-          id: "media-1",
-          mediaType: "video",
-          url: expect.stringMatching(
-            /^https:\/\/cdn\.example\.com\/pod\/reels\/character\/character-1\/.+\.mp4$/,
-          ),
-        },
-        uploadUrl: expect.stringContaining(
-          "https://bucket.s3.us-east-1.amazonaws.com/pod/reels/character/character-1/",
-        ),
-      });
-      expect(create.mock.calls[0][0]).toMatchObject({
+    await expect(
+      service.startUpload({
         mediaType: "video",
-        storageKey: expect.stringMatching(
-          /^pod\/reels\/character\/character-1\/.+\.mp4$/,
-        ),
+        contentType: "video/mp4",
+        fileName: " reel.mp4 ",
+        storagePrefix: "pod/reels/character/character-1",
+      }),
+    ).resolves.toMatchObject({
+      media: {
+        id: "media-1",
+        mediaType: "video",
         url: expect.stringMatching(
           /^https:\/\/cdn\.example\.com\/pod\/reels\/character\/character-1\/.+\.mp4$/,
         ),
-      });
-    } finally {
-      restoreS3Env();
-    }
+      },
+      uploadUrl: expect.stringContaining(
+        "https://bucket.s3.us-east-1.amazonaws.com/pod/reels/character/character-1/",
+      ),
+    });
+    expect(create.mock.calls[0][0]).toMatchObject({
+      mediaType: "video",
+      storageKey: expect.stringMatching(
+        /^pod\/reels\/character\/character-1\/.+\.mp4$/,
+      ),
+      url: expect.stringMatching(
+        /^https:\/\/cdn\.example\.com\/pod\/reels\/character\/character-1\/.+\.mp4$/,
+      ),
+    });
   });
 
   it("fails clearly when S3 upload signing is not configured", async () => {
-    const restoreS3Env = setS3Env({});
     const service = new (
       MediaService as new (...args: unknown[]) => MediaService
-    )({ create: jest.fn() });
+    )({ create: jest.fn() }, { s3: undefined });
 
-    try {
-      await expect(
-        service.startUpload({
-          mediaType: "image",
-          contentType: "image/png",
-          fileName: "photo.png",
-        }),
-      ).rejects.toBeInstanceOf(ServiceUnavailableException);
-    } finally {
-      restoreS3Env();
-    }
+    await expect(
+      service.startUpload({
+        mediaType: "image",
+        contentType: "image/png",
+        fileName: "photo.png",
+      }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 
   it("confirms a pending media upload", async () => {
@@ -197,13 +178,7 @@ describe("MediaService", () => {
 describe("createS3UploadSigner", () => {
   it("creates a deterministic S3 presigned PUT URL", async () => {
     const signPutUpload = createS3UploadSigner(
-      {
-        S3_BUCKET: "bucket",
-        AWS_REGION: "us-east-1",
-        AWS_ACCESS_KEY_ID: "test-access",
-        AWS_SECRET_ACCESS_KEY: "test-secret",
-        S3_PUBLIC_BASE_URL: "https://cdn.example.com",
-      },
+      s3,
       () => new Date("2026-06-30T00:00:00.000Z"),
       () => "fixed-id",
     );
@@ -233,35 +208,3 @@ describe("createS3UploadSigner", () => {
     expect(signed?.uploadUrl).toContain("X-Amz-Signature=");
   });
 });
-
-function setS3Env(values: Record<string, string | undefined>): () => void {
-  const keys = [
-    "S3_BUCKET",
-    "AWS_REGION",
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
-    "S3_PUBLIC_BASE_URL",
-  ];
-  const previous = Object.fromEntries(
-    keys.map((key) => [key, process.env[key]]),
-  );
-
-  for (const key of keys) {
-    const value = values[key];
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
-  }
-
-  return () => {
-    for (const [key, value] of Object.entries(previous)) {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    }
-  };
-}

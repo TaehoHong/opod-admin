@@ -12,17 +12,20 @@ import { server } from "../../test/server";
 describe("admin session", () => {
   it("shows the login form until the server confirms a session", async () => {
     const seenHeaders: string[] = [];
+    const seenCredentials: RequestCredentials[] = [];
     let signedIn = false;
 
     server.use(
       http.get("/api/admin/v1/auth/me", ({ request }) => {
         seenHeaders.push(request.headers.get("x-opod-admin") ?? "");
+        seenCredentials.push(request.credentials);
         return signedIn
           ? HttpResponse.json({ admin: { id: "admin-1", email: "a@b.test" } })
           : new HttpResponse(null, { status: 401 });
       }),
       http.post("/api/admin/v1/auth/login", ({ request }) => {
         seenHeaders.push(request.headers.get("x-opod-admin") ?? "");
+        seenCredentials.push(request.credentials);
         signedIn = true;
         return HttpResponse.json({
           admin: { id: "admin-1", email: "a@b.test" },
@@ -49,5 +52,8 @@ describe("admin session", () => {
     await screen.findByRole("button", { name: "로그아웃" });
     expect(screen.queryByLabelText("비밀번호")).not.toBeInTheDocument();
     expect(seenHeaders.every((value) => value === "1")).toBe(true);
+    expect(seenCredentials.every((value) => value === "same-origin")).toBe(
+      true,
+    );
   });
 });

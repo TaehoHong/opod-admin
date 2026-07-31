@@ -7,33 +7,29 @@
 `docs/00-overview.md` ~ `docs/07-codebase-guide.md`에 승인된 결정사항을
 실제 코드에 반영한다.
 
-## 어디서부터 시작하나
+## 현재 상태
 
-- 저장소는 `c910cc7` 시점에 origin/main과 동기, 작업트리 깨끗, 전체 검증
-  통과 상태다. 반쯤 하다 만 것은 없다.
-- **1번(누락 쓰기 화면 복구)이 최우선**이다. 콘솔에서 지금 못 쓰는 기능이
-  있다.
-- 코드만 만지고 싶으면 **4번(repository 분리)**이 이어받기 가장 쉽다. 같은
-  작업을 4번 반복했고 절차와 함정을 그 항목에 적어뒀다.
+- 2026-07-31에 체크리스트 1~4를 구현했다. 아직 커밋하지 않은 작업트리이므로
+  이어받을 때는 아래 Verification을 먼저 다시 실행한다.
+- React admin이 유일한 frontend다. legacy entry와 정적 자산은 삭제했고
+  root `npm run build`가 React bundle을 먼저 만든다.
+- 제품 정책이 필요한 5번, 운영 방식을 정해야 하는 6번, sibling canonical
+  schema 변경이 먼저 필요한 4-table logging은 이 migration 구현 범위에서
+  진행하지 않았다.
 
-## Current Context
+## Historical Baseline
 
 - 이 계획 이전 상태는 커밋 `737495a`(project-init)다. 이후 이 계획으로
-  27개 커밋이 쌓였다.
-- **병행 세션 제약은 해소됐다** (2026-07-31 확인). 게시물 생성 품질 작업
-  (`docs/media-generation-quality-improvements.md`)을 진행하던 세션은
-  종료됐고 결과물은 커밋돼 있다(`content-planner.ts`의
-  `assertVisibleCharacterHasReference` 등). 작업트리도 깨끗하다. 이전에
-  "건드리지 말 것"으로 묶어뒀던 `prompts/*`, `src/worker/*`,
-  `admin.service.ts`, `drafts.service.ts`, `generation.service.ts`,
-  `visual-profile.service.ts`, `packages/admin/main.js`는 모두 착수 가능하다.
+  27개 커밋이 쌓였고, 이번 체크리스트 1~4 결과는 아직 커밋하지 않았다.
+- 앞서 병행하던 게시물 생성 품질 작업의 결과
+  (`assertVisibleCharacterHasReference` 등)는 현재 코드에 반영돼 있다.
 
 ## 완료
 
 - 설정 누락 시 환경 구분 없이 실패(local placeholder provider 제거)
 - Swagger/OpenAPI 제거
 - bootstrap 환경변수 최초 관리자(`ADMIN_BOOTSTRAP_EMAIL`/`_PASSWORD`)
-- Helmet 전역 적용(CSP는 아직 off)
+- Helmet 전역 적용 + CSP 활성화
 - `GET /api/health` — repository 구조 canonical example
 - `AppConfigService` — 부팅 설정 typed 주입
 - `/api/admin/v1/*` 이관 + `__Host-` cookie 세션 + 전역 CSRF guard
@@ -59,45 +55,47 @@ React 이관에서 지켜야 했던 것 두 가지 (반복하지 않도록 기�
 
 ## Checklist
 
-### [ ] 1. 이관 누락된 쓰기 화면 복구 — **최우선**
+### [x] 1. 이관 누락된 쓰기 화면 복구
 
 2026-07-31 발견. React 이관은 조회 화면과 초안·생성·설정·미디어 워크플로는
-덮었지만 **캐릭터 관리와 몇몇 작성 기능이 빠졌다**. legacy `main.js`에는
-있고 React에는 없다.
+덮었지만 몇몇 작성 기능이 빠졌다. legacy `main.js`에는 있고 React에는 없다.
 
-빠진 것 (legacy `data-action` 기준):
+**완료 — 캐릭터 관리.** React에서 `characters.controller.ts`의 쓰기 endpoint
+20개를 모두 사용할 수 있다. 생성, 프로필·상태·프로필 이미지, 페르소나·메모리
+단건/일괄/순서 관리, 비주얼 프롬프트·레퍼런스·캡션·테스트 생성, 포스팅 정책을
+이관했다. 프로필 이미지와 비주얼 레퍼런스는 파일 선택 시 presign → S3 PUT →
+confirm을 거쳐 바로 연결한다. `CharactersPage.test.tsx`와
+`features/media/upload.test.ts`가 주요 입력→API 계약과 업로드 단계 순서를
+보호한다.
 
-- 캐릭터: 생성(`dlg-new-char`), 프로필 편집(`char-profile`), 프로필 이미지
-  (`profile-image-save`), 페르소나 CRUD(`persona-create|update`), 메모리
-  CRUD(`memory-create|update`), 비주얼 프로필·레퍼런스
-  (`visual-profile-save`, `visual-ref-add`, `visual-test-gen`), 포스팅 정책
-  (`policy-save`). 서버에는 `characters.controller.ts`에 쓰기 endpoint가
-  20개 있는데 React가 부르는 것은 0개다.
-- 크레딧 지급(`dlg-grant`, `credit-grant-full`)
-- 게시물 작성(`dlg-new-post`), 댓글(`dlg-comment`), 반응(`dlg-reaction`)
-- 영상 생성 job 등록(`dlg-new-job`)
+**완료 — 크레딧 지급.** React 크레딧 원장에서 최근 사용자 50명을 이름과
+이메일로 검색·선택해 양의 정수 금액, 사유, 선택 외부 참조를 지급할 수 있다.
+성공 시 크레딧 원장과 사용자 목록 query를 무효화해 잔액과 원장을 갱신한다.
+`CreditsPage.test.tsx`가 빈 원장에서도 지급 modal을 열 수 있는지, 정확한
+payload와 지급 후 원장 refresh를 보호한다.
 
-**이미 영향이 있다.** `src/main.ts:35`가 `dist/index.react.html` 존재 여부로
-서빙을 고르므로, `npm run admin:build`를 한 번이라도 돌린 환경에서는 legacy가
-아예 서빙되지 않는다. 즉 위 기능은 지금 콘솔에서 접근할 수 없다.
+**완료 — 게시물과 생성 작업.** 게시물 생성은 media 순서를 보존하며
+presign → PUT → confirm 후 정확한 payload로 등록한다. 댓글·반응 작성과
+영상 generation job 등록/실행/완료/재시도도 React에서 가능하다. 서버 오류를
+화면에 표시하고 pending 중 modal 닫기·중복 제출을 막는다.
 
-- React 쓰기 endpoint 현황: `/drafts/*`, `/generation/jobs/*`,
-  `/media/:id/confirm-upload`, `/moderation/reports/:id`, `/settings/*`,
-  `/auth/*` 뿐. 서버 전체 쓰기 endpoint는 58개다.
-- 착수 순서: 캐릭터(가장 큼, 탭 7개) → 크레딧 지급 → 게시물·댓글·반응
-- Verification: `npm run admin:check`, `npm run admin:build`, 수동 확인
+**완료 — legacy 상세 parity.** 사용자 상세(원장·이벤트·사용자 사전 선택 지급),
+게시물 상세(media·댓글·반응·action log), 캐릭터 관리 게시글·활동 탭을
+복구했다. 관련 MSW interaction test가 요청 filter와 화면 결과를 보호한다.
 
-### [ ] 2. React 전환 마무리 — **1번 이후에만**
+- Verification: `npm run admin:check` — 9 files, 23 tests 통과
 
-- legacy `main.js`, `styles.css`, `test/*.test.mjs` 제거와
-  `index.react.html`→`index.html` 병합은 **1번을 끝낸 뒤에** 한다. 지금
-  지우면 위 기능이 코드에서도 사라진다.
-- `src/main.ts`의 legacy/React 분기 제거 (현재는 `dist/index.react.html`
-  존재 여부가 전환 스위치)
-- legacy `main.js`를 지울 때 거기 있던 payload 단위 테스트도 함께 사라진다.
-  값이 있는 것만 React 쪽으로 옮긴다 — 지금까지 옮긴 것은
-  `features/settings/payload.test.ts` 하나다(빈 값의 의미가 필드마다 달라
-  조용히 키를 지울 수 있는 부분)
+### [x] 2. React 전환 마무리
+
+- legacy `main.js`, `styles.css`, `index.react.html`, legacy node:test를
+  삭제하고 `index.html`을 React entry로 통합했다.
+- `src/main.ts`는 `packages/admin/dist/index.html`만 서빙한다. root
+  `npm run build`는 `admin:build` 후 Nest build를 실행하므로 Docker build도
+  같은 산출물을 포함한다.
+- character API source ownership guard는 삭제하지 않고 정상 Jest suite의
+  `src/admin/admin-source-boundary.spec.ts`로 옮겼다.
+- legacy payload test 중 현재 계약 가치가 있는 부분은 React
+  Vitest/RTL/MSW interaction test가 보호한다.
 
 **완료** (`065fcc2`) — Helmet CSP 활성화와 라우트 단위 lazy import는 legacy
 삭제와 무관해서 먼저 끝냈다. 엔트리 청크 654kB → 329kB(gzip 195 → 103),
@@ -106,9 +104,10 @@ Vite 크기 경고 해소. CSP는 `script-src 'self'`가 실질 이득이고
 `<style>`을 주입한다). legacy가 서빙되는 경우에도 깨지지 않는 것을 확인했다
 — 양쪽 다 inline `<script>`·`eval`·`onclick=`이 없다.
 
-- Verification: `npm run admin:check`, `npm run build`, 수동 로그인 확인
+- Verification: `npm run admin:check`, `npm run build`, Docker image content
+  smoke. 인증된 live browser 수동 확인은 별도 운영 환경에서 수행한다.
 
-### [ ] 3. E2E 실패 1건 수정
+### [x] 3. E2E 실패 1건 수정
 
 - `test/generation.e2e-spec.ts:337` — 레퍼런스 없는 캐릭터로 이미지 draft를
   만들면 201을 기대하는데 400이 온다.
@@ -116,12 +115,15 @@ Vite 크기 경고 해소. CSP는 `script-src 'self'`가 실질 이득이고
   `assertVisibleCharacterHasReference`로 "인물이 보이는 샷은 신원 레퍼런스가
   있어야 한다"를 강제한다(`content-planner.ts:44`). 픽스처가 그 정책보다 먼저
   작성돼 낡았다.
-- 고칠 방향: 테스트 캐릭터에 비주얼 프로필 레퍼런스를 하나 붙이거나,
-  `characterVisible: false` 경로로 케이스를 나눈다. 정책 자체를 완화하지
-  않는다 — 그러면 개선 작업이 되돌아간다.
-- Verification: `npm run test:e2e` (Docker 필요)
+- 테스트 캐릭터에 업로드 완료된 비주얼 프로필 레퍼런스를 API로 연결했다.
+  외부 provider/storage만 deterministic fake로 교체하고 실제 worker,
+  PostgreSQL, repository, transaction, HTTP endpoint는 유지했다.
+- 3개 후보 저장, 동시 동일 output 선택, 단일 selected 후보와 단일
+  `GENERATION_OUTPUT_SELECTED` audit log, regeneration을 검증한다.
+- Verification: focused generation E2E 7건 통과. 전체 E2E는 Final
+  Verification 결과를 따른다.
 
-### [ ] 4. repository 분리 — 5개 남음
+### [x] 4. repository 분리
 
 목표는 `docs/02-development-rules.md` "Module and Repository Rules"의
 "PrismaService는 repository에서만" 이다.
@@ -135,20 +137,21 @@ Vite 크기 경고 해소. CSP는 `script-src 'self'`가 실질 이득이고
 | `generation-worker` | `110a35d` |
 | `characters`        | `a17a883` |
 
-**남은 것** (2026-07-31 실측, `this.prisma.`/`tx.` 호출 수 · 서비스 줄 수 ·
-spec 줄 수). 작은 것부터 하는 편이 리뷰 단위가 작다:
+**2026-07-31 완료** (착수 전 `this.prisma.`/`tx.` 호출 수):
 
 | 서비스                                       | 호출 | 서비스 | spec |
 | -------------------------------------------- | ---- | ------ | ---- |
-| `src/domain/settings/generation-settings.ts` | 3    | 407    | —    |
+| `src/domain/settings/generation-settings.service.ts` | 3    | 407    | 219 |
 | `src/admin/drafts/drafts.service.ts`         | 30   | 744    | 538  |
 | `src/admin/generation/generation.service.ts` | 30   | 952    | 1532 |
 | `src/worker/draft-worker.service.ts`         | 43   | 1302   | 1486 |
 | `src/admin/admin.service.ts`                 | 71   | 2036   | 1856 |
 
-`admin.service.ts`는 엔티티가 여러 개(post, user, media, credit, payment,
-moderation, event, analytics)라 repository도 엔티티별로 나눠야 한다. 한
-파일에 71개를 몰아넣지 않는다. 이건 다른 넷과 달리 커밋을 더 쪼개는 게 낫다.
+다섯 service 모두 직접 Prisma 호출이 0이다. `admin.service.ts`는
+user/content/credit-payment/moderation/analytics의 다섯 repository로
+분리했다. 나머지는 feature별 repository를 사용한다. validation, mapping,
+오류와 상태 결정은 service에 남고 query, transaction, raw SQL claim은
+repository가 소유한다.
 
 #### 절차 (앞의 4개에서 매번 같았다)
 
@@ -189,20 +192,20 @@ moderation, event, analytics)라 repository도 엔티티별로 나눠야 한다.
 
 #### 같이 처리할 것
 
-- **Raw SQL**은 repository 안으로 (`docs/02-development-rules.md:90`).
-  생성 워커 claim은 `110a35d`에서 옮겼다. `draft-worker.service.ts`의 claim/
-  lock도 같은 방식으로 옮긴다. tagged template은 유지한다.
-- **`assertUploadedMedia(this.prisma, ...)`** 잔여 호출이 하나 있다
-  (`generation.service.ts:718`). `9a218df`에서 순수 함수
-  `assertUploadedMediaRow(row, type)`와 prisma를 받는 래퍼로 갈라놨으니,
-  generation 차례에 repository 조회 + 순수 함수로 바꾸고 래퍼를 지운다.
-- **`env` 파라미터**(기본값 `process.env`)를 `AppConfigService` 주입으로
-  교체. 남은 파일: `media.service.ts`, `content-planner.ts`,
-  `draft-worker.service.ts`, `generation-worker.service.ts`.
-  단 `GenerationSettingsService`는 **제외** — DB 설정이 env보다 우선해서
-  호출마다 재해석해야 한다.
+- **완료 — Raw SQL.** generation/draft worker claim과 lock은 repository
+  안에 있고 tagged template binding을 유지한다.
+- **완료 — media assertion.** generation repository 조회 +
+  `assertUploadedMediaRow` 순수 검증을 사용하고, Prisma를 받던 미사용 호환
+  wrapper를 삭제했다.
+- **완료 — typed runtime config.** S3, generation worker, draft worker
+  설정은 `AppConfigService`가 소유하며 service/module에 주입된다. 네 파일의
+  기본 `process.env`/env parameter와 env-only planner entry를 제거했다.
+  character reference captioning도 같은 typed S3 config로 private object를
+  읽는다.
+  DB 설정이 env보다 우선하는 `GenerationSettingsService`의 요청별 재해석은
+  그대로 유지한다.
 
-- Verification: `npm run build`, `npm run lint`, `npm test`
+- Verification: 전체 unit 30 suites, 274 tests 통과.
 
 ### [ ] 5. 제품 기능 (요구사항 확정 필요)
 
@@ -225,11 +228,18 @@ moderation, event, analytics)라 repository도 엔티티별로 나눠야 한다.
 
 ## Final Verification
 
-- Format: `npm run format`
-- Lint: `npm run lint`
-- Unit tests: `npm test`
-- Admin UI: `npm run admin:check` (legacy node:test + tsc + vitest)
-- Admin UI build: `npm run admin:build`
-- Integration/E2E: `npm run test:e2e` (Docker 필요. 체크리스트 3번을 끝내기
-  전에는 `generation.e2e-spec.ts` 1건이 실패한다)
-- Build: `npm run build`
+- [x] Format: `npm run format`
+- [x] Lint: `npm run lint`
+- [x] Unit tests: `npm run test -- --runInBand` — 30 suites, 274 tests
+- [x] Admin UI: `npm run admin:check` — 9 files, 23 tests
+- [x] Integration/E2E: `npm run test:e2e` — 4 suites, 10 tests
+- [x] Schema mirror: `npm run schema:check` — admin 64 blocks 일치
+- [x] Build: `npm run build` — React production bundle + Nest
+- [x] Image build: `docker build -f docker/Dockerfile -t opod-admin:admin-modernization .`
+- [x] Image content smoke: React `dist/index.html`/assets 존재, legacy
+      `main.js` 없음
+- [x] Whitespace: `git diff --check`
+
+Docker의 production dependency prune 단계가 기존 lockfile에서
+11 moderate/4 high 취약점을 보고했다. migration 완료를 막지는 않지만 merge
+전 dependency audit 결과를 검토한다.

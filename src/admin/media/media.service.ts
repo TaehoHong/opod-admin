@@ -7,7 +7,8 @@ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 import { basename, extname } from "node:path";
-import { PrismaService } from "../../domain/database/prisma.service";
+import { AppConfigService } from "../../domain/config/app-config.service";
+import { S3Config } from "../../domain/config/app-config";
 import { MediaRepository } from "./media.repository";
 
 export type MediaType = "image" | "video";
@@ -58,7 +59,10 @@ type SignPutUpload = (input: {
 
 @Injectable()
 export class MediaService {
-  constructor(private readonly media: MediaRepository) {}
+  constructor(
+    private readonly media: MediaRepository,
+    private readonly config: AppConfigService,
+  ) {}
 
   async startUpload(input: {
     mediaType: string;
@@ -82,7 +86,7 @@ export class MediaService {
     const storagePrefix = this.validateStoragePrefix(input.storagePrefix);
     const numbers = this.validateMetadata(mediaType, input);
 
-    const signPutUpload = createS3UploadSigner();
+    const signPutUpload = createS3UploadSigner(this.config.s3);
     if (!signPutUpload) {
       throw new ServiceUnavailableException(
         "S3 media upload is not configured",
@@ -264,38 +268,21 @@ export function assertUploadedMediaRow(
   return media;
 }
 
-// prisma를 직접 받는 기존 형태 — 아직 repository로 옮기지 않은 호출부가 쓴다.
-export async function assertUploadedMedia(
-  prisma: Pick<PrismaService, "media">,
-  mediaId: string,
-  expectedMediaType?: MediaType,
-): Promise<AssertableMedia> {
-  return assertUploadedMediaRow(
-    await prisma.media.findUnique({
-      where: { id: mediaId },
-      select: assertableMediaFields,
-    }),
-    expectedMediaType,
-  );
-}
-
 export function createS3UploadSigner(
-  env = process.env,
+  config: S3Config | undefined,
   now: () => Date = () => new Date(),
   randomId: () => string = randomUUID,
 ): SignPutUpload | undefined {
-  const bucket = env.S3_BUCKET?.trim();
-  const region = env.AWS_REGION?.trim();
-  const accessKeyId = env.AWS_ACCESS_KEY_ID?.trim();
-  const secretAccessKey = env.AWS_SECRET_ACCESS_KEY?.trim();
-  if (!bucket || !region || !accessKeyId || !secretAccessKey) {
+  if (!config) {
     return undefined;
   }
 
-  const publicBaseUrl = env.S3_PUBLIC_BASE_URL?.trim();
   const client = new S3Client({
-    region,
-    credentials: { accessKeyId, secretAccessKey },
+    region: config.region,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
   });
 
   return async (input) => {
@@ -313,7 +300,7 @@ export function createS3UploadSigner(
     const uploadUrl = await getSignedUrl(
       client,
       new PutObjectCommand({
-        Bucket: bucket,
+        Bucket: config.bucket,
         Key: storageKey,
         ContentType: input.contentType,
       }),
@@ -323,9 +310,9 @@ export function createS3UploadSigner(
         signableHeaders: new Set(["content-type"]),
       },
     );
-    const publicUrlBase = publicBaseUrl
-      ? publicBaseUrl.replace(/\/$/, "")
-      : `https://${bucket}.s3.${region}.amazonaws.com`;
+    const publicUrlBase = config.publicBaseUrl
+      ? config.publicBaseUrl.replace(/\/$/, "")
+      : `https://${config.bucket}.s3.${config.region}.amazonaws.com`;
 
     return {
       storageKey,

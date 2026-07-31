@@ -8,12 +8,47 @@
 
 export type ConfigEnv = Record<string, string | undefined>;
 
+export type S3Config = {
+  bucket: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  publicBaseUrl?: string;
+};
+
+export type GenerationWorkerConfig = {
+  enabled: boolean;
+  pollIntervalMs: number;
+  jobsPerTick: number;
+  leaseSeconds: number;
+  maxAttempts: number;
+  providerPollIntervalMs: number;
+  providerTimeoutMs: number;
+  candidateCount: number;
+  dailyBudgetUsd?: number;
+  jobCostEstimateUsd: number;
+  circuitBreakerThreshold: number;
+  circuitBreakerCooldownMs: number;
+};
+
+export type DraftWorkerConfig = {
+  enabled: boolean;
+  pollIntervalMs: number;
+  planLeaseSeconds: number;
+  maxAttempts: number;
+  maxShots: number;
+  schedulerEnabled: boolean;
+};
+
 export type AppConfig = {
   databaseUrl: string;
   adminJwtSecret: string;
   port: number;
   tls?: { certPath: string; keyPath: string };
   bootstrapAdmin?: { email: string; password: string };
+  s3?: S3Config;
+  worker: GenerationWorkerConfig;
+  draftWorker: DraftWorkerConfig;
 };
 
 const DEFAULT_PORT = 7100;
@@ -81,6 +116,66 @@ function parseBootstrapAdmin(env: ConfigEnv): AppConfig["bootstrapAdmin"] {
   return { email: email.toLowerCase(), password };
 }
 
+function parsePositiveNumber(value: string | undefined): number | undefined {
+  const parsed = Number(value?.trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function enabled(value: string | undefined): boolean {
+  return value === "true" || value === "1";
+}
+
+function parseS3(env: ConfigEnv): S3Config | undefined {
+  const bucket = env.S3_BUCKET?.trim();
+  const region = env.AWS_REGION?.trim();
+  const accessKeyId = env.AWS_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = env.AWS_SECRET_ACCESS_KEY?.trim();
+  if (!bucket || !region || !accessKeyId || !secretAccessKey) {
+    return undefined;
+  }
+  const publicBaseUrl = env.S3_PUBLIC_BASE_URL?.trim();
+  return {
+    bucket,
+    region,
+    accessKeyId,
+    secretAccessKey,
+    ...(publicBaseUrl ? { publicBaseUrl } : {}),
+  };
+}
+
+function parseWorker(env: ConfigEnv): GenerationWorkerConfig {
+  return {
+    enabled: enabled(env.WORKER_ENABLED),
+    pollIntervalMs: parsePositiveNumber(env.WORKER_POLL_INTERVAL_MS) ?? 15_000,
+    jobsPerTick: parsePositiveNumber(env.WORKER_JOBS_PER_TICK) ?? 1,
+    leaseSeconds: parsePositiveNumber(env.WORKER_LEASE_SECONDS) ?? 600,
+    maxAttempts: parsePositiveNumber(env.WORKER_MAX_ATTEMPTS) ?? 3,
+    providerPollIntervalMs:
+      parsePositiveNumber(env.WORKER_PROVIDER_POLL_INTERVAL_MS) ?? 5_000,
+    providerTimeoutMs:
+      parsePositiveNumber(env.WORKER_PROVIDER_TIMEOUT_MS) ?? 5 * 60_000,
+    candidateCount: parsePositiveNumber(env.WORKER_CANDIDATE_COUNT) ?? 2,
+    dailyBudgetUsd: parsePositiveNumber(env.WORKER_DAILY_BUDGET_USD),
+    jobCostEstimateUsd:
+      parsePositiveNumber(env.WORKER_JOB_COST_ESTIMATE_USD) ?? 0.2,
+    circuitBreakerThreshold:
+      parsePositiveNumber(env.WORKER_CIRCUIT_BREAKER_THRESHOLD) ?? 5,
+    circuitBreakerCooldownMs:
+      parsePositiveNumber(env.WORKER_CIRCUIT_BREAKER_COOLDOWN_MS) ?? 5 * 60_000,
+  };
+}
+
+function parseDraftWorker(env: ConfigEnv): DraftWorkerConfig {
+  return {
+    enabled: enabled(env.WORKER_ENABLED),
+    pollIntervalMs: parsePositiveNumber(env.WORKER_POLL_INTERVAL_MS) ?? 15_000,
+    planLeaseSeconds: parsePositiveNumber(env.DRAFT_PLAN_LEASE_SECONDS) ?? 120,
+    maxAttempts: parsePositiveNumber(env.DRAFT_MAX_ATTEMPTS) ?? 3,
+    maxShots: parsePositiveNumber(env.DRAFT_MAX_SHOTS) ?? 2,
+    schedulerEnabled: enabled(env.DRAFT_SCHEDULER_ENABLED),
+  };
+}
+
 export function loadAppConfig(env: ConfigEnv = process.env): AppConfig {
   return {
     databaseUrl: required(env, "DATABASE_URL"),
@@ -97,5 +192,8 @@ export function loadAppConfig(env: ConfigEnv = process.env): AppConfig {
     ...(parseBootstrapAdmin(env)
       ? { bootstrapAdmin: parseBootstrapAdmin(env) }
       : {}),
+    ...(parseS3(env) ? { s3: parseS3(env) } : {}),
+    worker: parseWorker(env),
+    draftWorker: parseDraftWorker(env),
   };
 }

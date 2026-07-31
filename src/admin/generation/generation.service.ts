@@ -3,15 +3,13 @@ import {
   BadRequestException,
   Injectable,
 } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
 import {
   decodeCursor,
   Page,
   PageInput,
   pageFromRows,
 } from "../../domain/database/page";
-import { PrismaService } from "../../domain/database/prisma.service";
-import { assertUploadedMedia } from "../media/media.service";
+import { assertUploadedMediaRow } from "../media/media.service";
 import {
   assertVisibleCharacterHasReference,
   ContentPlanner,
@@ -22,6 +20,12 @@ import {
   targetModelIdForShot,
 } from "../../worker/image-prompt-builder";
 import { randomUUID } from "node:crypto";
+import {
+  GenerationParams,
+  GenerationParamsObject,
+  GenerationParamsValue,
+  GenerationRepository,
+} from "./generation.repository";
 
 type MediaType = "image" | "video";
 type JobStatus = "draft" | "queued" | "running" | "completed" | "failed";
@@ -76,7 +80,7 @@ type GenerationJob = {
   updatedAt: string;
 };
 
-type PrismaOutputMedia = {
+type PersistedOutputMedia = {
   mediaType: MediaType;
   url: string;
   width: number | null;
@@ -84,14 +88,14 @@ type PrismaOutputMedia = {
   durationSeconds: number | null;
 };
 
-type PrismaJobOutput = {
+type PersistedJobOutput = {
   mediaId: string;
   candidateIndex: number;
   selected: boolean;
   media: { url: string };
 };
 
-type PrismaGenerationJob = Omit<
+type PersistedGenerationJob = Omit<
   GenerationJob,
   | "createdAt"
   | "updatedAt"
@@ -121,9 +125,9 @@ type PrismaGenerationJob = Omit<
   inputPrompt?: string | null;
   candidateCount?: number | null;
   outputMediaId?: string | null;
-  paramsJson?: Prisma.JsonValue | null;
-  outputMedia: PrismaOutputMedia | null;
-  outputs?: PrismaJobOutput[];
+  paramsJson?: GenerationParamsValue | null;
+  outputMedia: PersistedOutputMedia | null;
+  outputs?: PersistedJobOutput[];
   character?: {
     visualProfile: {
       negativePrompt: string;
@@ -142,7 +146,7 @@ type ImageProfile = {
 @Injectable()
 export class GenerationService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly generation: GenerationRepository,
     // 위저드 장면 확장 플래너 — 자동(draft) 파이프라인의 기획 LLM과 동일한
     // 설정을 쓴다. null이면 LLM 미설정 — 운영자 원문을 그대로 장면으로 쓴다
     // (로컬 결정적 플래너로 대체하지 않는다: 위저드에서는 원문이 더 낫다).
@@ -166,46 +170,9 @@ export class GenerationService {
       throw new BadRequestException("Generation prompt is required");
     }
 
-    const character = await this.prisma.character.findUnique({
-      where: { id: input.characterId },
-      select: {
-        id: true,
-        displayName: true,
-        bio: true,
-        interests: true,
-        personas: {
-          where: { deletedAt: null },
-          orderBy: { sortOrder: "asc" },
-          select: { title: true, content: true },
-        },
-        memories: {
-          where: { deletedAt: null },
-          orderBy: { createdAt: "desc" },
-          take: 20,
-          select: { content: true },
-        },
-        posts: {
-          orderBy: { createdAt: "desc" },
-          take: 20,
-          select: { content: true },
-        },
-        visualProfile: {
-          select: {
-            appearancePrompt: true,
-            stylePrompt: true,
-            negativePrompt: true,
-            referenceMedia: {
-              orderBy: { sortOrder: "asc" },
-              select: {
-                mediaId: true,
-                description: true,
-                media: { select: { uploadedAt: true } },
-              },
-            },
-          },
-        },
-      },
-    });
+    const character = await this.generation.findCharacterForImageDraft(
+      input.characterId,
+    );
     if (!character) {
       throw new BadRequestException("Character not found");
     }
@@ -318,7 +285,7 @@ export class GenerationService {
     // 전달되지 않는다 (generation-worker가 걸러낸다). aspect_ratio는
     // 프로바이더 파라미터로 그대로 전달되어 프로필 providerConfig
     // 기본값을 잡 단위로 덮어쓴다 (게시글 4:3 / 스토리 16:9 프리셋).
-    const paramsJson: Prisma.JsonObject = {
+    const paramsJson: GenerationParamsObject = {
       ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}),
       ...(planner
         ? {
@@ -338,20 +305,15 @@ export class GenerationService {
         ...(targetModelId ? { targetModelId } : {}),
       },
     };
-    const job = await this.prisma.generationJob.create({
-      data: {
-        characterId: input.characterId,
-        mediaType: "image",
-        status: "draft",
-        inputPrompt,
-        prompt,
-        candidateCount,
-        ...(Object.keys(paramsJson).length > 0 ? { paramsJson } : {}),
-      },
-      include: this.jobWithOutput,
+    const job = await this.generation.createImageDraft({
+      characterId: input.characterId,
+      inputPrompt,
+      prompt,
+      candidateCount,
+      paramsJson,
     });
     return this.toGenerationJob(
-      job as PrismaGenerationJob,
+      job as PersistedGenerationJob,
       character.visualProfile,
     );
   }
@@ -365,11 +327,11 @@ export class GenerationService {
       throw new BadRequestException("Generation prompt is required");
     }
     const candidateCount = this.parseCandidateCount(input.candidateCount);
-    const transitioned = await this.prisma.generationJob.updateMany({
-      where: { id: jobId, status: "draft" },
-      data: { prompt, candidateCount },
+    const transitioned = await this.generation.updateImageDraft(jobId, {
+      prompt,
+      candidateCount,
     });
-    if (transitioned.count === 0) {
+    if (!transitioned) {
       await this.getJob(jobId);
       throw new BadRequestException("Only draft generation jobs can be edited");
     }
@@ -377,35 +339,9 @@ export class GenerationService {
   }
 
   async confirmImageDraft(jobId: string): Promise<GenerationJob> {
-    const transitioned = await this.prisma.$transaction(async (tx) => {
-      const result = await tx.generationJob.updateMany({
-        where: { id: jobId, status: "draft" },
-        data: { status: "queued" },
-      });
-      if (result.count === 0) {
-        return result;
-      }
-
-      const confirmed = await tx.generationJob.findUnique({
-        where: { id: jobId },
-        select: { characterId: true },
-      });
-      if (!confirmed) {
-        throw new BadRequestException("Generation job not found");
-      }
-      await tx.characterActionLog.create({
-        data: {
-          characterId: confirmed.characterId,
-          actionType: "GENERATION_DRAFT_CONFIRMED",
-          targetTable: "generation_jobs",
-          targetId: jobId,
-          reason: "generation draft confirmed",
-        },
-      });
-      return result;
-    });
+    const transitioned = await this.generation.confirmImageDraft(jobId);
     const job = await this.getJob(jobId);
-    if (transitioned.count > 0 || job.status !== "draft") {
+    if (transitioned || job.status !== "draft") {
       return job;
     }
     throw new BadRequestException(
@@ -414,59 +350,17 @@ export class GenerationService {
   }
 
   async selectOutput(jobId: string, mediaId: string): Promise<GenerationJob> {
-    await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`
-        SELECT id
-        FROM opod.generation_jobs
-        WHERE id = ${jobId}::uuid
-        FOR UPDATE
-      `;
-      const output = await tx.generationJobOutput.findFirst({
-        where: { jobId, mediaId, job: { status: "completed" } },
-        select: {
-          selected: true,
-          job: { select: { characterId: true, outputMediaId: true } },
-        },
-      });
-      if (!output) {
-        throw new BadRequestException(
-          "Generation output not found for completed job",
-        );
-      }
-      if (output.selected && output.job.outputMediaId === mediaId) {
-        return;
-      }
-
-      await tx.generationJobOutput.updateMany({
-        where: { jobId },
-        data: { selected: false },
-      });
-      await tx.generationJobOutput.updateMany({
-        where: { jobId, mediaId },
-        data: { selected: true },
-      });
-      await tx.generationJob.update({
-        where: { id: jobId },
-        data: { outputMediaId: mediaId },
-      });
-      await tx.characterActionLog.create({
-        data: {
-          characterId: output.job.characterId,
-          actionType: "GENERATION_OUTPUT_SELECTED",
-          targetTable: "generation_jobs",
-          targetId: jobId,
-          reason: `selected generation output ${mediaId}`,
-        },
-      });
-    });
+    const selected = await this.generation.selectOutput(jobId, mediaId);
+    if (selected === "missing") {
+      throw new BadRequestException(
+        "Generation output not found for completed job",
+      );
+    }
     return this.getJob(jobId);
   }
 
   async regenerateImageJob(jobId: string): Promise<GenerationJob> {
-    const source = await this.prisma.generationJob.findUnique({
-      where: { id: jobId },
-      include: this.jobWithOutput,
-    });
+    const source = await this.generation.findJob(jobId);
     if (!source) {
       throw new BadRequestException("Generation job not found");
     }
@@ -479,22 +373,8 @@ export class GenerationService {
       );
     }
 
-    const job = await this.prisma.generationJob.create({
-      data: {
-        characterId: source.characterId,
-        mediaType: "image",
-        status: "draft",
-        inputPrompt: source.inputPrompt ?? source.prompt,
-        prompt: source.prompt,
-        candidateCount: source.candidateCount,
-        ...(source.paramsJson != null
-          ? { paramsJson: source.paramsJson as Prisma.InputJsonValue }
-          : {}),
-        originJobId: source.id,
-      },
-      include: this.jobWithOutput,
-    });
-    return this.toGenerationJob(job as PrismaGenerationJob);
+    const job = await this.generation.createRegeneratedImageJob(source);
+    return this.toGenerationJob(job as PersistedGenerationJob);
   }
 
   async listJobs(
@@ -507,7 +387,7 @@ export class GenerationService {
     const characterId = input.characterId?.trim();
     const status = this.parseOptionalStatus(input.status);
     const mediaType = this.parseOptionalMediaType(input.mediaType);
-    const where = {
+    const filter = {
       ...(characterId ? { characterId } : {}),
       ...(status ? { status } : {}),
       ...(mediaType ? { mediaType } : {}),
@@ -515,23 +395,18 @@ export class GenerationService {
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
-      !(await this.prisma.generationJob.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.generation.cursorMatchesFilter(cursorId, filter))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const jobs = await this.prisma.generationJob.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    const jobs = await this.generation.findManyForList({
+      ...filter,
       take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
-      include: this.jobWithOutput,
+      ...(cursorId ? { cursor: cursorId } : {}),
     });
     return pageFromRows(
-      jobs.map((job) => this.toGenerationJob(job as PrismaGenerationJob)),
+      jobs.map((job) => this.toGenerationJob(job as PersistedGenerationJob)),
       input.limit,
     );
   }
@@ -541,7 +416,7 @@ export class GenerationService {
     mediaType: string;
     prompt: string;
     provider?: string;
-    paramsJson?: Prisma.InputJsonValue;
+    paramsJson?: GenerationParams;
     originJobId?: string;
   }): Promise<GenerationJob> {
     if (input.mediaType !== "image" && input.mediaType !== "video") {
@@ -556,32 +431,25 @@ export class GenerationService {
     const mediaType = input.mediaType;
     const prompt = input.prompt.trim();
 
-    const job = await this.prisma.generationJob.create({
-      data: {
-        characterId: input.characterId,
-        mediaType,
-        prompt,
-        ...(input.provider ? { provider: input.provider } : {}),
-        ...(input.paramsJson !== undefined
-          ? { paramsJson: input.paramsJson }
-          : {}),
-        ...(input.originJobId ? { originJobId: input.originJobId } : {}),
-      },
-      include: this.jobWithOutput,
+    const job = await this.generation.enqueueJob({
+      characterId: input.characterId,
+      mediaType,
+      prompt,
+      ...(input.provider ? { provider: input.provider } : {}),
+      ...(input.paramsJson !== undefined
+        ? { paramsJson: input.paramsJson }
+        : {}),
+      ...(input.originJobId ? { originJobId: input.originJobId } : {}),
     });
-    return this.toGenerationJob(job as PrismaGenerationJob);
+    return this.toGenerationJob(job as PersistedGenerationJob);
   }
 
   async startJob(jobId: string): Promise<GenerationJob> {
-    const transitioned = await this.prisma.generationJob.updateMany({
-      where: { id: jobId, status: "queued" },
-      data: {
-        status: "running",
-        leaseExpiresAt: new Date(Date.now() + MANUAL_START_LEASE_MS),
-        attemptCount: { increment: 1 },
-      },
-    });
-    if (transitioned.count === 0) {
+    const transitioned = await this.generation.startJob(
+      jobId,
+      new Date(Date.now() + MANUAL_START_LEASE_MS),
+    );
+    if (!transitioned) {
       await this.getJob(jobId); // 404를 400보다 먼저 구분한다.
       throw new BadRequestException("Only queued generation jobs can start");
     }
@@ -589,10 +457,7 @@ export class GenerationService {
   }
 
   async retryJob(jobId: string, reason?: string): Promise<GenerationJob> {
-    const source = await this.prisma.generationJob.findUnique({
-      where: { id: jobId },
-      include: this.jobWithOutput,
-    });
+    const source = await this.generation.findJob(jobId);
     if (!source) {
       throw new BadRequestException("Generation job not found");
     }
@@ -606,53 +471,22 @@ export class GenerationService {
         "Draft generation jobs must be retried from draft review",
       );
     }
-    const job = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.generationJob.create({
-        data: {
-          characterId: source.characterId,
-          mediaType: source.mediaType,
-          ...(source.inputPrompt != null
-            ? { inputPrompt: source.inputPrompt }
-            : {}),
-          prompt: source.prompt,
-          ...(source.candidateCount != null
-            ? { candidateCount: source.candidateCount }
-            : {}),
-          ...(source.paramsJson != null
-            ? { paramsJson: source.paramsJson as Prisma.InputJsonValue }
-            : {}),
-          sortOrder: source.sortOrder,
-          originJobId: source.id,
-        },
-        include: this.jobWithOutput,
-      });
-      await tx.characterActionLog.create({
-        data: {
-          characterId: source.characterId,
-          actionType: "GENERATION_JOB_RETRIED",
-          targetTable: "generation_jobs",
-          targetId: created.id,
-          reason: reason?.trim() || "generation job retried",
-        },
-      });
-      return created;
-    });
-    return this.toGenerationJob(job as PrismaGenerationJob);
+    const job = await this.generation.retryJob(
+      source,
+      reason?.trim() || "generation job retried",
+    );
+    return this.toGenerationJob(job as PersistedGenerationJob);
   }
 
   async failJob(input: {
     jobId: string;
     errorMessage: string;
   }): Promise<GenerationJob> {
-    const transitioned = await this.prisma.generationJob.updateMany({
-      where: { id: input.jobId, status: { in: ["queued", "running"] } },
-      data: {
-        status: "failed",
-        errorMessage: input.errorMessage,
-        leaseExpiresAt: null,
-      },
-    });
-    if (transitioned.count === 0) {
+    const transitioned = await this.generation.failJob(
+      input.jobId,
+      input.errorMessage,
+    );
+    if (!transitioned) {
       const job = await this.getJob(input.jobId);
       if (job.status === "failed") {
         return job;
@@ -686,46 +520,21 @@ export class GenerationService {
     });
   }
 
-  private readonly jobWithOutput = {
-    outputMedia: true,
-  } as const;
-
-  private readonly jobWithOutputs = {
-    outputMedia: true,
-    outputs: {
-      orderBy: { candidateIndex: "asc" },
-      include: { media: { select: { url: true } } },
-    },
-    character: {
-      select: {
-        visualProfile: {
-          select: {
-            negativePrompt: true,
-            referenceMedia: {
-              select: { media: { select: { uploadedAt: true } } },
-            },
-          },
-        },
-      },
-    },
-  } as const;
-
   private async completeJobWithMediaId(
     jobId: string,
     mediaId: string,
   ): Promise<GenerationJob> {
     const job = await this.getJob(jobId);
-    await assertUploadedMedia(this.prisma, mediaId, job.mediaType);
+    assertUploadedMediaRow(
+      await this.generation.findUploadedMedia(mediaId),
+      job.mediaType,
+    );
 
-    const transitioned = await this.prisma.generationJob.updateMany({
-      where: { id: jobId, status: "running" },
-      data: {
-        status: "completed",
-        outputMediaId: mediaId,
-        leaseExpiresAt: null,
-      },
-    });
-    if (transitioned.count === 0) {
+    const transitioned = await this.generation.completeJobWithMediaId(
+      jobId,
+      mediaId,
+    );
+    if (!transitioned) {
       return this.assertIdempotentComplete(jobId);
     }
     return this.getJob(jobId);
@@ -745,26 +554,10 @@ export class GenerationService {
     // Media 생성과 상태 전이를 한 트랜잭션으로 묶어, 전이 실패 시 고아 Media를 남기지 않는다.
     // 주의: uploadedAt이 없는 Media는 게시(createPost/createStory)에 쓸 수 없다.
     // 파이프라인(워커) 경로는 반드시 S3 재업로드 + uploadedAt 확정 경로를 쓴다.
-    const completed = await this.prisma.$transaction(async (tx) => {
-      const media = await tx.media.create({
-        data: {
-          mediaType: job.mediaType,
-          url: outputMedia.url,
-          width: outputMedia.width,
-          height: outputMedia.height,
-          durationSeconds: outputMedia.durationSeconds,
-        },
-        select: { id: true },
-      });
-      const transitioned = await tx.generationJob.updateMany({
-        where: { id: jobId, status: "running" },
-        data: {
-          status: "completed",
-          outputMediaId: media.id,
-          leaseExpiresAt: null,
-        },
-      });
-      return transitioned.count > 0;
+    const completed = await this.generation.completeJobWithUrl({
+      jobId,
+      mediaType: job.mediaType,
+      ...outputMedia,
     });
     if (!completed) {
       return this.assertIdempotentComplete(jobId);
@@ -784,16 +577,13 @@ export class GenerationService {
   }
 
   async getJob(jobId: string): Promise<GenerationJob> {
-    const job = await this.prisma.generationJob.findUnique({
-      where: { id: jobId },
-      include: this.jobWithOutputs,
-    });
+    const job = await this.generation.findJobDetail(jobId);
 
     if (!job) {
       throw new BadRequestException("Generation job not found");
     }
 
-    return this.toGenerationJob(job as PrismaGenerationJob);
+    return this.toGenerationJob(job as PersistedGenerationJob);
   }
 
   private parseOptionalStatus(status?: string): JobStatus | undefined {
@@ -838,7 +628,7 @@ export class GenerationService {
   }
 
   private toGenerationJob(
-    job: PrismaGenerationJob,
+    job: PersistedGenerationJob,
     imageProfile?: ImageProfile | null,
   ): GenerationJob {
     const outputMedia = job.outputMedia
@@ -912,7 +702,7 @@ export class GenerationService {
 
 // paramsJson.aspect_ratio — 잡 단위 종횡비 오버라이드를 꺼낸다.
 function aspectRatioFromParams(
-  paramsJson: Prisma.JsonValue | null | undefined,
+  paramsJson: GenerationParamsValue | null | undefined,
 ): string | undefined {
   if (
     paramsJson == null ||
@@ -927,7 +717,7 @@ function aspectRatioFromParams(
 
 // paramsJson._wizard — 위저드 장면 확장 메타데이터를 꺼낸다.
 function wizardMetaFromParams(
-  paramsJson: Prisma.JsonValue | null | undefined,
+  paramsJson: GenerationParamsValue | null | undefined,
 ): { plannerName?: string; expandedScene?: string } | null {
   if (
     paramsJson == null ||

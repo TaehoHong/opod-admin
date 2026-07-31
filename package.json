@@ -11,7 +11,7 @@
   "scripts": {
     "admin:check": "npm --workspace @ai-sns/admin run check",
     "admin:dev": "npm --workspace @ai-sns/admin run dev",
-    "build": "nest build",
+    "build": "npm run admin:build && nest build",
     "format": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"prompts/**/*.ts\" \"packages/admin/**/*.{html,css,js,mjs}\" \"packages/admin/src/**/*.{ts,tsx}\" \"packages/admin/*.ts\"",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\" \"prompts/**/*.ts\"",
     "db:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://ai_sns:ai_sns@localhost:5433/ai_sns} prisma generate",

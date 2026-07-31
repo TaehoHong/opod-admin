@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AdminAuthModule } from "../admin/auth/admin-auth.module";
+import { AppConfigService } from "../domain/config/app-config.service";
 import { PrismaModule } from "../domain/database/prisma.module";
 import { GenerationSettingsService } from "../domain/settings/generation-settings.service";
 import { SettingsModule } from "../domain/settings/settings.module";
@@ -37,8 +38,9 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
         visualProfiles: VisualProfileRepository,
         settings: GenerationSettingsService,
         llmLogs: LlmLogService,
+        config: AppConfigService,
       ) => {
-        const readBytes = createMediaBytesReader();
+        const readBytes = createMediaBytesReader(config.s3);
         return new VisualProfileService(visualProfiles, async () => {
           const resolved = await settings.resolvePlannerSettings();
           const apiUrl = resolved.apiUrl?.trim();
@@ -59,6 +61,7 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
         VisualProfileRepository,
         GenerationSettingsService,
         LlmLogService,
+        AppConfigService,
       ],
     },
   ],
