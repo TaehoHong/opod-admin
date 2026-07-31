@@ -50,22 +50,57 @@ React 이관에서 지켜야 했던 것 두 가지 (반복하지 않도록 기�
 
 ## Checklist
 
-### [ ] 1. React 전환 마무리
+### [ ] 1. 이관 누락된 쓰기 화면 복구 — **최우선**
 
-- `index.react.html`을 `index.html`로 합치고 legacy `main.js`,
-  `styles.css`, `test/*.test.mjs` 제거
+2026-07-31 발견. React 이관은 조회 화면과 초안·생성·설정·미디어 워크플로는
+덮었지만 **캐릭터 관리와 몇몇 작성 기능이 빠졌다**. legacy `main.js`에는
+있고 React에는 없다.
+
+빠진 것 (legacy `data-action` 기준):
+
+- 캐릭터: 생성(`dlg-new-char`), 프로필 편집(`char-profile`), 프로필 이미지
+  (`profile-image-save`), 페르소나 CRUD(`persona-create|update`), 메모리
+  CRUD(`memory-create|update`), 비주얼 프로필·레퍼런스
+  (`visual-profile-save`, `visual-ref-add`, `visual-test-gen`), 포스팅 정책
+  (`policy-save`). 서버에는 `characters.controller.ts`에 쓰기 endpoint가
+  20개 있는데 React가 부르는 것은 0개다.
+- 크레딧 지급(`dlg-grant`, `credit-grant-full`)
+- 게시물 작성(`dlg-new-post`), 댓글(`dlg-comment`), 반응(`dlg-reaction`)
+- 영상 생성 job 등록(`dlg-new-job`)
+
+**이미 영향이 있다.** `src/main.ts:35`가 `dist/index.react.html` 존재 여부로
+서빙을 고르므로, `npm run admin:build`를 한 번이라도 돌린 환경에서는 legacy가
+아예 서빙되지 않는다. 즉 위 기능은 지금 콘솔에서 접근할 수 없다.
+
+- React 쓰기 endpoint 현황: `/drafts/*`, `/generation/jobs/*`,
+  `/media/:id/confirm-upload`, `/moderation/reports/:id`, `/settings/*`,
+  `/auth/*` 뿐. 서버 전체 쓰기 endpoint는 58개다.
+- 착수 순서: 캐릭터(가장 큼, 탭 7개) → 크레딧 지급 → 게시물·댓글·반응
+- Verification: `npm run admin:check`, `npm run admin:build`, 수동 확인
+
+### [ ] 2. React 전환 마무리 — **1번 이후에만**
+
+- legacy `main.js`, `styles.css`, `test/*.test.mjs` 제거와
+  `index.react.html`→`index.html` 병합은 **1번을 끝낸 뒤에** 한다. 지금
+  지우면 위 기능이 코드에서도 사라진다.
 - `src/main.ts`의 legacy/React 분기 제거 (현재는 `dist/index.react.html`
   존재 여부가 전환 스위치)
-- Helmet CSP 활성화 — `docs/06-architecture.md:129`가 "실제 asset에 맞춘다"
-  로 미뤄둔 항목. 현재 `contentSecurityPolicy: false`
-- 라우트 단위 lazy import — 빌드 산출물이 654kB로 Vite 경고 중
 - legacy `main.js`를 지울 때 거기 있던 payload 단위 테스트도 함께 사라진다.
   값이 있는 것만 React 쪽으로 옮긴다 — 지금까지 옮긴 것은
   `features/settings/payload.test.ts` 하나다(빈 값의 의미가 필드마다 달라
   조용히 키를 지울 수 있는 부분)
+
+지금 해도 되는 것 (legacy 삭제와 무관):
+
+- Helmet CSP 활성화 — `docs/06-architecture.md:129`가 "실제 asset에 맞춘다"
+  로 미뤄둔 항목. 현재 `contentSecurityPolicy: false`. Mantine이 런타임에
+  `<style>`을 주입하고 화면 4곳이 inline `style` 속성을 쓰므로 `style-src`에
+  `'unsafe-inline'`이 필요하다. 미디어는 외부 호스트라 `img-src`는
+  `S3_PUBLIC_BASE_URL`(있으면)과 `https:`를 허용한다.
+- 라우트 단위 lazy import — 빌드 산출물이 654kB로 Vite 경고 중
 - Verification: `npm run admin:check`, `npm run build`, 수동 로그인 확인
 
-### [ ] 2. E2E 실패 1건 수정
+### [ ] 3. E2E 실패 1건 수정
 
 - `test/generation.e2e-spec.ts:337` — 레퍼런스 없는 캐릭터로 이미지 draft를
   만들면 201을 기대하는데 400이 온다.
@@ -78,16 +113,18 @@ React 이관에서 지켜야 했던 것 두 가지 (반복하지 않도록 기�
   않는다 — 그러면 개선 작업이 되돌아간다.
 - Verification: `npm run test:e2e` (Docker 필요)
 
-### [ ] 3. repository 분리
+### [ ] 4. repository 분리
 
 - 지금 전부 착수 가능하다 (병행 세션 제약 해소).
-- 규모 순: `admin.service.ts`(Prisma 호출 54곳),
-  `draft-worker.service.ts`(32), `characters.service.ts`(26),
-  `drafts.service.ts`(23), `generation.service.ts`(18),
-  `generation-worker.service.ts`(14), `visual-profile.service.ts`(9),
-  `llm-log.service.ts`(8)
-- 착수 순서는 작은 것부터를 권한다 — `llm-log.service.ts` →
-  `characters.service.ts` → 나머지. 큰 것을 먼저 하면 리뷰 단위가 커진다.
+- 규모 (2026-07-31 실측, `this.prisma.`/`tx.` 호출 수 · 파일 줄 수):
+  `admin.service.ts` 71 · 2036, `draft-worker.service.ts` 43 · 1302,
+  `drafts.service.ts` 30 · 744, `generation.service.ts` 30 · 952,
+  `characters.service.ts` 25 · 869, `generation-worker.service.ts` 19 · 775,
+  `visual-profile.service.ts` 12 · 347, `llm-log.service.ts` 7 · 596.
+  합계 237곳 / 약 7600줄이라 한 번에 끝내는 작업이 아니다.
+- 서비스 하나 = 커밋 하나로 나눈다. 작은 것부터:
+  `llm-log` → `visual-profile` → `generation-worker` → `characters` →
+  `drafts` → `generation` → `draft-worker` → `admin`.
 - 패턴: `src/health/`, `src/admin/auth/admin.repository.ts` 참고. spec은
   Prisma mock 대신 repository fake로 바꾼다
 - 함께 처리: queue claim/lock의 Raw SQL을 repository 안으로 옮긴다
@@ -98,13 +135,13 @@ React 이관에서 지켜야 했던 것 두 가지 (반복하지 않도록 기�
   env보다 우선하므로 런타임 재해석을 유지해야 한다
 - Verification: 관련 spec, `npm test`
 
-### [ ] 4. 제품 기능 (요구사항 확정 필요)
+### [ ] 5. 제품 기능 (요구사항 확정 필요)
 
 - 환불 시작 · 사용자 정지·해제 · 콘텐츠 숨김·삭제 control surface
 - 자동 댓글·캐릭터 상호작용 이력과 중단 제어
 - 둘 다 `docs/01-roadmap.md`에 한 줄씩만 있어 화면과 정책을 먼저 정해야 한다
 
-### [ ] 5. 운영
+### [ ] 6. 운영
 
 - automated smoke와 rollback 절차 (`docs/05-quality-rules.md` Current Gaps).
   GitHub Actions CI는 명시적 비목표(`docs/01-roadmap.md`)이므로 로컬/서버
@@ -124,6 +161,6 @@ React 이관에서 지켜야 했던 것 두 가지 (반복하지 않도록 기�
 - Unit tests: `npm test`
 - Admin UI: `npm run admin:check` (legacy node:test + tsc + vitest)
 - Admin UI build: `npm run admin:build`
-- Integration/E2E: `npm run test:e2e` (Docker 필요. 체크리스트 2번을 끝내기
+- Integration/E2E: `npm run test:e2e` (Docker 필요. 체크리스트 3번을 끝내기
   전에는 `generation.e2e-spec.ts` 1건이 실패한다)
 - Build: `npm run build`
