@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AnalyticsPage } from "../features/analytics/AnalyticsPage";
 import { CharactersPage } from "../features/characters/CharactersPage";
 import { CreditsPage } from "../features/credits/CreditsPage";
+import { DraftsPage } from "../features/drafts/DraftsPage";
 import { EventsPage } from "../features/events/EventsPage";
 import { HomePage } from "../features/home/HomePage";
 import { LlmLogsPage } from "../features/llm-logs/LlmLogsPage";
@@ -49,6 +50,7 @@ const MIGRATED: Record<string, () => React.JSX.Element> = {
   "llm-logs": LlmLogsPage,
   media: MediaPage,
   settings: SettingsPage,
+  drafts: DraftsPage,
 };
 
 export function AppRoutes() {
