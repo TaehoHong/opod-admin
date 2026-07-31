@@ -83,18 +83,30 @@ required during character creation is deferred.
 ## Persona input
 
 Persona titles are free text so operators can add character-specific sections.
-The Admin UI suggests these conventional titles:
+The Admin UI offers the twelve standard blocks as presets, listed here in their
+conventional order (Korean label in parentheses is UI-only — the stored title is
+the key):
 
-- `identity`: role, occupation, and basic self-image
-- `personality`: temperament and emotional expression
-- `voice`: vocabulary, sentence length, names, and prohibited expressions
-- `world`: background and living environment
-- `goals`: motivations and long-term goals
-- `boundaries`: character behavior rules
-- `examples`: example dialogue
+- `identity` (기본 프로필): role, occupation, and basic self-image
+- `personality` (성격): temperament and emotional expression
+- `values` (가치관): what the character prizes and refuses, sponsorship stance
+  included
+- `emotions` (감정·대인): emotional responses and how the character treats others
+- `voice` (말투): vocabulary, sentence length, names, and prohibited expressions
+- `world` (배경): background and living environment
+- `content_style` (콘텐츠 스타일): what the character posts and how it reads
+- `relationships` (관계): named people and organizations around the character
+- `preferences` (취향): likes and dislikes
+- `boundaries` (가드레일): behavior rules, public-comment rules included
+- `greeting` (첫인사): the message the character opens a conversation with
+- `examples` (대화 예시): example dialogue, free-form `유저:` / `캐릭터:` lines
 
 Each block should cover one concern because its title and content are inserted
-verbatim into Agent and content-planning prompts.
+verbatim into Agent and content-planning prompts. Do not number the titles —
+ordering is `sortOrder` alone.
+
+Write only statements that stay true if the character moves to another system.
+Cadence and channel ("주 1회 릴스") belong to posting policy, not persona.
 
 ```http
 POST /api/admin/v1/characters/:id/personas
@@ -103,7 +115,8 @@ Content-Type: application/json
 { "title": "voice", "content": "짧고 다정한 반말을 쓴다." }
 ```
 
-Custom titles such as `"photography philosophy"` are also accepted.
+Custom titles such as `"photography philosophy"` are also accepted, and older
+titles outside the twelve (for example `goals`) keep working.
 
 ## Canon memory input
 

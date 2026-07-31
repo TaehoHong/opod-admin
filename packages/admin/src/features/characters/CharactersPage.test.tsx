@@ -161,6 +161,83 @@ describe("character management", () => {
     expect(await screen.findByDisplayValue("말투")).toBeInTheDocument();
   });
 
+  it("fills the persona title from a standard block preset", async () => {
+    const personaCreates: unknown[] = [];
+    const character = {
+      id: "character-1",
+      publicId: "existing",
+      displayName: "기존 캐릭터",
+      bio: "기존 소개",
+      interests: ["music"],
+      status: "active",
+      postCount: 0,
+      followerCount: 0,
+      createdAt: "2026-07-31T00:00:00.000Z",
+      personas: [],
+      memories: [],
+    };
+
+    server.use(
+      http.get("/api/admin/v1/characters", () =>
+        HttpResponse.json({ items: [character] }),
+      ),
+      http.get("/api/admin/v1/characters/:id", () =>
+        HttpResponse.json(character),
+      ),
+      http.get("/api/admin/v1/characters/:id/profile-image", () =>
+        HttpResponse.json({
+          characterId: character.id,
+          image: null,
+          crop: { x: 0.5, y: 0.5, zoom: 1 },
+        }),
+      ),
+      http.post(
+        "/api/admin/v1/characters/:id/personas",
+        async ({ request }) => {
+          const body = await request.json();
+          personaCreates.push(body);
+          return HttpResponse.json(
+            { id: "persona-1", characterId: character.id, ...(body as object) },
+            { status: 201 },
+          );
+        },
+      ),
+    );
+
+    render(
+      <AppProviders>
+        <CharactersPage />
+      </AppProviders>,
+    );
+
+    await screen.findByText("기존 캐릭터");
+    await userEvent.click(screen.getByRole("button", { name: "관리" }));
+    await screen.findByLabelText("표시 이름");
+    await userEvent.click(screen.getByRole("tab", { name: "페르소나" }));
+
+    // 첫인사는 React 이관 전까지 admin에서 만들 수 없던 표준 블록이다.
+    await userEvent.click(
+      await screen.findByRole("combobox", { name: "제목 타입" }),
+    );
+    await userEvent.click(await screen.findByText("첫인사 (greeting)"));
+
+    expect(screen.getByLabelText("새 페르소나 제목")).toHaveValue("greeting");
+
+    await userEvent.type(
+      screen.getByLabelText("새 페르소나 내용"),
+      "오랜만이야, 잘 지냈어?",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "페르소나 추가" }),
+    );
+
+    await waitFor(() =>
+      expect(personaCreates).toEqual([
+        { title: "greeting", content: "오랜만이야, 잘 지냈어?" },
+      ]),
+    );
+  });
+
   it("saves memory, visual prompts, and posting policy from their tabs", async () => {
     const memoryCreates: unknown[] = [];
     const visualUpdates: unknown[] = [];

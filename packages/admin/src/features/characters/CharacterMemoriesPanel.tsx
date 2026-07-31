@@ -20,13 +20,14 @@ import {
   type CharacterMemory,
 } from "./api";
 
+// 저장값은 영문 타입, 한글은 화면 라벨이다 (페르소나 제목과 같은 관례).
 const MEMORY_TYPES = [
-  "fact",
-  "preference",
-  "relationship",
-  "event",
-  "routine",
-  "goal",
+  { value: "fact", label: "일반 사실" },
+  { value: "preference", label: "취향" },
+  { value: "relationship", label: "관계" },
+  { value: "event", label: "과거 사건" },
+  { value: "routine", label: "습관·일과" },
+  { value: "goal", label: "목표" },
 ];
 
 export function CharacterMemoriesPanel({

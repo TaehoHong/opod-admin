@@ -4,6 +4,7 @@ import {
   Group,
   NumberInput,
   Paper,
+  Select,
   Stack,
   Text,
   Textarea,
@@ -20,6 +21,57 @@ import {
   updatePersona,
   type CharacterPersona,
 } from "./api";
+
+// 표준 블록 12종. 제목은 Agent와 기획 프롬프트에 원문 그대로 들어가므로
+// 저장값은 영문 키로 두고 한글은 화면 라벨로만 쓴다. 목록 순서가 곧 관례상의
+// 블록 순서지만 실제 순서는 sortOrder가 담당한다 — 제목에 번호를 붙이지 않는다.
+const PERSONA_TITLES = [
+  { value: "identity", label: "기본 프로필" },
+  { value: "personality", label: "성격" },
+  { value: "values", label: "가치관" },
+  { value: "emotions", label: "감정·대인" },
+  { value: "voice", label: "말투" },
+  { value: "world", label: "배경" },
+  { value: "content_style", label: "콘텐츠 스타일" },
+  { value: "relationships", label: "관계" },
+  { value: "preferences", label: "취향" },
+  { value: "boundaries", label: "가드레일" },
+  { value: "greeting", label: "첫인사" },
+  { value: "examples", label: "대화 예시" },
+];
+
+const PERSONA_TITLE_OPTIONS = PERSONA_TITLES.map(({ value, label }) => ({
+  value,
+  label: `${label} (${value})`,
+}));
+
+// 프리셋은 제목 입력을 채워 주는 보조 장치다. 표준 블록에 없는 제목도 그대로
+// 저장할 수 있어야 하므로 제목 입력이 값의 주인이고 select는 강제하지 않는다.
+function PersonaTitlePreset({
+  defaultTitle,
+  onPick,
+}: {
+  defaultTitle: string;
+  onPick: (title: string) => void;
+}) {
+  return (
+    <Select
+      label="제목 타입"
+      placeholder="직접 입력"
+      data={PERSONA_TITLE_OPTIONS}
+      defaultValue={
+        PERSONA_TITLES.some((preset) => preset.value === defaultTitle)
+          ? defaultTitle
+          : null
+      }
+      onChange={(value) => {
+        if (value) onPick(value);
+      }}
+      searchable
+      clearable
+    />
+  );
+}
 
 export function CharacterPersonasPanel({
   characterId,
@@ -76,7 +128,15 @@ export function CharacterPersonasPanel({
           <form onSubmit={form.onSubmit((values) => create.mutate(values))}>
             <Stack gap="sm">
               <Title order={5}>페르소나 추가</Title>
+              <Text c="dimmed" size="sm">
+                제목 타입을 고르면 제목에 반영됩니다. 표준 블록에 없는 제목은
+                직접 입력하세요. 한 블록에는 하나의 관심사만 담습니다.
+              </Text>
               <Group grow align="flex-start">
+                <PersonaTitlePreset
+                  defaultTitle=""
+                  onPick={(title) => form.setFieldValue("title", title)}
+                />
                 <TextInput
                   label="새 페르소나 제목"
                   key={form.key("title")}
@@ -177,6 +237,10 @@ function PersonaForm({
       <form onSubmit={form.onSubmit((values) => save.mutate(values))}>
         <Stack gap="sm">
           <Group grow align="flex-start">
+            <PersonaTitlePreset
+              defaultTitle={persona.title}
+              onPick={(title) => form.setFieldValue("title", title)}
+            />
             <TextInput
               label="페르소나 제목"
               key={form.key("title")}
