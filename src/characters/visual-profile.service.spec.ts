@@ -1,37 +1,28 @@
+import {
+  VisualProfileRepository,
+  type VisualProfileRow,
+} from "./visual-profile.repository";
 import { VisualProfileService } from "./visual-profile.service";
 
-function prismaMock(overrides: Record<string, unknown> = {}) {
+// Prisma를 흉내내지 않고 repository를 대신 세운다
+// (docs/02-development-rules.md "Module and Repository Rules").
+function repositoryFake(overrides: Partial<VisualProfileRepository> = {}) {
   return {
-    character: {
-      findUnique: jest.fn().mockResolvedValue({ id: "ai-1" }),
-    },
-    characterVisualProfile: {
-      findUnique: jest.fn().mockResolvedValue(null),
-      upsert: jest.fn(),
-    },
-    characterVisualProfileReference: {
-      deleteMany: jest.fn(),
-      createMany: jest.fn(),
-      upsert: jest.fn(),
-    },
-    characterActionLog: {
-      create: jest.fn().mockResolvedValue({}),
-    },
-    generationJob: {
-      create: jest.fn(),
-    },
-    media: {
-      findUnique: jest.fn(),
-    },
-    $transaction: jest.fn(),
+    characterExists: jest.fn().mockResolvedValue(true),
+    findUploadedMedia: jest.fn(),
+    findProfile: jest.fn().mockResolvedValue(null),
+    upsertProfile: jest.fn(),
+    findUncaptionedReferences: jest.fn().mockResolvedValue([]),
+    setReferenceDescription: jest.fn(),
+    replaceReferences: jest.fn(),
+    createTestGenerationJob: jest.fn(),
+    recordActionLog: jest.fn().mockResolvedValue(undefined),
     ...overrides,
-  };
+  } as unknown as jest.Mocked<VisualProfileRepository>;
 }
 
-function makeService(prisma: ReturnType<typeof prismaMock>) {
-  return new (
-    VisualProfileService as new (prisma: unknown) => VisualProfileService
-  )(prisma);
+function makeService(repository: jest.Mocked<VisualProfileRepository>) {
+  return new VisualProfileService(repository);
 }
 
 const storedProfile = {
@@ -49,12 +40,11 @@ const storedProfile = {
       media: { url: "https://cdn.local/ref-1.png" },
     },
   ],
-};
+} as unknown as VisualProfileRow;
 
 describe("VisualProfileService", () => {
   it("returns an empty default profile before one exists", async () => {
-    const prisma = prismaMock();
-    const service = makeService(prisma);
+    const service = makeService(repositoryFake());
 
     await expect(service.getProfile("ai-1")).resolves.toEqual({
       characterId: "ai-1",
@@ -66,10 +56,9 @@ describe("VisualProfileService", () => {
   });
 
   it("rejects a missing character", async () => {
-    const prisma = prismaMock({
-      character: { findUnique: jest.fn().mockResolvedValue(null) },
-    });
-    const service = makeService(prisma);
+    const service = makeService(
+      repositoryFake({ characterExists: jest.fn().mockResolvedValue(false) }),
+    );
 
     await expect(service.getProfile("missing")).rejects.toThrow(
       "Character not found",
@@ -77,9 +66,10 @@ describe("VisualProfileService", () => {
   });
 
   it("upserts prompts and records an action log", async () => {
-    const prisma = prismaMock();
-    prisma.characterVisualProfile.upsert.mockResolvedValue(storedProfile);
-    const service = makeService(prisma);
+    const repository = repositoryFake({
+      upsertProfile: jest.fn().mockResolvedValue(storedProfile),
+    });
+    const service = makeService(repository);
 
     await expect(
       service.upsertProfile({
@@ -95,23 +85,19 @@ describe("VisualProfileService", () => {
         { mediaId: "media-1", url: "https://cdn.local/ref-1.png" },
       ],
     });
-    expect(prisma.characterVisualProfile.upsert).toHaveBeenCalledWith(
+    expect(repository.upsertProfile).toHaveBeenCalledWith(
+      "ai-1",
       expect.objectContaining({
-        where: { characterId: "ai-1" },
-        create: expect.objectContaining({
-          characterId: "ai-1",
-          appearancePrompt: "young woman, short black hair",
-        }),
+        appearancePrompt: "young woman, short black hair",
       }),
     );
-    expect(prisma.characterActionLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ actionType: "VISUAL_PROFILE_UPDATED" }),
-    });
+    expect(repository.recordActionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ actionType: "VISUAL_PROFILE_UPDATED" }),
+    );
   });
 
   it("rejects overlong prompts", async () => {
-    const prisma = prismaMock();
-    const service = makeService(prisma);
+    const service = makeService(repositoryFake());
 
     await expect(
       service.upsertProfile({
@@ -122,63 +108,34 @@ describe("VisualProfileService", () => {
   });
 
   it("replaces references with upload-confirmed image media only", async () => {
-    const prisma = prismaMock();
-    prisma.media.findUnique.mockResolvedValue({
-      id: "media-1",
-      mediaType: "image",
-      uploadedAt: new Date(),
+    const repository = repositoryFake({
+      findUploadedMedia: jest.fn().mockResolvedValue({
+        id: "media-1",
+        mediaType: "image",
+        uploadedAt: new Date(),
+      }),
+      replaceReferences: jest.fn().mockResolvedValue(storedProfile),
     });
-    const txDeleteMany = jest.fn();
-    const txUpsert = jest.fn();
-    prisma.$transaction.mockImplementation(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          characterVisualProfile: {
-            upsert: jest.fn().mockResolvedValue({ id: "profile-1" }),
-            findUnique: jest.fn().mockResolvedValue(storedProfile),
-          },
-          characterVisualProfileReference: {
-            deleteMany: txDeleteMany,
-            upsert: txUpsert,
-          },
-        }),
-    );
-    const service = makeService(prisma);
+    const service = makeService(repository);
 
     await expect(
       service.setReferences({ characterId: "ai-1", mediaIds: ["media-1"] }),
     ).resolves.toMatchObject({ characterId: "ai-1" });
-    expect(txDeleteMany).toHaveBeenCalledWith({
-      where: {
-        profileId: "profile-1",
-        mediaId: { notIn: ["media-1"] },
-      },
-    });
-    expect(txUpsert).toHaveBeenCalledWith({
-      where: {
-        profileId_mediaId: {
-          profileId: "profile-1",
-          mediaId: "media-1",
-        },
-      },
-      create: {
-        profileId: "profile-1",
-        mediaId: "media-1",
-        sortOrder: 10,
-      },
-      // 유지된 관계는 description을 건드리지 않고 순서만 바꾼다.
-      update: { sortOrder: 10 },
-    });
+    expect(repository.replaceReferences).toHaveBeenCalledWith("ai-1", [
+      "media-1",
+    ]);
   });
 
   it("rejects unconfirmed reference media", async () => {
-    const prisma = prismaMock();
-    prisma.media.findUnique.mockResolvedValue({
-      id: "media-1",
-      mediaType: "image",
-      uploadedAt: null,
-    });
-    const service = makeService(prisma);
+    const service = makeService(
+      repositoryFake({
+        findUploadedMedia: jest.fn().mockResolvedValue({
+          id: "media-1",
+          mediaType: "image",
+          uploadedAt: null,
+        }),
+      }),
+    );
 
     await expect(
       service.setReferences({ characterId: "ai-1", mediaIds: ["media-1"] }),
@@ -186,8 +143,7 @@ describe("VisualProfileService", () => {
   });
 
   it("rejects more than twenty references", async () => {
-    const prisma = prismaMock();
-    const service = makeService(prisma);
+    const service = makeService(repositoryFake());
 
     await expect(
       service.setReferences({
@@ -198,13 +154,13 @@ describe("VisualProfileService", () => {
   });
 
   it("compiles the test generation prompt from profile and scene", async () => {
-    const prisma = prismaMock();
-    prisma.characterVisualProfile.findUnique.mockResolvedValue(storedProfile);
-    prisma.generationJob.create.mockResolvedValue({
-      id: "job-1",
-      status: "queued",
+    const repository = repositoryFake({
+      findProfile: jest.fn().mockResolvedValue(storedProfile),
+      createTestGenerationJob: jest
+        .fn()
+        .mockResolvedValue({ id: "job-1", status: "queued" }),
     });
-    const service = makeService(prisma);
+    const service = makeService(repository);
 
     await expect(
       service.enqueueTestGeneration({
@@ -217,20 +173,15 @@ describe("VisualProfileService", () => {
         "young woman, short black hair, walking on a beach at sunset, film photography, Kodak Portra",
       status: "queued",
     });
-    expect(prisma.generationJob.create).toHaveBeenCalledWith({
-      data: {
-        characterId: "ai-1",
-        mediaType: "image",
-        prompt:
-          "young woman, short black hair, walking on a beach at sunset, film photography, Kodak Portra",
-      },
-      select: { id: true, status: true },
+    expect(repository.createTestGenerationJob).toHaveBeenCalledWith({
+      characterId: "ai-1",
+      prompt:
+        "young woman, short black hair, walking on a beach at sunset, film photography, Kodak Portra",
     });
   });
 
   it("rejects test generation without any prompt material", async () => {
-    const prisma = prismaMock();
-    const service = makeService(prisma);
+    const service = makeService(repositoryFake());
 
     await expect(
       service.enqueueTestGeneration({ characterId: "ai-1" }),

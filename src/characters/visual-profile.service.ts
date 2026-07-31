@@ -1,8 +1,11 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { compileImagePrompt } from "../../prompts/image-prompt";
-import { assertUploadedMedia } from "../admin/media/media.service";
-import { PrismaService } from "../domain/database/prisma.service";
+import { assertUploadedMediaRow } from "../admin/media/media.service";
+import {
+  VisualProfileRepository,
+  type VisualProfileRow,
+} from "./visual-profile.repository";
 import { ReferenceCaptioner } from "../worker/reference-captioner";
 
 const PROMPT_MAX_LENGTH = 4000;
@@ -34,35 +37,12 @@ type VisualProfile = {
   updatedAt?: string;
 };
 
-type PrismaVisualProfile = {
-  id: string;
-  characterId: string;
-  appearancePrompt: string;
-  stylePrompt: string;
-  negativePrompt: string;
-  providerConfig: unknown;
-  updatedAt: Date;
-  referenceMedia: {
-    mediaId: string;
-    sortOrder: number;
-    description: string;
-    media: { url: string };
-  }[];
-};
-
-const profileInclude = {
-  referenceMedia: {
-    orderBy: { sortOrder: "asc" },
-    include: { media: { select: { url: true } } },
-  },
-} as const;
-
 // 캐릭터 비주얼 프로필: 외모/화풍/네거티브 프롬프트 + 레퍼런스 이미지.
 // 워커가 생성 요청을 만들 때 이 프로필을 주입한다 (docs/media-generation-pipeline.md D4).
 @Injectable()
 export class VisualProfileService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly visualProfiles: VisualProfileRepository,
     // 레퍼런스 캡셔닝용 비전 LLM — 기획 LLM(planner.*) 설정을 재사용하며
     // 호출 시마다 재해석한다. null이면 LLM 미설정.
     private readonly resolveCaptioner: () => Promise<ReferenceCaptioner | null> = async () =>
@@ -82,19 +62,7 @@ export class VisualProfileService {
       );
     }
     const references =
-      await this.prisma.characterVisualProfileReference.findMany({
-        where: {
-          profile: { characterId },
-          description: "",
-          media: { uploadedAt: { not: null } },
-        },
-        orderBy: { sortOrder: "asc" },
-        select: {
-          profileId: true,
-          mediaId: true,
-          media: { select: { url: true, storageKey: true, contentType: true } },
-        },
-      });
+      await this.visualProfiles.findUncaptionedReferences(characterId);
 
     let captioned = 0;
     const failed: { mediaId: string; error: string }[] = [];
@@ -105,15 +73,11 @@ export class VisualProfileService {
           characterId,
           inputMediaIds: [reference.mediaId],
         });
-        await this.prisma.characterVisualProfileReference.update({
-          where: {
-            profileId_mediaId: {
-              profileId: reference.profileId,
-              mediaId: reference.mediaId,
-            },
-          },
-          data: { description },
-        });
+        await this.visualProfiles.setReferenceDescription(
+          reference.profileId,
+          reference.mediaId,
+          description,
+        );
         captioned += 1;
       } catch (error) {
         failed.push({
@@ -137,10 +101,7 @@ export class VisualProfileService {
 
   async getProfile(characterId: string): Promise<VisualProfile> {
     await this.assertCharacter(characterId);
-    const profile = await this.prisma.characterVisualProfile.findUnique({
-      where: { characterId },
-      include: profileInclude,
-    });
+    const profile = await this.visualProfiles.findProfile(characterId);
     if (!profile) {
       return {
         characterId,
@@ -150,7 +111,7 @@ export class VisualProfileService {
         referenceMedia: [],
       };
     }
-    return this.toVisualProfile(profile as PrismaVisualProfile);
+    return this.toVisualProfile(profile);
   }
 
   async upsertProfile(input: {
@@ -172,18 +133,16 @@ export class VisualProfileService {
         ? { providerConfig: input.providerConfig }
         : {}),
     };
-    const profile = await this.prisma.characterVisualProfile.upsert({
-      where: { characterId: input.characterId },
-      create: { characterId: input.characterId, ...data },
-      update: data,
-      include: profileInclude,
-    });
+    const profile = await this.visualProfiles.upsertProfile(
+      input.characterId,
+      data,
+    );
     await this.recordActionLog(
       input.characterId,
       "VISUAL_PROFILE_UPDATED",
       "visual profile prompts updated",
     );
-    return this.toVisualProfile(profile as PrismaVisualProfile);
+    return this.toVisualProfile(profile);
   }
 
   // 레퍼런스 세트를 동기화한다. 유지된 관계는 캡션을 보존하고 순서만 갱신한다.
@@ -202,50 +161,22 @@ export class VisualProfileService {
       );
     }
     for (const mediaId of mediaIds) {
-      await assertUploadedMedia(this.prisma, mediaId, "image");
+      assertUploadedMediaRow(
+        await this.visualProfiles.findUploadedMedia(mediaId),
+        "image",
+      );
     }
 
-    const profile = await this.prisma.$transaction(async (tx) => {
-      const upserted = await tx.characterVisualProfile.upsert({
-        where: { characterId: input.characterId },
-        create: { characterId: input.characterId },
-        update: {},
-        select: { id: true },
-      });
-      await tx.characterVisualProfileReference.deleteMany({
-        where: {
-          profileId: upserted.id,
-          ...(mediaIds.length > 0 ? { mediaId: { notIn: mediaIds } } : {}),
-        },
-      });
-      for (const [index, mediaId] of mediaIds.entries()) {
-        const sortOrder = (index + 1) * 10;
-        await tx.characterVisualProfileReference.upsert({
-          where: {
-            profileId_mediaId: {
-              profileId: upserted.id,
-              mediaId,
-            },
-          },
-          create: {
-            profileId: upserted.id,
-            mediaId,
-            sortOrder,
-          },
-          update: { sortOrder },
-        });
-      }
-      return tx.characterVisualProfile.findUnique({
-        where: { id: upserted.id },
-        include: profileInclude,
-      });
-    });
+    const profile = await this.visualProfiles.replaceReferences(
+      input.characterId,
+      mediaIds,
+    );
     await this.recordActionLog(
       input.characterId,
       "VISUAL_PROFILE_REFERENCES_SET",
       `visual profile references set (${mediaIds.length})`,
     );
-    return this.toVisualProfile(profile as PrismaVisualProfile);
+    return this.toVisualProfile(profile);
   }
 
   // 프로필 프롬프트 + 장면 설명을 컴파일해 생성 잡을 큐에 넣는다.
@@ -269,13 +200,9 @@ export class VisualProfileService {
       );
     }
 
-    const job = await this.prisma.generationJob.create({
-      data: {
-        characterId: input.characterId,
-        mediaType: "image",
-        prompt,
-      },
-      select: { id: true, status: true },
+    const job = await this.visualProfiles.createTestGenerationJob({
+      characterId: input.characterId,
+      prompt,
     });
     await this.recordActionLog(
       input.characterId,
@@ -297,11 +224,7 @@ export class VisualProfileService {
   }
 
   private async assertCharacter(characterId: string): Promise<void> {
-    const character = await this.prisma.character.findUnique({
-      where: { id: characterId },
-      select: { id: true },
-    });
-    if (!character) {
+    if (!(await this.visualProfiles.characterExists(characterId))) {
       throw new BadRequestException("Character not found");
     }
   }
@@ -312,21 +235,19 @@ export class VisualProfileService {
     reason: string,
     targetId?: string,
   ): Promise<void> {
-    await this.prisma.characterActionLog.create({
-      data: {
-        characterId,
-        actionType,
-        targetTable:
-          actionType === "GENERATION_JOB_ENQUEUED"
-            ? "generation_jobs"
-            : "character_visual_profiles",
-        targetId: targetId ?? characterId,
-        reason,
-      },
+    await this.visualProfiles.recordActionLog({
+      characterId,
+      actionType,
+      targetTable:
+        actionType === "GENERATION_JOB_ENQUEUED"
+          ? "generation_jobs"
+          : "character_visual_profiles",
+      targetId: targetId ?? characterId,
+      reason,
     });
   }
 
-  private toVisualProfile(profile: PrismaVisualProfile): VisualProfile {
+  private toVisualProfile(profile: VisualProfileRow): VisualProfile {
     return {
       characterId: profile.characterId,
       appearancePrompt: profile.appearancePrompt,

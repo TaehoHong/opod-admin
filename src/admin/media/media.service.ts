@@ -226,23 +226,32 @@ export class MediaService {
   }
 }
 
-export async function assertUploadedMedia(
-  prisma: Pick<PrismaService, "media">,
-  mediaId: string,
+// 확인에 필요한 최소 필드. repository가 이 형태로 읽어 오면 검증은 순수
+// 함수로 끝난다 — prisma를 넘겨받지 않아도 된다.
+export type AssertableMedia = {
+  id: string;
+  mediaType: MediaType;
+  url: string;
+  width: number | null;
+  height: number | null;
+  durationSeconds: number | null;
+  uploadedAt: Date | null;
+};
+
+export const assertableMediaFields = {
+  id: true,
+  mediaType: true,
+  url: true,
+  width: true,
+  height: true,
+  durationSeconds: true,
+  uploadedAt: true,
+} as const;
+
+export function assertUploadedMediaRow(
+  media: AssertableMedia | null,
   expectedMediaType?: MediaType,
-) {
-  const media = await prisma.media.findUnique({
-    where: { id: mediaId },
-    select: {
-      id: true,
-      mediaType: true,
-      url: true,
-      width: true,
-      height: true,
-      durationSeconds: true,
-      uploadedAt: true,
-    },
-  });
+): AssertableMedia {
   if (!media) {
     throw new BadRequestException("Media not found");
   }
@@ -253,6 +262,21 @@ export async function assertUploadedMedia(
     throw new BadRequestException("Media type does not match generation job");
   }
   return media;
+}
+
+// prisma를 직접 받는 기존 형태 — 아직 repository로 옮기지 않은 호출부가 쓴다.
+export async function assertUploadedMedia(
+  prisma: Pick<PrismaService, "media">,
+  mediaId: string,
+  expectedMediaType?: MediaType,
+): Promise<AssertableMedia> {
+  return assertUploadedMediaRow(
+    await prisma.media.findUnique({
+      where: { id: mediaId },
+      select: assertableMediaFields,
+    }),
+    expectedMediaType,
+  );
 }
 
 export function createS3UploadSigner(

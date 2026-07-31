@@ -1,7 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AdminAuthModule } from "../admin/auth/admin-auth.module";
 import { PrismaModule } from "../domain/database/prisma.module";
-import { PrismaService } from "../domain/database/prisma.service";
 import { GenerationSettingsService } from "../domain/settings/generation-settings.service";
 import { SettingsModule } from "../domain/settings/settings.module";
 import {
@@ -14,6 +13,7 @@ import { CharacterProfileImageRepository } from "./character-profile-image.repos
 import { CharacterProfileImageService } from "./character-profile-image.service";
 import { PostingPolicyRepository } from "./posting-policy.repository";
 import { PostingPolicyService } from "./posting-policy.service";
+import { VisualProfileRepository } from "./visual-profile.repository";
 import { VisualProfileService } from "./visual-profile.service";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 
@@ -26,17 +26,18 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
     CharacterProfileImageService,
     PostingPolicyService,
     PostingPolicyRepository,
+    VisualProfileRepository,
     {
       provide: VisualProfileService,
       // 캡셔닝 비전 LLM — 기획 LLM(planner.*) 설정을 호출 시마다 재해석한다.
       // 셋 중 하나라도 없으면 null → 캡셔닝 요청은 400으로 안내된다.
       useFactory: (
-        prisma: PrismaService,
+        visualProfiles: VisualProfileRepository,
         settings: GenerationSettingsService,
         llmLogs: LlmLogService,
       ) => {
         const readBytes = createMediaBytesReader();
-        return new VisualProfileService(prisma, async () => {
+        return new VisualProfileService(visualProfiles, async () => {
           const resolved = await settings.resolvePlannerSettings();
           const apiUrl = resolved.apiUrl?.trim();
           const apiKey = resolved.apiKey?.trim();
@@ -52,7 +53,11 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
           );
         });
       },
-      inject: [PrismaService, GenerationSettingsService, LlmLogService],
+      inject: [
+        VisualProfileRepository,
+        GenerationSettingsService,
+        LlmLogService,
+      ],
     },
   ],
 })
