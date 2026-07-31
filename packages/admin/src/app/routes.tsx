@@ -4,6 +4,7 @@ import { CharactersPage } from "../features/characters/CharactersPage";
 import { CreditsPage } from "../features/credits/CreditsPage";
 import { DraftsPage } from "../features/drafts/DraftsPage";
 import { EventsPage } from "../features/events/EventsPage";
+import { GenerationPage } from "../features/generation/GenerationPage";
 import { HomePage } from "../features/home/HomePage";
 import { LlmLogsPage } from "../features/llm-logs/LlmLogsPage";
 import { LogsPage } from "../features/logs/LogsPage";
@@ -51,6 +52,7 @@ const MIGRATED: Record<string, () => React.JSX.Element> = {
   media: MediaPage,
   settings: SettingsPage,
   drafts: DraftsPage,
+  generation: GenerationPage,
 };
 
 export function AppRoutes() {

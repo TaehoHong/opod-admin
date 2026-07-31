@@ -62,7 +62,9 @@ export function DraftDetailPanel({ draftId }: { draftId: string }) {
     );
   }
 
-  return <DraftTimeline draft={draft.data} />;
+  // 다른 초안으로 바꿔 열면 캡션·사유 폼을 새로 시작해야 한다. uncontrolled
+  // form은 mount 시점의 initialValues만 쓰기 때문이다.
+  return <DraftTimeline key={draft.data.id} draft={draft.data} />;
 }
 
 function DraftTimeline({ draft }: { draft: Draft }) {
