@@ -1,8 +1,11 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { AnalyticsPage } from "../features/analytics/AnalyticsPage";
 import { CharactersPage } from "../features/characters/CharactersPage";
 import { CreditsPage } from "../features/credits/CreditsPage";
 import { EventsPage } from "../features/events/EventsPage";
+import { LogsPage } from "../features/logs/LogsPage";
 import { ModerationPage } from "../features/moderation/ModerationPage";
+import { PaymentsPage } from "../features/payments/PaymentsPage";
 import { PostsPage } from "../features/posts/PostsPage";
 import { UsersPage } from "../features/users/UsersPage";
 import { AppLayout } from "./AppLayout";
@@ -35,6 +38,9 @@ const MIGRATED: Record<string, () => React.JSX.Element> = {
   credits: CreditsPage,
   moderation: ModerationPage,
   events: EventsPage,
+  analytics: AnalyticsPage,
+  payments: PaymentsPage,
+  logs: LogsPage,
 };
 
 export function AppRoutes() {
