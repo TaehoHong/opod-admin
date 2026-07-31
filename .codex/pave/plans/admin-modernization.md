@@ -125,6 +125,14 @@ React 이관에서 지켜야 했던 것 두 가지 (반복하지 않도록 기�
 - 서비스 하나 = 커밋 하나로 나눈다. 작은 것부터:
   `llm-log` → `visual-profile` → `generation-worker` → `characters` →
   `drafts` → `generation` → `draft-worker` → `admin`.
+- 진행: `llm-log`(4b36c05), `visual-profile`(9a218df),
+  `generation-worker`(110a35d) 완료. 남은 5개 = 호출 199곳.
+- 매번 함께 나오는 두 가지:
+  - spec이 Prisma 호출 형태를 검증하고 있으면 repository fake로 바꾸면서
+    "무엇을 결정했는가"만 남긴다. 트랜잭션 콜백을 테이블 목으로 재현하던
+    부분은 repository 책임이라 지운다.
+  - `Prisma.JsonNull`(컬럼의 JSON null)과 `DbNull`(SQL NULL)을 바꿔 쓰지
+    않는다. repository 경계를 넘길 때 조용히 뒤집히기 쉽다.
 - 패턴: `src/health/`, `src/admin/auth/admin.repository.ts` 참고. spec은
   Prisma mock 대신 repository fake로 바꾼다
 - 함께 처리: queue claim/lock의 Raw SQL을 repository 안으로 옮긴다
