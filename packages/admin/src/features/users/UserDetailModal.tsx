@@ -74,6 +74,30 @@ export function UserDetailModal({
               />
             </SimpleGrid>
             <Stack gap="xs">
+              <Title order={5}>연결된 계정</Title>
+              {user.data.socialAccounts.length === 0 ? (
+                <Text size="sm" c="dimmed">
+                  연결된 소셜 계정이 없습니다.
+                </Text>
+              ) : (
+                user.data.socialAccounts.map((account) => (
+                  <Paper key={account.provider} p="xs" withBorder>
+                    <Group justify="space-between" align="center">
+                      <Group gap="xs">
+                        <Badge variant="light" tt="none">
+                          {account.provider}
+                        </Badge>
+                        <Text size="sm">{account.email ?? "이메일 없음"}</Text>
+                      </Group>
+                      <Text size="xs" c="dimmed">
+                        {formatDateTime(account.linkedAt)} 연결
+                      </Text>
+                    </Group>
+                  </Paper>
+                ))
+              )}
+            </Stack>
+            <Stack gap="xs">
               <Title order={5}>크레딧 원장</Title>
               {ledger.isPending ? (
                 <Loader size="sm" aria-label="크레딧 원장 불러오는 중" />

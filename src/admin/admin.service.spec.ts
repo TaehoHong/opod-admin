@@ -83,6 +83,47 @@ describe("AdminService", () => {
     });
   });
 
+  it("returns linked social accounts in the user detail", async () => {
+    const createdAt = new Date("2026-07-12T00:00:00.000Z");
+    const linkedAt = new Date("2026-07-13T00:00:00.000Z");
+    const service = createService({
+      user: {
+        getUser: jest.fn().mockResolvedValue({
+          id: "user-1",
+          displayName: "Taeho",
+          email: null,
+          createdAt,
+          _count: { characterFollows: 0 },
+        }),
+        getSpendableBalances: jest.fn().mockResolvedValue(new Map()),
+        listUserAccounts: jest.fn().mockResolvedValue([
+          {
+            provider: "google",
+            email: "taeho@gmail.com",
+            createdAt: linkedAt,
+          },
+          { provider: "apple", email: null, createdAt: linkedAt },
+        ]),
+      },
+    });
+
+    await expect(service.getUser("user-1")).resolves.toEqual({
+      id: "user-1",
+      displayName: "Taeho",
+      followCount: 0,
+      creditBalance: 0,
+      createdAt: createdAt.toISOString(),
+      socialAccounts: [
+        {
+          provider: "google",
+          email: "taeho@gmail.com",
+          linkedAt: linkedAt.toISOString(),
+        },
+        { provider: "apple", linkedAt: linkedAt.toISOString() },
+      ],
+    });
+  });
+
   it("does not read a balance after a missing user is detected", async () => {
     const getSpendableBalances = jest.fn();
     const service = createService({

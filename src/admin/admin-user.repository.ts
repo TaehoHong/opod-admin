@@ -14,6 +14,18 @@ export type AdminUserRecord = Prisma.UserGetPayload<{
   select: typeof adminUserFields;
 }>;
 
+// 소셜 로그인은 service-backend 소관이다. admin은 유저 지원을 위해 연결
+// 상태만 읽는다 — provider_account_id(sub)는 내부 신원 키라 노출하지 않는다.
+export const adminUserAccountFields = {
+  provider: true,
+  email: true,
+  createdAt: true,
+} as const;
+
+export type AdminUserAccountRecord = Prisma.UserAccountGetPayload<{
+  select: typeof adminUserAccountFields;
+}>;
+
 export type AdminUserEventRecord =
   Prisma.UserEventGetPayload<Prisma.UserEventDefaultArgs>;
 
@@ -97,6 +109,14 @@ export class AdminUserRepository {
     return this.prisma.user.findUnique({
       where: { id: userId },
       select: adminUserFields,
+    });
+  }
+
+  listUserAccounts(userId: string): Promise<AdminUserAccountRecord[]> {
+    return this.prisma.userAccount.findMany({
+      where: { userId },
+      orderBy: { createdAt: "asc" },
+      select: adminUserAccountFields,
     });
   }
 

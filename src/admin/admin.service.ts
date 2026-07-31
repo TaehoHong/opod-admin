@@ -31,6 +31,7 @@ import {
 } from "./admin-moderation.repository";
 import {
   AdminHashtagPreferenceRecord,
+  AdminUserAccountRecord,
   AdminUserEventRecord,
   AdminUserRecord,
   AdminUserRepository,
@@ -77,7 +78,13 @@ type AdminUser = {
   createdAt: string;
 };
 
-type AdminUserDetail = AdminUser;
+type AdminSocialAccount = {
+  provider: string;
+  email?: string;
+  linkedAt: string;
+};
+
+type AdminUserDetail = AdminUser & { socialAccounts: AdminSocialAccount[] };
 
 type AdminUserEvent = {
   id: string;
@@ -281,10 +288,10 @@ export class AdminService {
     if (!user) {
       throw new BadRequestException("User not found");
     }
-    const balances = await this.userRepository.getSpendableBalances(
-      [userId],
-      new Date(),
-    );
+    const [balances, accounts] = await Promise.all([
+      this.userRepository.getSpendableBalances([userId], new Date()),
+      this.userRepository.listUserAccounts(userId),
+    ]);
     const balance = balances.get(userId);
     return {
       ...this.toAdminUser(user, 0),
@@ -292,6 +299,7 @@ export class AdminService {
         0,
         (balance?.granted ?? 0) - (balance?.reserved ?? 0),
       ),
+      socialAccounts: accounts.map((account) => this.toSocialAccount(account)),
     };
   }
 
@@ -1376,6 +1384,14 @@ export class AdminService {
       followCount: user._count.characterFollows,
       creditBalance,
       createdAt: user.createdAt.toISOString(),
+    };
+  }
+
+  private toSocialAccount(account: AdminUserAccountRecord): AdminSocialAccount {
+    return {
+      provider: account.provider,
+      ...(account.email ? { email: account.email } : {}),
+      linkedAt: account.createdAt.toISOString(),
     };
   }
 

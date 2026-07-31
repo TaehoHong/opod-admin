@@ -10,6 +10,16 @@ export type UserListItem = {
   createdAt: string;
 };
 
+export type UserSocialAccount = {
+  provider: string;
+  email?: string;
+  linkedAt: string;
+};
+
+export type UserDetail = UserListItem & {
+  socialAccounts: UserSocialAccount[];
+};
+
 export type UserEvent = {
   id: string;
   userId: string;
@@ -28,7 +38,7 @@ export function fetchUsers(params: {
   return apiRequest(`/users${toQuery(params)}`);
 }
 
-export function fetchUser(userId: string): Promise<UserListItem> {
+export function fetchUser(userId: string): Promise<UserDetail> {
   return apiRequest(`/users/${encodeURIComponent(userId)}`);
 }
 

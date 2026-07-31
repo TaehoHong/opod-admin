@@ -23,7 +23,18 @@ describe("user detail", () => {
           new URL(request.url).searchParams.get("limit") === "50";
         return HttpResponse.json({ items: isGrantOptions ? [] : [user] });
       }),
-      http.get("/api/admin/v1/users/:id", () => HttpResponse.json(user)),
+      http.get("/api/admin/v1/users/:id", () =>
+        HttpResponse.json({
+          ...user,
+          socialAccounts: [
+            {
+              provider: "google",
+              email: "minji@gmail.com",
+              linkedAt: "2026-07-01T02:00:00.000Z",
+            },
+          ],
+        }),
+      ),
       http.get("/api/admin/v1/credits/ledger", ({ request }) => {
         expect(new URL(request.url).searchParams.get("userId")).toBe(user.id);
         return HttpResponse.json({
@@ -68,6 +79,8 @@ describe("user detail", () => {
     await userEvent.click(within(row!).getByRole("button", { name: "상세" }));
 
     expect(await screen.findByText("가입 보상")).toBeInTheDocument();
+    expect(screen.getByText("google")).toBeInTheDocument();
+    expect(screen.getByText("minji@gmail.com")).toBeInTheDocument();
     expect(screen.getByText("welcome-2026")).toBeInTheDocument();
     expect(screen.getByText("post_viewed")).toBeInTheDocument();
     expect(screen.getByText("post · post-123…")).toBeInTheDocument();
