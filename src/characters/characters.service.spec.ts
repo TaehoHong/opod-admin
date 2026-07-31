@@ -1,28 +1,76 @@
+import { CharacterRepository } from "./character.repository";
 import { CharactersService } from "./characters.service";
+
+// Prisma를 흉내내지 않고 repository를 대신 세운다
+// (docs/02-development-rules.md "Module and Repository Rules").
+type RepositoryFake = jest.Mocked<CharacterRepository>;
+
+function repositoryFake(overrides: Partial<CharacterRepository> = {}) {
+  return {
+    exists: jest.fn().mockResolvedValue(true),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateStatus: jest.fn(),
+    findDetail: jest.fn(),
+    cursorMatchesFilter: jest.fn().mockResolvedValue(true),
+    findManyForList: jest.fn().mockResolvedValue([]),
+    findPersonas: jest.fn().mockResolvedValue([]),
+    findPersona: jest.fn().mockResolvedValue({ id: "persona-1" }),
+    highestPersonaSortOrder: jest.fn().mockResolvedValue(0),
+    createPersona: jest.fn(),
+    updatePersona: jest.fn(),
+    softDeletePersona: jest.fn(),
+    findMemories: jest.fn().mockResolvedValue([]),
+    findMemory: jest.fn().mockResolvedValue({ id: "memory-1" }),
+    createMemory: jest.fn(),
+    updateMemory: jest.fn(),
+    softDeleteMemory: jest.fn(),
+    recordActionLog: jest.fn().mockResolvedValue(undefined),
+    ...overrides,
+  } as unknown as RepositoryFake;
+}
+
+function makeService(repository: RepositoryFake) {
+  return new CharactersService(repository);
+}
+
+const createdAt = new Date("2026-07-02T00:00:00.000Z");
+const deletedAt = new Date("2026-07-02T00:10:00.000Z");
+
+function personaRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "persona-1",
+    characterId: "character-1",
+    title: "Core",
+    content: "Warm",
+    sortOrder: 30,
+    createdAt,
+    updatedAt: createdAt,
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+function memoryRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "memory-1",
+    characterId: "character-1",
+    content: "likes concise status reports",
+    type: "preference",
+    reason: "operator note",
+    createdAt,
+    updatedAt: createdAt,
+    deletedAt: null,
+    ...overrides,
+  };
+}
 
 describe("CharactersService", () => {
   it("creates character memory without a scope", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const create = jest.fn().mockResolvedValue({
-      id: "memory-1",
-      characterId: "character-1",
-      content: "likes concise status reports",
-      type: "preference",
-      reason: "operator note",
-      createdAt,
-      updatedAt: createdAt,
-      deletedAt: null,
+    const repository = repositoryFake({
+      createMemory: jest.fn().mockResolvedValue(memoryRow()),
     });
-    const actionLogCreate = jest.fn().mockResolvedValue({});
-    const service = new (
-      CharactersService as new (...args: unknown[]) => CharactersService
-    )({
-      character: {
-        findUnique: jest.fn().mockResolvedValue({ id: "character-1" }),
-      },
-      characterMemory: { create },
-      characterActionLog: { create: actionLogCreate },
-    });
+    const service = makeService(repository);
 
     await expect(
       service.createCharacterMemory({
@@ -40,36 +88,26 @@ describe("CharactersService", () => {
       createdAt: createdAt.toISOString(),
       updatedAt: createdAt.toISOString(),
     });
-    expect(create).toHaveBeenCalledWith({
-      data: {
-        characterId: "character-1",
-        content: "likes concise status reports",
-        type: "preference",
-        reason: "operator note",
-      },
-      select: expect.any(Object),
+    // 저장 전에 공백을 다듬는다.
+    expect(repository.createMemory).toHaveBeenCalledWith({
+      characterId: "character-1",
+      content: "likes concise status reports",
+      type: "preference",
+      reason: "operator note",
     });
-    expect(actionLogCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(repository.recordActionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
         characterId: "character-1",
         actionType: "MEMORY_CREATED",
         targetTable: "character_memories",
         targetId: "memory-1",
       }),
-    });
+    );
   });
 
   it("rejects unknown character memory types", async () => {
-    const create = jest.fn();
-    const service = new (
-      CharactersService as new (...args: unknown[]) => CharactersService
-    )({
-      character: {
-        findUnique: jest.fn().mockResolvedValue({ id: "character-1" }),
-      },
-      characterMemory: { create },
-      characterActionLog: { create: jest.fn() },
-    });
+    const repository = repositoryFake();
+    const service = makeService(repository);
 
     await expect(
       service.createCharacterMemory({
@@ -79,16 +117,13 @@ describe("CharactersService", () => {
         reason: "operator note",
       }),
     ).rejects.toThrow("Invalid character memory type");
-    expect(create).not.toHaveBeenCalled();
+    expect(repository.createMemory).not.toHaveBeenCalled();
   });
 
   it("returns character detail with active personas and memory", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const service = new (
-      CharactersService as new (...args: unknown[]) => CharactersService
-    )({
-      character: {
-        findUnique: jest.fn().mockResolvedValue({
+    const service = makeService(
+      repositoryFake({
+        findDetail: jest.fn().mockResolvedValue({
           id: "character-1",
           publicId: "mina_ai",
           displayName: "Mina",
@@ -98,36 +133,22 @@ describe("CharactersService", () => {
           createdAt,
           _count: { posts: 12, userFollowers: 340 },
         }),
-      },
-      characterPersona: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            id: "persona-1",
-            characterId: "character-1",
+        findPersonas: jest.fn().mockResolvedValue([
+          personaRow({
             title: "Core",
             content: "Warm and concise",
             sortOrder: 10,
-            createdAt,
-            updatedAt: createdAt,
-            deletedAt: null,
-          },
+          }),
         ]),
-      },
-      characterMemory: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            id: "memory-1",
-            characterId: "character-1",
+        findMemories: jest.fn().mockResolvedValue([
+          memoryRow({
             content: "likes night walks",
             type: "routine",
             reason: "operator",
-            createdAt,
-            updatedAt: createdAt,
-            deletedAt: null,
-          },
+          }),
         ]),
-      },
-    });
+      }),
+    );
 
     await expect(service.getCharacter("character-1")).resolves.toEqual({
       id: "character-1",
@@ -165,22 +186,22 @@ describe("CharactersService", () => {
   });
 
   it("lists character post and follower counts", async () => {
-    const createdAt = new Date("2026-07-12T00:00:00.000Z");
-    const findMany = jest.fn().mockResolvedValue([
-      {
-        id: "character-1",
-        publicId: "mina_ai",
-        displayName: "Mina",
-        bio: "City walks",
-        interests: ["art"],
-        status: "active",
-        createdAt,
-        _count: { posts: 12, userFollowers: 340 },
-      },
-    ]);
-    const service = new (
-      CharactersService as new (...args: unknown[]) => CharactersService
-    )({ character: { findMany } });
+    const listedAt = new Date("2026-07-12T00:00:00.000Z");
+    const repository = repositoryFake({
+      findManyForList: jest.fn().mockResolvedValue([
+        {
+          id: "character-1",
+          publicId: "mina_ai",
+          displayName: "Mina",
+          bio: "City walks",
+          interests: ["art"],
+          status: "active",
+          createdAt: listedAt,
+          _count: { posts: 12, userFollowers: 340 },
+        },
+      ]),
+    });
+    const service = makeService(repository);
 
     await expect(
       service.listCharacters({ status: "active", limit: 20 }),
@@ -195,73 +216,31 @@ describe("CharactersService", () => {
           status: "active",
           postCount: 12,
           followerCount: 340,
-          createdAt: createdAt.toISOString(),
+          createdAt: listedAt.toISOString(),
         },
       ],
     });
-    expect(findMany).toHaveBeenCalledWith({
-      where: { status: "active" },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    // limit + 1을 요청해야 다음 페이지 유무를 판정할 수 있다.
+    expect(repository.findManyForList).toHaveBeenCalledWith({
+      status: "active",
       take: 21,
-      select: expect.objectContaining({
-        _count: { select: { posts: true, userFollowers: true } },
-      }),
     });
   });
 
   it("creates, updates, and soft-deletes character personas", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const deletedAt = new Date("2026-07-02T00:10:00.000Z");
-    const create = jest.fn().mockResolvedValue({
-      id: "persona-1",
-      characterId: "character-1",
-      title: "Core",
-      content: "Warm",
-      sortOrder: 30,
-      createdAt,
-      updatedAt: createdAt,
-      deletedAt: null,
+    const repository = repositoryFake({
+      highestPersonaSortOrder: jest.fn().mockResolvedValue(20),
+      createPersona: jest.fn().mockResolvedValue(personaRow()),
+      updatePersona: jest
+        .fn()
+        .mockResolvedValue(
+          personaRow({ content: "Warmer", updatedAt: deletedAt }),
+        ),
+      softDeletePersona: jest
+        .fn()
+        .mockResolvedValue(personaRow({ content: "Warmer", deletedAt })),
     });
-    const update = jest
-      .fn()
-      .mockResolvedValueOnce({
-        id: "persona-1",
-        characterId: "character-1",
-        title: "Core",
-        content: "Warmer",
-        sortOrder: 30,
-        createdAt,
-        updatedAt: deletedAt,
-        deletedAt: null,
-      })
-      .mockResolvedValueOnce({
-        id: "persona-1",
-        characterId: "character-1",
-        title: "Core",
-        content: "Warmer",
-        sortOrder: 30,
-        createdAt,
-        updatedAt: deletedAt,
-        deletedAt,
-      });
-    const actionLogCreate = jest.fn().mockResolvedValue({});
-    const service = new (
-      CharactersService as new (...args: unknown[]) => CharactersService
-    )({
-      character: {
-        findUnique: jest.fn().mockResolvedValue({ id: "character-1" }),
-      },
-      characterPersona: {
-        create,
-        update,
-        // Returns the current max sortOrder for the create path, and a truthy
-        // ownership row for the update/delete paths.
-        findFirst: jest
-          .fn()
-          .mockResolvedValue({ id: "persona-1", sortOrder: 20 }),
-      },
-      characterActionLog: { create: actionLogCreate },
-    });
+    const service = makeService(repository);
 
     await expect(
       service.createCharacterPersona({
@@ -287,59 +266,34 @@ describe("CharactersService", () => {
       deletedAt: deletedAt.toISOString(),
     });
 
-    expect(create).toHaveBeenCalledWith({
-      data: {
-        characterId: "character-1",
-        title: "Core",
-        content: "Warm",
-        sortOrder: 30,
-      },
-      select: expect.any(Object),
+    // 새 페르소나는 기존 최댓값 다음 칸에 놓인다.
+    expect(repository.createPersona).toHaveBeenCalledWith({
+      characterId: "character-1",
+      title: "Core",
+      content: "Warm",
+      sortOrder: 30,
     });
-    expect(update).toHaveBeenLastCalledWith({
-      where: { id: "persona-1" },
-      data: { deletedAt: expect.any(Date) },
-      select: expect.any(Object),
-    });
+    expect(repository.softDeletePersona).toHaveBeenCalledWith(
+      "persona-1",
+      expect.any(Date),
+    );
     expect(
-      actionLogCreate.mock.calls.map(([input]) => input.data.actionType),
+      repository.recordActionLog.mock.calls.map(([input]) => input.actionType),
     ).toEqual(["PERSONA_CREATED", "PERSONA_UPDATED", "PERSONA_DELETED"]);
   });
 
   it("updates and soft-deletes character memory", async () => {
-    const createdAt = new Date("2026-07-02T00:00:00.000Z");
-    const deletedAt = new Date("2026-07-02T00:10:00.000Z");
-    const update = jest
-      .fn()
-      .mockResolvedValueOnce({
-        id: "memory-1",
-        characterId: "character-1",
-        content: "likes sunrise",
-        type: "preference",
-        reason: "operator",
-        createdAt,
-        updatedAt: deletedAt,
-        deletedAt: null,
-      })
-      .mockResolvedValueOnce({
-        id: "memory-1",
-        characterId: "character-1",
-        content: "likes sunrise",
-        type: "preference",
-        reason: "operator",
-        createdAt,
-        updatedAt: deletedAt,
-        deletedAt,
-      });
-    const service = new (
-      CharactersService as new (...args: unknown[]) => CharactersService
-    )({
-      characterMemory: {
-        update,
-        findFirst: jest.fn().mockResolvedValue({ id: "memory-1" }),
-      },
-      characterActionLog: { create: jest.fn().mockResolvedValue({}) },
+    const repository = repositoryFake({
+      updateMemory: jest
+        .fn()
+        .mockResolvedValue(
+          memoryRow({ content: "likes sunrise", updatedAt: deletedAt }),
+        ),
+      softDeleteMemory: jest
+        .fn()
+        .mockResolvedValue(memoryRow({ content: "likes sunrise", deletedAt })),
     });
+    const service = makeService(repository);
 
     await expect(
       service.updateCharacterMemory({
@@ -357,43 +311,26 @@ describe("CharactersService", () => {
       id: "memory-1",
       deletedAt: deletedAt.toISOString(),
     });
-    expect(update).toHaveBeenLastCalledWith({
-      where: { id: "memory-1" },
-      data: { deletedAt: expect.any(Date) },
-      select: expect.any(Object),
-    });
+    // 삭제는 행을 지우지 않고 deletedAt만 채운다.
+    expect(repository.softDeleteMemory).toHaveBeenCalledWith(
+      "memory-1",
+      expect.any(Date),
+    );
   });
 
   it("bulk-creates personas and numbers them in submitted order", async () => {
-    const createdAt = new Date("2026-07-08T00:00:00.000Z");
     let sequence = 0;
-    const create = jest.fn().mockImplementation(({ data }) => {
-      sequence += 1;
-      return Promise.resolve({
-        id: `persona-${sequence}`,
-        characterId: data.characterId,
-        title: data.title,
-        content: data.content,
-        sortOrder: data.sortOrder,
-        createdAt,
-        updatedAt: createdAt,
-        deletedAt: null,
-      });
+    const repository = repositoryFake({
+      // 기존 최상단이 40이므로 배치는 50, 60으로 이어진다.
+      highestPersonaSortOrder: jest.fn().mockResolvedValue(40),
+      createPersona: jest.fn().mockImplementation((data) => {
+        sequence += 1;
+        return Promise.resolve(
+          personaRow({ id: `persona-${sequence}`, ...data }),
+        );
+      }),
     });
-    const actionLogCreate = jest.fn().mockResolvedValue({});
-    const service = new (
-      CharactersService as new (...args: unknown[]) => CharactersService
-    )({
-      character: {
-        findUnique: jest.fn().mockResolvedValue({ id: "character-1" }),
-      },
-      characterPersona: {
-        create,
-        // Existing top persona sits at 40, so the batch continues at 50, 60.
-        findFirst: jest.fn().mockResolvedValue({ sortOrder: 40 }),
-      },
-      characterActionLog: { create: actionLogCreate },
-    });
+    const service = makeService(repository);
 
     const result = await service.createCharacterPersonas({
       characterId: "character-1",
@@ -409,46 +346,32 @@ describe("CharactersService", () => {
       title: "02. Voice",
       sortOrder: 60,
     });
-    expect(create).toHaveBeenCalledTimes(2);
-    expect(actionLogCreate).toHaveBeenCalledTimes(2);
-    expect(actionLogCreate).toHaveBeenLastCalledWith({
-      data: expect.objectContaining({
+    expect(repository.recordActionLog).toHaveBeenCalledTimes(2);
+    expect(repository.recordActionLog).toHaveBeenLastCalledWith(
+      expect.objectContaining({
         actionType: "PERSONA_CREATED",
         targetId: "persona-2",
       }),
-    });
+    );
   });
 
   it("reorders personas and rejects a mismatched id set", async () => {
-    const createdAt = new Date("2026-07-08T00:00:00.000Z");
-    const personaRow = (id: string, sortOrder: number) => ({
-      id,
-      characterId: "character-1",
-      title: id,
-      content: "c",
-      sortOrder,
-      createdAt,
-      updatedAt: createdAt,
-      deletedAt: null,
+    const repository = repositoryFake({
+      findPersonas: jest
+        .fn()
+        .mockResolvedValue([
+          personaRow({ id: "a", title: "a", sortOrder: 10 }),
+          personaRow({ id: "b", title: "b", sortOrder: 20 }),
+        ]),
+      updatePersona: jest
+        .fn()
+        .mockImplementation((personaId: string, data: { sortOrder: number }) =>
+          Promise.resolve(
+            personaRow({ id: personaId, title: personaId, ...data }),
+          ),
+        ),
     });
-    const findMany = jest
-      .fn()
-      .mockResolvedValue([personaRow("a", 10), personaRow("b", 20)]);
-    const update = jest
-      .fn()
-      .mockImplementation(({ where, data }) =>
-        Promise.resolve(personaRow(where.id, data.sortOrder)),
-      );
-    const actionLogCreate = jest.fn().mockResolvedValue({});
-    const service = new (
-      CharactersService as new (...args: unknown[]) => CharactersService
-    )({
-      character: {
-        findUnique: jest.fn().mockResolvedValue({ id: "character-1" }),
-      },
-      characterPersona: { findMany, update },
-      characterActionLog: { create: actionLogCreate },
-    });
+    const service = makeService(repository);
 
     const result = await service.reorderCharacterPersonas({
       characterId: "character-1",
@@ -458,10 +381,11 @@ describe("CharactersService", () => {
       ["b", 10],
       ["a", 20],
     ]);
-    expect(actionLogCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ actionType: "PERSONA_REORDERED" }),
-    });
+    expect(repository.recordActionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ actionType: "PERSONA_REORDERED" }),
+    );
 
+    // 부분 재정렬과 중복은 순서를 망가뜨리므로 전체 집합을 요구한다.
     await expect(
       service.reorderCharacterPersonas({
         characterId: "character-1",
@@ -477,16 +401,8 @@ describe("CharactersService", () => {
   });
 
   it("rejects an entire bulk batch when any item is invalid", async () => {
-    const create = jest.fn();
-    const service = new (
-      CharactersService as new (...args: unknown[]) => CharactersService
-    )({
-      character: {
-        findUnique: jest.fn().mockResolvedValue({ id: "character-1" }),
-      },
-      characterMemory: { create },
-      characterActionLog: { create: jest.fn() },
-    });
+    const repository = repositoryFake();
+    const service = makeService(repository);
 
     await expect(
       service.createCharacterMemories({
@@ -497,7 +413,7 @@ describe("CharactersService", () => {
         ],
       }),
     ).rejects.toThrow("Character memory items[1] content is required");
-    expect(create).not.toHaveBeenCalled();
+    expect(repository.createMemory).not.toHaveBeenCalled();
 
     await expect(
       service.createCharacterMemories({
@@ -509,20 +425,12 @@ describe("CharactersService", () => {
         })),
       }),
     ).rejects.toThrow("Character memory items must be 50 or fewer");
-    expect(create).not.toHaveBeenCalled();
+    expect(repository.createMemory).not.toHaveBeenCalled();
   });
 
   it("rejects persona fields beyond the length limits", async () => {
-    const create = jest.fn();
-    const service = new (
-      CharactersService as new (...args: unknown[]) => CharactersService
-    )({
-      character: {
-        findUnique: jest.fn().mockResolvedValue({ id: "character-1" }),
-      },
-      characterPersona: { create },
-      characterActionLog: { create: jest.fn() },
-    });
+    const repository = repositoryFake();
+    const service = makeService(repository);
 
     await expect(
       service.createCharacterPersona({
@@ -540,6 +448,6 @@ describe("CharactersService", () => {
     ).rejects.toThrow(
       "Character persona content must be at most 8000 characters",
     );
-    expect(create).not.toHaveBeenCalled();
+    expect(repository.createPersona).not.toHaveBeenCalled();
   });
 });

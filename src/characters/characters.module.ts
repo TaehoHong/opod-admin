@@ -8,6 +8,7 @@ import {
   createMediaBytesReader,
 } from "../worker/reference-captioner";
 import { CharactersController } from "./characters.controller";
+import { CharacterRepository } from "./character.repository";
 import { CharactersService } from "./characters.service";
 import { CharacterProfileImageRepository } from "./character-profile-image.repository";
 import { CharacterProfileImageService } from "./character-profile-image.service";
@@ -21,6 +22,7 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
   imports: [PrismaModule, AdminAuthModule, SettingsModule],
   controllers: [CharactersController],
   providers: [
+    CharacterRepository,
     CharactersService,
     CharacterProfileImageRepository,
     CharacterProfileImageService,

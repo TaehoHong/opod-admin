@@ -1,12 +1,16 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
 import {
   decodeCursor,
   Page,
   PageInput,
   pageFromRows,
 } from "../domain/database/page";
-import { PrismaService } from "../domain/database/prisma.service";
+import {
+  CharacterRepository,
+  type CharacterListRow,
+  type MemoryRow,
+  type PersonaRow,
+} from "./character.repository";
 
 type CharacterStatus = "active" | "inactive";
 
@@ -30,10 +34,6 @@ type AdminCharacterDetail = AdminCharacterListItem & {
   memories: CharacterMemory[];
 };
 
-type PrismaCharacterListItem = Prisma.CharacterGetPayload<{
-  select: typeof characterListFields;
-}>;
-
 type CharacterStatusReceipt = {
   id: string;
   status: CharacterStatus;
@@ -51,10 +51,6 @@ type CharacterMemory = {
   deletedAt?: string;
 };
 
-type PrismaCharacterMemory = Prisma.CharacterMemoryGetPayload<{
-  select: typeof characterMemoryFields;
-}>;
-
 type CharacterPersona = {
   id: string;
   characterId: string;
@@ -66,62 +62,10 @@ type CharacterPersona = {
   deletedAt?: string;
 };
 
-type PrismaCharacterPersona = Prisma.CharacterPersonaGetPayload<{
-  select: typeof characterPersonaFields;
-}>;
-
 type SoftDeleteReceipt = {
   id: string;
   deletedAt: string;
 };
-
-const characterFields = {
-  id: true,
-  publicId: true,
-  displayName: true,
-  bio: true,
-  interests: true,
-} as const;
-
-const characterListFields = {
-  ...characterFields,
-  status: true,
-  createdAt: true,
-  _count: {
-    select: {
-      posts: true,
-      userFollowers: true,
-    },
-  },
-} as const;
-
-const characterStatusFields = {
-  id: true,
-  status: true,
-  updatedAt: true,
-} as const;
-
-const characterPersonaFields = {
-  id: true,
-  characterId: true,
-  title: true,
-  content: true,
-  sortOrder: true,
-  createdAt: true,
-  updatedAt: true,
-  deletedAt: true,
-} as const;
-
-const characterMemoryFields = {
-  id: true,
-  characterId: true,
-  content: true,
-  type: true,
-  reason: true,
-  createdAt: true,
-  updatedAt: true,
-  deletedAt: true,
-} as const;
 
 // Persona/memory text is assembled into LLM prompts downstream; the length
 // caps keep a single entry from blowing the prompt budget.
@@ -144,7 +88,7 @@ const PERSONA_SORT_STEP = 10;
 
 @Injectable()
 export class CharactersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly characters: CharacterRepository) {}
 
   async createCharacter(input: {
     publicId: string;
@@ -152,14 +96,11 @@ export class CharactersService {
     bio: string;
     interests?: string[];
   }) {
-    const character = await this.prisma.character.create({
-      data: {
-        publicId: input.publicId,
-        displayName: input.displayName,
-        bio: input.bio,
-        interests: input.interests ?? [],
-      },
-      select: characterFields,
+    const character = await this.characters.create({
+      publicId: input.publicId,
+      displayName: input.displayName,
+      bio: input.bio,
+      interests: input.interests ?? [],
     });
     await this.recordCharacterActionLog({
       characterId: character.id,
@@ -206,11 +147,7 @@ export class CharactersService {
       throw new BadRequestException("Character not found");
     }
 
-    return this.prisma.character.update({
-      where: { id: input.id },
-      data,
-      select: characterFields,
-    });
+    return this.characters.update(input.id, data);
   }
 
   async updateCharacterStatus(input: {
@@ -230,11 +167,7 @@ export class CharactersService {
       throw new BadRequestException("Character not found");
     }
 
-    const character = await this.prisma.character.update({
-      where: { id: input.id },
-      data: { status },
-      select: characterStatusFields,
-    });
+    const character = await this.characters.updateStatus(input.id, status);
     await this.recordCharacterActionLog({
       characterId: character.id,
       actionType:
@@ -261,24 +194,13 @@ export class CharactersService {
   }
 
   async getCharacter(characterId: string): Promise<AdminCharacterDetail> {
-    const character = await this.prisma.character.findUnique({
-      where: { id: characterId },
-      select: characterListFields,
-    });
+    const character = await this.characters.findDetail(characterId);
     if (!character) {
       throw new BadRequestException("Character not found");
     }
     const [personas, memories] = await Promise.all([
-      this.prisma.characterPersona.findMany({
-        where: { characterId, deletedAt: null },
-        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
-        select: characterPersonaFields,
-      }),
-      this.prisma.characterMemory.findMany({
-        where: { characterId, deletedAt: null },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        select: characterMemoryFields,
-      }),
+      this.characters.findPersonas(characterId),
+      this.characters.findMemories(characterId),
     ]);
     return {
       ...this.toCharacterListItem(character),
@@ -291,24 +213,18 @@ export class CharactersService {
     input: { status?: string } & PageInput,
   ): Promise<Page<AdminCharacterListItem>> {
     const status = this.parseCharacterStatus(input.status);
-    const where = status === undefined ? {} : { status };
     const cursorId = decodeCursor(input.cursor);
     if (
       cursorId &&
-      !(await this.prisma.character.findFirst({
-        where: { id: cursorId, ...where },
-        select: { id: true },
-      }))
+      !(await this.characters.cursorMatchesFilter(cursorId, status))
     ) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const characters = await this.prisma.character.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    const characters = await this.characters.findManyForList({
+      ...(status === undefined ? {} : { status }),
       take: input.limit + 1,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
-      select: characterListFields,
+      ...(cursorId ? { cursor: cursorId } : {}),
     });
     return pageFromRows(
       characters.map((character) => this.toCharacterListItem(character)),
@@ -322,11 +238,7 @@ export class CharactersService {
     if (!(await this.hasCharacter(characterId))) {
       throw new BadRequestException("Character not found");
     }
-    const memories = await this.prisma.characterMemory.findMany({
-      where: { characterId, deletedAt: null },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: characterMemoryFields,
-    });
+    const memories = await this.characters.findMemories(characterId);
     return { items: memories.map((memory) => this.toCharacterMemory(memory)) };
   }
 
@@ -343,14 +255,11 @@ export class CharactersService {
     const type = this.parseMemoryType(input.type);
     const reason = this.parseMemoryReason(input.reason, "Character memory");
 
-    const memory = await this.prisma.characterMemory.create({
-      data: {
-        characterId: input.characterId,
-        content,
-        type,
-        reason,
-      },
-      select: characterMemoryFields,
+    const memory = await this.characters.createMemory({
+      characterId: input.characterId,
+      content,
+      type,
+      reason,
     });
     await this.recordCharacterActionLog({
       characterId: input.characterId,
@@ -385,9 +294,9 @@ export class CharactersService {
 
     const memories: CharacterMemory[] = [];
     for (const item of items) {
-      const memory = await this.prisma.characterMemory.create({
-        data: { characterId: input.characterId, ...item },
-        select: characterMemoryFields,
+      const memory = await this.characters.createMemory({
+        characterId: input.characterId,
+        ...item,
       });
       await this.recordCharacterActionLog({
         characterId: input.characterId,
@@ -422,11 +331,7 @@ export class CharactersService {
     if (Object.keys(data).length === 0) {
       throw new BadRequestException("Character memory update is empty");
     }
-    const memory = await this.prisma.characterMemory.update({
-      where: { id: input.memoryId },
-      data,
-      select: characterMemoryFields,
-    });
+    const memory = await this.characters.updateMemory(input.memoryId, data);
     await this.recordCharacterActionLog({
       characterId: input.characterId,
       actionType: "MEMORY_UPDATED",
@@ -445,11 +350,10 @@ export class CharactersService {
     memoryId: string;
   }): Promise<SoftDeleteReceipt> {
     await this.assertCharacterMemory(input.characterId, input.memoryId);
-    const memory = await this.prisma.characterMemory.update({
-      where: { id: input.memoryId },
-      data: { deletedAt: new Date() },
-      select: characterMemoryFields,
-    });
+    const memory = await this.characters.softDeleteMemory(
+      input.memoryId,
+      new Date(),
+    );
     await this.recordCharacterActionLog({
       characterId: input.characterId,
       actionType: "MEMORY_DELETED",
@@ -469,23 +373,15 @@ export class CharactersService {
     if (!(await this.hasCharacter(characterId))) {
       throw new BadRequestException("Character not found");
     }
-    const personas = await this.prisma.characterPersona.findMany({
-      where: { characterId, deletedAt: null },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
-      select: characterPersonaFields,
-    });
+    const personas = await this.characters.findPersonas(characterId);
     return {
       items: personas.map((persona) => this.toCharacterPersona(persona)),
     };
   }
 
   private async nextPersonaSortOrder(characterId: string): Promise<number> {
-    const top = await this.prisma.characterPersona.findFirst({
-      where: { characterId, deletedAt: null },
-      orderBy: { sortOrder: "desc" },
-      select: { sortOrder: true },
-    });
-    return (top?.sortOrder ?? 0) + PERSONA_SORT_STEP;
+    const highest = await this.characters.highestPersonaSortOrder(characterId);
+    return highest + PERSONA_SORT_STEP;
   }
 
   async createCharacterPersona(input: {
@@ -506,14 +402,11 @@ export class CharactersService {
       input.sortOrder === undefined
         ? await this.nextPersonaSortOrder(input.characterId)
         : this.parseSortOrder(input.sortOrder, "Character persona");
-    const persona = await this.prisma.characterPersona.create({
-      data: {
-        characterId: input.characterId,
-        title,
-        content,
-        sortOrder,
-      },
-      select: characterPersonaFields,
+    const persona = await this.characters.createPersona({
+      characterId: input.characterId,
+      title,
+      content,
+      sortOrder,
     });
     await this.recordCharacterActionLog({
       characterId: input.characterId,
@@ -550,9 +443,10 @@ export class CharactersService {
     let sortOrder = await this.nextPersonaSortOrder(input.characterId);
     const personas: CharacterPersona[] = [];
     for (const item of items) {
-      const persona = await this.prisma.characterPersona.create({
-        data: { characterId: input.characterId, ...item, sortOrder },
-        select: characterPersonaFields,
+      const persona = await this.characters.createPersona({
+        characterId: input.characterId,
+        ...item,
+        sortOrder,
       });
       await this.recordCharacterActionLog({
         characterId: input.characterId,
@@ -594,11 +488,7 @@ export class CharactersService {
     if (Object.keys(data).length === 0) {
       throw new BadRequestException("Character persona update is empty");
     }
-    const persona = await this.prisma.characterPersona.update({
-      where: { id: input.personaId },
-      data,
-      select: characterPersonaFields,
-    });
+    const persona = await this.characters.updatePersona(input.personaId, data);
     await this.recordCharacterActionLog({
       characterId: input.characterId,
       actionType: "PERSONA_UPDATED",
@@ -631,11 +521,7 @@ export class CharactersService {
       );
     }
 
-    const existing = await this.prisma.characterPersona.findMany({
-      where: { characterId: input.characterId, deletedAt: null },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
-      select: characterPersonaFields,
-    });
+    const existing = await this.characters.findPersonas(input.characterId);
     const existingIds = new Set(existing.map((persona) => persona.id));
     if (
       requested.length !== existingIds.size ||
@@ -648,10 +534,8 @@ export class CharactersService {
 
     const reordered: CharacterPersona[] = [];
     for (const [index, personaId] of requested.entries()) {
-      const persona = await this.prisma.characterPersona.update({
-        where: { id: personaId },
-        data: { sortOrder: (index + 1) * PERSONA_SORT_STEP },
-        select: characterPersonaFields,
+      const persona = await this.characters.updatePersona(personaId, {
+        sortOrder: (index + 1) * PERSONA_SORT_STEP,
       });
       reordered.push(this.toCharacterPersona(persona));
     }
@@ -670,11 +554,10 @@ export class CharactersService {
     personaId: string;
   }): Promise<SoftDeleteReceipt> {
     await this.assertCharacterPersona(input.characterId, input.personaId);
-    const persona = await this.prisma.characterPersona.update({
-      where: { id: input.personaId },
-      data: { deletedAt: new Date() },
-      select: characterPersonaFields,
-    });
+    const persona = await this.characters.softDeletePersona(
+      input.personaId,
+      new Date(),
+    );
     await this.recordCharacterActionLog({
       characterId: input.characterId,
       actionType: "PERSONA_DELETED",
@@ -695,39 +578,29 @@ export class CharactersService {
     targetId: string;
     reason: string;
   }) {
-    await this.prisma.characterActionLog.create({ data: input });
+    await this.characters.recordActionLog(input);
   }
 
   private async hasCharacter(characterId: string): Promise<boolean> {
-    const character = await this.prisma.character.findUnique({
-      where: { id: characterId },
-      select: { id: true },
-    });
-    return character !== null;
+    return this.characters.exists(characterId);
   }
 
   private async assertCharacterMemory(characterId: string, memoryId: string) {
-    const memory = await this.prisma.characterMemory.findFirst({
-      where: { id: memoryId, characterId, deletedAt: null },
-      select: { id: true },
-    });
+    const memory = await this.characters.findMemory(characterId, memoryId);
     if (!memory) {
       throw new BadRequestException("Character memory not found");
     }
   }
 
   private async assertCharacterPersona(characterId: string, personaId: string) {
-    const persona = await this.prisma.characterPersona.findFirst({
-      where: { id: personaId, characterId, deletedAt: null },
-      select: { id: true },
-    });
+    const persona = await this.characters.findPersona(characterId, personaId);
     if (!persona) {
       throw new BadRequestException("Character persona not found");
     }
   }
 
   private toCharacterListItem(
-    character: PrismaCharacterListItem,
+    character: CharacterListRow,
   ): AdminCharacterListItem {
     return {
       id: character.id,
@@ -742,7 +615,7 @@ export class CharactersService {
     };
   }
 
-  private toCharacterMemory(memory: PrismaCharacterMemory): CharacterMemory {
+  private toCharacterMemory(memory: MemoryRow): CharacterMemory {
     return {
       id: memory.id,
       characterId: memory.characterId,
@@ -757,9 +630,7 @@ export class CharactersService {
     };
   }
 
-  private toCharacterPersona(
-    persona: PrismaCharacterPersona,
-  ): CharacterPersona {
+  private toCharacterPersona(persona: PersonaRow): CharacterPersona {
     return {
       id: persona.id,
       characterId: persona.characterId,
