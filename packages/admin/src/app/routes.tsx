@@ -3,6 +3,7 @@ import { AnalyticsPage } from "../features/analytics/AnalyticsPage";
 import { CharactersPage } from "../features/characters/CharactersPage";
 import { CreditsPage } from "../features/credits/CreditsPage";
 import { EventsPage } from "../features/events/EventsPage";
+import { HomePage } from "../features/home/HomePage";
 import { LlmLogsPage } from "../features/llm-logs/LlmLogsPage";
 import { LogsPage } from "../features/logs/LogsPage";
 import { MediaPage } from "../features/media/MediaPage";
@@ -35,6 +36,7 @@ export const NAV_ITEMS = [
 ] as const;
 
 const MIGRATED: Record<string, () => React.JSX.Element> = {
+  home: HomePage,
   characters: CharactersPage,
   posts: PostsPage,
   users: UsersPage,
