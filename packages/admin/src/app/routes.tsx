@@ -5,6 +5,7 @@ import { CreditsPage } from "../features/credits/CreditsPage";
 import { EventsPage } from "../features/events/EventsPage";
 import { LlmLogsPage } from "../features/llm-logs/LlmLogsPage";
 import { LogsPage } from "../features/logs/LogsPage";
+import { MediaPage } from "../features/media/MediaPage";
 import { ModerationPage } from "../features/moderation/ModerationPage";
 import { PaymentsPage } from "../features/payments/PaymentsPage";
 import { PostsPage } from "../features/posts/PostsPage";
@@ -43,6 +44,7 @@ const MIGRATED: Record<string, () => React.JSX.Element> = {
   payments: PaymentsPage,
   logs: LogsPage,
   "llm-logs": LlmLogsPage,
+  media: MediaPage,
 };
 
 export function AppRoutes() {

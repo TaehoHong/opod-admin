@@ -12,6 +12,7 @@ import {
   Title,
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
+import { previewUrl } from "../../shared/media/previewUrl";
 import { fetchLlmLog, type LlmLogMediaItem } from "./api";
 
 // provider payload는 기본 화면에 펼치지 않고 필요할 때 연다
@@ -23,18 +24,6 @@ const JSON_SECTIONS = [
   { key: "responseJson", label: "response" },
   { key: "metadataJson", label: "metadata" },
 ] as const;
-
-// 저장된 URL이 http(s)가 아니면 미리보기를 만들지 않는다.
-function previewUrl(value: string): string | null {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:"
-      ? url.href
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 export function LlmLogDetailPanel({ id }: { id: string }) {
   const log = useQuery({
