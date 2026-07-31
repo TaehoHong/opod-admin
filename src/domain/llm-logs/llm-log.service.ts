@@ -6,8 +6,8 @@ import {
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { isUUID } from "class-validator";
-import { PrismaService } from "../database/prisma.service";
 import { decodeCursor, PageInput, pageFromRows } from "../database/page";
+import { LlmLogRepository, type LlmLogStatus } from "./llm-log.repository";
 
 export const LLM_LOG_TYPE = {
   contentPlan: "admin.content.plan",
@@ -38,7 +38,7 @@ export type LlmLogHandle = {
 export class LlmLogService {
   private readonly logger = new Logger(LlmLogService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly logs: LlmLogRepository) {}
 
   async list(
     input: {
@@ -66,53 +66,21 @@ export class LlmLogService {
     if (generationJobId && !isUUID(generationJobId)) {
       throw new BadRequestException("generationJobId must be a UUID");
     }
-    const where: Prisma.LlmLogWhereInput = {
-      ...(status
-        ? { status: status as "running" | "succeeded" | "failed" }
-        : {}),
-      ...(input.type?.trim() ? { type: input.type.trim() } : {}),
-      ...(input.provider?.trim() ? { provider: input.provider.trim() } : {}),
-      ...(input.model?.trim()
-        ? { model: { contains: input.model.trim(), mode: "insensitive" } }
-        : {}),
-      ...(input.requestId?.trim() ? { requestId: input.requestId.trim() } : {}),
-      ...(generationJobId ? { generationJobId } : {}),
-      ...(from || to
-        ? {
-            createdAt: {
-              ...(from ? { gte: from } : {}),
-              ...(to ? { lte: to } : {}),
-            },
-          }
-        : {}),
-    };
-    const rows = await this.prisma.llmLog.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(cursor !== undefined ? { cursor: { id: cursor }, skip: 1 } : {}),
-      select: {
-        id: true,
-        type: true,
-        provider: true,
-        model: true,
-        status: true,
-        isStreaming: true,
-        requestId: true,
-        providerRequestId: true,
-        userId: true,
-        characterId: true,
-        generationJobId: true,
-        httpStatus: true,
-        errorType: true,
-        durationMs: true,
-        inputTokens: true,
-        outputTokens: true,
-        totalTokens: true,
-        createdAt: true,
-        completedAt: true,
-        _count: { select: { media: true } },
+    const rows = await this.logs.findManyForList({
+      filter: {
+        ...(status ? { status: status as LlmLogStatus } : {}),
+        ...(input.type?.trim() ? { type: input.type.trim() } : {}),
+        ...(input.provider?.trim() ? { provider: input.provider.trim() } : {}),
+        ...(input.model?.trim() ? { model: input.model.trim() } : {}),
+        ...(input.requestId?.trim()
+          ? { requestId: input.requestId.trim() }
+          : {}),
+        ...(generationJobId ? { generationJobId } : {}),
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
       },
+      take: input.limit + 1,
+      ...(cursor !== undefined ? { cursor } : {}),
     });
     return pageFromRows(
       rows.map((row) => ({
@@ -128,16 +96,7 @@ export class LlmLogService {
   }
 
   async get(idValue: string) {
-    const id = bigintId(idValue);
-    const log = await this.prisma.llmLog.findUnique({
-      where: { id },
-      include: {
-        media: {
-          orderBy: [{ role: "asc" }, { sortOrder: "asc" }],
-          include: { media: true },
-        },
-      },
-    });
+    const log = await this.logs.findByIdWithMedia(bigintId(idValue));
     if (!log) throw new NotFoundException("LLM log not found");
     return {
       ...log,
@@ -228,44 +187,35 @@ export class LlmLogService {
       (message) => isRecord(message) && message.role === "user",
     );
     const context = input.context;
-    const log = await this.prisma.llmLog.create({
-      data: {
-        type: input.type,
-        provider: input.provider,
-        model: input.model,
-        endpoint: String(endpoint.value),
-        isStreaming: input.isStreaming ?? false,
-        requestId: context?.requestId,
-        userId: context?.userId,
-        characterId: context?.characterId,
-        generationJobId: context?.generationJobId,
-        systemPromptJson: jsonOrNull(
-          systemPromptJson.length > 0 ? systemPromptJson : null,
-        ),
-        userPromptJson: jsonOrNull(
-          userPromptJson.length > 0 ? userPromptJson : null,
-        ),
-        requestJson: request.value as Prisma.InputJsonValue,
-        metadataJson: jsonOrUndefined(metadata.value),
-        redactedPaths,
-        ...(context?.inputMediaIds?.length
-          ? {
-              media: {
-                create: [...new Set(context.inputMediaIds)].map(
-                  (mediaId, sortOrder) => ({
-                    mediaId,
-                    role: "input" as const,
-                    sortOrder,
-                  }),
-                ),
-              },
-            }
-          : {}),
-      },
-      select: { id: true },
+    const id = await this.logs.create({
+      type: input.type,
+      provider: input.provider,
+      model: input.model,
+      endpoint: String(endpoint.value),
+      isStreaming: input.isStreaming ?? false,
+      requestId: context?.requestId,
+      userId: context?.userId,
+      characterId: context?.characterId,
+      generationJobId: context?.generationJobId,
+      systemPromptJson:
+        systemPromptJson.length > 0
+          ? (systemPromptJson as Prisma.InputJsonValue)
+          : null,
+      userPromptJson:
+        userPromptJson.length > 0
+          ? (userPromptJson as Prisma.InputJsonValue)
+          : null,
+      requestJson: request.value as Prisma.InputJsonValue,
+      ...(metadata.value == null
+        ? {}
+        : { metadataJson: metadata.value as Prisma.InputJsonValue }),
+      redactedPaths,
+      ...(context?.inputMediaIds?.length
+        ? { inputMediaIds: context.inputMediaIds }
+        : {}),
     });
     return {
-      id: log.id,
+      id,
       redactedPaths,
       startedAt: Date.now(),
     };
@@ -276,19 +226,7 @@ export class LlmLogService {
     generationJobId: string;
     providerRequestId: string;
   }): Promise<LlmLogHandle> {
-    const log = await this.prisma.llmLog.findFirst({
-      where: {
-        type: input.type,
-        generationJobId: input.generationJobId,
-        status: "running",
-        OR: [
-          { providerRequestId: input.providerRequestId },
-          { providerRequestId: null },
-        ],
-      },
-      orderBy: { id: "desc" },
-      select: { id: true, redactedPaths: true, createdAt: true },
-    });
+    const log = await this.logs.findRunning(input);
     if (!log) {
       throw new Error("running LLM log was not found for provider request");
     }
@@ -304,10 +242,7 @@ export class LlmLogService {
     providerRequestId: string,
   ): Promise<void> {
     try {
-      await this.prisma.llmLog.update({
-        where: { id: handle.id },
-        data: { providerRequestId },
-      });
+      await this.logs.finish(handle.id, { providerRequestId });
     } catch (error) {
       this.logger.error(
         `failed to record provider request id for LLM log ${handle.id}`,
@@ -327,23 +262,20 @@ export class LlmLogService {
     const response = redactLlmPayload(result.responseJson, "$.response");
     const usage = usageOf(response.value);
     try {
-      await this.prisma.llmLog.update({
-        where: { id: handle.id },
-        data: {
-          status: "succeeded",
-          responseJson: jsonOrNull(response.value),
-          redactedPaths: uniquePaths(
-            handle.redactedPaths,
-            response.redactedPaths,
-          ),
-          providerRequestId: result.providerRequestId,
-          httpStatus: result.httpStatus ?? 200,
-          durationMs: Math.max(0, Date.now() - handle.startedAt),
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          totalTokens: usage.totalTokens,
-          completedAt: new Date(),
-        },
+      await this.logs.finish(handle.id, {
+        status: "succeeded",
+        responseJson: (response.value ?? null) as Prisma.InputJsonValue | null,
+        redactedPaths: uniquePaths(
+          handle.redactedPaths,
+          response.redactedPaths,
+        ),
+        providerRequestId: result.providerRequestId,
+        httpStatus: result.httpStatus ?? 200,
+        durationMs: Math.max(0, Date.now() - handle.startedAt),
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens,
+        completedAt: new Date(),
       });
     } catch (error) {
       this.logFinishError(handle.id, error);
@@ -365,24 +297,21 @@ export class LlmLogService {
     );
     const failure = errorFields(error);
     try {
-      await this.prisma.llmLog.update({
-        where: { id: handle.id },
-        data: {
-          status: "failed",
-          responseJson: jsonOrNull(response.value),
-          redactedPaths: uniquePaths(
-            handle.redactedPaths,
-            response.redactedPaths,
-            failure.isRedacted ? ["$.errorMessage"] : [],
-          ),
-          providerRequestId:
-            result.providerRequestId ?? failure.providerRequestId,
-          httpStatus: result.httpStatus ?? failure.httpStatus,
-          errorType: failure.errorType,
-          errorMessage: failure.errorMessage,
-          durationMs: Math.max(0, Date.now() - handle.startedAt),
-          completedAt: new Date(),
-        },
+      await this.logs.finish(handle.id, {
+        status: "failed",
+        responseJson: (response.value ?? null) as Prisma.InputJsonValue | null,
+        redactedPaths: uniquePaths(
+          handle.redactedPaths,
+          response.redactedPaths,
+          failure.isRedacted ? ["$.errorMessage"] : [],
+        ),
+        providerRequestId:
+          result.providerRequestId ?? failure.providerRequestId,
+        httpStatus: result.httpStatus ?? failure.httpStatus,
+        errorType: failure.errorType,
+        errorMessage: failure.errorMessage,
+        durationMs: Math.max(0, Date.now() - handle.startedAt),
+        completedAt: new Date(),
       });
     } catch (writeError) {
       this.logFinishError(handle.id, writeError);
@@ -552,16 +481,6 @@ function numberOf(value: unknown): number | undefined {
 
 function uniquePaths(...groups: string[][]): string[] {
   return [...new Set(groups.flat())];
-}
-
-function jsonOrNull(
-  value: unknown,
-): Prisma.InputJsonValue | Prisma.JsonNullValueInput {
-  return value == null ? Prisma.JsonNull : (value as Prisma.InputJsonValue);
-}
-
-function jsonOrUndefined(value: unknown): Prisma.InputJsonValue | undefined {
-  return value == null ? undefined : (value as Prisma.InputJsonValue);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
