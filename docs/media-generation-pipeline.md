@@ -34,7 +34,8 @@ docs/api/admin-settings.md를 따른다.
 - 상태 전이는 기대 상태를 조건으로 한 원자적 갱신이어야 한다.
 - lease가 만료된 running job은 재시도 한도 안에서 queued로 돌린다.
 - provider 제출 직후 providerRequestId를 저장해 재시작 시 중복 제출과
-  이중 과금을 막는다.
+  이중 과금을 막는다. 같은 갱신에서 실제 라우트와 해결된 레퍼런스 ID를
+  `paramsJson._shot.execution`에 저장한다.
 - 자동 재시도는 같은 job의 attempt를 증가시키고, 사람의 재생성은
   originJobId로 연결된 새 job을 만든다.
 
@@ -49,6 +50,8 @@ docs/api/admin-settings.md를 따른다.
   옮기고 Media.uploadedAt을 확정해야 게시할 수 있다.
 - 한 cut의 여러 후보는 GenerationJobOutput으로 저장하며, 선택 결과만 최종
   출력으로 연결한다.
+- 빌드 대상 모델·기획 레퍼런스와 실제 provider·해결 레퍼런스가 다르면
+  검수 화면에 경고한다. 이 불일치는 생성이나 승인을 차단하지 않는다.
 
 ### 기획 / 프롬프트 빌드 분리
 
@@ -117,6 +120,8 @@ docs/api/admin-settings.md를 따른다.
 
 - 초안은 모든 cut 생성이 성공한 뒤에만 needs_review로 이동한다.
 - 일부 cut만 성공한 상태로 게시하지 않는다.
+- 기획·실행 불일치는 검수 참고 정보이며, 승인은 기존처럼 모든 cut의
+  후보가 하나씩 선택됐는지만 확인한다.
 - inactive 캐릭터는 새 초안을 만들거나 승인된 초안을 게시하지 않는다.
 - 게시 완료 후 사용한 소재와 설정을 캐릭터 메모리에 반영한다.
 

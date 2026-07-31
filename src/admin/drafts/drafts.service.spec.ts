@@ -145,6 +145,72 @@ describe("DraftsService", () => {
     });
   });
 
+  it("returns planned and actual generation trace without hiding missing references", async () => {
+    const repository = repositoryFake({
+      findDraft: jest.fn().mockResolvedValue(draftRow),
+      findDraftJobs: jest.fn().mockResolvedValue([
+        {
+          ...selectedJob,
+          provider: "fal:new-edit-model",
+          paramsJson: {
+            _shot: {
+              scene: "철길 옆에 선 뒷모습",
+              captureSetup: "벤치 위 고정 카메라와 셀프타이머",
+              characterVisible: true,
+              referenceMediaIds: ["planned-ref", "missing-ref"],
+              targetModelId: "old-edit-model",
+              execution: {
+                route: "edit",
+                referenceMediaIds: ["planned-ref"],
+              },
+            },
+          },
+        },
+      ]),
+      findMediaUrls: jest
+        .fn()
+        .mockResolvedValue([
+          { id: "planned-ref", url: "https://cdn.local/planned.png" },
+        ]),
+    });
+    const service = makeService(repository);
+
+    await expect(service.getDraft("draft-1")).resolves.toMatchObject({
+      shots: [
+        {
+          generationTrace: {
+            captureSetup: "벤치 위 고정 카메라와 셀프타이머",
+            characterVisible: true,
+            planned: {
+              route: "edit",
+              targetModelId: "old-edit-model",
+              references: [
+                {
+                  mediaId: "planned-ref",
+                  url: "https://cdn.local/planned.png",
+                  available: true,
+                },
+                { mediaId: "missing-ref", available: false },
+              ],
+            },
+            execution: {
+              route: "edit",
+              provider: "fal:new-edit-model",
+              references: [
+                {
+                  mediaId: "planned-ref",
+                  url: "https://cdn.local/planned.png",
+                  available: true,
+                },
+              ],
+            },
+            matchesPlan: false,
+          },
+        },
+      ],
+    });
+  });
+
   it("creates a manual draft with normalized operator intent", async () => {
     const repository = repositoryFake({
       createDraft: jest.fn().mockResolvedValue({
@@ -277,12 +343,24 @@ describe("DraftsService", () => {
   });
 
   it("approves a fully reviewed draft and records the decision", async () => {
+    const mismatchedJob = {
+      ...selectedJob,
+      provider: "fal:new-t2i-model",
+      paramsJson: {
+        _shot: {
+          characterVisible: false,
+          referenceMediaIds: [],
+          targetModelId: "old-t2i-model",
+          execution: { route: "t2i", referenceMediaIds: [] },
+        },
+      },
+    };
     const repository = repositoryFake({
       findDraft: jest
         .fn()
         .mockResolvedValueOnce(draftRow)
         .mockResolvedValueOnce({ ...draftRow, status: "approved" }),
-      findDraftJobs: jest.fn().mockResolvedValue([selectedJob]),
+      findDraftJobs: jest.fn().mockResolvedValue([mismatchedJob]),
     });
     const service = makeService(repository);
 

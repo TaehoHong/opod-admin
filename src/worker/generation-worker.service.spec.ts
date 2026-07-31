@@ -38,6 +38,7 @@ function claimedJob(overrides: Record<string, unknown> = {}) {
         negativePrompt: "blurry",
         referenceMedia: [
           {
+            mediaId: "reference-1",
             media: {
               url: "https://cdn.local/reference.png",
               storageKey: "pod/reference/a.png",
@@ -184,6 +185,14 @@ describe("GenerationWorkerService", () => {
       jobId: "job-1",
       providerRequestId: "req-1",
       provider: "test-provider",
+      paramsJson: {
+        _shot: {
+          execution: {
+            route: "edit",
+            referenceMediaIds: ["reference-1"],
+          },
+        },
+      },
     });
     // 레퍼런스는 업로드 확정본만, negative prompt는 프로필에서 주입
     expect(provider.submit).toHaveBeenCalledWith({
@@ -481,7 +490,7 @@ describe("GenerationWorkerService", () => {
     expect(t2i.submit).not.toHaveBeenCalled();
   });
 
-  it("fails before submission when the planned target model changed", async () => {
+  it("records and continues a submission when the planned target model changed", async () => {
     const repository = repositoryFake();
     repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
     repository.findForProcessing.mockResolvedValue(
@@ -495,18 +504,34 @@ describe("GenerationWorkerService", () => {
         },
       }),
     );
-    const t2i = providerMock([], "fal:new-t2i-model");
+    const t2i = providerMock(
+      [{ status: "completed", images: [{ url: "https://p.local/a.png" }] }],
+      "fal:new-t2i-model",
+    );
     const edit = providerMock([], "fal:new-edit-model");
     const { service } = makeService(repository, { t2i, edit });
 
     await service.tick();
 
-    expect(t2i.submit).not.toHaveBeenCalled();
+    expect(t2i.submit).toHaveBeenCalled();
     expect(edit.submit).not.toHaveBeenCalled();
-    expect(repository.markFailed).toHaveBeenCalledWith(
-      "job-1",
-      "planned target model old-t2i-model does not match resolved provider fal:new-t2i-model",
-    );
+    expect(repository.markFailed).not.toHaveBeenCalled();
+    expect(repository.recordProviderSubmission).toHaveBeenCalledWith({
+      jobId: "job-1",
+      providerRequestId: "req-1",
+      provider: "fal:new-t2i-model",
+      paramsJson: {
+        _shot: {
+          characterVisible: false,
+          referenceMediaIds: [],
+          targetModelId: "old-t2i-model",
+          execution: {
+            route: "t2i",
+            referenceMediaIds: [],
+          },
+        },
+      },
+    });
   });
 
   it("runJobNow claims a specific queued job and processes it in the background", async () => {

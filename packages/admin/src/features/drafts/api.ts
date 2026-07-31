@@ -21,6 +21,28 @@ export type DraftShotOutput = {
   filterPreset: string | null;
 };
 
+export type DraftReference = {
+  mediaId: string;
+  url?: string;
+  available: boolean;
+};
+
+export type GenerationTrace = {
+  captureSetup?: string;
+  characterVisible?: boolean;
+  planned: {
+    route?: "t2i" | "edit";
+    targetModelId?: string;
+    references: DraftReference[];
+  };
+  execution?: {
+    route: "t2i" | "edit";
+    provider?: string;
+    references: DraftReference[];
+  };
+  matchesPlan?: boolean;
+};
+
 export type DraftShot = {
   sortOrder: number;
   jobId: string;
@@ -28,6 +50,7 @@ export type DraftShot = {
   prompt: string;
   scene?: string;
   references?: { mediaId: string; url: string }[];
+  generationTrace?: GenerationTrace;
   candidateCount?: number;
   provider?: string;
   costUsd?: string;

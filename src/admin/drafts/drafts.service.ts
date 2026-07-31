@@ -50,6 +50,30 @@ type DraftShotOutput = {
   filterPreset: string | null;
 };
 
+type DraftReference = {
+  mediaId: string;
+  url?: string;
+  available: boolean;
+};
+
+type ShotRoute = "t2i" | "edit";
+
+type GenerationTrace = {
+  captureSetup?: string;
+  characterVisible?: boolean;
+  planned: {
+    route?: ShotRoute;
+    targetModelId?: string;
+    references: DraftReference[];
+  };
+  execution?: {
+    route: ShotRoute;
+    provider?: string;
+    references: DraftReference[];
+  };
+  matchesPlan?: boolean;
+};
+
 type DraftShot = {
   sortOrder: number;
   jobId: string;
@@ -59,6 +83,7 @@ type DraftShot = {
   scene?: string;
   // 기획 LLM이 이 샷에 고른 레퍼런스 (URL은 표시용으로 해석).
   references?: { mediaId: string; url: string }[];
+  generationTrace?: GenerationTrace;
   candidateCount?: number;
   provider?: string;
   costUsd?: string;
@@ -84,27 +109,152 @@ type AdminDraft = {
   updatedAt: string;
 };
 
-// paramsJson._shot — 기획이 남긴 샷 메타데이터(장면 원문, 선별 레퍼런스).
-function shotMeta(paramsJson: unknown): {
+type ShotMeta = {
+  present: boolean;
   scene?: string;
-  referenceMediaIds: string[];
-} {
+  captureSetup?: string;
+  characterVisible?: boolean;
+  referenceMediaIds?: string[];
+  targetModelId?: string;
+  execution?: {
+    route: ShotRoute;
+    referenceMediaIds: string[];
+  };
+};
+
+function stringIds(value: unknown): string[] | undefined {
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string")
+    : undefined;
+}
+
+// paramsJson._shot — 기획과 provider 제출 시점의 실행 메타데이터.
+function shotMeta(paramsJson: unknown): ShotMeta {
   if (typeof paramsJson !== "object" || paramsJson === null) {
-    return { referenceMediaIds: [] };
+    return { present: false };
   }
   const shot = (paramsJson as Record<string, unknown>)._shot;
   if (typeof shot !== "object" || shot === null) {
-    return { referenceMediaIds: [] };
+    return { present: false };
   }
   const record = shot as Record<string, unknown>;
   const scene =
     typeof record.scene === "string" && record.scene ? record.scene : undefined;
-  const ids = Array.isArray(record.referenceMediaIds)
-    ? record.referenceMediaIds.filter(
-        (id): id is string => typeof id === "string",
-      )
-    : [];
-  return { ...(scene ? { scene } : {}), referenceMediaIds: ids };
+  const captureSetup =
+    typeof record.captureSetup === "string" && record.captureSetup
+      ? record.captureSetup
+      : undefined;
+  const characterVisible =
+    typeof record.characterVisible === "boolean"
+      ? record.characterVisible
+      : undefined;
+  const referenceMediaIds = stringIds(record.referenceMediaIds);
+  const targetModelId =
+    typeof record.targetModelId === "string" && record.targetModelId
+      ? record.targetModelId
+      : undefined;
+  const executionRecord =
+    typeof record.execution === "object" && record.execution !== null
+      ? (record.execution as Record<string, unknown>)
+      : undefined;
+  const executionRoute =
+    executionRecord?.route === "t2i" || executionRecord?.route === "edit"
+      ? executionRecord.route
+      : undefined;
+  const executionIds = stringIds(executionRecord?.referenceMediaIds);
+
+  return {
+    present: true,
+    ...(scene ? { scene } : {}),
+    ...(captureSetup ? { captureSetup } : {}),
+    ...(characterVisible !== undefined ? { characterVisible } : {}),
+    ...(referenceMediaIds !== undefined ? { referenceMediaIds } : {}),
+    ...(targetModelId ? { targetModelId } : {}),
+    ...(executionRoute
+      ? {
+          execution: {
+            route: executionRoute,
+            referenceMediaIds: executionIds ?? [],
+          },
+        }
+      : {}),
+  };
+}
+
+function referencesFor(
+  mediaIds: string[],
+  urls: Map<string, string>,
+): DraftReference[] {
+  return mediaIds.map((mediaId) => {
+    const url = urls.get(mediaId);
+    return {
+      mediaId,
+      ...(url ? { url } : {}),
+      available: url !== undefined,
+    };
+  });
+}
+
+function sameIds(left: string[], right: string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((mediaId, index) => mediaId === right[index])
+  );
+}
+
+function generationTrace(
+  meta: ShotMeta,
+  provider: string | null,
+  urls: Map<string, string>,
+): GenerationTrace | undefined {
+  if (!meta.present) {
+    return undefined;
+  }
+
+  const plannedRoute =
+    meta.referenceMediaIds === undefined
+      ? undefined
+      : meta.referenceMediaIds.length > 0
+        ? "edit"
+        : "t2i";
+  const comparisons: boolean[] = [];
+  if (meta.execution) {
+    if (plannedRoute) {
+      comparisons.push(plannedRoute === meta.execution.route);
+    }
+    if (meta.referenceMediaIds) {
+      comparisons.push(
+        sameIds(meta.referenceMediaIds, meta.execution.referenceMediaIds),
+      );
+    }
+    if (meta.targetModelId && provider) {
+      comparisons.push(provider === `fal:${meta.targetModelId}`);
+    }
+  }
+
+  return {
+    ...(meta.captureSetup ? { captureSetup: meta.captureSetup } : {}),
+    ...(meta.characterVisible !== undefined
+      ? { characterVisible: meta.characterVisible }
+      : {}),
+    planned: {
+      ...(plannedRoute ? { route: plannedRoute } : {}),
+      ...(meta.targetModelId ? { targetModelId: meta.targetModelId } : {}),
+      references: referencesFor(meta.referenceMediaIds ?? [], urls),
+    },
+    ...(meta.execution
+      ? {
+          execution: {
+            route: meta.execution.route,
+            ...(provider ? { provider } : {}),
+            references: referencesFor(meta.execution.referenceMediaIds, urls),
+          },
+          ...(comparisons.length > 0
+            ? { matchesPlan: comparisons.every(Boolean) }
+            : {}),
+        }
+      : {}),
+  };
 }
 
 @Injectable()
@@ -157,7 +307,13 @@ export class DraftsService {
     const latestJobs = [...latestPerShot.values()];
     const referenceIds = [
       ...new Set(
-        latestJobs.flatMap((job) => shotMeta(job.paramsJson).referenceMediaIds),
+        latestJobs.flatMap((job) => {
+          const meta = shotMeta(job.paramsJson);
+          return [
+            ...(meta.referenceMediaIds ?? []),
+            ...(meta.execution?.referenceMediaIds ?? []),
+          ];
+        }),
       ),
     ];
     const referenceUrls = new Map(
@@ -172,12 +328,13 @@ export class DraftsService {
       .sort(([a], [b]) => a - b)
       .map(([sortOrder, job]) => {
         const meta = shotMeta(job.paramsJson);
-        const references = meta.referenceMediaIds
+        const references = (meta.referenceMediaIds ?? [])
           .filter((mediaId) => referenceUrls.has(mediaId))
           .map((mediaId) => ({
             mediaId,
             url: referenceUrls.get(mediaId) as string,
           }));
+        const trace = generationTrace(meta, job.provider, referenceUrls);
         return {
           sortOrder,
           jobId: job.id,
@@ -185,6 +342,7 @@ export class DraftsService {
           prompt: job.prompt,
           ...(meta.scene ? { scene: meta.scene } : {}),
           ...(references.length > 0 ? { references } : {}),
+          ...(trace ? { generationTrace: trace } : {}),
           ...(job.candidateCount != null
             ? { candidateCount: job.candidateCount }
             : {}),

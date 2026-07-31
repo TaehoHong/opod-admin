@@ -165,12 +165,14 @@ export class GenerationJobRepository {
     jobId: string;
     providerRequestId: string;
     provider: string;
+    paramsJson: unknown;
   }): Promise<void> {
     await this.prisma.generationJob.updateMany({
       where: { id: input.jobId, status: "running" },
       data: {
         providerRequestId: input.providerRequestId,
         provider: input.provider,
+        paramsJson: input.paramsJson as Prisma.InputJsonValue,
       },
     });
   }

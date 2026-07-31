@@ -64,6 +64,20 @@ function shotCharacterVisible(paramsJson: unknown): boolean | undefined {
     : undefined;
 }
 
+type ShotExecution = {
+  route: "t2i" | "edit";
+  referenceMediaIds: string[];
+};
+
+function withShotExecution(
+  paramsJson: unknown,
+  execution: ShotExecution,
+): Record<string, unknown> {
+  const params = isRecord(paramsJson) ? { ...paramsJson } : {};
+  const shot = isRecord(params._shot) ? { ...params._shot } : {};
+  return { ...params, _shot: { ...shot, execution } };
+}
+
 // 프로바이더가 잡 자체를 거부/실패 처리한 경우. 재시도 시 requestId를 버리고
 // 새로 제출해야 한다 (transient 오류는 requestId를 유지해 폴링을 이어받는다).
 // permanent = 입력 검증 실패(422 등) — 재시도 없이 즉시 failed 처리한다.
@@ -297,9 +311,8 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
         request.referenceImageUrls.length > 0 ? providers.edit : providers.t2i;
       const targetModelId = shotTargetModelId(job.paramsJson);
       if (targetModelId && provider.name !== `fal:${targetModelId}`) {
-        throw new ProviderJobFailedError(
-          `planned target model ${targetModelId} does not match resolved provider ${provider.name}`,
-          true,
+        this.logger.warn(
+          `Job ${job.id}: planned target model ${targetModelId} does not match resolved provider ${provider.name}`,
         );
       }
       const result = await this.generate(job, provider, request);
@@ -330,11 +343,18 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       requestId = submitted.requestId;
       job.providerRequestId = requestId;
       job.provider = provider.name;
+      const referenceMediaIds = this.requestInputMediaIds.get(request) ?? [];
+      const paramsJson = withShotExecution(job.paramsJson, {
+        route: referenceMediaIds.length > 0 ? "edit" : "t2i",
+        referenceMediaIds,
+      });
+      job.paramsJson = paramsJson;
       // 제출 직후 기록해야 크래시 후 재수용 시 이중 제출을 막는다.
       await this.jobs.recordProviderSubmission({
         jobId: job.id,
         providerRequestId: requestId,
         provider: provider.name,
+        paramsJson,
       });
     }
 

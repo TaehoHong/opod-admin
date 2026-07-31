@@ -17,7 +17,9 @@ import {
   generateShot,
   regenerateShot,
   type Draft,
+  type DraftReference,
   type DraftShot,
+  type GenerationTrace,
 } from "./api";
 import { SHOT_STATUS_COLOR, SHOT_STATUS_LABEL } from "./labels";
 import { useDraftMutation } from "./useDraftMutation";
@@ -56,7 +58,9 @@ export function ShotCard({ draft, shot }: { draft: Draft; shot: DraftShot }) {
           </Text>
         ) : null}
 
-        {shot.references?.length ? (
+        {shot.generationTrace ? (
+          <GenerationTracePanel trace={shot.generationTrace} />
+        ) : shot.references?.length ? (
           <Stack gap={4}>
             <Text size="xs" c="dimmed" tt="uppercase">
               선별 레퍼런스 {shot.references.length}장 — 기획 LLM이 장면에 맞게
@@ -75,7 +79,11 @@ export function ShotCard({ draft, shot }: { draft: Draft; shot: DraftShot }) {
               ))}
             </Group>
           </Stack>
-        ) : null}
+        ) : (
+          <Text size="xs" c="dimmed">
+            이전 버전 작업 · 생성 실행 상세 기록 없음
+          </Text>
+        )}
 
         <ShotBody draft={draft} shot={shot} />
 
@@ -98,6 +106,120 @@ export function ShotCard({ draft, shot }: { draft: Draft; shot: DraftShot }) {
         ) : null}
       </Stack>
     </Card>
+  );
+}
+
+function routeLabel(route?: "t2i" | "edit") {
+  if (route === "edit") return "레퍼런스 편집";
+  if (route === "t2i") return "텍스트 생성";
+  return "기록 없음";
+}
+
+function ReferenceList({
+  label,
+  references,
+}: {
+  label: string;
+  references: DraftReference[];
+}) {
+  return (
+    <Stack gap={4}>
+      <Text size="xs" c="dimmed">
+        {label} · {references.length}장
+      </Text>
+      {references.length > 0 ? (
+        <Group gap={6}>
+          {references.map((reference) =>
+            reference.url ? (
+              <Image
+                key={reference.mediaId}
+                src={reference.url}
+                alt={`${label} ${reference.mediaId}`}
+                w={52}
+                h={52}
+                fit="cover"
+              />
+            ) : (
+              <Stack key={reference.mediaId} gap={2}>
+                <Badge variant="light" color="gray">
+                  사용 불가
+                </Badge>
+                <Text size="xs" c="dimmed">
+                  {reference.mediaId}
+                </Text>
+              </Stack>
+            ),
+          )}
+        </Group>
+      ) : null}
+    </Stack>
+  );
+}
+
+function GenerationTracePanel({ trace }: { trace: GenerationTrace }) {
+  return (
+    <Stack gap={6}>
+      {trace.matchesPlan === false ? (
+        <Alert color="yellow" title="기획과 실제 생성 조건이 다릅니다">
+          검수 참고용 경고이며 승인 가능 여부에는 영향을 주지 않습니다.
+        </Alert>
+      ) : null}
+
+      <Group gap="md" align="flex-start" wrap="wrap">
+        <Stack gap={2}>
+          <Text size="xs" fw={600}>
+            기획
+          </Text>
+          <Text size="xs" c="dimmed">
+            라우트 · {routeLabel(trace.planned.route)}
+          </Text>
+          <Text size="xs" c="dimmed">
+            모델 · {trace.planned.targetModelId ?? "기록 없음"}
+          </Text>
+        </Stack>
+        <Stack gap={2}>
+          <Text size="xs" fw={600}>
+            실제 실행
+          </Text>
+          {trace.execution ? (
+            <>
+              <Text size="xs" c="dimmed">
+                라우트 · {routeLabel(trace.execution.route)}
+              </Text>
+              <Text size="xs" c="dimmed">
+                모델 · {trace.execution.provider ?? "기록 없음"}
+              </Text>
+            </>
+          ) : (
+            <Text size="xs" c="dimmed">
+              아직 provider에 제출되지 않았거나 이전 버전 작업입니다.
+            </Text>
+          )}
+        </Stack>
+      </Group>
+
+      {trace.captureSetup ? (
+        <Text size="xs" c="dimmed">
+          촬영 방식 · {trace.captureSetup}
+        </Text>
+      ) : null}
+      {trace.characterVisible !== undefined ? (
+        <Text size="xs" c="dimmed">
+          캐릭터 노출 · {trace.characterVisible ? "보임" : "보이지 않음"}
+        </Text>
+      ) : null}
+
+      <ReferenceList
+        label="기획 레퍼런스"
+        references={trace.planned.references}
+      />
+      {trace.execution ? (
+        <ReferenceList
+          label="실제 사용 레퍼런스"
+          references={trace.execution.references}
+        />
+      ) : null}
+    </Stack>
   );
 }
 

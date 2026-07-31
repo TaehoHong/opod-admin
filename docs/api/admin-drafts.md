@@ -71,6 +71,34 @@ Adds `shots` — the latest generation job per cut with its best-of-N candidates
       "jobId": "0190d8d1-463b-7e36-a9ef-0242ac120040",
       "status": "completed",
       "prompt": "young woman ..., 해변 역광, film photography ...",
+      "scene": "벤치 위 카메라로 셀프타이머를 설정한 뒷모습",
+      "generationTrace": {
+        "captureSetup": "벤치 위 고정 카메라와 셀프타이머",
+        "characterVisible": true,
+        "planned": {
+          "route": "edit",
+          "targetModelId": "fal-ai/nano-banana-pro/edit",
+          "references": [
+            {
+              "mediaId": "...",
+              "url": "...",
+              "available": true
+            }
+          ]
+        },
+        "execution": {
+          "route": "edit",
+          "provider": "fal:fal-ai/nano-banana-pro/edit",
+          "references": [
+            {
+              "mediaId": "...",
+              "url": "...",
+              "available": true
+            }
+          ]
+        },
+        "matchesPlan": true
+      },
       "outputs": [
         {
           "mediaId": "...",
@@ -91,6 +119,16 @@ Adds `shots` — the latest generation job per cut with its best-of-N candidates
   ]
 }
 ```
+
+`generationTrace` compares the structured shot plan with the values actually
+submitted to the image provider. Planned references remain in the response
+with `available: false` when their media record is no longer available.
+`execution` is absent before provider submission and for legacy jobs that did
+not record an execution snapshot.
+
+`matchesPlan: false` is an operator-facing warning only. It does not change
+draft approval eligibility; approval continues to require `needs_review` and
+one selected image for every cut.
 
 ## Create a draft (manual planning trigger)
 
@@ -158,8 +196,9 @@ POST /api/drafts/:id/reject   { "reason": "구도가 어색함" }
 ```
 
 Both require `needs_review` (atomic transition, HTTP 400 otherwise). Approval
-also requires one selected image for every cut. Approved drafts are published
-by the worker at `scheduledAt` (or immediately).
+also requires one selected image for every cut. A generation plan/execution
+mismatch is shown for review but does not block approval. Approved drafts are
+published by the worker at `scheduledAt` (or immediately).
 
 ## Regenerate a shot
 
