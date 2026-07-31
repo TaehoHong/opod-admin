@@ -11,17 +11,13 @@
 
 - 이 계획 이전 상태는 커밋 `737495a`(project-init)다. 이후 이 계획으로
   18개 커밋이 쌓였다.
-- **병행 세션 주의**: 게시물 생성 품질 작업(`docs/media-generation-quality-improvements.md`)은
-  다른 세션이 소유한다. 아래 **서버 파일**은 건드리지 않는다 —
-  `prompts/*`, `src/worker/*`, `src/admin/drafts/drafts.service.ts`,
-  `src/admin/generation/generation.service.ts`, `src/admin/admin.service.ts`,
-  `src/characters/visual-profile.service.ts`, `src/admin/admin.module.ts`.
-  `packages/admin/main.js`(legacy)도 그 세션이 손대지만, React 이관은 새
-  파일만 추가하므로 충돌하지 않는다. 다만 그 세션이 서버 응답 형태를 바꾸면
-  `src/features/drafts|generation/api.ts`의 타입을 맞춰야 한다.
-- **알려진 실패 1건**: `test/generation.e2e-spec.ts:337`이 400을 받는다.
-  원인은 위 병행 세션의 `assertVisibleCharacterHasReference`이며 이 계획의
-  책임이 아니다. 나머지 E2E 3개는 통과한다.
+- **병행 세션 제약은 해소됐다** (2026-07-31 확인). 게시물 생성 품질 작업
+  (`docs/media-generation-quality-improvements.md`)을 진행하던 세션은
+  종료됐고 결과물은 커밋돼 있다(`content-planner.ts`의
+  `assertVisibleCharacterHasReference` 등). 작업트리도 깨끗하다. 이전에
+  "건드리지 말 것"으로 묶어뒀던 `prompts/*`, `src/worker/*`,
+  `admin.service.ts`, `drafts.service.ts`, `generation.service.ts`,
+  `visual-profile.service.ts`, `packages/admin/main.js`는 모두 착수 가능하다.
 
 ## 완료
 
@@ -69,26 +65,38 @@ React 이관에서 지켜야 했던 것 두 가지 (반복하지 않도록 기�
   조용히 키를 지울 수 있는 부분)
 - Verification: `npm run admin:check`, `npm run build`, 수동 로그인 확인
 
-### [ ] 2. repository 분리 (지금 가능한 것)
+### [ ] 2. E2E 실패 1건 수정
 
-- `src/characters/characters.service.ts` (Prisma 호출 26곳)
-- `src/domain/llm-logs/llm-log.service.ts` (8곳)
-- 위 둘은 병행 세션 소유가 아니라 지금 착수 가능하다
+- `test/generation.e2e-spec.ts:337` — 레퍼런스 없는 캐릭터로 이미지 draft를
+  만들면 201을 기대하는데 400이 온다.
+- 원인은 버그가 아니라 의도된 정책이다. `generation.service.ts:273`이
+  `assertVisibleCharacterHasReference`로 "인물이 보이는 샷은 신원 레퍼런스가
+  있어야 한다"를 강제한다(`content-planner.ts:44`). 픽스처가 그 정책보다 먼저
+  작성돼 낡았다.
+- 고칠 방향: 테스트 캐릭터에 비주얼 프로필 레퍼런스를 하나 붙이거나,
+  `characterVisible: false` 경로로 케이스를 나눈다. 정책 자체를 완화하지
+  않는다 — 그러면 개선 작업이 되돌아간다.
+- Verification: `npm run test:e2e` (Docker 필요)
+
+### [ ] 3. repository 분리
+
+- 지금 전부 착수 가능하다 (병행 세션 제약 해소).
+- 규모 순: `admin.service.ts`(Prisma 호출 54곳),
+  `draft-worker.service.ts`(32), `characters.service.ts`(26),
+  `drafts.service.ts`(23), `generation.service.ts`(18),
+  `generation-worker.service.ts`(14), `visual-profile.service.ts`(9),
+  `llm-log.service.ts`(8)
+- 착수 순서는 작은 것부터를 권한다 — `llm-log.service.ts` →
+  `characters.service.ts` → 나머지. 큰 것을 먼저 하면 리뷰 단위가 커진다.
 - 패턴: `src/health/`, `src/admin/auth/admin.repository.ts` 참고. spec은
   Prisma mock 대신 repository fake로 바꾼다
-- Verification: 관련 spec, `npm test`
-
-### [ ] 3. repository 분리 (병행 세션 종료 후)
-
-- `admin.service.ts`(54곳), `draft-worker.service.ts`(32),
-  `drafts.service.ts`(23), `generation.service.ts`(18),
-  `generation-worker.service.ts`(14), `visual-profile.service.ts`(9)
 - 함께 처리: queue claim/lock의 Raw SQL을 repository 안으로 옮긴다
   (`docs/02-development-rules.md:90`). 현재 tagged template이라 안전 규칙은
   지키고 배치만 어긋난다
 - 함께 처리: worker/provider 함수의 `env` 파라미터(기본값 `process.env`)를
   `AppConfigService` 주입으로 교체. 단 `GenerationSettingsService`는 DB 설정이
   env보다 우선하므로 런타임 재해석을 유지해야 한다
+- Verification: 관련 spec, `npm test`
 
 ### [ ] 4. 제품 기능 (요구사항 확정 필요)
 
@@ -116,5 +124,6 @@ React 이관에서 지켜야 했던 것 두 가지 (반복하지 않도록 기�
 - Unit tests: `npm test`
 - Admin UI: `npm run admin:check` (legacy node:test + tsc + vitest)
 - Admin UI build: `npm run admin:build`
-- Integration/E2E: `npm run test:e2e` (Docker 필요, 위 알려진 실패 1건 제외)
+- Integration/E2E: `npm run test:e2e` (Docker 필요. 체크리스트 2번을 끝내기
+  전에는 `generation.e2e-spec.ts` 1건이 실패한다)
 - Build: `npm run build`
