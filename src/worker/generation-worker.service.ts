@@ -4,7 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
-import { PrismaService } from "../domain/database/prisma.service";
+import { GenerationJobRepository } from "./generation-job.repository";
 import {
   GeneratedMediaStore,
   ReferenceUrlSigner,
@@ -164,7 +164,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
   >();
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly jobs: GenerationJobRepository,
     // 잡 처리 시마다 재해석한다 — admin 설정(UI)에서 키/모델을 바꾸면
     // 프로세스 재시작 없이 다음 잡부터 반영된다.
     private readonly resolveProviders: () => Promise<ImageGenerationProviders>,
@@ -232,15 +232,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
 
   // 특정 queued 이미지 잡을 조건부 전이로 claim한다. queued가 아니면 null.
   private async claimSpecificJob(jobId: string): Promise<string | undefined> {
-    const claimed = await this.prisma.generationJob.updateMany({
-      where: { id: jobId, status: "queued", mediaType: "image" },
-      data: {
-        status: "running",
-        leaseExpiresAt: new Date(Date.now() + this.config.leaseSeconds * 1000),
-        attemptCount: { increment: 1 },
-      },
-    });
-    return claimed.count > 0 ? jobId : undefined;
+    return this.jobs.claimQueuedImageJob(jobId, this.config.leaseSeconds);
   }
 
   private scheduleNext(): void {
@@ -281,33 +273,21 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
   // 소진했으면 failed 처리한다. 배포/크래시로 중단된 잡의 유일한 복구 경로.
   private async sweepExpiredLeases(): Promise<void> {
     const now = new Date();
-    const requeued = await this.prisma.generationJob.updateMany({
-      where: {
-        status: "running",
-        leaseExpiresAt: { lt: now },
-        attemptCount: { lt: this.config.maxAttempts },
-      },
-      data: { status: "queued", leaseExpiresAt: null },
-    });
-    if (requeued.count > 0) {
-      this.logger.warn(`Requeued ${requeued.count} expired-lease job(s)`);
+    const requeued = await this.jobs.requeueExpiredLeases(
+      now,
+      this.config.maxAttempts,
+    );
+    if (requeued > 0) {
+      this.logger.warn(`Requeued ${requeued} expired-lease job(s)`);
     }
 
-    const exhausted = await this.prisma.generationJob.findMany({
-      where: {
-        status: "running",
-        leaseExpiresAt: { lt: now },
-        attemptCount: { gte: this.config.maxAttempts },
-      },
-      select: { id: true, characterId: true, attemptCount: true },
-    });
+    const exhausted = await this.jobs.findExhaustedLeases(
+      now,
+      this.config.maxAttempts,
+    );
     for (const job of exhausted) {
       const message = `lease expired after ${job.attemptCount} attempt(s)`;
-      const transitioned = await this.prisma.generationJob.updateMany({
-        where: { id: job.id, status: "running" },
-        data: { status: "failed", errorMessage: message, leaseExpiresAt: null },
-      });
-      if (transitioned.count > 0) {
+      if (await this.jobs.markFailed(job.id, message)) {
         await this.recordActionLog(job.characterId, job.id, {
           actionType: "GENERATION_JOB_FAILED",
           reason: message,
@@ -324,14 +304,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     if (this.config.dailyBudgetUsd === undefined) {
       return true;
     }
-    const aggregate = await this.prisma.generationJob.aggregate({
-      _sum: { costUsd: true },
-      where: {
-        updatedAt: { gte: startOfKstDay() },
-        costUsd: { not: null },
-      },
-    });
-    const spent = Number(aggregate._sum.costUsd ?? 0);
+    const spent = await this.jobs.sumCostSince(startOfKstDay());
     const within =
       spent + this.config.jobCostEstimateUsd <= this.config.dailyBudgetUsd;
     if (!within) {
@@ -345,46 +318,11 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
   // FOR UPDATE SKIP LOCKED으로 queued 이미지 잡 하나를 원자적으로 집는다.
   // 여러 워커 인스턴스가 떠도 같은 잡을 중복 처리하지 않는다.
   private async claimNextJob(): Promise<string | undefined> {
-    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
-      UPDATE opod.generation_jobs
-      SET status = 'running',
-          lease_expires_at = now() + make_interval(secs => ${this.config.leaseSeconds}),
-          attempt_count = attempt_count + 1,
-          updated_at = now()
-      WHERE id = (
-        SELECT id FROM opod.generation_jobs
-        WHERE status = 'queued' AND media_type = 'image'
-        ORDER BY created_at, id
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-      )
-      RETURNING id
-    `;
-    return rows[0]?.id;
+    return this.jobs.claimNextQueuedImageJob(this.config.leaseSeconds);
   }
 
   private async processJob(jobId: string): Promise<void> {
-    const job = (await this.prisma.generationJob.findUnique({
-      where: { id: jobId },
-      include: {
-        character: {
-          include: {
-            visualProfile: {
-              include: {
-                referenceMedia: {
-                  orderBy: { sortOrder: "asc" },
-                  include: {
-                    media: {
-                      select: { url: true, storageKey: true, uploadedAt: true },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    })) as ClaimedJob | null;
+    const job = (await this.jobs.findForProcessing(jobId)) as ClaimedJob | null;
     if (!job || job.status !== "running") {
       return;
     }
@@ -432,9 +370,10 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       job.providerRequestId = requestId;
       job.provider = provider.name;
       // 제출 직후 기록해야 크래시 후 재수용 시 이중 제출을 막는다.
-      await this.prisma.generationJob.updateMany({
-        where: { id: job.id, status: "running" },
-        data: { providerRequestId: requestId, provider: provider.name },
+      await this.jobs.recordProviderSubmission({
+        jobId: job.id,
+        providerRequestId: requestId,
+        provider: provider.name,
       });
     }
 
@@ -566,74 +505,12 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     }
     const costUsd = result.costUsd ?? this.config.jobCostEstimateUsd;
 
-    await this.prisma.$transaction(async (tx) => {
-      const mediaIds: string[] = [];
-      for (const file of stored) {
-        const media = await tx.media.create({
-          data: {
-            mediaType: "image",
-            url: file.url,
-            storageKey: file.storageKey,
-            contentType: file.contentType,
-            byteSize: file.byteSize,
-            width: file.image.width,
-            height: file.image.height,
-            isAiGenerated: true,
-            uploadedAt: new Date(),
-          },
-          select: { id: true },
-        });
-        mediaIds.push(media.id);
-      }
-      const transitioned = await tx.generationJob.updateMany({
-        where: { id: job.id, status: "running" },
-        data: {
-          status: "completed",
-          outputMediaId: null,
-          costUsd,
-          leaseExpiresAt: null,
-          errorMessage: null,
-        },
-      });
-      if (transitioned.count === 0) {
-        throw new Error("job left the running state during persistence");
-      }
-      await tx.generationJobOutput.createMany({
-        data: mediaIds.map((mediaId, index) => ({
-          jobId: job.id,
-          mediaId,
-          candidateIndex: index,
-          selected: false,
-        })),
-      });
-      const llmLog = await tx.llmLog.findFirst({
-        where: {
-          type: LLM_LOG_TYPE.imageGenerate,
-          generationJobId: job.id,
-        },
-        orderBy: { id: "desc" },
-        select: { id: true },
-      });
-      if (llmLog) {
-        await tx.llmLogMedia.createMany({
-          data: mediaIds.map((mediaId, sortOrder) => ({
-            llmLogId: llmLog.id,
-            mediaId,
-            role: "output",
-            sortOrder,
-          })),
-          skipDuplicates: true,
-        });
-      }
-      await tx.characterActionLog.create({
-        data: {
-          characterId: job.characterId,
-          actionType: "GENERATION_JOB_COMPLETED",
-          targetTable: "generation_jobs",
-          targetId: job.id,
-          reason: `generation worker completed job via ${providerName}`,
-        },
-      });
+    await this.jobs.persistSuccess({
+      jobId: job.id,
+      characterId: job.characterId,
+      files: stored,
+      costUsd,
+      providerName,
     });
   }
 
@@ -661,11 +538,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
 
     if (permanent || job.attemptCount >= this.config.maxAttempts) {
       await this.failRunningLlmLog(job, error);
-      const transitioned = await this.prisma.generationJob.updateMany({
-        where: { id: job.id, status: "running" },
-        data: { status: "failed", errorMessage: message, leaseExpiresAt: null },
-      });
-      if (transitioned.count > 0) {
+      if (await this.jobs.markFailed(job.id, message)) {
         await this.recordActionLog(job.characterId, job.id, {
           actionType: "GENERATION_JOB_FAILED",
           reason: message,
@@ -674,18 +547,12 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    await this.prisma.generationJob.updateMany({
-      where: { id: job.id, status: "running" },
-      data: {
-        status: "queued",
-        leaseExpiresAt: null,
-        errorMessage: message,
-        // 프로바이더가 잡을 거부한 경우에만 requestId를 버리고 재제출한다.
-        // transient 오류는 requestId를 유지해 다음 시도가 폴링을 이어받는다.
-        ...(error instanceof ProviderJobFailedError
-          ? { providerRequestId: null }
-          : {}),
-      },
+    await this.jobs.requeueForRetry({
+      jobId: job.id,
+      message,
+      // 프로바이더가 잡을 거부한 경우에만 requestId를 버리고 재제출한다.
+      // transient 오류는 requestId를 유지해 다음 시도가 폴링을 이어받는다.
+      clearProviderRequestId: error instanceof ProviderJobFailedError,
     });
   }
 
@@ -715,12 +582,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async extendLease(jobId: string): Promise<void> {
-    await this.prisma.generationJob.updateMany({
-      where: { id: jobId, status: "running" },
-      data: {
-        leaseExpiresAt: new Date(Date.now() + this.config.leaseSeconds * 1000),
-      },
-    });
+    await this.jobs.extendLease(jobId, this.config.leaseSeconds);
   }
 
   private async recordActionLog(
@@ -729,14 +591,11 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     input: { actionType: string; reason: string },
   ): Promise<void> {
     try {
-      await this.prisma.characterActionLog.create({
-        data: {
-          characterId,
-          actionType: input.actionType,
-          targetTable: "generation_jobs",
-          targetId: jobId,
-          reason: input.reason,
-        },
+      await this.jobs.recordActionLog({
+        characterId,
+        jobId,
+        actionType: input.actionType,
+        reason: input.reason,
       });
     } catch (error) {
       this.logger.error(`Failed to record action log: ${errorMessage(error)}`);

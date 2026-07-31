@@ -59,29 +59,41 @@ function claimedJob(overrides: Record<string, unknown> = {}) {
   };
 }
 
-type PrismaMock = {
-  generationJob: {
-    updateMany: jest.Mock;
-    findMany: jest.Mock;
-    findUnique: jest.Mock;
-    aggregate: jest.Mock;
-  };
-  characterActionLog: { create: jest.Mock };
-  $queryRaw: jest.Mock;
-  $transaction: jest.Mock;
+// Prisma를 흉내내지 않고 repository를 대신 세운다
+// (docs/02-development-rules.md "Module and Repository Rules"). 큐 전이의
+// 원자성 자체는 repository의 조건부 갱신이 책임지므로, 여기서는 워커가 어떤
+// 전이를 어떤 순서로 요구하는지만 본다.
+type RepositoryFake = {
+  claimNextQueuedImageJob: jest.Mock;
+  claimQueuedImageJob: jest.Mock;
+  requeueExpiredLeases: jest.Mock;
+  findExhaustedLeases: jest.Mock;
+  markFailed: jest.Mock;
+  requeueForRetry: jest.Mock;
+  sumCostSince: jest.Mock;
+  findForProcessing: jest.Mock;
+  recordProviderSubmission: jest.Mock;
+  extendLease: jest.Mock;
+  persistSuccess: jest.Mock;
+  recordActionLog: jest.Mock;
 };
 
-function prismaMock(): PrismaMock {
+function repositoryFake(): RepositoryFake {
   return {
-    generationJob: {
-      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      findMany: jest.fn().mockResolvedValue([]),
-      findUnique: jest.fn(),
-      aggregate: jest.fn().mockResolvedValue({ _sum: { costUsd: null } }),
-    },
-    characterActionLog: { create: jest.fn().mockResolvedValue({}) },
-    $queryRaw: jest.fn().mockResolvedValue([]),
-    $transaction: jest.fn(),
+    claimNextQueuedImageJob: jest.fn().mockResolvedValue(undefined),
+    claimQueuedImageJob: jest
+      .fn()
+      .mockImplementation((jobId: string) => Promise.resolve(jobId)),
+    requeueExpiredLeases: jest.fn().mockResolvedValue(0),
+    findExhaustedLeases: jest.fn().mockResolvedValue([]),
+    markFailed: jest.fn().mockResolvedValue(true),
+    requeueForRetry: jest.fn().mockResolvedValue(undefined),
+    sumCostSince: jest.fn().mockResolvedValue(0),
+    findForProcessing: jest.fn(),
+    recordProviderSubmission: jest.fn().mockResolvedValue(undefined),
+    extendLease: jest.fn().mockResolvedValue(undefined),
+    persistSuccess: jest.fn().mockResolvedValue(undefined),
+    recordActionLog: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -113,7 +125,7 @@ function bothProviders(provider: ImageGenerationProvider) {
 }
 
 function makeService(
-  prisma: PrismaMock,
+  repository: RepositoryFake,
   providers: ImageGenerationProvider | ImageGenerationProviders,
   config: Partial<WorkerConfig> = {},
   store = jest.fn().mockResolvedValue({
@@ -128,7 +140,7 @@ function makeService(
       ? providers
       : bothProviders(providers as ImageGenerationProvider);
   const service = new GenerationWorkerService(
-    prisma as never,
+    repository as never,
     // 프로덕션에서는 잡마다 DB 설정을 재해석하는 resolver가 들어간다.
     () => Promise.resolve(pair),
     store,
@@ -138,23 +150,6 @@ function makeService(
     signReferenceUrl,
   );
   return { service, store, downloadBytes };
-}
-
-// persistSuccess 경로용 트랜잭션 목.
-function mockSuccessTransaction(prisma: PrismaMock) {
-  prisma.$transaction.mockImplementation(
-    async (callback: (tx: unknown) => Promise<unknown>) =>
-      callback({
-        media: { create: jest.fn().mockResolvedValue({ id: "media-a" }) },
-        generationJob: {
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        generationJobOutput: { createMany: jest.fn() },
-        characterActionLog: { create: jest.fn() },
-        llmLog: { findFirst: jest.fn().mockResolvedValue(null) },
-        llmLogMedia: { createMany: jest.fn() },
-      }),
-  );
 }
 
 describe("workerConfigFromEnv", () => {
@@ -177,9 +172,9 @@ describe("workerConfigFromEnv", () => {
 
 describe("GenerationWorkerService", () => {
   it("processes a claimed job end to end", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(claimedJob());
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(claimedJob());
     const provider = providerMock([
       {
         status: "completed",
@@ -199,33 +194,15 @@ describe("GenerationWorkerService", () => {
         ],
       },
     ]);
-    const txMediaCreate = jest
-      .fn()
-      .mockResolvedValueOnce({ id: "media-a" })
-      .mockResolvedValueOnce({ id: "media-b" });
-    const txJobUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const txOutputsCreateMany = jest.fn().mockResolvedValue({ count: 2 });
-    const txActionLogCreate = jest.fn().mockResolvedValue({});
-    const txLlmLogMediaCreateMany = jest.fn().mockResolvedValue({ count: 2 });
-    prisma.$transaction.mockImplementation(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          media: { create: txMediaCreate },
-          generationJob: { updateMany: txJobUpdateMany },
-          generationJobOutput: { createMany: txOutputsCreateMany },
-          characterActionLog: { create: txActionLogCreate },
-          llmLog: { findFirst: jest.fn().mockResolvedValue({ id: 7n }) },
-          llmLogMedia: { createMany: txLlmLogMediaCreateMany },
-        }),
-    );
-    const { service, downloadBytes } = makeService(prisma, provider);
+    const { service, downloadBytes } = makeService(repository, provider);
 
     await service.tick();
 
     // 제출 직후 providerRequestId 기록 (이중 제출 방지)
-    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "running" },
-      data: { providerRequestId: "req-1", provider: "test-provider" },
+    expect(repository.recordProviderSubmission).toHaveBeenCalledWith({
+      jobId: "job-1",
+      providerRequestId: "req-1",
+      provider: "test-provider",
     });
     // 레퍼런스는 업로드 확정본만, negative prompt는 프로필에서 주입
     expect(provider.submit).toHaveBeenCalledWith({
@@ -236,51 +213,31 @@ describe("GenerationWorkerService", () => {
       extraParams: undefined,
     });
     expect(downloadBytes).toHaveBeenCalledTimes(2);
-    // 생성 미디어는 uploadedAt 확정 + isAiGenerated
-    expect(txMediaCreate).toHaveBeenCalledWith(
+    // 후보 두 장을 저장 비용 추정치와 함께 넘긴다.
+    expect(repository.persistSuccess).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          isAiGenerated: true,
-          uploadedAt: expect.any(Date),
-          storageKey: "generated/image/a.png",
-        }),
+        jobId: "job-1",
+        characterId: "ai-1",
+        costUsd: 0.2,
+        providerName: "test-provider",
+        files: expect.arrayContaining([
+          expect.objectContaining({ storageKey: "generated/image/a.png" }),
+        ]),
       }),
     );
-    expect(txJobUpdateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "running" },
-      data: expect.objectContaining({
-        status: "completed",
-        outputMediaId: null,
-        costUsd: 0.2,
-      }),
-    });
-    expect(txOutputsCreateMany).toHaveBeenCalledWith({
-      data: expect.arrayContaining([
-        expect.objectContaining({ candidateIndex: 0, selected: false }),
-        expect.objectContaining({ candidateIndex: 1, selected: false }),
-      ]),
-    });
-    expect(txLlmLogMediaCreateMany).toHaveBeenCalledWith({
-      data: [
-        { llmLogId: 7n, mediaId: "media-a", role: "output", sortOrder: 0 },
-        { llmLogId: 7n, mediaId: "media-b", role: "output", sortOrder: 1 },
-      ],
-      skipDuplicates: true,
-    });
-    expect(txActionLogCreate).toHaveBeenCalled();
+    expect(repository.persistSuccess.mock.calls[0][0].files).toHaveLength(2);
   });
 
   it("uses the configured candidate count for legacy jobs", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({ candidateCount: null }),
     );
-    mockSuccessTransaction(prisma);
     const provider = providerMock([
       { status: "completed", images: [{ url: "https://p.local/a.png" }] },
     ]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await service.tick();
 
@@ -290,9 +247,9 @@ describe("GenerationWorkerService", () => {
   });
 
   it("resumes polling with a stored provider request id instead of resubmitting", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({ provider: "test-provider", providerRequestId: "req-old" }),
     );
     const provider = providerMock([
@@ -301,18 +258,7 @@ describe("GenerationWorkerService", () => {
         images: [{ url: "https://provider.local/a.png" }],
       },
     ]);
-    prisma.$transaction.mockImplementation(
-      async (callback: (tx: unknown) => Promise<unknown>) =>
-        callback({
-          media: { create: jest.fn().mockResolvedValue({ id: "media-a" }) },
-          generationJob: {
-            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-          },
-          generationJobOutput: { createMany: jest.fn() },
-          characterActionLog: { create: jest.fn() },
-        }),
-    );
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await service.tick();
 
@@ -321,155 +267,132 @@ describe("GenerationWorkerService", () => {
   });
 
   it("requeues a transient failure keeping the provider request id", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({ attemptCount: 1 }),
     );
     const provider = providerMock([]);
     provider.poll.mockRejectedValue(new Error("network flake"));
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await service.tick();
 
-    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "running" },
-      data: {
-        status: "queued",
-        leaseExpiresAt: null,
-        errorMessage: "network flake",
-      },
+    expect(repository.requeueForRetry).toHaveBeenCalledWith({
+      jobId: "job-1",
+      message: "network flake",
+      clearProviderRequestId: false,
     });
   });
 
   it("drops the provider request id when the provider rejected the job", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({ attemptCount: 1 }),
     );
     const provider = providerMock([
       { status: "failed", errorMessage: "nsfw rejected" },
     ]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await service.tick();
 
-    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "running" },
-      data: {
-        status: "queued",
-        leaseExpiresAt: null,
-        errorMessage: "nsfw rejected",
-        providerRequestId: null,
-      },
+    expect(repository.requeueForRetry).toHaveBeenCalledWith({
+      jobId: "job-1",
+      message: "nsfw rejected",
+      clearProviderRequestId: true,
     });
   });
 
   it("fails the job with an action log once attempts are exhausted", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({ attemptCount: 3 }),
     );
     const provider = providerMock([
       { status: "failed", errorMessage: "nsfw rejected" },
     ]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await service.tick();
 
-    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "running" },
-      data: {
-        status: "failed",
-        errorMessage: "nsfw rejected",
-        leaseExpiresAt: null,
-      },
-    });
-    expect(prisma.characterActionLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(repository.markFailed).toHaveBeenCalledWith(
+      "job-1",
+      "nsfw rejected",
+    );
+    expect(repository.recordActionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
         actionType: "GENERATION_JOB_FAILED",
-        targetId: "job-1",
+        jobId: "job-1",
       }),
-    });
+    );
   });
 
   it("sweeps expired leases before claiming", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.updateMany.mockResolvedValue({ count: 2 });
-    prisma.generationJob.findMany.mockResolvedValue([
+    const repository = repositoryFake();
+    repository.requeueExpiredLeases.mockResolvedValue(2);
+    repository.findExhaustedLeases.mockResolvedValue([
       { id: "job-9", characterId: "ai-1", attemptCount: 3 },
     ]);
     const provider = providerMock([]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await service.tick();
 
-    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
-      where: {
-        status: "running",
-        leaseExpiresAt: { lt: expect.any(Date) },
-        attemptCount: { lt: 3 },
-      },
-      data: { status: "queued", leaseExpiresAt: null },
-    });
-    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
-      where: { id: "job-9", status: "running" },
-      data: {
-        status: "failed",
-        errorMessage: "lease expired after 3 attempt(s)",
-        leaseExpiresAt: null,
-      },
-    });
+    expect(repository.requeueExpiredLeases).toHaveBeenCalledWith(
+      expect.any(Date),
+      3,
+    );
+    expect(repository.markFailed).toHaveBeenCalledWith(
+      "job-9",
+      "lease expired after 3 attempt(s)",
+    );
   });
 
   it("pauses claiming when the daily budget is reached", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.aggregate.mockResolvedValue({
-      _sum: { costUsd: 9.9 },
-    });
+    const repository = repositoryFake();
+    repository.sumCostSince.mockResolvedValue(9.9);
     const provider = providerMock([]);
-    const { service } = makeService(prisma, provider, {
+    const { service } = makeService(repository, provider, {
       dailyBudgetUsd: 10,
       jobCostEstimateUsd: 0.2,
     });
 
     await service.tick();
 
-    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(repository.claimNextQueuedImageJob).not.toHaveBeenCalled();
   });
 
   it("claims within the daily budget", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.aggregate.mockResolvedValue({
-      _sum: { costUsd: 5 },
-    });
+    const repository = repositoryFake();
+    repository.sumCostSince.mockResolvedValue(5);
     const provider = providerMock([]);
-    const { service } = makeService(prisma, provider, {
+    const { service } = makeService(repository, provider, {
       dailyBudgetUsd: 10,
       jobCostEstimateUsd: 0.2,
     });
 
     await service.tick();
 
-    expect(prisma.$queryRaw).toHaveBeenCalled();
+    expect(repository.claimNextQueuedImageJob).toHaveBeenCalled();
   });
 
   it("opens the circuit breaker after consecutive failures", async () => {
-    const prisma = prismaMock();
+    const repository = repositoryFake();
     const provider = providerMock([]);
     provider.poll.mockRejectedValue(new Error("provider down"));
-    const { service } = makeService(prisma, provider, {
+    const { service } = makeService(repository, provider, {
       circuitBreakerThreshold: 2,
       jobsPerTick: 10,
     });
 
-    prisma.$queryRaw
-      .mockResolvedValueOnce([{ id: "job-1" }])
-      .mockResolvedValueOnce([{ id: "job-2" }])
-      .mockResolvedValue([{ id: "job-3" }]);
-    prisma.generationJob.findUnique
+    repository.claimNextQueuedImageJob
+      .mockResolvedValueOnce("job-1")
+      .mockResolvedValueOnce("job-2")
+      .mockResolvedValue("job-3");
+    repository.findForProcessing
       .mockResolvedValueOnce(claimedJob({ id: "job-1" }))
       .mockResolvedValueOnce(claimedJob({ id: "job-2" }))
       .mockResolvedValue(claimedJob({ id: "job-3" }));
@@ -477,50 +400,47 @@ describe("GenerationWorkerService", () => {
     await service.tick();
 
     // 임계치(2) 도달 후 서킷이 열려 세 번째 claim은 일어나지 않는다.
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(repository.claimNextQueuedImageJob).toHaveBeenCalledTimes(2);
     expect(provider.poll).toHaveBeenCalledTimes(2);
   });
 
   it("does not process video jobs (claim query filters image only)", async () => {
-    const prisma = prismaMock();
+    const repository = repositoryFake();
     const provider = providerMock([]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await service.tick();
 
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
-    expect(prisma.generationJob.findUnique).not.toHaveBeenCalled();
+    expect(repository.claimNextQueuedImageJob).toHaveBeenCalledTimes(1);
+    expect(repository.findForProcessing).not.toHaveBeenCalled();
   });
 
   it("times out provider polling against the deadline", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({ attemptCount: 3 }),
     );
     const provider = providerMock([]);
     provider.poll.mockResolvedValue({ status: "pending" });
-    const { service } = makeService(prisma, provider, {
+    const { service } = makeService(repository, provider, {
       providerTimeoutMs: 0,
     });
 
     await service.tick();
 
-    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "running" },
-      data: expect.objectContaining({
-        status: "failed",
-        errorMessage: expect.stringContaining("timed out"),
-      }),
-    });
+    expect(repository.markFailed).toHaveBeenCalledWith(
+      "job-1",
+      expect.stringContaining("timed out"),
+    );
     // 데드라인 초과 시 시작 전 요청은 과금 전에 취소를 시도한다 (베스트에포트).
     expect(provider.cancel).toHaveBeenCalledWith("req-1");
   });
 
   it("fails an explicit character-visible shot without usable references before submission", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({
         paramsJson: {
           _shot: {
@@ -547,34 +467,28 @@ describe("GenerationWorkerService", () => {
     );
     const t2i = providerMock([], "fal:t2i-model");
     const edit = providerMock([], "fal:edit-model");
-    const { service } = makeService(prisma, { t2i, edit });
+    const { service } = makeService(repository, { t2i, edit });
 
     await service.tick();
 
     expect(t2i.submit).not.toHaveBeenCalled();
     expect(edit.submit).not.toHaveBeenCalled();
-    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "running" },
-      data: {
-        status: "failed",
-        errorMessage:
-          "shot job-1 shows the character but has no usable identity reference",
-        leaseExpiresAt: null,
-      },
-    });
+    expect(repository.markFailed).toHaveBeenCalledWith(
+      "job-1",
+      "shot job-1 shows the character but has no usable identity reference",
+    );
   });
 
   it("routes jobs with confirmed references to the edit provider", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(claimedJob());
-    mockSuccessTransaction(prisma);
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(claimedJob());
     const t2i = providerMock([], "fal:t2i-model");
     const edit = providerMock(
       [{ status: "completed", images: [{ url: "https://p.local/a.png" }] }],
       "fal:edit-model",
     );
-    const { service } = makeService(prisma, { t2i, edit });
+    const { service } = makeService(repository, { t2i, edit });
 
     await service.tick();
 
@@ -587,9 +501,9 @@ describe("GenerationWorkerService", () => {
   });
 
   it("fails before submission when the planned target model changed", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({
         paramsJson: {
           _shot: {
@@ -602,82 +516,66 @@ describe("GenerationWorkerService", () => {
     );
     const t2i = providerMock([], "fal:new-t2i-model");
     const edit = providerMock([], "fal:new-edit-model");
-    const { service } = makeService(prisma, { t2i, edit });
+    const { service } = makeService(repository, { t2i, edit });
 
     await service.tick();
 
     expect(t2i.submit).not.toHaveBeenCalled();
     expect(edit.submit).not.toHaveBeenCalled();
-    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "running" },
-      data: {
-        status: "failed",
-        errorMessage:
-          "planned target model old-t2i-model does not match resolved provider fal:new-t2i-model",
-        leaseExpiresAt: null,
-      },
-    });
+    expect(repository.markFailed).toHaveBeenCalledWith(
+      "job-1",
+      "planned target model old-t2i-model does not match resolved provider fal:new-t2i-model",
+    );
   });
 
   it("runJobNow claims a specific queued job and processes it in the background", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.findUnique.mockResolvedValue(claimedJob());
-    mockSuccessTransaction(prisma);
+    const repository = repositoryFake();
+    repository.findForProcessing.mockResolvedValue(claimedJob());
     const provider = providerMock([
       { status: "completed", images: [{ url: "https://p.local/a.png" }] },
     ]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await expect(service.runJobNow("job-1")).resolves.toEqual({
       jobId: "job-1",
     });
 
-    // 조건부 claim: queued 이미지 잡만, lease 세팅 + attempt 증가
-    expect(prisma.generationJob.updateMany).toHaveBeenCalledWith({
-      where: { id: "job-1", status: "queued", mediaType: "image" },
-      data: expect.objectContaining({
-        status: "running",
-        attemptCount: { increment: 1 },
-        leaseExpiresAt: expect.any(Date),
-      }),
-    });
+    // 조건부 claim — queued 이미지 잡만 집는다.
+    expect(repository.claimQueuedImageJob).toHaveBeenCalledWith("job-1", 600);
     // 처리 자체는 백그라운드 — 셧다운 훅이 완료를 기다린다.
     await service.onModuleDestroy();
     expect(provider.submit).toHaveBeenCalled();
   });
 
   it("runJobNow returns null when the job is not queued", async () => {
-    const prisma = prismaMock();
-    prisma.generationJob.updateMany.mockResolvedValue({ count: 0 });
+    const repository = repositoryFake();
+    repository.claimQueuedImageJob.mockResolvedValue(undefined);
     const provider = providerMock([]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await expect(service.runJobNow("job-1")).resolves.toEqual({
       jobId: null,
     });
-    expect(prisma.generationJob.findUnique).not.toHaveBeenCalled();
+    expect(repository.findForProcessing).not.toHaveBeenCalled();
   });
 
   it("runJobNow without a jobId claims the next queued job", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-7" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
-      claimedJob({ id: "job-7" }),
-    );
-    mockSuccessTransaction(prisma);
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-7");
+    repository.findForProcessing.mockResolvedValue(claimedJob({ id: "job-7" }));
     const provider = providerMock([
       { status: "completed", images: [{ url: "https://p.local/a.png" }] },
     ]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await expect(service.runJobNow()).resolves.toEqual({ jobId: "job-7" });
     await service.onModuleDestroy();
   });
 
   it("merges visual profile providerConfig under job paramsJson", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({
         paramsJson: { seed: 42 },
         character: {
@@ -696,11 +594,10 @@ describe("GenerationWorkerService", () => {
         },
       }),
     );
-    mockSuccessTransaction(prisma);
     const provider = providerMock([
       { status: "completed", images: [{ url: "https://p.local/a.png" }] },
     ]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await service.tick();
 
@@ -720,9 +617,9 @@ describe("GenerationWorkerService", () => {
         uploadedAt: new Date("2026-07-01T00:00:00.000Z"),
       },
     });
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({
         // 기획 LLM이 이 샷에 고른 레퍼런스 — r3는 앵커와 중복되지 않는 선별분.
         paramsJson: {
@@ -742,11 +639,10 @@ describe("GenerationWorkerService", () => {
         },
       }),
     );
-    mockSuccessTransaction(prisma);
     const provider = providerMock([
       { status: "completed", images: [{ url: "https://p.local/a.png" }] },
     ]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await service.tick();
 
@@ -769,9 +665,9 @@ describe("GenerationWorkerService", () => {
         uploadedAt: new Date("2026-07-01T00:00:00.000Z"),
       },
     });
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({
         paramsJson: {
           _shot: {
@@ -791,11 +687,10 @@ describe("GenerationWorkerService", () => {
         },
       }),
     );
-    mockSuccessTransaction(prisma);
     const provider = providerMock([
       { status: "completed", images: [{ url: "https://p.local/a.png" }] },
     ]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await service.tick();
 
@@ -805,10 +700,9 @@ describe("GenerationWorkerService", () => {
   });
 
   it("presigns S3-backed reference urls before sending them to the provider", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(claimedJob());
-    mockSuccessTransaction(prisma);
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(claimedJob());
     const provider = providerMock([
       { status: "completed", images: [{ url: "https://p.local/a.png" }] },
     ]);
@@ -816,7 +710,7 @@ describe("GenerationWorkerService", () => {
       .fn()
       .mockResolvedValue("https://cdn.local/reference.png?signed=1");
     const { service } = makeService(
-      prisma,
+      repository,
       provider,
       {},
       undefined,
@@ -836,9 +730,9 @@ describe("GenerationWorkerService", () => {
   });
 
   it("strips underscore-prefixed metadata keys from provider params", async () => {
-    const prisma = prismaMock();
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: "job-1" }]);
-    prisma.generationJob.findUnique.mockResolvedValue(
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
       claimedJob({
         // 위저드가 남긴 파이프라인 메타데이터 — 프로바이더에 전달되면 안 된다.
         paramsJson: {
@@ -847,11 +741,10 @@ describe("GenerationWorkerService", () => {
         },
       }),
     );
-    mockSuccessTransaction(prisma);
     const provider = providerMock([
       { status: "completed", images: [{ url: "https://p.local/a.png" }] },
     ]);
-    const { service } = makeService(prisma, provider);
+    const { service } = makeService(repository, provider);
 
     await service.tick();
 

@@ -16,6 +16,7 @@ import {
   GenerationWorkerService,
   workerConfigFromEnv,
 } from "./generation-worker.service";
+import { GenerationJobRepository } from "./generation-job.repository";
 import { resolveImageGenerationProviders } from "./image-generation.provider";
 import { resolveImagePromptBuilder } from "./image-prompt-builder";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
@@ -26,16 +27,17 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 @Module({
   imports: [PrismaModule, SettingsModule],
   providers: [
+    GenerationJobRepository,
     {
       provide: GenerationWorkerService,
       // 프로바이더는 잡 처리 시마다 재해석 — admin 설정(DB)이 env보다 우선.
       useFactory: (
-        prisma: PrismaService,
+        jobs: GenerationJobRepository,
         settings: GenerationSettingsService,
         llmLogs: LlmLogService,
       ) =>
         new GenerationWorkerService(
-          prisma,
+          jobs,
           async () =>
             resolveImageGenerationProviders(
               await settings.resolveProviderSettings(),
@@ -50,7 +52,11 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
           createReferenceUrlSigner() ?? undefined,
           llmLogs,
         ),
-      inject: [PrismaService, GenerationSettingsService, LlmLogService],
+      inject: [
+        GenerationJobRepository,
+        GenerationSettingsService,
+        LlmLogService,
+      ],
     },
     {
       provide: DraftWorkerService,
