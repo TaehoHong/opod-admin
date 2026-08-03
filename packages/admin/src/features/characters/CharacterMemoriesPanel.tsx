@@ -1,5 +1,4 @@
 import {
-  Alert,
   Button,
   Group,
   Paper,
@@ -12,6 +11,7 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { MutationAlert } from "../../shared/ui/MutationAlert";
 import {
   createMemories,
   createMemory,
@@ -266,27 +266,6 @@ function trimMemory(values: { content: string; type: string; reason: string }) {
     type: values.type.trim(),
     reason: values.reason.trim(),
   };
-}
-
-function MutationAlert({
-  mutation,
-  success,
-}: {
-  mutation: { isError: boolean; isSuccess: boolean; error: Error | null };
-  success: string;
-}) {
-  if (mutation.isError) {
-    return (
-      <Alert color="red" role="alert">
-        {mutation.error?.message}
-      </Alert>
-    );
-  }
-  return mutation.isSuccess ? (
-    <Alert color="teal" role="status">
-      {success}
-    </Alert>
-  ) : null;
 }
 
 function required(message: string) {

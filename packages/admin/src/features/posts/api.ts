@@ -73,6 +73,14 @@ export type PostReactionCreate = {
   reason?: string;
 };
 
+// 목록에서는 미디어를 종류와 장수로만 요약한다 — 썸네일은 상세에서 본다.
+export function mediaLabel(media: PostMedia[] | undefined): string {
+  const items = media ?? [];
+  if (items.length === 0) return "없음";
+  const type = items[0]?.mediaType ?? "media";
+  return items.length > 1 ? `${type} ×${items.length}` : type;
+}
+
 export function fetchPosts(params: {
   characterId?: string;
   contentType?: string;

@@ -1,5 +1,4 @@
 import {
-  Alert,
   Button,
   Group,
   NumberInput,
@@ -13,6 +12,7 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { MutationAlert } from "../../shared/ui/MutationAlert";
 import {
   createPersona,
   createPersonas,
@@ -361,27 +361,6 @@ function parsePersonaItems(
     throw new Error("title과 content를 가진 JSON 배열이 필요합니다.");
   }
   return parsed as Array<{ title: string; content: string }>;
-}
-
-function MutationAlert({
-  mutation,
-  success,
-}: {
-  mutation: { isError: boolean; isSuccess: boolean; error: Error | null };
-  success: string;
-}) {
-  if (mutation.isError) {
-    return (
-      <Alert color="red" role="alert">
-        {mutation.error?.message}
-      </Alert>
-    );
-  }
-  return mutation.isSuccess ? (
-    <Alert color="teal" role="status">
-      {success}
-    </Alert>
-  ) : null;
 }
 
 function required(message: string) {

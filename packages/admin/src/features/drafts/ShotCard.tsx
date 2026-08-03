@@ -4,7 +4,6 @@ import {
   Button,
   Card,
   Group,
-  Image,
   NumberInput,
   SimpleGrid,
   Stack,
@@ -12,6 +11,7 @@ import {
   Textarea,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
+import { ZoomableImage } from "../../shared/ui/ZoomableImage";
 import { CandidateCard } from "./CandidateCard";
 import {
   generateShot,
@@ -68,7 +68,7 @@ export function ShotCard({ draft, shot }: { draft: Draft; shot: DraftShot }) {
             </Text>
             <Group gap={6}>
               {shot.references.map((reference) => (
-                <Image
+                <ZoomableImage
                   key={reference.mediaId}
                   src={reference.url}
                   alt="레퍼런스"
@@ -131,7 +131,7 @@ function ReferenceList({
         <Group gap={6}>
           {references.map((reference) =>
             reference.url ? (
-              <Image
+              <ZoomableImage
                 key={reference.mediaId}
                 src={reference.url}
                 alt={`${label} ${reference.mediaId}`}

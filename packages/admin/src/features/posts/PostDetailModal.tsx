@@ -3,7 +3,6 @@ import {
   Badge,
   Button,
   Group,
-  Image,
   Loader,
   Modal,
   Paper,
@@ -14,6 +13,7 @@ import {
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { previewUrl } from "../../shared/media/previewUrl";
+import { ZoomableImage } from "../../shared/ui/ZoomableImage";
 import { fetchCharacters } from "../characters/api";
 import {
   fetchPost,
@@ -182,7 +182,7 @@ function MediaGallery({
         return (
           <Paper key={`${item.url}-${index}`} p="xs" withBorder>
             {source && item.mediaType === "image" ? (
-              <Image
+              <ZoomableImage
                 src={source}
                 alt={`게시글 미디어 ${index + 1}`}
                 h={220}

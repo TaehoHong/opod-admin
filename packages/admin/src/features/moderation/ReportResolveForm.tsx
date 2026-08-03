@@ -1,6 +1,7 @@
 import { Button, Group, Select, Stack, Textarea } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { MutationAlert } from "../../shared/ui/MutationAlert";
 import { updateReport, type ReportListItem, type ReportStatus } from "./api";
 
 const STATUS_OPTIONS = [
@@ -66,11 +67,11 @@ export function ReportResolveForm({ report }: { report: ReportListItem }) {
             저장
           </Button>
         </Group>
-        {resolve.isError ? (
-          <Group c="red" role="alert">
-            {resolve.error.message}
-          </Group>
-        ) : null}
+        <MutationAlert
+          mutation={resolve}
+          success="신고를 처리했습니다."
+          errorTitle="처리하지 못했습니다"
+        />
       </Stack>
     </form>
   );

@@ -1,8 +1,9 @@
-import { Badge, Button, Group, Table, Text, TextInput } from "@mantine/core";
+import { Badge, Button, Group, Table, TextInput } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { UserName } from "../../shared/ui/EntityName";
 import { TableText } from "../../shared/ui/TableText";
 import { CreditGrantModal } from "./CreditGrantModal";
 import { fetchCreditLedger } from "./api";
@@ -72,9 +73,7 @@ export function CreditsPage() {
                     <TableText>{entry.reason}</TableText>
                   </Table.Td>
                   <Table.Td>
-                    <Text size="xs" c="dimmed">
-                      {entry.userId}
-                    </Text>
+                    <UserName id={entry.userId} />
                   </Table.Td>
                   <Table.Td>{entry.createdAt.slice(0, 10)}</Table.Td>
                 </Table.Tr>

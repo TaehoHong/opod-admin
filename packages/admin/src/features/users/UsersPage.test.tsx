@@ -1,8 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { AppProviders } from "../../app/providers";
+import { renderPage } from "../../test/renderPage";
 import { server } from "../../test/server";
 import { UsersPage } from "./UsersPage";
 
@@ -68,11 +68,10 @@ describe("user detail", () => {
       }),
     );
 
-    render(
-      <AppProviders>
-        <UsersPage />
-      </AppProviders>,
-    );
+    renderPage(<UsersPage />, {
+      path: "/users",
+      routes: ["users", "users/:userId"],
+    });
 
     const row = (await screen.findByText("minji@example.com")).closest("tr");
     expect(row).not.toBeNull();

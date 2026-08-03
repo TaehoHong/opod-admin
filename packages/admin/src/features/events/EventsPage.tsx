@@ -3,6 +3,7 @@ import { useForm } from "@mantine/form";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { UserName } from "../../shared/ui/EntityName";
 import { fetchEvents } from "./api";
 
 export function EventsPage() {
@@ -63,9 +64,7 @@ export function EventsPage() {
                   </Text>
                 </Table.Td>
                 <Table.Td>
-                  <Text size="xs" c="dimmed">
-                    {event.userId}
-                  </Text>
+                  <UserName id={event.userId} />
                 </Table.Td>
                 <Table.Td>{event.createdAt.slice(0, 10)}</Table.Td>
               </Table.Tr>

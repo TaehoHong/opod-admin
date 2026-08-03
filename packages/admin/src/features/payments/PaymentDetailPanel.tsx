@@ -10,6 +10,7 @@ import {
   Title,
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
+import { UserName } from "../../shared/ui/EntityName";
 import { fetchPayment, type PaymentReconciliationItem } from "./api";
 import { LEDGER_STATUS_LABEL, PROVIDER_STATUS_LABEL } from "./labels";
 
@@ -64,9 +65,7 @@ export function PaymentDetailPanel({
               {payment.data.updatedAt.replace("T", " ").slice(0, 16)}
             </Field>
             <Field label="사용자">
-              <Text size="xs" c="dimmed">
-                {payment.data.userId}
-              </Text>
+              <UserName id={payment.data.userId} size="sm" />
             </Field>
             <Field label="결제 ID">
               <Text size="xs" c="dimmed">

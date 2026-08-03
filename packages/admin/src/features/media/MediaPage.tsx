@@ -1,9 +1,7 @@
 import {
-  Alert,
   Badge,
   Button,
   Group,
-  Image,
   Paper,
   SegmentedControl,
   SimpleGrid,
@@ -12,15 +10,19 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
+import { useDetailSelection } from "../../shared/routing/useDetailSelection";
 import { previewUrl } from "../../shared/media/previewUrl";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { MutationAlert } from "../../shared/ui/MutationAlert";
 import { TableText } from "../../shared/ui/TableText";
+import { ZoomableImage } from "../../shared/ui/ZoomableImage";
 import { MediaUploadModal } from "./MediaUploadModal";
 import {
   confirmMediaUpload,
+  fetchMedia,
   fetchMediaList,
   mediaDimensionsLabel,
   mediaFileName,
@@ -43,7 +45,7 @@ const UPLOAD_FILTER = [
 export function MediaPage() {
   const [mediaType, setMediaType] = useState("");
   const [uploaded, setUploaded] = useState("");
-  const [selected, setSelected] = useState<MediaItem | null>(null);
+  const { selectedId, toggle } = useDetailSelection("mediaId", "/media");
   const [uploadOpen, setUploadOpen] = useState(false);
   const queryClient = useQueryClient();
 
@@ -55,12 +57,11 @@ export function MediaPage() {
     }),
   );
 
+  const listed = media.items.find((item) => item.id === selectedId);
+
   const confirm = useMutation({
     mutationFn: (mediaId: string) => confirmMediaUpload(mediaId),
-    onSuccess: (updated) => {
-      setSelected((current) =>
-        current?.id === updated.id ? updated : current,
-      );
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["media"] });
     },
   });
@@ -90,13 +91,13 @@ export function MediaPage() {
         </Group>
       }
     >
-      {confirm.isError ? (
-        <Alert color="red" role="alert" title="확정하지 못했습니다">
-          {confirm.error.message}
-        </Alert>
-      ) : null}
+      <MutationAlert
+        mutation={confirm}
+        success="업로드를 확정했습니다."
+        errorTitle="확정하지 못했습니다"
+      />
 
-      <Table.ScrollContainer minWidth={920}>
+      <Table.ScrollContainer minWidth={1000}>
         <Table striped>
           <Table.Thead>
             <Table.Tr>
@@ -104,6 +105,7 @@ export function MediaPage() {
               <Table.Th>타입</Table.Th>
               <Table.Th>크기</Table.Th>
               <Table.Th>해상도</Table.Th>
+              <Table.Th>생성</Table.Th>
               <Table.Th>업로드 상태</Table.Th>
               <Table.Th />
             </Table.Tr>
@@ -119,6 +121,7 @@ export function MediaPage() {
                 </Table.Td>
                 <Table.Td>{mediaSizeLabel(item)}</Table.Td>
                 <Table.Td>{mediaDimensionsLabel(item)}</Table.Td>
+                <Table.Td>{item.createdAt.slice(0, 10)}</Table.Td>
                 <Table.Td>
                   {item.uploadedAt ? (
                     <Badge color="teal">
@@ -144,13 +147,9 @@ export function MediaPage() {
                     <Button
                       variant="subtle"
                       size="compact-sm"
-                      onClick={() =>
-                        setSelected((current) =>
-                          current?.id === item.id ? null : item,
-                        )
-                      }
+                      onClick={() => toggle(item.id)}
                     >
-                      {selected?.id === item.id ? "닫기" : "상세"}
+                      {selectedId === item.id ? "닫기" : "상세"}
                     </Button>
                   </Group>
                 </Table.Td>
@@ -166,7 +165,9 @@ export function MediaPage() {
         onLoadMore={() => void media.fetchNextPage()}
       />
 
-      {selected ? <MediaDetail item={selected} /> : null}
+      {selectedId ? (
+        <MediaDetail mediaId={selectedId} {...(listed ? { listed } : {})} />
+      ) : null}
 
       <MediaUploadModal
         opened={uploadOpen}
@@ -176,14 +177,33 @@ export function MediaPage() {
   );
 }
 
-function MediaDetail({ item }: { item: MediaItem }) {
+// URL로 바로 들어오면 목록에 없는 미디어일 수 있어 단건 조회로 채운다.
+function MediaDetail({
+  mediaId,
+  listed,
+}: {
+  mediaId: string;
+  listed?: MediaItem;
+}) {
+  const detail = useQuery({
+    queryKey: ["media", "detail", mediaId],
+    queryFn: () => fetchMedia(mediaId),
+    ...(listed ? { initialData: listed } : {}),
+  });
+  if (!detail.data) return null;
+  const item = detail.data;
   const source = item.mediaType === "image" ? previewUrl(item.url) : null;
   return (
     <Paper p="md" maw={640}>
       <Stack gap="sm">
         <Title order={5}>{mediaFileName(item)}</Title>
         {source ? (
-          <Image src={source} alt={mediaFileName(item)} h={220} fit="contain" />
+          <ZoomableImage
+            src={source}
+            alt={mediaFileName(item)}
+            h={220}
+            fit="contain"
+          />
         ) : null}
         <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="sm">
           <Field label="Content-Type">{item.contentType ?? "—"}</Field>

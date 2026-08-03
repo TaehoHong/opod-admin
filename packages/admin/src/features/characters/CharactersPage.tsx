@@ -1,4 +1,4 @@
-import { Badge, Button, Table } from "@mantine/core";
+import { Badge, Button, Group, Table, Text } from "@mantine/core";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCursorList } from "../../shared/api/useCursorList";
@@ -31,12 +31,14 @@ export function CharactersPage() {
           <Button onClick={() => setCreateOpen(true)}>캐릭터 추가</Button>
         }
       >
-        <Table.ScrollContainer minWidth={640}>
+        <Table.ScrollContainer minWidth={960}>
           <Table striped highlightOnHover>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>이름</Table.Th>
                 <Table.Th>핸들</Table.Th>
+                <Table.Th>Bio</Table.Th>
+                <Table.Th>관심사</Table.Th>
                 <Table.Th>상태</Table.Th>
                 <Table.Th>게시글</Table.Th>
                 <Table.Th>팔로워</Table.Th>
@@ -59,6 +61,27 @@ export function CharactersPage() {
                 >
                   <Table.Td>{character.displayName}</Table.Td>
                   <Table.Td>{character.publicId}</Table.Td>
+                  <Table.Td maw={280}>
+                    <Text
+                      lineClamp={2}
+                      c={character.bio ? undefined : "dimmed"}
+                    >
+                      {character.bio || "—"}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td maw={200}>
+                    <Group gap={4}>
+                      {character.interests.length > 0 ? (
+                        character.interests.slice(0, 3).map((interest) => (
+                          <Badge key={interest} variant="outline" color="ink">
+                            {interest}
+                          </Badge>
+                        ))
+                      ) : (
+                        <Text c="dimmed">—</Text>
+                      )}
+                    </Group>
+                  </Table.Td>
                   <Table.Td>
                     <Badge color={STATUS_COLOR[character.status] ?? "gray"}>
                       {character.status}

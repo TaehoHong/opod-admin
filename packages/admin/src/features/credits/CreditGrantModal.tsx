@@ -14,6 +14,8 @@ import { useEffect } from "react";
 import { fetchUsers, type UserListItem } from "../users/api";
 import { grantCredits, type CreditGrant } from "./api";
 
+const AMOUNT_PRESETS = [100, 500, 1000];
+
 export function CreditGrantModal({
   opened,
   onClose,
@@ -112,6 +114,19 @@ export function CreditGrantModal({
             key={form.key("amount")}
             {...form.getInputProps("amount")}
           />
+          {/* 자주 쓰는 금액은 눌러서 채운다 — 지급은 손이 자주 가는 작업이다. */}
+          <Group gap="xs">
+            {AMOUNT_PRESETS.map((amount) => (
+              <Button
+                key={amount}
+                variant="default"
+                size="compact-sm"
+                onClick={() => form.setFieldValue("amount", amount)}
+              >
+                +{amount.toLocaleString()}
+              </Button>
+            ))}
+          </Group>
           <TextInput
             label="사유"
             placeholder="admin grant"

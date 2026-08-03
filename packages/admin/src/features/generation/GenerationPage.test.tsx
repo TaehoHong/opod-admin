@@ -1,8 +1,8 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { AppProviders } from "../../app/providers";
+import { renderPage } from "../../test/renderPage";
 import { server } from "../../test/server";
 import { GenerationPage } from "./GenerationPage";
 
@@ -58,11 +58,10 @@ describe("generation job management", () => {
       }),
     );
 
-    render(
-      <AppProviders>
-        <GenerationPage />
-      </AppProviders>,
-    );
+    renderPage(<GenerationPage />, {
+      path: "/generation",
+      routes: ["generation", "generation/:jobId"],
+    });
 
     await screen.findByText("조건에 맞는 작업이 없습니다.");
     await userEvent.click(
@@ -141,11 +140,10 @@ describe("generation job management", () => {
       ),
     );
 
-    render(
-      <AppProviders>
-        <GenerationPage />
-      </AppProviders>,
-    );
+    renderPage(<GenerationPage />, {
+      path: "/generation",
+      routes: ["generation", "generation/:jobId"],
+    });
 
     await screen.findByText("완료할 영상");
     await userEvent.click(screen.getByRole("button", { name: "완료 처리" }));
@@ -209,11 +207,10 @@ describe("generation job management", () => {
       ),
     );
 
-    render(
-      <AppProviders>
-        <GenerationPage />
-      </AppProviders>,
-    );
+    renderPage(<GenerationPage />, {
+      path: "/generation",
+      routes: ["generation", "generation/:jobId"],
+    });
 
     await screen.findByText("실행할 영상");
     await userEvent.click(screen.getByRole("button", { name: "실행" }));

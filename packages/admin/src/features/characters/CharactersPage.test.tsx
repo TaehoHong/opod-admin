@@ -312,6 +312,10 @@ describe("character management", () => {
           referenceMedia: [],
         }),
       ),
+      http.get("/api/admin/v1/generation/jobs", () =>
+        HttpResponse.json({ items: [] }),
+      ),
+      http.get("/api/admin/v1/drafts", () => HttpResponse.json({ items: [] })),
       http.get("/api/admin/v1/characters/:id/posting-policy", () =>
         HttpResponse.json({
           characterId: character.id,
@@ -493,4 +497,99 @@ describe("character management", () => {
       screen.getByText(/character_memories · memory-1…/),
     ).toBeInTheDocument();
   });
+});
+
+describe("visual reference promotion", () => {
+  // 테스트 생성 결과를 레퍼런스로 올려야 다음 생성에 반영된다. 이 경로가 없으면
+  // 결과를 보러 생성 화면으로 나갔다가 미디어 ID를 손으로 옮겨야 한다.
+  it("promotes a completed generation output into the visual references", async () => {
+    const referenceUpdates: unknown[] = [];
+    const character = {
+      id: "character-1",
+      publicId: "existing",
+      displayName: "기존 캐릭터",
+      bio: "",
+      interests: [],
+      status: "active",
+      postCount: 0,
+      followerCount: 0,
+      createdAt: "2026-07-31T00:00:00.000Z",
+      personas: [],
+      memories: [],
+    };
+
+    server.use(
+      http.get("/api/admin/v1/characters", () =>
+        HttpResponse.json({ items: [character] }),
+      ),
+      http.get("/api/admin/v1/characters/:id", () =>
+        HttpResponse.json(character),
+      ),
+      http.get("/api/admin/v1/characters/:id/profile-image", () =>
+        HttpResponse.json({
+          characterId: character.id,
+          image: null,
+          crop: { x: 0.5, y: 0.5, zoom: 1 },
+        }),
+      ),
+      http.get("/api/admin/v1/media", () => HttpResponse.json({ items: [] })),
+      http.get("/api/admin/v1/characters/:id/visual-profile", () =>
+        HttpResponse.json({
+          characterId: character.id,
+          appearancePrompt: "",
+          stylePrompt: "",
+          negativePrompt: "",
+          referenceMedia: [],
+        }),
+      ),
+      http.get("/api/admin/v1/generation/jobs", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: "job-1",
+              characterId: character.id,
+              mediaType: "image",
+              prompt: "해변 산책 테스트",
+              status: "completed",
+              attemptCount: 1,
+              outputMediaId: "media-9",
+              outputs: [
+                {
+                  mediaId: "media-9",
+                  url: "https://cdn.local/test-output.png",
+                  candidateIndex: 0,
+                  selected: true,
+                },
+              ],
+              createdAt: "2026-08-01T00:00:00.000Z",
+              updatedAt: "2026-08-01T00:00:00.000Z",
+            },
+          ],
+        }),
+      ),
+      http.put(
+        "/api/admin/v1/characters/:id/visual-profile/references",
+        async ({ request }) => {
+          referenceUpdates.push(await request.json());
+          return HttpResponse.json({
+            characterId: character.id,
+            appearancePrompt: "",
+            stylePrompt: "",
+            negativePrompt: "",
+            referenceMedia: [{ mediaId: "media-9", url: "" }],
+          });
+        },
+      ),
+    );
+
+    renderCharacterRoutes();
+
+    await userEvent.click(await screen.findByLabelText("기존 캐릭터 관리"));
+    await userEvent.click(await screen.findByRole("tab", { name: "비주얼" }));
+    await userEvent.click(await screen.findByRole("button", { name: "승격" }));
+
+    await waitFor(() =>
+      expect(referenceUpdates).toEqual([{ mediaIds: ["media-9"] }]),
+    );
+  }, 15_000);
 });

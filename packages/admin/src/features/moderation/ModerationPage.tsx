@@ -2,6 +2,7 @@ import { Badge, Select, Stack, Table, Text } from "@mantine/core";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { UserName } from "../../shared/ui/EntityName";
 import { TableText } from "../../shared/ui/TableText";
 import { ReportResolveForm } from "./ReportResolveForm";
 import { fetchReports, type ReportStatus } from "./api";
@@ -52,11 +53,12 @@ export function ModerationPage() {
         />
       }
     >
-      <Table.ScrollContainer minWidth={880}>
+      <Table.ScrollContainer minWidth={1000}>
         <Table striped>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>대상</Table.Th>
+              <Table.Th>신고자</Table.Th>
               <Table.Th>사유</Table.Th>
               <Table.Th>상태</Table.Th>
               <Table.Th>접수일</Table.Th>
@@ -74,6 +76,9 @@ export function ModerationPage() {
                       {report.targetId}
                     </Text>
                   </Stack>
+                </Table.Td>
+                <Table.Td>
+                  <UserName id={report.reporterUserId} />
                 </Table.Td>
                 <Table.Td maw={280}>
                   <TableText>{report.reason}</TableText>

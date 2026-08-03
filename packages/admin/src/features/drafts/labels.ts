@@ -1,4 +1,4 @@
-import type { DraftStatus } from "./api";
+import type { DraftStatus, FinishPreset } from "./api";
 
 // 상태는 색과 문구를 함께 쓴다 (docs/04-design-rules.md:85).
 
@@ -46,3 +46,8 @@ export const FINISH_OPTIONS = [
   { value: "film", label: "필름" },
   { value: "mono-film", label: "흑백" },
 ] as const;
+
+// 선택 컨트롤과 비교 배지가 같은 이름을 쓰게 한다.
+export const FINISH_LABEL = Object.fromEntries(
+  FINISH_OPTIONS.map((option) => [option.value, option.label]),
+) as Record<FinishPreset, string>;

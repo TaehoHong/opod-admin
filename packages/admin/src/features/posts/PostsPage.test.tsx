@@ -1,8 +1,8 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { AppProviders } from "../../app/providers";
+import { renderPage } from "../../test/renderPage";
 import { server } from "../../test/server";
 import { PostsPage } from "./PostsPage";
 import type { PostCommentCreate, PostCreate, PostReactionCreate } from "./api";
@@ -12,6 +12,13 @@ const character = {
   publicId: "arin",
   displayName: "아린",
 };
+
+// Mantine Popover dropdown은 jsdom에서 display:none으로 남아 있어 role 조회의
+// 기본 가시성 필터에 걸린다. 목록에도 같은 캐릭터 이름이 나오므로 텍스트 대신
+// 옵션 role로 좁힌다.
+function findCharacterOption(name: string) {
+  return screen.findByRole("option", { name, hidden: true });
+}
 
 describe("post management", () => {
   it("opens a post detail with media, comments, reactions, and related action logs", async () => {
@@ -91,11 +98,10 @@ describe("post management", () => {
       ),
     );
 
-    render(
-      <AppProviders>
-        <PostsPage />
-      </AppProviders>,
-    );
+    renderPage(<PostsPage />, {
+      path: "/posts",
+      routes: ["posts", "posts/:postId"],
+    });
 
     await userEvent.click(
       await screen.findByRole("button", { name: "상세에서 확인할 게시글" }),
@@ -165,11 +171,10 @@ describe("post management", () => {
       }),
     );
 
-    render(
-      <AppProviders>
-        <PostsPage />
-      </AppProviders>,
-    );
+    renderPage(<PostsPage />, {
+      path: "/posts",
+      routes: ["posts", "posts/:postId"],
+    });
 
     await screen.findByText("표시할 항목이 없습니다.");
     await userEvent.click(screen.getByRole("button", { name: "게시글 작성" }));
@@ -177,7 +182,7 @@ describe("post management", () => {
       name: "작성 캐릭터",
     });
     await userEvent.click(characterSelect);
-    await userEvent.click(await screen.findByText("아린"));
+    await userEvent.click(await findCharacterOption("아린"));
     await userEvent.type(screen.getByLabelText("본문"), "  여름밤 산책  ");
     await userEvent.type(
       screen.getByRole("combobox", { name: "해시태그" }),
@@ -252,11 +257,10 @@ describe("post management", () => {
       ),
     );
 
-    render(
-      <AppProviders>
-        <PostsPage />
-      </AppProviders>,
-    );
+    renderPage(<PostsPage />, {
+      path: "/posts",
+      routes: ["posts", "posts/:postId"],
+    });
 
     const postRow = (await screen.findByText("기존 게시글")).closest("tr");
     expect(postRow).not.toBeNull();
@@ -267,7 +271,7 @@ describe("post management", () => {
       name: "댓글 작성 캐릭터",
     });
     await userEvent.click(commentCharacter);
-    await userEvent.click(await screen.findByText("아린"));
+    await userEvent.click(await findCharacterOption("아린"));
     await userEvent.type(screen.getByLabelText("댓글 내용"), "  좋아요!  ");
     await userEvent.type(screen.getByLabelText("로그 이유"), "  참여 테스트  ");
     await userEvent.click(screen.getByRole("button", { name: "댓글 생성" }));
@@ -282,7 +286,8 @@ describe("post management", () => {
       ]),
     );
     await waitFor(() =>
-      expect(within(postRow!).getAllByRole("cell")[3]).toHaveTextContent("1"),
+      // 열 순서: 캐릭터 · 내용 · 형식 · 해시태그 · 미디어 · 댓글 · 반응 · 작성일 · 작업
+      expect(within(postRow!).getAllByRole("cell")[5]).toHaveTextContent("1"),
     );
 
     await userEvent.click(
@@ -292,7 +297,7 @@ describe("post management", () => {
       name: "반응 캐릭터",
     });
     await userEvent.click(reactionCharacter);
-    await userEvent.click(await screen.findByText("아린"));
+    await userEvent.click(await findCharacterOption("아린"));
     await userEvent.type(screen.getByLabelText("로그 이유"), "  공감 표시  ");
     await userEvent.click(screen.getByRole("button", { name: "반응 생성" }));
 
@@ -306,7 +311,7 @@ describe("post management", () => {
       ]),
     );
     await waitFor(() =>
-      expect(within(postRow!).getAllByRole("cell")[4]).toHaveTextContent("1"),
+      expect(within(postRow!).getAllByRole("cell")[6]).toHaveTextContent("1"),
     );
   });
 
@@ -339,18 +344,17 @@ describe("post management", () => {
       }),
     );
 
-    render(
-      <AppProviders>
-        <PostsPage />
-      </AppProviders>,
-    );
+    renderPage(<PostsPage />, {
+      path: "/posts",
+      routes: ["posts", "posts/:postId"],
+    });
 
     const row = (await screen.findByText("중복 방지 게시글")).closest("tr");
     await userEvent.click(within(row!).getByRole("button", { name: "댓글" }));
     await userEvent.click(
       await screen.findByRole("combobox", { name: "댓글 작성 캐릭터" }),
     );
-    await userEvent.click(await screen.findByText("아린"));
+    await userEvent.click(await findCharacterOption("아린"));
     await userEvent.type(screen.getByLabelText("댓글 내용"), "한 번만 등록");
     const submit = screen.getByRole("button", { name: "댓글 생성" });
     await userEvent.dblClick(submit);

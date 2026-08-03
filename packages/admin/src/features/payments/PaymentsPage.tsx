@@ -1,7 +1,9 @@
-import { Badge, Button, SegmentedControl, Table, Text } from "@mantine/core";
+import { Badge, Button, SegmentedControl, Table } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useDetailSelection } from "../../shared/routing/useDetailSelection";
 import { DataPage } from "../../shared/ui/DataPage";
+import { UserName } from "../../shared/ui/EntityName";
 import { TableText } from "../../shared/ui/TableText";
 import { PaymentDetailPanel } from "./PaymentDetailPanel";
 import {
@@ -21,7 +23,10 @@ const STATUS_FILTER = [
 
 export function PaymentsPage() {
   const [status, setStatus] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { selectedId, toggle, close } = useDetailSelection(
+    "paymentId",
+    "/payments",
+  );
 
   const reconciliation = useQuery({
     queryKey: ["payments", "reconciliation", status],
@@ -45,7 +50,7 @@ export function PaymentsPage() {
           value={status}
           onChange={(value) => {
             setStatus(value);
-            setSelectedId(null);
+            close();
           }}
         />
       }
@@ -66,9 +71,7 @@ export function PaymentsPage() {
             {items.map((item) => (
               <Table.Tr key={item.paymentId}>
                 <Table.Td>
-                  <Text size="xs" c="dimmed">
-                    {item.userId}
-                  </Text>
+                  <UserName id={item.userId} />
                 </Table.Td>
                 <Table.Td>{item.provider}</Table.Td>
                 <Table.Td>
@@ -93,11 +96,7 @@ export function PaymentsPage() {
                   <Button
                     variant="subtle"
                     size="compact-sm"
-                    onClick={() =>
-                      setSelectedId((current) =>
-                        current === item.paymentId ? null : item.paymentId,
-                      )
-                    }
+                    onClick={() => toggle(item.paymentId)}
                   >
                     {selectedId === item.paymentId ? "닫기" : "상세"}
                   </Button>

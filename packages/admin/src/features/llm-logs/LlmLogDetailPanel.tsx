@@ -3,7 +3,6 @@ import {
   Alert,
   Code,
   Group,
-  Image,
   Loader,
   Paper,
   SimpleGrid,
@@ -13,6 +12,7 @@ import {
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { previewUrl } from "../../shared/media/previewUrl";
+import { ZoomableImage } from "../../shared/ui/ZoomableImage";
 import { fetchLlmLog, type LlmLogMediaItem } from "./api";
 
 // provider payload는 기본 화면에 펼치지 않고 필요할 때 연다
@@ -116,7 +116,7 @@ function MediaTile({ item }: { item: LlmLogMediaItem }) {
   return (
     <Stack gap={4}>
       {source ? (
-        <Image
+        <ZoomableImage
           src={source}
           alt={`${item.role} ${item.sortOrder + 1}`}
           h={120}

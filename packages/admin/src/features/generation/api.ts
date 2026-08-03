@@ -41,6 +41,8 @@ export type GenerationJob = {
 
 export function fetchGenerationJobs(params: {
   status?: string;
+  characterId?: string;
+  limit?: string;
   cursor?: string;
 }): Promise<CursorPage<GenerationJob>> {
   return apiRequest(`/generation/jobs${toQuery(params)}`);

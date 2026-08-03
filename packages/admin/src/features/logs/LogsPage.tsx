@@ -11,6 +11,7 @@ import { useForm } from "@mantine/form";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { CharacterName } from "../../shared/ui/EntityName";
 import { TableText } from "../../shared/ui/TableText";
 import { fetchCharacterActionLogs } from "./api";
 
@@ -84,9 +85,7 @@ export function LogsPage() {
                   </Badge>
                 </Table.Td>
                 <Table.Td>
-                  <Text size="xs" c="dimmed">
-                    {log.characterId}
-                  </Text>
+                  <CharacterName id={log.characterId} />
                 </Table.Td>
                 <Table.Td>
                   <Stack gap={0}>

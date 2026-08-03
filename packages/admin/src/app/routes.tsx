@@ -88,6 +88,10 @@ const SettingsPage = lazy(() =>
 
 // 네비게이션 항목과 화면을 한 배열이 소유한다. 따로 두면 화면 없는 nav 항목이
 // 생길 수 있다.
+//
+// detail이 있는 화면은 선택 상태를 URL에 둔다. 운영자는 특정 초안·사용자·결제를
+// 두고 대화하므로 링크로 주고받을 수 있어야 하고, 새로고침과 뒤로가기가 보던
+// 자리를 지켜야 한다. detail 값은 상세 경로 뒤에 붙는 path parameter 이름이다.
 export const NAV_ITEMS = [
   { id: "home", label: "홈", Page: HomePage },
   { id: "characters", label: "캐릭터", Page: CharactersPage },
@@ -107,13 +111,33 @@ export const NAV_ITEMS = [
   { id: "settings", label: "설정", Page: SettingsPage },
 ] as const;
 
+// 캐릭터와 장소는 상세가 별도 페이지 컴포넌트라 아래에서 따로 건다.
+const DETAIL_ROUTES: { id: string; paths: string[] }[] = [
+  { id: "posts", paths: [":postId"] },
+  { id: "media", paths: [":mediaId"] },
+  { id: "drafts", paths: [":draftId"] },
+  { id: "generation", paths: [":jobId"] },
+  { id: "llm-logs", paths: [":logId"] },
+  { id: "users", paths: [":userId"] },
+  { id: "payments", paths: [":paymentId"] },
+];
+
 export function AppRoutes() {
+  const detailPaths = new Map(
+    DETAIL_ROUTES.map(({ id, paths }) => [id, paths]),
+  );
+
   return (
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<Navigate to="/home" replace />} />
         {NAV_ITEMS.map(({ id, Page }) => (
-          <Route key={id} path={id} element={<Page />} />
+          <Route key={id} path={id}>
+            <Route index element={<Page />} />
+            {(detailPaths.get(id) ?? []).map((path) => (
+              <Route key={path} path={path} element={<Page />} />
+            ))}
+          </Route>
         ))}
         <Route
           path="characters/:characterId"

@@ -112,6 +112,14 @@ example이다. `features/media/api.ts`의 `uploadMediaFile`은 한 화면에서 
 
 nav 16개 화면이 모두 React로 렌더된다. 라우트와 화면은 `app/routes.tsx`의
 `NAV_ITEMS` 한 배열이 소유하고, 각 화면은 `lazy()`로 라우트 단위로 받는다.
+목록 화면의 상세 경로는 같은 파일의 `DETAIL_ROUTES`가 소유하고
+(`/drafts/:draftId`, `/generation/:jobId`, `/payments/:paymentId` 등), 화면은
+선택 상태를 useState가 아니라 `shared/routing/useDetailSelection`으로 URL에
+둔다. 상세의 표현(인라인 패널 또는 modal)은 화면이 그대로 정한다. 캐릭터와
+장소처럼 상세가 독립 페이지인 화면은 `CharacterManagerPage`,
+`LocationManagerPage`를 별도 route로 건다. 라우터를 쓰는 화면 테스트는
+`src/test/renderPage.tsx`(또는 화면별 render helper)로 라우트 패턴과 함께
+렌더한다.
 
 캐릭터 관리 쓰기 endpoint, 게시물·댓글·반응 작성, 크레딧 지급, 영상 생성
 job 등록/실행/완료/재시도가 모두 React에 있다. 사용자·게시물 상세와 캐릭터
@@ -125,7 +133,20 @@ job 등록/실행/완료/재시도가 모두 React에 있다. 사용자·게시�
 상태·더 보기)은 `shared/ui/DataPage`와 `shared/api/useCursorList`로
 공통화했다. application shell의 route 위치와 keyboard 우회 동작은
 `app/AppLayout`이, 긴 table 셀의 줄바꿈·말줄임은 `shared/ui/TableText`가
-공통으로 소유한다.
+공통으로 소유한다. `DataPage`는 빈 목록일 때 children을 통째로 감추므로 목록 외
+컨트롤(생성 폼, 상세 패널)을 children에 두는 화면은 빈 상태를 직접 그린다
+(`features/drafts/DraftsPage.tsx`).
+
+이미지 확대(라이트박스)는 `shared/ui/ZoomableImage`가 소유한다. 이미지
+클릭이 다른 뜻을 갖지 않는 자리에서는 `ZoomableImage`로 감싸고, 클릭이 이미
+선택인 생성 화면 후보 그리드는 `ImageLightbox`를 별도 버튼으로 연다. 마감
+프리셋이 걸린 초안 후보는 `compare`로 원본/마감 비교 슬라이더를 연다.
+
+목록이 참조하는 캐릭터·사용자는 `shared/ui/EntityName`의 `CharacterName` /
+`UserName`으로 이름을 표시한다(못 찾으면 8자 축약 + title에 전체 ID). mutation
+결과는 `shared/ui/MutationAlert` 하나로 성공(role=status)·실패(role=alert)를
+같은 모양으로 알린다. 유실 기능 대조 기록은
+`docs/react-migration-gaps.md`에 있다.
 
 ## Verification Paths
 

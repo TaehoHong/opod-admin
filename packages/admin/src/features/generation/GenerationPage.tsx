@@ -1,5 +1,4 @@
 import {
-  Alert,
   Badge,
   Button,
   Group,
@@ -11,8 +10,11 @@ import {
 } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { CharacterName } from "../../shared/ui/EntityName";
+import { MutationAlert } from "../../shared/ui/MutationAlert";
 import { TableText } from "../../shared/ui/TableText";
 import { GenerationJobCompleteModal } from "./GenerationJobCompleteModal";
 import { GenerationJobCreateModal } from "./GenerationJobCreateModal";
@@ -62,11 +64,20 @@ const WIZARD_LABEL: Record<string, string> = {
   failed: "실패",
 };
 
-type View = { kind: "list" } | { kind: "new" } | { kind: "job"; jobId: string };
+// 목록 · 새 요청 · 잡 하나를 URL이 구분한다. legacy와 같이 /generation/new는
+// 새 요청 화면이고 나머지 세그먼트는 잡 ID다.
+const NEW_JOB_SEGMENT = "new";
 
 export function GenerationPage() {
   const [status, setStatus] = useState("");
-  const [view, setView] = useState<View>({ kind: "list" });
+  const { jobId } = useParams();
+  const navigate = useNavigate();
+  const openJob = (id: string) => {
+    void navigate(`/generation/${encodeURIComponent(id)}`);
+  };
+  const openList = () => {
+    void navigate("/generation");
+  };
   const [createOpened, setCreateOpened] = useState(false);
   const [completingJob, setCompletingJob] = useState<GenerationJob | null>(
     null,
@@ -80,32 +91,26 @@ export function GenerationPage() {
     queryFn: fetchResolvedProviders,
   });
 
-  if (view.kind === "new") {
+  if (jobId === NEW_JOB_SEGMENT) {
     return (
       <DataPage title="새 이미지 생성" isPending={false}>
-        <NewImageRequestForm
-          onCreated={(jobId) => setView({ kind: "job", jobId })}
-          onCancel={() => setView({ kind: "list" })}
-        />
+        <NewImageRequestForm onCreated={openJob} onCancel={openList} />
       </DataPage>
     );
   }
 
-  if (view.kind === "job") {
+  if (jobId) {
     return (
       <DataPage
         title="이미지 생성"
         isPending={false}
         actions={
-          <Button variant="default" onClick={() => setView({ kind: "list" })}>
+          <Button variant="default" onClick={openList}>
             목록으로
           </Button>
         }
       >
-        <ImageWizard
-          jobId={view.jobId}
-          onJobChange={(jobId) => setView({ kind: "job", jobId })}
-        />
+        <ImageWizard jobId={jobId} onJobChange={openJob} />
       </DataPage>
     );
   }
@@ -129,7 +134,7 @@ export function GenerationPage() {
             <Button variant="default" onClick={() => setCreateOpened(true)}>
               생성 작업 큐 등록
             </Button>
-            <Button onClick={() => setView({ kind: "new" })}>
+            <Button onClick={() => void navigate("/generation/new")}>
               새 이미지 생성
             </Button>
           </Group>
@@ -164,9 +169,7 @@ export function GenerationPage() {
               {jobs.items.map((job) => (
                 <Table.Tr key={job.id}>
                   <Table.Td>
-                    <Text size="xs" c="dimmed">
-                      {job.characterId}
-                    </Text>
+                    <CharacterName id={job.characterId} />
                   </Table.Td>
                   <Table.Td>
                     <Badge variant="light">{job.mediaType}</Badge>
@@ -186,7 +189,7 @@ export function GenerationPage() {
                   <Table.Td>
                     <JobActions
                       job={job}
-                      onOpen={() => setView({ kind: "job", jobId: job.id })}
+                      onOpen={() => openJob(job.id)}
                       onComplete={() => setCompletingJob(job)}
                     />
                   </Table.Td>
@@ -261,6 +264,17 @@ function JobActions({
             완료 처리
           </Button>
         ) : null}
+        {/* 이 잡이 어느 초안의 컷인지 — 실패를 볼 때 가장 먼저 필요한 맥락이다. */}
+        {job.draftId ? (
+          <Button
+            variant="subtle"
+            size="compact-sm"
+            component={Link}
+            to={`/drafts/${encodeURIComponent(job.draftId)}`}
+          >
+            초안 보기
+          </Button>
+        ) : null}
         {job.mediaType !== "image" && job.status === "failed" ? (
           <Button
             variant="subtle"
@@ -273,11 +287,16 @@ function JobActions({
           </Button>
         ) : null}
       </Group>
-      {run.isError || retry.isError ? (
-        <Alert color="red" role="alert" title="작업을 실행하지 못했습니다">
-          {(run.error ?? retry.error)?.message}
-        </Alert>
-      ) : null}
+      <MutationAlert
+        mutation={run}
+        success="워커에 실행을 요청했습니다."
+        errorTitle="작업을 실행하지 못했습니다"
+      />
+      <MutationAlert
+        mutation={retry}
+        success="재시도를 요청했습니다."
+        errorTitle="재시도하지 못했습니다"
+      />
     </Stack>
   );
 }

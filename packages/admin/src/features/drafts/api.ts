@@ -102,6 +102,7 @@ export type Draft = {
 export function fetchDrafts(params: {
   status?: string;
   characterId?: string;
+  limit?: string;
   cursor?: string;
 }): Promise<CursorPage<Draft>> {
   return apiRequest(`/drafts${toQuery(params)}`);

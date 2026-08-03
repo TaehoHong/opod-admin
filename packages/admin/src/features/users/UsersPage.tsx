@@ -2,13 +2,18 @@ import { Button, Group, Table, TextInput } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
+import { useDetailSelection } from "../../shared/routing/useDetailSelection";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
 import { fetchUsers } from "./api";
 import { UserDetailModal } from "./UserDetailModal";
 
 export function UsersPage() {
   const [search, setSearch] = useState("");
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const {
+    selectedId: selectedUserId,
+    select: selectUser,
+    close: closeUser,
+  } = useDetailSelection("userId", "/users");
   // 검색은 제출 시점에만 반영하면 되므로 uncontrolled 기본 모드를 쓴다
   // (docs/04-design-rules.md:72-73).
   const form = useForm({ mode: "uncontrolled", initialValues: { q: "" } });
@@ -67,7 +72,7 @@ export function UsersPage() {
                     <Button
                       variant="subtle"
                       size="compact-sm"
-                      onClick={() => setSelectedUserId(user.id)}
+                      onClick={() => selectUser(user.id)}
                     >
                       상세
                     </Button>
@@ -84,10 +89,7 @@ export function UsersPage() {
         />
       </DataPage>
       {selectedUserId ? (
-        <UserDetailModal
-          userId={selectedUserId}
-          onClose={() => setSelectedUserId(null)}
-        />
+        <UserDetailModal userId={selectedUserId} onClose={closeUser} />
       ) : null}
     </>
   );

@@ -12,7 +12,9 @@ import {
 import { useForm } from "@mantine/form";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
+import { useDetailSelection } from "../../shared/routing/useDetailSelection";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { CharacterName, shortId } from "../../shared/ui/EntityName";
 import { LlmLogDetailPanel } from "./LlmLogDetailPanel";
 import { TokenUsagePanel } from "./TokenUsagePanel";
 import { fetchLlmLogs, type LlmLogStatus } from "./api";
@@ -56,7 +58,10 @@ export function LlmLogsPage() {
 function LlmLogList() {
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState({ type: "", provider: "", model: "" });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { selectedId, toggle, close } = useDetailSelection(
+    "logId",
+    "/llm-logs",
+  );
 
   const form = useForm({
     mode: "uncontrolled",
@@ -90,7 +95,7 @@ function LlmLogList() {
               provider: values.provider.trim(),
               model: values.model.trim(),
             });
-            setSelectedId(null);
+            close();
           })}
         >
           <Group gap="xs">
@@ -100,7 +105,7 @@ function LlmLogList() {
               value={status}
               onChange={(value) => {
                 setStatus(value ?? "");
-                setSelectedId(null);
+                close();
               }}
               allowDeselect={false}
               w={120}
@@ -133,14 +138,16 @@ function LlmLogList() {
         </form>
       }
     >
-      <Table.ScrollContainer minWidth={980}>
+      <Table.ScrollContainer minWidth={1140}>
         <Table striped>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>상태</Table.Th>
               <Table.Th>종류</Table.Th>
               <Table.Th>provider · model</Table.Th>
+              <Table.Th>연결</Table.Th>
               <Table.Th>토큰</Table.Th>
+              <Table.Th>미디어</Table.Th>
               <Table.Th>소요</Table.Th>
               <Table.Th>일시</Table.Th>
               <Table.Th />
@@ -163,7 +170,24 @@ function LlmLogList() {
                     </Text>
                   </Stack>
                 </Table.Td>
+                <Table.Td>
+                  {/* 어떤 생성 작업이 부른 호출인지가 로그를 읽는 출발점이다. */}
+                  {log.generationJobId ? (
+                    <Text size="xs" c="dimmed" title={log.generationJobId}>
+                      job {shortId(log.generationJobId)}
+                    </Text>
+                  ) : log.characterId ? (
+                    <CharacterName id={log.characterId} size="xs" />
+                  ) : (
+                    <Text size="xs" c="dimmed">
+                      —
+                    </Text>
+                  )}
+                </Table.Td>
                 <Table.Td>{log.totalTokens?.toLocaleString() ?? "—"}</Table.Td>
+                <Table.Td>
+                  {log.mediaCount > 0 ? `${log.mediaCount}장` : "—"}
+                </Table.Td>
                 <Table.Td>
                   {log.durationMs === null
                     ? "—"
@@ -176,11 +200,7 @@ function LlmLogList() {
                   <Button
                     variant="subtle"
                     size="compact-sm"
-                    onClick={() =>
-                      setSelectedId((current) =>
-                        current === log.id ? null : log.id,
-                      )
-                    }
+                    onClick={() => toggle(log.id)}
                   >
                     {selectedId === log.id ? "닫기" : "상세"}
                   </Button>

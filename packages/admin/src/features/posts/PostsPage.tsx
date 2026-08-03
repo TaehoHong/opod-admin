@@ -4,11 +4,14 @@ import {
   Group,
   Select,
   Table,
+  Text,
   UnstyledButton,
 } from "@mantine/core";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
+import { useDetailSelection } from "../../shared/routing/useDetailSelection";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { CharacterName } from "../../shared/ui/EntityName";
 import { TableText } from "../../shared/ui/TableText";
 import { PostCreateModal } from "./PostCreateModal";
 import { PostDetailModal } from "./PostDetailModal";
@@ -16,7 +19,7 @@ import {
   PostInteractionModal,
   type PostInteraction,
 } from "./PostInteractionModal";
-import { fetchPosts } from "./api";
+import { fetchPosts, mediaLabel } from "./api";
 
 const CONTENT_TYPES = [
   { value: "", label: "전체" },
@@ -28,7 +31,11 @@ const CONTENT_TYPES = [
 export function PostsPage() {
   const [contentType, setContentType] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+  const {
+    selectedId: selectedPostId,
+    select: selectPost,
+    close: closePost,
+  } = useDetailSelection("postId", "/posts");
   const [interaction, setInteraction] = useState<PostInteraction | null>(null);
   const posts = useCursorList(["posts", contentType], (cursor) =>
     fetchPosts({ ...(contentType ? { contentType } : {}), cursor }),
@@ -55,13 +62,15 @@ export function PostsPage() {
           </Group>
         }
       >
-        <Table.ScrollContainer minWidth={860}>
+        <Table.ScrollContainer minWidth={1040}>
           <Table striped>
             <Table.Thead>
               <Table.Tr>
+                <Table.Th>작성 캐릭터</Table.Th>
                 <Table.Th>내용</Table.Th>
                 <Table.Th>형식</Table.Th>
                 <Table.Th>해시태그</Table.Th>
+                <Table.Th>미디어</Table.Th>
                 <Table.Th>댓글</Table.Th>
                 <Table.Th>반응</Table.Th>
                 <Table.Th>작성일</Table.Th>
@@ -71,10 +80,13 @@ export function PostsPage() {
             <Table.Tbody>
               {posts.items.map((post) => (
                 <Table.Tr key={post.id}>
+                  <Table.Td>
+                    <CharacterName id={post.characterId} />
+                  </Table.Td>
                   <Table.Td maw={360}>
                     <UnstyledButton
                       w="100%"
-                      onClick={() => setSelectedPostId(post.id)}
+                      onClick={() => selectPost(post.id)}
                     >
                       <TableText>{post.content}</TableText>
                     </UnstyledButton>
@@ -90,6 +102,11 @@ export function PostsPage() {
                         </Badge>
                       ))}
                     </Group>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs" c="dimmed">
+                      {mediaLabel(post.media)}
+                    </Text>
                   </Table.Td>
                   <Table.Td>{post.commentCount}</Table.Td>
                   <Table.Td>{post.reactionCount}</Table.Td>
@@ -138,7 +155,7 @@ export function PostsPage() {
       {selectedPostId ? (
         <PostDetailModal
           postId={selectedPostId}
-          onClose={() => setSelectedPostId(null)}
+          onClose={closePost}
           onComment={() =>
             setInteraction({ postId: selectedPostId, mode: "comment" })
           }

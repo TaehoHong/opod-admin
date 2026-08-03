@@ -1,0 +1,98 @@
+/* 확대 가능한 이미지임을 커서로 알린다. focus ring은 Mantine 기본을 그대로
+   둔다 (docs/04-design-rules.md "Accessibility"). */
+.trigger {
+  display: block;
+  cursor: zoom-in;
+}
+
+.zoomed {
+  max-width: min(88vw, 1400px);
+  max-height: 80vh;
+}
+
+/* 원본/마감 비교 — 가운데 선(range)을 끌면 왼쪽 원본 / 오른쪽 마감이 갈라진다.
+   경계 위치는 runtime 값이라 --x를 inline style로 넘긴다. */
+.compare {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+.after {
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 0 0 var(--x, 50%));
+}
+
+.after img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--x, 50%);
+  width: 2px;
+  background: var(--mantine-color-white);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.divider::after {
+  content: "◂ ▸";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 5px 8px 5px 10px;
+  border-radius: 999px;
+  background: var(--mantine-color-white);
+  color: var(--mantine-color-black);
+  font-size: 11px;
+  letter-spacing: 2px;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.badge {
+  position: absolute;
+  top: 10px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(15, 0, 0, 0.62);
+  color: var(--mantine-color-white);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.badgeLeft {
+  left: 10px;
+}
+
+.badgeRight {
+  right: 10px;
+}
+
+/* 슬라이더는 이미지 전체를 덮는 투명한 조작면이다. 보이는 것은 divider다. */
+.range {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: ew-resize;
+}
+
+/* 마감본을 받는 동안에는 원본만 보여 준다. */
+.loading .after,
+.loading .divider,
+.loading .range {
+  display: none;
+}

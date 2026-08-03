@@ -1,0 +1,31 @@
+/* 프로필은 정사각형으로 잘려 나가므로 편집 중에도 잘린 결과를 봐야 한다.
+   crop 값은 runtime 값이라 CSS 변수로 넘긴다. */
+.preview {
+  width: 180px;
+  height: 180px;
+  overflow: hidden;
+  border: 1px solid var(--mantine-color-gray-3);
+  background: var(--mantine-color-gray-1);
+  cursor: zoom-in;
+}
+
+.preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: var(--crop-x) var(--crop-y);
+  transform: scale(var(--crop-zoom));
+  transform-origin: var(--crop-x) var(--crop-y);
+}
+
+.thumb {
+  display: block;
+  width: 100%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.thumbSelected {
+  border-color: var(--mantine-color-accent-4);
+}

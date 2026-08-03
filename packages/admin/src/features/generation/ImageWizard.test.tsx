@@ -157,7 +157,7 @@ describe("image generation wizard", () => {
     );
 
     const secondCandidate = await screen.findByRole("button", {
-      name: /후보 2/,
+      name: "후보 2 선택",
     });
     await userEvent.click(secondCandidate);
     expect(secondCandidate).toHaveAttribute("aria-pressed", "true");

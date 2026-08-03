@@ -1,9 +1,9 @@
 import {
   Alert,
+  Badge,
   Button,
   FileInput,
   Group,
-  Image,
   Loader,
   MultiSelect,
   Paper,
@@ -23,7 +23,10 @@ import {
   uploadMediaFile,
   type MediaItem,
 } from "../media/api";
+import { fetchGenerationJobs } from "../generation/api";
 import { previewUrl } from "../../shared/media/previewUrl";
+import { MutationAlert } from "../../shared/ui/MutationAlert";
+import { ZoomableImage } from "../../shared/ui/ZoomableImage";
 import {
   captionVisualProfileReferences,
   enqueueVisualProfileTest,
@@ -214,6 +217,12 @@ function VisualProfileForms({
               </Button>
             </Stack>
           </form>
+          <RecentGenerations
+            characterId={characterId}
+            referenceMediaIds={profile.referenceMedia.map(
+              (item) => item.mediaId,
+            )}
+          />
         </Paper>
       </Stack>
 
@@ -290,7 +299,7 @@ function VisualProfileForms({
                   return (
                     <Stack key={reference.mediaId} gap={4}>
                       {source ? (
-                        <Image
+                        <ZoomableImage
                           src={source}
                           alt="캐릭터 레퍼런스"
                           h={120}
@@ -312,26 +321,103 @@ function VisualProfileForms({
   );
 }
 
-function MutationAlert({
-  mutation,
-  success,
+// 테스트 생성은 결과를 봐야 의미가 있고, 쓸 만한 결과는 레퍼런스로 올려야
+// 다음 생성에 반영된다. 큐에 넣고 끝나면 그 결과를 찾으러 생성 화면으로 나가야
+// 한다.
+function RecentGenerations({
+  characterId,
+  referenceMediaIds,
 }: {
-  mutation: { isError: boolean; isSuccess: boolean; error: Error | null };
-  success: string;
+  characterId: string;
+  referenceMediaIds: string[];
 }) {
-  if (mutation.isError) {
-    return (
-      <Alert color="red" role="alert">
-        {mutation.error?.message}
-      </Alert>
-    );
-  }
-  return mutation.isSuccess ? (
-    <Alert color="teal" role="status">
-      {success}
-    </Alert>
-  ) : null;
+  const queryClient = useQueryClient();
+  const jobs = useQuery({
+    queryKey: ["generation", "character", characterId],
+    queryFn: () => fetchGenerationJobs({ characterId, limit: "10" }),
+  });
+
+  const promote = useMutation({
+    mutationFn: (mediaId: string) =>
+      setVisualProfileReferences(characterId, [
+        ...new Set([...referenceMediaIds, mediaId]),
+      ]),
+    onSuccess: () => invalidate(queryClient, characterId),
+  });
+
+  const items = jobs.data?.items ?? [];
+
+  return (
+    <Stack gap="xs" mt="lg">
+      <Title order={6}>최근 생성</Title>
+      <MutationAlert mutation={promote} success="레퍼런스로 승격했습니다." />
+      {jobs.isPending ? (
+        <Loader size="sm" aria-label="최근 생성 불러오는 중" />
+      ) : items.length === 0 ? (
+        <Text size="sm" c="dimmed">
+          생성 이력이 없습니다.
+        </Text>
+      ) : (
+        items.map((job) => {
+          const mediaId =
+            job.outputMediaId ??
+            job.outputs?.find((output) => output.selected)?.mediaId ??
+            job.outputs?.[0]?.mediaId;
+          const output = job.outputs?.find(
+            (candidate) => candidate.mediaId === mediaId,
+          );
+          const source = output ? previewUrl(output.url) : null;
+          const promotable =
+            job.status === "completed" &&
+            mediaId !== undefined &&
+            !referenceMediaIds.includes(mediaId);
+
+          return (
+            <Group key={job.id} gap="sm" wrap="nowrap" align="center">
+              {source ? (
+                <ZoomableImage
+                  src={source}
+                  alt={`생성 결과 ${job.id}`}
+                  w={44}
+                  h={44}
+                  fit="cover"
+                />
+              ) : null}
+              <Text size="sm" lineClamp={1} style={{ flex: 1, minWidth: 0 }}>
+                {job.prompt}
+              </Text>
+              <Badge color={JOB_STATUS_COLOR[job.status] ?? "gray"}>
+                {job.status}
+              </Badge>
+              {promotable ? (
+                <Button
+                  variant="subtle"
+                  size="compact-sm"
+                  loading={promote.isPending && promote.variables === mediaId}
+                  onClick={() => promote.mutate(mediaId)}
+                >
+                  승격
+                </Button>
+              ) : referenceMediaIds.includes(mediaId ?? "") ? (
+                <Text size="xs" c="dimmed">
+                  레퍼런스
+                </Text>
+              ) : null}
+            </Group>
+          );
+        })
+      )}
+    </Stack>
+  );
 }
+
+const JOB_STATUS_COLOR: Record<string, string> = {
+  draft: "ink",
+  queued: "attention",
+  running: "accent",
+  completed: "teal",
+  failed: "red",
+};
 
 function invalidate(
   queryClient: ReturnType<typeof useQueryClient>,
