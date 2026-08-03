@@ -1,4 +1,5 @@
 import {
+  IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT,
   buildImagePromptBuilderUserPrompt,
   imageModelFamily,
   modelFamilyGuidance,
@@ -111,6 +112,15 @@ describe("localImagePromptBuilder", () => {
 });
 
 describe("buildImagePromptBuilderUserPrompt", () => {
+  it("tells the builder to omit non-visual location metadata", () => {
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "Keep location wording limited to details that can change the visible pixels",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "a spacious gym lined with strength-training machines",
+    );
+  });
+
   it("includes model, appearance, style, and numbered scenes", () => {
     const prompt = buildImagePromptBuilderUserPrompt({
       appearancePrompt: "young woman, short black hair",
