@@ -47,9 +47,72 @@ describe("buildPlannerUserPrompt", () => {
     expect(prompt).toContain("- 지난주 흑백 필름 현상소 방문기");
     expect(prompt).toContain("노을 골목");
   });
+
+  it("includes reusable and character-specific location references", () => {
+    const prompt = buildPlannerUserPrompt({
+      characterName: "서린",
+      bio: "라이프스타일 인플루언서",
+      interests: [],
+      personas: [],
+      memories: [],
+      recentCaptions: [],
+      locationCatalog: [
+        {
+          id: "gym-1",
+          name: "서린이 다니는 헬스장",
+          description: "촬영 친화적인 24시간 헬스장",
+          references: [
+            { id: "gym-ref-1", description: "전신 거울 구역" },
+          ],
+        },
+      ],
+    });
+
+    expect(prompt).toContain("Available locations");
+    expect(prompt).toContain("[gym-1] 서린이 다니는 헬스장");
+    expect(prompt).toContain("[gym-ref-1] 전신 거울 구역");
+  });
 });
 
 describe("parseContentPlan", () => {
+  it("allows an environment reference without identity in a hidden-character shot", () => {
+    const plan = parseContentPlan(
+      JSON.stringify({
+        caption: "오늘은 조용한 시간",
+        hashtags: [],
+        locationId: "gym-1",
+        shots: [
+          {
+            sortOrder: 0,
+            scene: "사람이 없는 헬스장 거울 구역",
+            captureSetup: "벤치 위 고정 휴대폰",
+            characterVisible: false,
+            referenceIds: [],
+            environmentReferenceIds: ["gym-ref-1", "other-ref"],
+          },
+        ],
+      }),
+      1,
+      ["identity-1"],
+      [
+        {
+          id: "gym-1",
+          name: "헬스장",
+          description: "설명",
+          references: [
+            { id: "gym-ref-1", description: "거울 구역" },
+          ],
+        },
+      ],
+    );
+
+    expect(plan.locationId).toBe("gym-1");
+    expect(plan.shots[0]).toMatchObject({
+      referenceIds: [],
+      environmentReferenceIds: ["gym-ref-1"],
+    });
+  });
+
   it("parses plain JSON output", () => {
     const plan = parseContentPlan(
       JSON.stringify({
@@ -149,6 +212,7 @@ describe("parseContentPlan", () => {
       captureSetup: "소이가 Canon AE-1을 눈높이에 들고 프레임 밖에서 촬영",
       characterVisible: false,
       referenceIds: [],
+      environmentReferenceIds: [],
     });
   });
 

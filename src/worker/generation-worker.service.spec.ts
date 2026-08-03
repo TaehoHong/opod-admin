@@ -55,6 +55,7 @@ function claimedJob(overrides: Record<string, unknown> = {}) {
         ],
       },
     },
+    draft: null,
     ...overrides,
   };
 }
@@ -704,6 +705,50 @@ describe("GenerationWorkerService", () => {
       expect.objectContaining({ referenceImageUrls: [] }),
     );
   });
+
+  it("keeps location references for a hidden-character shot and combines negative prompts", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        paramsJson: {
+          _shot: {
+            characterVisible: false,
+            referenceMediaIds: ["reference-1", "gym-ref-1"],
+          },
+        },
+        draft: {
+          location: {
+            negativePrompt: "neon gym",
+            references: [
+              {
+                mediaId: "gym-ref-1",
+                media: {
+                  url: "https://cdn.local/gym-ref-1.png",
+                  storageKey: null,
+                  uploadedAt: new Date("2026-07-01T00:00:00.000Z"),
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referenceImageUrls: ["https://cdn.local/gym-ref-1.png"],
+        negativePrompt: "blurry, neon gym",
+      }),
+    );
+  });
+
 
   it("presigns S3-backed reference urls before sending them to the provider", async () => {
     const repository = repositoryFake();

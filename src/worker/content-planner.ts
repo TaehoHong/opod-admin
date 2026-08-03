@@ -24,11 +24,14 @@ export type ContentPlanShot = {
   captureSetup: string;
   characterVisible: boolean;
   referenceIds: string[];
+  // optional for compatibility with custom planners created before location support.
+  environmentReferenceIds?: string[];
 };
 
 export type ContentPlan = {
   caption: string;
   hashtags: string[];
+  locationId?: string;
   // referenceIds: 카탈로그에서 고른 샷별 레퍼런스. 인물 비노출 샷만
   // 빈 배열을 허용한다.
   shots: ContentPlanShot[];
@@ -137,6 +140,7 @@ export function createLlmContentPlanner(
         content,
         clampShots(input.maxShots),
         (input.referenceCatalog ?? []).map((reference) => reference.id),
+        input.locationCatalog ?? [],
       );
     },
   };
@@ -148,6 +152,7 @@ export function parseContentPlan(
   raw: string,
   maxShots: number,
   allowedReferenceIds: string[] = [],
+  locationCatalog: NonNullable<ContentPlanInput["locationCatalog"]> = [],
 ): ContentPlan {
   const text = raw.trim();
   const jsonText = text.startsWith("{")
@@ -167,6 +172,20 @@ export function parseContentPlan(
     throw new Error("content plan is missing a caption");
   }
   const allowed = new Set(allowedReferenceIds);
+  const locations = new Map(
+    locationCatalog.map((location) => [location.id, location] as const),
+  );
+  const locationId =
+    typeof parsed.locationId === "string" && locations.has(parsed.locationId)
+      ? parsed.locationId
+      : undefined;
+  const allowedEnvironmentIds = new Set(
+    locationId
+      ? (locations.get(locationId)?.references ?? []).map(
+          (reference) => reference.id,
+        )
+      : [],
+  );
   const rawShots = Array.isArray(parsed.shots) ? parsed.shots : [];
   if (rawShots.length !== maxShots) {
     throw new Error(
@@ -193,6 +212,11 @@ export function parseContentPlan(
       );
     }
     const referenceIds = cleanReferenceIds(shot.referenceIds, allowed);
+    const environmentReferenceIds = cleanReferenceIds(
+      shot.environmentReferenceIds,
+      allowedEnvironmentIds,
+      2,
+    );
     assertVisibleCharacterHasReference(
       shot.characterVisible,
       referenceIds.length,
@@ -209,6 +233,7 @@ export function parseContentPlan(
       captureSetup: shot.captureSetup.trim(),
       characterVisible: shot.characterVisible,
       referenceIds: shot.characterVisible ? referenceIds : [],
+      environmentReferenceIds,
     };
   });
   return {
@@ -216,11 +241,16 @@ export function parseContentPlan(
     hashtags: cleanHashtags(
       Array.isArray(parsed.hashtags) ? parsed.hashtags : [],
     ),
+    ...(locationId ? { locationId } : {}),
     shots,
   };
 }
 
-function cleanReferenceIds(values: unknown, allowed: Set<string>): string[] {
+function cleanReferenceIds(
+  values: unknown,
+  allowed: Set<string>,
+  limit = SHOT_REFERENCES_MAX,
+): string[] {
   if (!Array.isArray(values) || allowed.size === 0) {
     return [];
   }
@@ -233,7 +263,7 @@ function cleanReferenceIds(values: unknown, allowed: Set<string>): string[] {
     ) {
       cleaned.push(value);
     }
-    if (cleaned.length >= SHOT_REFERENCES_MAX) {
+    if (cleaned.length >= limit) {
       break;
     }
   }

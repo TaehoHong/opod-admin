@@ -25,6 +25,7 @@ const HTTP_TIMEOUT_MS = 60_000;
 export type ImagePromptBuildInput = {
   appearancePrompt: string;
   stylePrompt: string;
+  environmentPrompt?: string;
   shots: {
     sortOrder: number;
     scene: string;
@@ -92,11 +93,14 @@ export const localImagePromptBuilder: ImagePromptBuilder = {
             stylePrompt: input.stylePrompt,
           },
           [
+            input.environmentPrompt?.trim()
+              ? `Canonical environment: ${input.environmentPrompt.trim()}`
+              : "",
             `Final image content: ${shot.scene}`,
             shot.characterVisible
               ? "Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment"
               : "Use a physically plausible camera viewpoint consistent with the final-frame scene; the character, photographer, hands, body, and capture equipment remain entirely outside the frame",
-          ].join(". "),
+          ].filter(Boolean).join(". "),
         ),
       ),
     });
@@ -129,6 +133,7 @@ export function createLlmImagePromptBuilder(
             content: buildImagePromptBuilderUserPrompt({
               appearancePrompt: input.appearancePrompt,
               stylePrompt: input.stylePrompt,
+              environmentPrompt: input.environmentPrompt,
               shots: input.shots,
             }),
           },

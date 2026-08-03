@@ -29,6 +29,7 @@ function repositoryFake() {
     sweepExpiredPlanLeases: jest.fn().mockResolvedValue(0),
     claimPlannedDraft: jest.fn().mockResolvedValue(undefined),
     findPlannedDraft: jest.fn().mockResolvedValue(null),
+    findAvailableLocations: jest.fn().mockResolvedValue([]),
     extendPlanLease: jest.fn().mockResolvedValue(undefined),
     persistPlan: jest.fn().mockResolvedValue(undefined),
     failPlanning: jest.fn().mockResolvedValue(true),
@@ -66,6 +67,7 @@ function planner(
           captureSetup: "eye-level medium shot",
           characterVisible: true,
           referenceIds: ["reference-1"],
+          environmentReferenceIds: [],
         },
       ],
     }),
@@ -180,6 +182,75 @@ describe("DraftWorkerService planning", () => {
       }),
     );
   });
+
+  it("persists the selected location and combines its references with identity references", async () => {
+    const repository = repositoryFake();
+    repository.claimPlannedDraft
+      .mockResolvedValueOnce("draft-1")
+      .mockResolvedValueOnce(undefined);
+    repository.findPlannedDraft.mockResolvedValue(plannedDraft());
+    repository.findAvailableLocations.mockResolvedValue([
+      {
+        id: "gym-1",
+        displayName: "서린이 다니는 헬스장",
+        description: "촬영 친화적인 24시간 헬스장",
+        visualPrompt: "warm greige gym with a three-panel mirror",
+        negativePrompt: "neon gym",
+        references: [
+          {
+            mediaId: "gym-ref-1",
+            description: "전신 거울 구역",
+            media: { uploadedAt: new Date("2026-07-01T00:00:00.000Z") },
+          },
+        ],
+      },
+    ]);
+    const contentPlanner = planner({
+      plan: jest.fn().mockResolvedValue({
+        caption: "라인 체크",
+        hashtags: ["애슬레저"],
+        locationId: "gym-1",
+        shots: [
+          {
+            sortOrder: 0,
+            scene: "전신 거울 앞의 서린",
+            captureSetup: "거울 정면 스마트폰 셀프 촬영",
+            characterVisible: true,
+            referenceIds: ["reference-1"],
+            environmentReferenceIds: ["gym-ref-1"],
+          },
+        ],
+      }),
+    });
+    const builder = promptBuilder();
+    const service = makeService(repository, contentPlanner, {}, builder);
+
+    await service.tick();
+
+    expect(builder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environmentPrompt: "warm greige gym with a three-panel mirror",
+      }),
+      expect.anything(),
+    );
+    expect(repository.persistPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locationId: "gym-1",
+        jobs: [
+          expect.objectContaining({
+            paramsJson: {
+              _shot: expect.objectContaining({
+                identityReferenceMediaIds: ["reference-1"],
+                environmentReferenceMediaIds: ["gym-ref-1"],
+                referenceMediaIds: ["reference-1", "gym-ref-1"],
+              }),
+            },
+          }),
+        ],
+      }),
+    );
+  });
+
 
   it("fails immediately when a visible shot has no uploaded identity reference", async () => {
     const repository = repositoryFake();

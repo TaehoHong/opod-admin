@@ -340,6 +340,7 @@ model Character {
   stories              Story[]
   userFollowers        UserCharacterFollow[]
   visualProfile        CharacterVisualProfile?
+  locations            CharacterLocation[]
   postDrafts           PostDraft[]
   postingPolicy        CharacterPostingPolicy?
   profileImage         Media?                  @relation("CharacterProfileImage", fields: [profileImageId], references: [id], onDelete: SetNull)
@@ -382,6 +383,7 @@ model Media {
   characterProfileImages  Character[]                       @relation("CharacterProfileImage")
   stories                 Story[]
   visualProfileReferences CharacterVisualProfileReference[]
+  locationReferences      CharacterLocationReference[]
 
   @@map("media")
   @@schema("opod")
@@ -756,33 +758,36 @@ model GenerationJob {
 
 // 포스트 초안 — 기획~게시의 단위이자 워커의 기획/게시 큐.
 model PostDraft {
-  id               String          @id @default(uuid(7)) @db.Uuid
-  characterId      String          @map("character_id") @db.Uuid
-  draftType        PostDraftType   @default(post) @map("draft_type")
-  contentType      PostContentType @default(feed) @map("content_type")
-  caption          String          @default("")
-  hashtags         String[]        @default([])
+  id               String             @id @default(uuid(7)) @db.Uuid
+  characterId      String             @map("character_id") @db.Uuid
+  locationId       String?            @map("location_id") @db.Uuid
+  draftType        PostDraftType      @default(post) @map("draft_type")
+  contentType      PostContentType    @default(feed) @map("content_type")
+  caption          String             @default("")
+  hashtags         String[]           @default([])
   // LLM 기획 원본 (shots 포함). 수동 생성 시 scene 힌트도 여기 담는다.
-  conceptJson      Json?           @map("concept_json")
-  status           PostDraftStatus @default(planned)
-  errorMessage     String?         @map("error_message")
+  conceptJson      Json?              @map("concept_json")
+  status           PostDraftStatus    @default(planned)
+  errorMessage     String?            @map("error_message")
   // 워커 claim lease. 만료된 generating 잡은 스윕이 회수한다.
-  leaseExpiresAt   DateTime?       @map("lease_expires_at") @db.Timestamptz(6)
-  attemptCount     Int             @default(0) @map("attempt_count")
+  leaseExpiresAt   DateTime?          @map("lease_expires_at") @db.Timestamptz(6)
+  attemptCount     Int                @default(0) @map("attempt_count")
   // 게시 예정 시각 (KST 정책으로 산출, UTC 저장). null이면 승인 즉시 게시.
-  scheduledAt      DateTime?       @map("scheduled_at") @db.Timestamptz(6)
-  publishedPostId  String?         @map("published_post_id") @db.Uuid
-  publishedStoryId String?         @map("published_story_id") @db.Uuid
-  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
-  character        Character       @relation(fields: [characterId], references: [id])
-  publishedPost    Post?           @relation(fields: [publishedPostId], references: [id])
-  publishedStory   Story?          @relation(fields: [publishedStoryId], references: [id])
+  scheduledAt      DateTime?          @map("scheduled_at") @db.Timestamptz(6)
+  publishedPostId  String?            @map("published_post_id") @db.Uuid
+  publishedStoryId String?            @map("published_story_id") @db.Uuid
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  character        Character          @relation(fields: [characterId], references: [id])
+  location         CharacterLocation? @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  publishedPost    Post?              @relation(fields: [publishedPostId], references: [id])
+  publishedStory   Story?             @relation(fields: [publishedStoryId], references: [id])
   jobs             GenerationJob[]
 
   @@index([status, scheduledAt])
   @@index([status, leaseExpiresAt])
   @@index([characterId, createdAt])
+  @@index([locationId, createdAt])
   @@map("post_drafts")
   @@schema("opod")
 }
@@ -853,6 +858,45 @@ model CharacterVisualProfileReference {
 
   @@id([profileId, mediaId])
   @@map("character_visual_profile_references")
+  @@schema("opod")
+}
+
+// 캐릭터가 게시물에서 반복 사용하는 장소. characterId가 null이면 모든
+// 캐릭터가 사용할 수 있는 범용 장소이고, 값이 있으면 해당 캐릭터 전용이다.
+model CharacterLocation {
+  id             String                       @id @default(uuid(7)) @db.Uuid
+  characterId    String?                      @map("character_id") @db.Uuid
+  locationKey    String                       @map("location_key")
+  displayName    String                       @map("display_name")
+  description    String
+  visualPrompt   String                       @map("visual_prompt")
+  negativePrompt String                       @default("") @map("negative_prompt")
+  createdAt      DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime?                    @map("deleted_at") @db.Timestamptz(6)
+  character      Character?                   @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  references     CharacterLocationReference[]
+  drafts         PostDraft[]
+
+  @@unique([characterId, locationKey])
+  @@index([characterId, deletedAt, createdAt])
+  @@map("character_locations")
+  @@schema("opod")
+}
+
+model CharacterLocationReference {
+  locationId  String            @map("location_id") @db.Uuid
+  mediaId     String            @map("media_id") @db.Uuid
+  sortOrder   Int               @default(0) @map("sort_order")
+  description String            @default("")
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  location    CharacterLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  media       Media             @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+
+  @@id([locationId, mediaId])
+  @@index([locationId, sortOrder])
+  @@map("character_location_references")
   @@schema("opod")
 }
 

@@ -17,6 +17,14 @@ export type ContentPlanInput = {
   // 레퍼런스 이미지 카탈로그 (캡션 있는 것만). LLM이 샷별로 어울리는
   // 레퍼런스를 고른다 — docs/media-generation-pipeline.md "컨텍스트 선별".
   referenceCatalog?: { id: string; description: string }[];
+  // 캐릭터 전용 + 범용 장소 카탈로그. 장소 레퍼런스는 인물 정체성이 아니라
+  // 배경과 공간 일관성을 위한 조건 이미지다.
+  locationCatalog?: {
+    id: string;
+    name: string;
+    description: string;
+    references: { id: string; description: string }[];
+  }[];
 };
 
 const DEFAULT_MAX_SHOTS = 2;
@@ -41,11 +49,14 @@ export const PLANNER_SYSTEM_PROMPT = [
   "- If the personas or operator hint establish how the character takes photos, preserve that habit in captureSetup. Do not invent a photographer, tripod, or production crew that the character context does not establish.",
   "- Keep captureSetup, the visible hands, mirrors, phone, and physical action in scene mutually possible. Do not use a moving follow-camera, floating viewpoint, or professionally staged angle unless the established context calls for it.",
   "- References are identity conditioning. For each shot that shows the character, select 1-3 references that best preserve the identity features actually visible in the planned framing while respecting the character's face-visibility, cropping, and privacy rules. Prefer references whose direction and framing conflict least with the scene; clothing, background, and season are secondary. Use an empty array for shots without the character, such as objects or landscapes.",
+  "- Locations are optional environment conditioning. Select one locationId for the whole post only when the planned post takes place at a listed location; otherwise use null. Never invent a location ID.",
+  "- When locationId is selected, each shot may select 0-2 environmentReferenceIds from that location to preserve its layout, materials, lighting, and camera viewpoint. Environment references never count as character identity references.",
+  "- Shots without the character must use an empty referenceIds array, but may still use environmentReferenceIds.",
   "- If no reference catalog is provided, plan only shots with characterVisible=false. Never invent a reference ID or plan a character-visible shot without an available identity reference.",
   "- Number shots with zero-based sortOrder in the exact output order.",
   "- Write the caption in the character's voice in 1-3 sentences.",
   "Return only the JSON below, with no explanation or Markdown:",
-  '{"caption": "...", "hashtags": ["tag1", "tag2"], "shots": [{"sortOrder": 0, "scene": "visible final-frame content only", "captureSetup": "off-frame capture method and camera geometry", "characterVisible": true, "referenceIds": ["id1"]}]}',
+  '{"caption": "...", "hashtags": ["tag1", "tag2"], "locationId": null, "shots": [{"sortOrder": 0, "scene": "visible final-frame content only", "captureSetup": "off-frame capture method and camera geometry", "characterVisible": true, "referenceIds": ["identity-id1"], "environmentReferenceIds": ["environment-id1"]}]}',
 ].join("\n");
 
 export function buildPlannerUserPrompt(input: ContentPlanInput): string {
@@ -85,6 +96,21 @@ export function buildPlannerUserPrompt(input: ContentPlanInput): string {
       `## Reference catalog (for identity in character shots; follow the rules above)\n${input
         .referenceCatalog!.map(
           (reference) => `- [${reference.id}] ${reference.description}`,
+        )
+        .join("\n")}`,
+    );
+  }
+  if ((input.locationCatalog ?? []).length > 0) {
+    sections.push(
+      `## Available locations (optional; environment references are not identity references)\n${input
+        .locationCatalog!.map(
+          (location) =>
+            `### [${location.id}] ${location.name}\n${location.description}\n${location.references
+              .map(
+                (reference) =>
+                  `- [${reference.id}] ${reference.description || "(no description)"}`,
+              )
+              .join("\n") || "- (no usable environment references)"}`,
         )
         .join("\n")}`,
     );

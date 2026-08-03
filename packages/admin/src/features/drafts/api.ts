@@ -83,6 +83,7 @@ export type DraftConcept = {
 export type Draft = {
   id: string;
   characterId: string;
+  locationId?: string;
   draftType: string;
   contentType: string;
   caption: string;

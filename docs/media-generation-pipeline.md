@@ -116,6 +116,22 @@ docs/api/admin-settings.md를 따른다.
   쓰기 시점 임베딩(text-embedding-3-small 급), 수동 백필 버튼,
   임베딩 미존재 행은 최신순 폴백.
 
+### 장소와 환경 레퍼런스
+
+- 반복 장소는 `character_locations`에 저장한다. `character_id IS NULL`이면
+  모든 캐릭터가 사용할 수 있는 범용 장소이고, 값이 있으면 해당 캐릭터
+  전용 장소다. 삭제된 장소는 새 기획 카탈로그에서 제외한다.
+- 장소의 정본 설명과 이미지 생성용 `visual_prompt`는 장소 행이 소유하고,
+  여러 시점의 환경 이미지는 `character_location_references`가 소유한다.
+- 기획 LLM은 게시물당 장소 하나를 선택하고, 샷별로 인물 정체성
+  `referenceIds`와 장소 `environmentReferenceIds`를 별도로 선택한다. 환경
+  레퍼런스는 인물 정체성 요구를 충족하지 않는다.
+- 인물 비노출 샷은 인물 레퍼런스를 보내지 않지만 환경 레퍼런스는 사용할 수
+  있다. 프롬프트 빌더에는 장소 `visual_prompt`, provider에는 선택된 환경
+  레퍼런스와 장소 `negative_prompt`를 전달한다.
+- 선택 장소는 `post_drafts.location_id`에, 샷별 선택과 실제 provider 입력은
+  기존처럼 `generation_jobs.params_json._shot`에 추적한다.
+
 ### 검수와 게시
 
 - 초안은 모든 cut 생성이 성공한 뒤에만 needs_review로 이동한다.

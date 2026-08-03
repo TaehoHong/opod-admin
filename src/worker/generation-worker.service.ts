@@ -36,9 +36,6 @@ function shotReferenceMediaIds(paramsJson: unknown): string[] | undefined {
   if (!isRecord(paramsJson) || !isRecord(paramsJson._shot)) {
     return undefined;
   }
-  if (paramsJson._shot.characterVisible === false) {
-    return [];
-  }
   const ids = paramsJson._shot.referenceMediaIds;
   return Array.isArray(ids)
     ? ids.filter((id): id is string => typeof id === "string")
@@ -115,6 +112,19 @@ type ClaimedJob = {
       }[];
     } | null;
   };
+  draft: {
+    location: {
+      negativePrompt: string;
+      references: {
+        mediaId: string;
+        media: {
+          url: string;
+          storageKey: string | null;
+          uploadedAt: Date | null;
+        };
+      }[];
+    } | null;
+  } | null;
 };
 
 type CompletedGeneration = {
@@ -384,29 +394,42 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
 
   private async buildRequest(job: ClaimedJob): Promise<ImageGenerationRequest> {
     const profile = job.character.visualProfile;
-    // sortOrder 순 업로드 완료 레퍼런스.
-    const uploaded = (profile?.referenceMedia ?? []).filter(
+    // 인물 정체성 레퍼런스와 선택 장소의 환경 레퍼런스를 구분해 해석한다.
+    const uploadedIdentity = (profile?.referenceMedia ?? []).filter(
       (reference) => reference.media.uploadedAt,
+    );
+    const uploadedEnvironment = (job.draft?.location?.references ?? []).filter(
+      (reference) => reference.media.uploadedAt,
+    );
+    const uploaded = [...uploadedIdentity, ...uploadedEnvironment];
+    const identityIds = new Set(
+      uploadedIdentity.map((reference) => reference.mediaId),
     );
     // 기획 LLM이 이 샷에 고른 레퍼런스 (docs/media-generation-pipeline.md
     // "컨텍스트 선별"). 필드 없음은 구버전 잡 호환을 위해 전체를 쓰고,
     // 빈 배열은 인물 없는 샷이므로 레퍼런스를 보내지 않는다.
     const selectedIds = shotReferenceMediaIds(job.paramsJson);
-    const ordered =
+    const selected =
       selectedIds === undefined
-        ? uploaded
+        ? uploadedIdentity
         : selectedIds
             .map((mediaId) =>
               uploaded.find((reference) => reference.mediaId === mediaId),
             )
             .filter(
               (reference): reference is (typeof uploaded)[number] =>
-                reference !== undefined,
+              reference !== undefined,
             );
+    const characterVisible = shotCharacterVisible(job.paramsJson);
+    const ordered =
+      characterVisible === false
+        ? selected.filter((reference) => !identityIds.has(reference.mediaId))
+        : selected;
     try {
       assertVisibleCharacterHasReference(
-        shotCharacterVisible(job.paramsJson) === true,
-        ordered.length,
+        characterVisible === true,
+        ordered.filter((reference) => identityIds.has(reference.mediaId))
+          .length,
         `shot ${job.id}`,
       );
     } catch (error) {
@@ -438,7 +461,11 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     });
     const request: ImageGenerationRequest = {
       prompt: job.prompt,
-      negativePrompt: profile?.negativePrompt || undefined,
+      negativePrompt:
+        [profile?.negativePrompt, job.draft?.location?.negativePrompt]
+          .map((value) => value?.trim())
+          .filter(Boolean)
+          .join(", ") || undefined,
       referenceImageUrls,
       candidateCount: job.candidateCount ?? this.config.candidateCount,
       extraParams:

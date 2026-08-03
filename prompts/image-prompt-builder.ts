@@ -5,6 +5,7 @@
 export type ImagePromptBuilderPromptInput = {
   appearancePrompt: string;
   stylePrompt: string;
+  environmentPrompt?: string;
   // sortOrder 순의 구조화된 한국어 컷 기획.
   shots: {
     sortOrder: number;
@@ -79,6 +80,7 @@ export const IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT = [
   "- If the appearance prompt is divided into [labeled] sections, include only sections for features actually visible in each shot. For example, omit face and nail details in a rear-view shot and omit full-body proportions in a hand close-up. Always include core identity sections whenever the character is visible.",
   "- Preserve the captureSetup's phone or camera placement, mirror relationship, framing, and lighting as a physically reachable viewpoint. Keep visible hands consistent with the action, and do not invent a moving follow-camera or additional people.",
   "- Translate the scene's location, composition, pose, lighting, and mood into concrete visual language the image model understands. Allow natural occlusion when framing or action hides an appearance feature; do not reposition hair, body, or clothing merely to expose it.",
+  "- When an environment prompt is supplied, preserve its fixed architecture, materials, palette, fixtures, and lighting across every shot. Treat it as the canonical location, not as optional decoration.",
   "- Treat the style prompt as a visual default. Incorporate only the parts that do not conflict with the scene's capture setup, time, lighting, composition, or physical action.",
   "- Follow the syntax and format in the 'Target model guidance' section exactly; prompt-writing conventions differ by model family.",
   "- Do not create a negative prompt; it is injected separately.",
@@ -106,6 +108,7 @@ export function buildImagePromptBuilderUserPrompt(
     .join("\n\n");
   const sections = [
     `## Style defaults (apply only when compatible with the shot)\n${input.stylePrompt.trim() || "(none)"}`,
+    `## Canonical environment (apply to every shot)\n${input.environmentPrompt?.trim() || "(none)"}`,
     `## Shot plans\n${shots}`,
     `## Request\nCreate one English image-generation prompt for each of the ${input.shots.length} shots.`,
   ];

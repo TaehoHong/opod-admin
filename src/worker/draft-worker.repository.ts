@@ -77,6 +77,15 @@ export type PromptBuildDraft = {
   id: string;
   characterId: string;
   conceptJson: unknown;
+  location: {
+    id: string;
+    visualPrompt: string;
+    negativePrompt: string;
+    references: {
+      mediaId: string;
+      media: { uploadedAt: Date | null };
+    }[];
+  } | null;
   character: {
     visualProfile: {
       appearancePrompt: string;
@@ -87,6 +96,19 @@ export type PromptBuildDraft = {
       }[];
     } | null;
   };
+};
+
+export type AvailableLocation = {
+  id: string;
+  displayName: string;
+  description: string;
+  visualPrompt: string;
+  negativePrompt: string;
+  references: {
+    mediaId: string;
+    description: string;
+    media: { uploadedAt: Date | null };
+  }[];
 };
 
 export type DraftImageJob = {
@@ -177,6 +199,20 @@ export class DraftWorkerRepository {
         id: true,
         characterId: true,
         conceptJson: true,
+        location: {
+          select: {
+            id: true,
+            visualPrompt: true,
+            negativePrompt: true,
+            references: {
+              orderBy: { sortOrder: "asc" },
+              select: {
+                mediaId: true,
+                media: { select: { uploadedAt: true } },
+              },
+            },
+          },
+        },
         character: {
           select: {
             visualProfile: {
@@ -192,6 +228,31 @@ export class DraftWorkerRepository {
                 },
               },
             },
+          },
+        },
+      },
+    });
+  }
+
+  findAvailableLocations(characterId: string): Promise<AvailableLocation[]> {
+    return this.prisma.characterLocation.findMany({
+      where: {
+        deletedAt: null,
+        OR: [{ characterId: null }, { characterId }],
+      },
+      orderBy: [{ characterId: "desc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        displayName: true,
+        description: true,
+        visualPrompt: true,
+        negativePrompt: true,
+        references: {
+          orderBy: { sortOrder: "asc" },
+          select: {
+            mediaId: true,
+            description: true,
+            media: { select: { uploadedAt: true } },
           },
         },
       },
@@ -317,6 +378,7 @@ export class DraftWorkerRepository {
     characterId: string;
     caption: string;
     hashtags: string[];
+    locationId?: string;
     conceptJson: Prisma.InputJsonValue;
     plannerName: string;
     builderName?: string;
@@ -333,6 +395,7 @@ export class DraftWorkerRepository {
         data: {
           caption: input.caption,
           hashtags: input.hashtags,
+          locationId: input.locationId ?? null,
           conceptJson: input.conceptJson,
           leaseExpiresAt: null,
           errorMessage: null,

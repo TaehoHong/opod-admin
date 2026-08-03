@@ -226,27 +226,46 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       shots.push(shot);
     }
     const profile = draft.character.visualProfile;
-    const availableReferenceIds = (profile?.referenceMedia ?? [])
+    const availableIdentityIds = (profile?.referenceMedia ?? [])
       .filter((reference) => reference.media.uploadedAt)
       .map((reference) => reference.mediaId);
+    const availableEnvironmentIds = (draft.location?.references ?? [])
+      .filter((reference) => reference.media.uploadedAt)
+      .map((reference) => reference.mediaId);
+    const availableReferenceIds = [
+      ...availableIdentityIds,
+      ...availableEnvironmentIds,
+    ];
     const effectiveShots = shots.map(({ referenceMediaIds, ...shot }) => {
-      const effectiveReferenceIds = !shot.characterVisible
-        ? []
-        : referenceMediaIds === undefined
-          ? availableReferenceIds
+      const selected =
+        referenceMediaIds === undefined
+          ? shot.characterVisible
+            ? availableIdentityIds
+            : []
           : referenceMediaIds.filter((mediaId) =>
               availableReferenceIds.includes(mediaId),
             );
+      const identityReferenceMediaIds = selected.filter((mediaId) =>
+        availableIdentityIds.includes(mediaId),
+      );
+      const environmentReferenceMediaIds = selected.filter((mediaId) =>
+        availableEnvironmentIds.includes(mediaId),
+      );
       return {
         ...shot,
-        referenceMediaIds: effectiveReferenceIds,
+        identityReferenceMediaIds,
+        environmentReferenceMediaIds,
+        referenceMediaIds: [
+          ...(shot.characterVisible ? identityReferenceMediaIds : []),
+          ...environmentReferenceMediaIds,
+        ],
       };
     });
     try {
       for (const shot of effectiveShots) {
         assertVisibleCharacterHasReference(
           shot.characterVisible,
-          shot.referenceMediaIds.length,
+          shot.identityReferenceMediaIds.length,
           `shot ${shot.sortOrder}`,
         );
       }
@@ -268,6 +287,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           {
             appearancePrompt: profile?.appearancePrompt ?? "",
             stylePrompt: profile?.stylePrompt ?? "",
+            environmentPrompt: draft.location?.visualPrompt ?? "",
             shots: buildShots.map((shot) => ({
               sortOrder: shot.sortOrder,
               scene: shot.scene,
@@ -300,7 +320,8 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
             prompt: prompts[index],
             paramsJson: withShotBuildMetadata(
               job.paramsJson,
-              buildShots[index].referenceMediaIds,
+              buildShots[index].identityReferenceMediaIds,
+              buildShots[index].environmentReferenceMediaIds,
               targetModelId,
             ),
           };
@@ -369,6 +390,19 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           id: reference.mediaId,
           description: reference.description,
         }));
+      const availableLocations =
+        await this.repository.findAvailableLocations(draft.characterId);
+      const locationCatalog = availableLocations.map((location) => ({
+        id: location.id,
+        name: location.displayName,
+        description: location.description,
+        references: location.references
+          .filter((reference) => reference.media.uploadedAt)
+          .map((reference) => ({
+            id: reference.mediaId,
+            description: reference.description,
+          })),
+      }));
       const planInput = {
         characterName: draft.character.displayName,
         bio: draft.character.bio,
@@ -381,6 +415,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         sceneHint,
         maxShots: this.config.maxShots,
         ...(referenceCatalog.length > 0 ? { referenceCatalog } : {}),
+        ...(locationCatalog.length > 0 ? { locationCatalog } : {}),
       };
       const planned = await planner.plan(planInput, {
         requestId: draft.id,
@@ -389,18 +424,32 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       const availableReferenceIds = new Set(
         referenceCatalog.map((reference) => reference.id),
       );
+      const selectedLocation = planned.locationId
+        ? availableLocations.find(
+            (location) => location.id === planned.locationId,
+          )
+        : undefined;
+      const availableEnvironmentIds = new Set(
+        selectedLocation?.references
+          .filter((reference) => reference.media.uploadedAt)
+          .map((reference) => reference.mediaId) ?? [],
+      );
       const plan = {
         ...planned,
         shots: planned.shots.map((shot) => {
           const referenceIds = shot.characterVisible
             ? shot.referenceIds.filter((id) => availableReferenceIds.has(id))
             : [];
+          const environmentReferenceIds =
+            (shot.environmentReferenceIds ?? []).filter((id) =>
+              availableEnvironmentIds.has(id),
+            );
           assertVisibleCharacterHasReference(
             shot.characterVisible,
             referenceIds.length,
             `shot ${shot.sortOrder}`,
           );
-          return { ...shot, referenceIds };
+          return { ...shot, referenceIds, environmentReferenceIds };
         }),
       };
 
@@ -424,7 +473,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
             characterVisible: shot.characterVisible,
             targetModelId: targetModelIdForShot(
               builder,
-              shot.referenceIds.length > 0,
+              shot.referenceIds.length +
+                shot.environmentReferenceIds.length >
+                0,
             ),
           }))
         : [];
@@ -433,6 +484,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
             {
               appearancePrompt: profile?.appearancePrompt ?? "",
               stylePrompt: profile?.stylePrompt ?? "",
+              environmentPrompt: selectedLocation?.visualPrompt ?? "",
               shots: buildShots,
             },
             { requestId: draft.id, characterId: draft.characterId },
@@ -442,6 +494,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       await this.repository.persistPlan({
         draftId: draft.id,
         characterId: draft.characterId,
+        ...(selectedLocation ? { locationId: selectedLocation.id } : {}),
         caption: plan.caption,
         hashtags: plan.hashtags,
         plannerName: planner.name,
@@ -458,6 +511,12 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         jobs: plan.shots.map((shot, index) => {
           // 커스텀/구버전 플래너가 referenceIds를 생략해도 동작해야 한다.
           const referenceIds = shot.referenceIds ?? [];
+          const environmentReferenceIds =
+            shot.environmentReferenceIds ?? [];
+          const combinedReferenceIds = [
+            ...referenceIds,
+            ...environmentReferenceIds,
+          ];
           return {
             // 수동 모드는 빈 프롬프트 — "프롬프트 빌드" 단계에서 채운다.
             prompt: built ? built.prompts[index] : "",
@@ -470,7 +529,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
                 scene: shot.scene,
                 captureSetup: shot.captureSetup,
                 characterVisible: shot.characterVisible,
-                referenceMediaIds: referenceIds,
+                identityReferenceMediaIds: referenceIds,
+                environmentReferenceMediaIds: environmentReferenceIds,
+                referenceMediaIds: combinedReferenceIds,
                 ...(buildShots[index]?.targetModelId
                   ? { targetModelId: buildShots[index].targetModelId }
                   : {}),
@@ -860,7 +921,8 @@ function shotPlanOf(
 
 function withShotBuildMetadata(
   paramsJson: unknown,
-  referenceMediaIds: string[],
+  identityReferenceMediaIds: string[],
+  environmentReferenceMediaIds: string[],
   targetModelId?: string,
 ): Prisma.InputJsonValue {
   const params = isRecord(paramsJson) ? paramsJson : {};
@@ -869,7 +931,12 @@ function withShotBuildMetadata(
     ...params,
     _shot: {
       ...shot,
-      referenceMediaIds,
+      identityReferenceMediaIds,
+      environmentReferenceMediaIds,
+      referenceMediaIds: [
+        ...identityReferenceMediaIds,
+        ...environmentReferenceMediaIds,
+      ],
       ...(targetModelId ? { targetModelId } : {}),
     },
   } as Prisma.InputJsonValue;

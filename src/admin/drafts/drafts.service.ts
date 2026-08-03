@@ -94,6 +94,7 @@ type DraftShot = {
 type AdminDraft = {
   id: string;
   characterId: string;
+  locationId?: string;
   draftType: string;
   contentType: string;
   caption: string;
@@ -736,6 +737,7 @@ export class DraftsService {
     return {
       id: draft.id,
       characterId: draft.characterId,
+      ...(draft.locationId ? { locationId: draft.locationId } : {}),
       draftType: draft.draftType,
       contentType: draft.contentType,
       caption: draft.caption,

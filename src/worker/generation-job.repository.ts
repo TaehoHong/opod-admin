@@ -27,6 +27,22 @@ const jobWithProfile = {
       },
     },
   },
+  draft: {
+    include: {
+      location: {
+        include: {
+          references: {
+            orderBy: { sortOrder: "asc" },
+            include: {
+              media: {
+                select: { url: true, storageKey: true, uploadedAt: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
 } as const;
 
 export type GenerationJobWithProfile = Prisma.GenerationJobGetPayload<{
