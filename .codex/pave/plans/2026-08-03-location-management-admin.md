@@ -1,6 +1,6 @@
 # Location management admin
 
-Status: approved and in progress
+Status: implemented, verified, and deployed to development
 
 ## Scope and decisions
 
@@ -16,7 +16,19 @@ Status: approved and in progress
 - [x] Add location CRUD, filtering, soft deletion, and ordered reference APIs with focused behavior tests.
 - [x] Add location list, character/scope filters, detail editing, upload, reorder, and unlink UI with contract tests.
 - [x] Sync durable docs and run the full declared verification suite.
-- [ ] Commit, push, deploy to development, and verify health.
+- [x] Commit, push, deploy to development, and verify health.
+
+## Verification evidence
+
+- `npm run lint`: passed.
+- `npm run test -- --runInBand`: 283 tests passed.
+- `npm run admin:check`: 30 tests passed with TypeScript check.
+- `npm run test:e2e`: 11 tests passed against PostgreSQL.
+- `npm run schema:check`: admin mirror matches the canonical schema.
+- `npm run build`: production frontend and Nest build passed.
+- Changed-file Prettier check and `git diff --check`: passed.
+- Development container: recreated with the new image; location routes mapped.
+- Internal development health: `200`, `{ "status": "ok", "database": "up" }`.
 
 ## Acceptance
 
