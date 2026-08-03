@@ -1,4 +1,12 @@
-import { Alert, Button, Group, Loader, Stack, Title } from "@mantine/core";
+import {
+  Alert,
+  Button,
+  Group,
+  Loader,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
 import type { ReactNode } from "react";
 
 // 목록 화면이 13개 반복되고 같은 이유로 바뀌므로 공통화한다
@@ -30,14 +38,23 @@ export function DataPage({
         <Title order={3}>{title}</Title>
         {actions}
       </Group>
-      {isPending ? <Loader aria-label={`${title} 불러오는 중`} /> : null}
+      {isPending ? (
+        <Group gap="xs" role="status">
+          <Loader size="sm" aria-hidden />
+          <Text size="sm" c="dimmed">
+            {title} 불러오는 중…
+          </Text>
+        </Group>
+      ) : null}
       {error ? (
         <Alert color="red" role="alert" title="불러오지 못했습니다">
           {error.message}
         </Alert>
       ) : null}
       {!isPending && !error && isEmpty ? (
-        <Alert color="gray">{emptyLabel}</Alert>
+        <Alert color="gray" role="status">
+          {emptyLabel}
+        </Alert>
       ) : null}
       {!isPending && !error && !isEmpty ? children : null}
     </Stack>

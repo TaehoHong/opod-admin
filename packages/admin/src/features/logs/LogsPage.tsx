@@ -11,6 +11,7 @@ import { useForm } from "@mantine/form";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { TableText } from "../../shared/ui/TableText";
 import { fetchCharacterActionLogs } from "./api";
 
 // 자동화가 무엇을 했는지 읽는 화면이라, 실패로 읽히는 액션은 눈에 띄어야 한다
@@ -98,7 +99,7 @@ export function LogsPage() {
                   </Stack>
                 </Table.Td>
                 <Table.Td maw={320}>
-                  <Text lineClamp={2}>{log.reason}</Text>
+                  <TableText>{log.reason}</TableText>
                 </Table.Td>
                 <Table.Td>
                   {log.createdAt.replace("T", " ").slice(0, 16)}

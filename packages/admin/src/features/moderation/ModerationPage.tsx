@@ -2,6 +2,7 @@ import { Badge, Select, Stack, Table, Text } from "@mantine/core";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { TableText } from "../../shared/ui/TableText";
 import { ReportResolveForm } from "./ReportResolveForm";
 import { fetchReports, type ReportStatus } from "./api";
 
@@ -75,7 +76,7 @@ export function ModerationPage() {
                   </Stack>
                 </Table.Td>
                 <Table.Td maw={280}>
-                  <Text lineClamp={2}>{report.reason}</Text>
+                  <TableText>{report.reason}</TableText>
                 </Table.Td>
                 <Table.Td>
                   <Badge color={STATUS_COLOR[report.status]}>

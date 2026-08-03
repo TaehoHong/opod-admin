@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { TableText } from "../../shared/ui/TableText";
 import { GenerationJobCompleteModal } from "./GenerationJobCompleteModal";
 import { GenerationJobCreateModal } from "./GenerationJobCreateModal";
 import { ImageWizard } from "./ImageWizard";
@@ -171,7 +172,7 @@ export function GenerationPage() {
                     <Badge variant="light">{job.mediaType}</Badge>
                   </Table.Td>
                   <Table.Td maw={280}>
-                    <Text lineClamp={1}>{job.prompt}</Text>
+                    <TableText lines={1}>{job.prompt}</TableText>
                   </Table.Td>
                   <Table.Td>
                     <Badge color={STATUS_COLOR[job.status]}>

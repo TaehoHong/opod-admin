@@ -1,4 +1,5 @@
 import { Badge, Paper, Stack, Table, Text, Title } from "@mantine/core";
+import { TableText } from "../../shared/ui/TableText";
 import type { SettingsChangeLog } from "./api";
 
 // 설정 변경 감사 이력 (console_logs) — 읽기 전용.
@@ -32,7 +33,9 @@ export function SettingsChangesTable({
                       {change.createdAt.replace("T", " ").slice(0, 16)}
                     </Table.Td>
                     <Table.Td>{change.adminEmail ?? "—"}</Table.Td>
-                    <Table.Td>{change.target ?? "—"}</Table.Td>
+                    <Table.Td maw={220}>
+                      <TableText lines={1}>{change.target ?? "—"}</TableText>
+                    </Table.Td>
                     <Table.Td>
                       {change.actionType === "SETTINGS_CLEAR" ? (
                         <Badge color="ink" variant="light">
@@ -42,7 +45,9 @@ export function SettingsChangesTable({
                         <Badge color="accent">저장</Badge>
                       )}
                     </Table.Td>
-                    <Table.Td>{change.summary ?? ""}</Table.Td>
+                    <Table.Td maw={320}>
+                      <TableText>{change.summary ?? ""}</TableText>
+                    </Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>

@@ -14,6 +14,7 @@ import {
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { CreditGrantModal } from "../credits/CreditGrantModal";
+import { TableText } from "../../shared/ui/TableText";
 import { fetchCreditLedger } from "../credits/api";
 import { fetchUser, fetchUserEvents } from "./api";
 import { useState } from "react";
@@ -139,8 +140,14 @@ export function UserDetailModal({
                             {entry.amount > 0 ? "+" : ""}
                             {entry.amount.toLocaleString()}
                           </Table.Td>
-                          <Table.Td>{entry.reason}</Table.Td>
-                          <Table.Td>{entry.externalReference ?? "—"}</Table.Td>
+                          <Table.Td maw={240}>
+                            <TableText>{entry.reason}</TableText>
+                          </Table.Td>
+                          <Table.Td maw={240}>
+                            <TableText lines={1}>
+                              {entry.externalReference ?? "—"}
+                            </TableText>
+                          </Table.Td>
                           <Table.Td>{formatDateTime(entry.createdAt)}</Table.Td>
                         </Table.Tr>
                       ))}

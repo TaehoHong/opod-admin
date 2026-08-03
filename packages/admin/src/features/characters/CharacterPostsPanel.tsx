@@ -1,6 +1,7 @@
 import { Alert, Badge, Loader, Stack, Table, Text } from "@mantine/core";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { LoadMore } from "../../shared/ui/DataPage";
+import { TableText } from "../../shared/ui/TableText";
 import { fetchPosts } from "../posts/api";
 
 export function CharacterPostsPanel({ characterId }: { characterId: string }) {
@@ -46,7 +47,7 @@ export function CharacterPostsPanel({ characterId }: { characterId: string }) {
                   <Badge variant="light">{post.contentType}</Badge>
                 </Table.Td>
                 <Table.Td maw={420}>
-                  <Text lineClamp={2}>{post.content}</Text>
+                  <TableText>{post.content}</TableText>
                 </Table.Td>
                 <Table.Td>{post.commentCount}</Table.Td>
                 <Table.Td>{post.reactionCount}</Table.Td>

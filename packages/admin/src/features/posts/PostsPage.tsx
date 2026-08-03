@@ -1,7 +1,15 @@
-import { Badge, Button, Group, Select, Table, Text } from "@mantine/core";
+import {
+  Badge,
+  Button,
+  Group,
+  Select,
+  Table,
+  UnstyledButton,
+} from "@mantine/core";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { TableText } from "../../shared/ui/TableText";
 import { PostCreateModal } from "./PostCreateModal";
 import { PostDetailModal } from "./PostDetailModal";
 import {
@@ -64,15 +72,12 @@ export function PostsPage() {
               {posts.items.map((post) => (
                 <Table.Tr key={post.id}>
                   <Table.Td maw={360}>
-                    <Button
-                      variant="transparent"
-                      p={0}
-                      h="auto"
-                      c="inherit"
+                    <UnstyledButton
+                      w="100%"
                       onClick={() => setSelectedPostId(post.id)}
                     >
-                      <Text lineClamp={2}>{post.content}</Text>
-                    </Button>
+                      <TableText>{post.content}</TableText>
+                    </UnstyledButton>
                   </Table.Td>
                   <Table.Td>
                     <Badge variant="light">{post.contentType}</Badge>

@@ -3,6 +3,7 @@ import { useForm } from "@mantine/form";
 import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { TableText } from "../../shared/ui/TableText";
 import { CreditGrantModal } from "./CreditGrantModal";
 import { fetchCreditLedger } from "./api";
 
@@ -68,7 +69,7 @@ export function CreditsPage() {
                   <Table.Td>{entry.amount}</Table.Td>
                   <Table.Td>{entry.creditKind ?? "—"}</Table.Td>
                   <Table.Td maw={280}>
-                    <Text lineClamp={2}>{entry.reason}</Text>
+                    <TableText>{entry.reason}</TableText>
                   </Table.Td>
                   <Table.Td>
                     <Text size="xs" c="dimmed">

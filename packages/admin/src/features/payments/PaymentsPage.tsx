@@ -2,6 +2,7 @@ import { Badge, Button, SegmentedControl, Table, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { DataPage } from "../../shared/ui/DataPage";
+import { TableText } from "../../shared/ui/TableText";
 import { PaymentDetailPanel } from "./PaymentDetailPanel";
 import {
   LEDGER_STATUS_COLOR,
@@ -84,7 +85,7 @@ export function PaymentsPage() {
                   </Badge>
                 </Table.Td>
                 <Table.Td maw={280}>
-                  <Text lineClamp={2}>{item.reason ?? "—"}</Text>
+                  <TableText>{item.reason ?? "—"}</TableText>
                 </Table.Td>
                 <Table.Td>
                   {/* 행 클릭 대신 버튼을 둬서 keyboard로도 열 수 있게 한다

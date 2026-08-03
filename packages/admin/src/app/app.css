@@ -4,3 +4,20 @@ body {
   background-color: var(--mantine-color-white);
   color: var(--mantine-color-black);
 }
+
+.skip-link {
+  position: fixed;
+  top: var(--mantine-spacing-xs);
+  left: var(--mantine-spacing-xs);
+  z-index: 1000;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  border: 1px solid var(--mantine-color-accent-6);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-white);
+  color: var(--mantine-color-accent-7);
+  transform: translateY(calc(-100% - var(--mantine-spacing-md)));
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}

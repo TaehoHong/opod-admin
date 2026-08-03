@@ -17,6 +17,7 @@ import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { previewUrl } from "../../shared/media/previewUrl";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { TableText } from "../../shared/ui/TableText";
 import { MediaUploadModal } from "./MediaUploadModal";
 import {
   confirmMediaUpload,
@@ -111,7 +112,7 @@ export function MediaPage() {
             {media.items.map((item) => (
               <Table.Tr key={item.id}>
                 <Table.Td maw={280}>
-                  <Text lineClamp={1}>{mediaFileName(item)}</Text>
+                  <TableText lines={1}>{mediaFileName(item)}</TableText>
                 </Table.Td>
                 <Table.Td>
                   <Badge variant="light">{item.mediaType}</Badge>

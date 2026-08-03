@@ -17,6 +17,7 @@ import { useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { CharacterSelect } from "../../shared/ui/CharacterSelect";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
+import { TableText } from "../../shared/ui/TableText";
 import { DraftDetailPanel } from "./DraftDetailPanel";
 import { createDraft, fetchDrafts } from "./api";
 import { DRAFT_STATUS_COLOR, DRAFT_STATUS_LABEL } from "./labels";
@@ -87,7 +88,9 @@ export function DraftsPage() {
                   </Text>
                 </Table.Td>
                 <Table.Td maw={320}>
-                  <Text lineClamp={1}>{draft.caption || "(기획 전)"}</Text>
+                  <TableText lines={1}>
+                    {draft.caption || "(기획 전)"}
+                  </TableText>
                 </Table.Td>
                 <Table.Td>
                   <Badge color={DRAFT_STATUS_COLOR[draft.status]}>

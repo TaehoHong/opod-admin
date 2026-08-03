@@ -12,52 +12,55 @@
 
 ## Current Module Map
 
-| 영역              | 현재 경로                                                                              | 현재 책임                                                            | 주요 진입점                                                          | 테스트·증거                                                 |
-| ----------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Bootstrap/HTTP    | `src/main.ts`, `src/app.module.ts`, `src/common/`                                      | Nest 시작, static UI, validation, exception, HTTP log                | `bootstrap`, `AppModule`                                             | `src/main.ts`, `src/app.module.ts`, `src/common/`           |
-| Admin auth        | `src/admin/auth/`                                                                      | login, admin 생성, cookie 세션, CSRF/JWT guard                       | `AdminAuthController`, `AdminAuthService`, `AdminJwtGuard`           | `src/admin/auth/*.spec.ts`, `test/admin-auth.e2e-spec.ts`   |
-| General admin     | `src/admin/admin.controller.ts`, `src/admin/admin.service.ts`, `src/admin/admin-*.repository.ts`, `src/admin/dto/` | user/content/credit/payment/report/analytics                         | `AdminController`, `AdminService`                                    | colocated specs, `test/admin-analytics.e2e-spec.ts`         |
-| Drafts            | `src/admin/drafts/`                                                                    | draft CRUD, planning, generation, approval, publish                  | `DraftsController`, `DraftsService`                                  | `drafts.service.spec.ts`, generation E2E                    |
-| Generation        | `src/admin/generation/`, `src/worker/`                                                 | job 생성, provider 호출, lease/retry, planning, publish              | `GenerationService`, `GenerationWorkerService`, `DraftWorkerService` | colocated specs, `test/generation.e2e-spec.ts`              |
-| Characters        | `src/characters/`                                                                      | character/persona/memory/profile image/posting policy/visual profile | `CharactersController`, feature services와 repositories              | colocated specs, `test/character-profile-image.e2e-spec.ts` |
-| Media             | `src/admin/media/`, `src/worker/generated-media-store.ts`, `src/worker/film-finish.ts` | upload, signing, generated media persistence                         | `MediaService`, store factories                                      | media/film specs                                            |
-| Settings          | `src/admin/settings/`, `src/domain/settings/`                                          | provider 설정과 audit                                                | `GenerationSettingsService`                                          | settings specs, `docs/api/admin-settings.md`                |
-| LLM logs          | `src/admin/llm-logs/`, `src/domain/llm-logs/`                                          | LLM 실행 기록·조회와 토큰 사용량 집계                                | `LlmLogService`, `LlmLogsController`, `TokenUsageService`            | LLM log specs, `token-usage.service.spec.ts`                |
-| Prompt code       | `prompts/`, `src/worker/*prompt*`                                                      | pure prompt 구성과 worker orchestration                              | exported builders                                                    | prompt/worker specs                                         |
-| Config            | `src/domain/config/`                                                                   | 부팅 설정 로드·검증과 typed 주입                                     | `AppConfigService`, `loadAppConfig`, `ConfigModule`                  | `admin-auth.service.spec.ts`가 주입 경로 사용               |
-| Health            | `src/health/`                                                                          | 인증 없는 liveness/readiness와 DB 도달성 확인                        | `HealthController`, `HealthService`, `HealthRepository`              | `health.controller.spec.ts`                                 |
-| Prisma/schema     | `src/domain/database/`, `prisma/`, `scripts/check-schema-sync.mjs`                     | Prisma client와 admin schema mirror                                  | `PrismaModule`, `PrismaService`                                      | schema check, E2E setup                                     |
-| Admin UI          | `packages/admin/src/`, `packages/admin/index.html`                                     | React admin과 `/api/admin/v1/*` 호출                                 | `main.tsx`, `app/`, `features/`                                      | `src/**/*.test.tsx`, `npm run admin:check`                  |
-| E2E               | `test/`                                                                                | Testcontainers PostgreSQL와 API contract                             | Jest global setup                                                    | `test/jest-e2e.json`, `test/e2e-global-setup.ts`            |
+| 영역           | 현재 경로                                                                                                          | 현재 책임                                                            | 주요 진입점                                                          | 테스트·증거                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Bootstrap/HTTP | `src/main.ts`, `src/app.module.ts`, `src/common/`                                                                  | Nest 시작, static UI, validation, exception, HTTP log                | `bootstrap`, `AppModule`                                             | `src/main.ts`, `src/app.module.ts`, `src/common/`           |
+| Admin auth     | `src/admin/auth/`                                                                                                  | login, admin 생성, cookie 세션, CSRF/JWT guard                       | `AdminAuthController`, `AdminAuthService`, `AdminJwtGuard`           | `src/admin/auth/*.spec.ts`, `test/admin-auth.e2e-spec.ts`   |
+| General admin  | `src/admin/admin.controller.ts`, `src/admin/admin.service.ts`, `src/admin/admin-*.repository.ts`, `src/admin/dto/` | user/content/credit/payment/report/analytics                         | `AdminController`, `AdminService`                                    | colocated specs, `test/admin-analytics.e2e-spec.ts`         |
+| Drafts         | `src/admin/drafts/`                                                                                                | draft CRUD, planning, generation, approval, publish                  | `DraftsController`, `DraftsService`                                  | `drafts.service.spec.ts`, generation E2E                    |
+| Generation     | `src/admin/generation/`, `src/worker/`                                                                             | job 생성, provider 호출, lease/retry, planning, publish              | `GenerationService`, `GenerationWorkerService`, `DraftWorkerService` | colocated specs, `test/generation.e2e-spec.ts`              |
+| Characters     | `src/characters/`                                                                                                  | character/persona/memory/profile image/posting policy/visual profile | `CharactersController`, feature services와 repositories              | colocated specs, `test/character-profile-image.e2e-spec.ts` |
+| Media          | `src/admin/media/`, `src/worker/generated-media-store.ts`, `src/worker/film-finish.ts`                             | upload, signing, generated media persistence                         | `MediaService`, store factories                                      | media/film specs                                            |
+| Settings       | `src/admin/settings/`, `src/domain/settings/`                                                                      | provider 설정과 audit                                                | `GenerationSettingsService`                                          | settings specs, `docs/api/admin-settings.md`                |
+| LLM logs       | `src/admin/llm-logs/`, `src/domain/llm-logs/`                                                                      | LLM 실행 기록·조회와 토큰 사용량 집계                                | `LlmLogService`, `LlmLogsController`, `TokenUsageService`            | LLM log specs, `token-usage.service.spec.ts`                |
+| Prompt code    | `prompts/`, `src/worker/*prompt*`                                                                                  | pure prompt 구성과 worker orchestration                              | exported builders                                                    | prompt/worker specs                                         |
+| Config         | `src/domain/config/`                                                                                               | 부팅 설정 로드·검증과 typed 주입                                     | `AppConfigService`, `loadAppConfig`, `ConfigModule`                  | `admin-auth.service.spec.ts`가 주입 경로 사용               |
+| Health         | `src/health/`                                                                                                      | 인증 없는 liveness/readiness와 DB 도달성 확인                        | `HealthController`, `HealthService`, `HealthRepository`              | `health.controller.spec.ts`                                 |
+| Prisma/schema  | `src/domain/database/`, `prisma/`, `scripts/check-schema-sync.mjs`                                                 | Prisma client와 admin schema mirror                                  | `PrismaModule`, `PrismaService`                                      | schema check, E2E setup                                     |
+| Admin UI       | `packages/admin/src/`, `packages/admin/index.html`                                                                 | React admin과 `/api/admin/v1/*` 호출                                 | `main.tsx`, `app/`, `features/`                                      | `src/**/*.test.tsx`, `npm run admin:check`                  |
+| E2E            | `test/`                                                                                                            | Testcontainers PostgreSQL와 API contract                             | Jest global setup                                                    | `test/jest-e2e.json`, `test/e2e-global-setup.ts`            |
 
 ## Shared Capability Catalog
 
-| 기능                      | 현재 canonical owner                                    | 제약                                                                                                               | 주요 사용처                                          |
-| ------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| Prisma connection         | `PrismaModule`, `PrismaService`                         | migration 소유권 없음                                                                                              | admin, characters, worker                            |
-| Admin auth                | `AdminJwtGuard`, `AdminCsrfGuard`, `AdminAuthService`   | `__Host-` cookie 세션, 상태 변경 시 고정 헤더                                                                      | protected controllers/UI                             |
-| Pagination                | `src/domain/database/page.ts`                           | active filter 안에서 cursor 검증                                                                                   | list endpoints                                       |
-| Provider settings         | `GenerationSettingsService`                             | secret response masking                                                                                            | worker, settings, generation                         |
-| LLM logging               | `LlmLogService`                                         | 현재 구현과 목표 4-table 구조 구분                                                                                 | planners/providers/admin                             |
-| Image provider resolution | `resolveImageGenerationProviders`                       | 현재 provider를 영구 product abstraction으로 간주하지 않음                                                         | generation worker                                    |
-| Generated media storage   | `createGeneratedMediaStore`, `createReferenceUrlSigner` | provider 임시 결과를 owned storage에 보존                                                                          | worker, draft publish                                |
-| Prompt construction       | exports under `prompts/`                                | pure construction; network/DB 없음                                                                                 | planner, prompt builder                              |
+| 기능                      | 현재 canonical owner                                    | 제약                                                                                                                                                                                        | 주요 사용처                                          |
+| ------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Prisma connection         | `PrismaModule`, `PrismaService`                         | migration 소유권 없음                                                                                                                                                                       | admin, characters, worker                            |
+| Admin auth                | `AdminJwtGuard`, `AdminCsrfGuard`, `AdminAuthService`   | `__Host-` cookie 세션, 상태 변경 시 고정 헤더                                                                                                                                               | protected controllers/UI                             |
+| Pagination                | `src/domain/database/page.ts`                           | active filter 안에서 cursor 검증                                                                                                                                                            | list endpoints                                       |
+| Provider settings         | `GenerationSettingsService`                             | secret response masking                                                                                                                                                                     | worker, settings, generation                         |
+| LLM logging               | `LlmLogService`                                         | 현재 구현과 목표 4-table 구조 구분                                                                                                                                                          | planners/providers/admin                             |
+| Image provider resolution | `resolveImageGenerationProviders`                       | 현재 provider를 영구 product abstraction으로 간주하지 않음                                                                                                                                  | generation worker                                    |
+| Generated media storage   | `createGeneratedMediaStore`, `createReferenceUrlSigner` | provider 임시 결과를 owned storage에 보존                                                                                                                                                   | worker, draft publish                                |
+| Prompt construction       | exports under `prompts/`                                | pure construction; network/DB 없음                                                                                                                                                          | planner, prompt builder                              |
 | Shot generation contract  | `ContentPlanShot`, `paramsJson._shot`                   | `scene`과 `captureSetup` 분리, 인물 노출 샷은 업로드 완료 identity reference 필수, provider 제출 사실은 `_shot.execution`에 기록하며 기획·실행 불일치는 검수 경고일 뿐 승인을 차단하지 않음 | planner, draft/generation worker, retry/regeneration |
-| Runtime config            | `AppConfigService` (`ConfigModule`은 `@Global`)         | database/auth/TLS/S3/worker의 부팅 고정값 소유. DB 우선 provider 설정은 `GenerationSettingsService`가 유지           | `app-config.spec.ts`, module factories               |
-| Validation/error boundary | `ValidationPipe`, `AllExceptionsFilter`                 | whitelist+transform, common error response                                                                         | all HTTP routes                                      |
+| Runtime config            | `AppConfigService` (`ConfigModule`은 `@Global`)         | database/auth/TLS/S3/worker의 부팅 고정값 소유. DB 우선 provider 설정은 `GenerationSettingsService`가 유지                                                                                  | `app-config.spec.ts`, module factories               |
+| Validation/error boundary | `ValidationPipe`, `AllExceptionsFilter`                 | whitelist+transform, common error response                                                                                                                                                  | all HTTP routes                                      |
+| Admin shell navigation    | `packages/admin/src/app/AppLayout.tsx`                  | 현재 route 활성 표시, mobile 메뉴 닫기와 본문 바로가기 제공                                                                                                                                 | all admin UI routes                                  |
+| List status feedback      | `packages/admin/src/shared/ui/DataPage.tsx`             | 목록의 loading·empty 상태를 보이는 문구와 `role="status"`로 공지                                                                                                                            | list pages                                           |
+| Long table text           | `packages/admin/src/shared/ui/TableText.tsx`            | 긴 셀 내용을 줄 수로 제한하고 단일 문자열도 셀 안에서 줄바꿈하며 전체 문자열을 보존                                                                                                         | prose/file/prompt table cells                        |
 
 ## Current Canonical Examples
 
 현재 존재하는 코드에서만 example을 지정한다.
 
-| 관심사                              | example                         | 이유                                                                                            | 증거                                                              |
-| ----------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Nest feature co-location            | character와 draft feature       | controller/service/DTO/spec가 기능 경계에 함께 있음                                             | `src/characters/`, `src/admin/drafts/`                            |
-| DTO validation                      | draft DTO                       | HTTP input decorator와 validation 사용                                                          | `src/admin/drafts/dto/`                                           |
-| Observable behavior tests           | draft/generation worker specs   | 상태 전이와 결과를 보호                                                                         | `src/admin/drafts/drafts.service.spec.ts`, `src/worker/*.spec.ts` |
-| Cross-module DB contract            | auth/generation E2E             | 실제 PostgreSQL과 API 경계 검증                                                                 | `test/admin-auth.e2e-spec.ts`, `test/generation.e2e-spec.ts`      |
-| Pure prompt logic                   | prompt builders                 | network/persistence 없이 deterministic 구성                                                     | `prompts/`, 관련 specs                                            |
-| Repository/application-service 구조 | health, characters, admin        | controller → application service → repository 방향이고 `PrismaService`가 repository 안에만 있음 | `src/health/`, `src/characters/`, `src/admin/admin-*.repository.ts` |
+| 관심사                              | example                       | 이유                                                                                            | 증거                                                                |
+| ----------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Nest feature co-location            | character와 draft feature     | controller/service/DTO/spec가 기능 경계에 함께 있음                                             | `src/characters/`, `src/admin/drafts/`                              |
+| DTO validation                      | draft DTO                     | HTTP input decorator와 validation 사용                                                          | `src/admin/drafts/dto/`                                             |
+| Observable behavior tests           | draft/generation worker specs | 상태 전이와 결과를 보호                                                                         | `src/admin/drafts/drafts.service.spec.ts`, `src/worker/*.spec.ts`   |
+| Cross-module DB contract            | auth/generation E2E           | 실제 PostgreSQL과 API 경계 검증                                                                 | `test/admin-auth.e2e-spec.ts`, `test/generation.e2e-spec.ts`        |
+| Pure prompt logic                   | prompt builders               | network/persistence 없이 deterministic 구성                                                     | `prompts/`, 관련 specs                                              |
+| Repository/application-service 구조 | health, characters, admin     | controller → application service → repository 방향이고 `PrismaService`가 repository 안에만 있음 | `src/health/`, `src/characters/`, `src/admin/admin-*.repository.ts` |
 
 health feature가 승인된 repository/application-service 구조의 첫 canonical
 example이고 character profile image가 entity mutation 적용 예다. 새 DB 접근은
@@ -87,13 +90,13 @@ repository fake로 서비스 판단만 검증하는 형태의 예다.
 
 ## Current and Target Frontend
 
-| 항목         | 현재                                       |
-| ------------ | ------------------------------------------ |
-| Framework    | React + TypeScript + Vite                  |
-| Routing      | React Router                               |
-| Server state | TanStack Query                             |
-| UI/form      | Mantine + `@mantine/form` uncontrolled     |
-| Tests        | Vitest + RTL/jsdom + MSW Node              |
+| 항목         | 현재                                   |
+| ------------ | -------------------------------------- |
+| Framework    | React + TypeScript + Vite              |
+| Routing      | React Router                           |
+| Server state | TanStack Query                         |
+| UI/form      | Mantine + `@mantine/form` uncontrolled |
+| Tests        | Vitest + RTL/jsdom + MSW Node          |
 
 React 앱은 `packages/admin/src/`가 소유하고 `npm run admin:build`가
 `packages/admin/dist/index.html`을 만든다. Nest는 이 entry만 서빙한다.
@@ -119,7 +122,9 @@ job 등록/실행/완료/재시도가 모두 React에 있다. 사용자·게시�
 그 값을 직접 복사하지 않는다
 (docs/04-design-rules.md:25-26). 목록 화면의 반복(제목·로딩·오류·빈
 상태·더 보기)은 `shared/ui/DataPage`와 `shared/api/useCursorList`로
-공통화했다.
+공통화했다. application shell의 route 위치와 keyboard 우회 동작은
+`app/AppLayout`이, 긴 table 셀의 줄바꿈·말줄임은 `shared/ui/TableText`가
+공통으로 소유한다.
 
 ## Verification Paths
 
