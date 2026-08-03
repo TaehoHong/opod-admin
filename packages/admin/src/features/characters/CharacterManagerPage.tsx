@@ -1,7 +1,9 @@
-import { Alert, Loader, Modal, Stack, Tabs, Text } from "@mantine/core";
+import { Button, Stack, Tabs, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
-import { CharacterAutomationPanel } from "./CharacterAutomationPanel";
+import { Link, Navigate, useParams } from "react-router-dom";
+import { DataPage } from "../../shared/ui/DataPage";
 import { CharacterActivityPanel } from "./CharacterActivityPanel";
+import { CharacterAutomationPanel } from "./CharacterAutomationPanel";
 import { CharacterMemoriesPanel } from "./CharacterMemoriesPanel";
 import { CharacterPersonasPanel } from "./CharacterPersonasPanel";
 import { CharacterPostsPanel } from "./CharacterPostsPanel";
@@ -9,32 +11,28 @@ import { CharacterProfilePanel } from "./CharacterProfilePanel";
 import { CharacterVisualPanel } from "./CharacterVisualPanel";
 import { fetchCharacter } from "./api";
 
-export function CharacterManagerModal({
-  characterId,
-  onClose,
-}: {
-  characterId: string;
-  onClose: () => void;
-}) {
+export function CharacterManagerPage() {
+  const { characterId } = useParams();
   const character = useQuery({
     queryKey: ["character", characterId],
-    queryFn: () => fetchCharacter(characterId),
+    queryFn: () => fetchCharacter(characterId!),
+    enabled: Boolean(characterId),
   });
 
+  if (!characterId) return <Navigate to="/characters" replace />;
+
   return (
-    <Modal
-      opened
-      onClose={onClose}
+    <DataPage
       title={character.data?.displayName ?? "캐릭터 관리"}
-      size="calc(100vw - 80px)"
+      isPending={character.isPending}
+      error={character.error}
+      actions={
+        <Button component={Link} to="/characters" variant="default">
+          목록으로
+        </Button>
+      }
     >
-      {character.isPending ? (
-        <Loader aria-label="캐릭터 상세 불러오는 중" />
-      ) : character.error ? (
-        <Alert color="red" role="alert" title="불러오지 못했습니다">
-          {character.error.message}
-        </Alert>
-      ) : character.data ? (
+      {character.data ? (
         <Stack>
           <Text size="sm" c="dimmed">
             @{character.data.publicId} · {character.data.status}
@@ -82,6 +80,6 @@ export function CharacterManagerModal({
           </Tabs>
         </Stack>
       ) : null}
-    </Modal>
+    </DataPage>
   );
 }

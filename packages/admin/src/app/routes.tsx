@@ -13,6 +13,11 @@ const CharactersPage = lazy(() =>
     default: m.CharactersPage,
   })),
 );
+const CharacterManagerPage = lazy(() =>
+  import("../features/characters/CharacterManagerPage").then((m) => ({
+    default: m.CharacterManagerPage,
+  })),
+);
 const PostsPage = lazy(() =>
   import("../features/posts/PostsPage").then((m) => ({ default: m.PostsPage })),
 );
@@ -99,6 +104,10 @@ export function AppRoutes() {
         {NAV_ITEMS.map(({ id, Page }) => (
           <Route key={id} path={id} element={<Page />} />
         ))}
+        <Route
+          path="characters/:characterId"
+          element={<CharacterManagerPage />}
+        />
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Route>
     </Routes>

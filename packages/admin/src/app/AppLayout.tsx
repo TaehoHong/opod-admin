@@ -77,7 +77,10 @@ export function AppLayout() {
               component={RouterNavLink}
               to={`/${item.id}`}
               label={item.label}
-              active={location.pathname === `/${item.id}`}
+              active={
+                location.pathname === `/${item.id}` ||
+                location.pathname.startsWith(`/${item.id}/`)
+              }
               onClick={close}
               rightSection={
                 queue && queue.count > 0 ? (

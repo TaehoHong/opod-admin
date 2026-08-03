@@ -105,7 +105,7 @@ Docker build가 동일한 frontend 계약을 사용한다.
 
 canonical example: auth feature(`src/features/auth/`)가 apiClient, TanStack
 Query, Mantine form과 MSW 테스트를 한 번에 보여준다. characters feature가
-목록 조회·cursor 페이지네이션과 modal/tab 기반 entity 쓰기 관리의 canonical
+목록 조회·cursor 페이지네이션과 route/tab 기반 entity 쓰기 관리의 canonical
 example이다. `features/media/api.ts`의 `uploadMediaFile`은 한 화면에서 파일
 선택부터 연결까지 끝내야 할 때 쓰는 presign → PUT → confirm owner다.
 

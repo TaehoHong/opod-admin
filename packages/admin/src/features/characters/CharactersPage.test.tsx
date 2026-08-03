@@ -1,14 +1,35 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { AppProviders } from "../../app/providers";
 import { server } from "../../test/server";
+import { CharacterManagerPage } from "./CharacterManagerPage";
 import { CharactersPage } from "./CharactersPage";
 import type { CharacterCreate } from "./api";
 
+function renderCharacterRoutes() {
+  server.use(
+    http.get("/api/admin/v1/media", () => HttpResponse.json({ items: [] })),
+  );
+  render(
+    <AppProviders>
+      <MemoryRouter initialEntries={["/characters"]}>
+        <Routes>
+          <Route path="characters" element={<CharactersPage />} />
+          <Route
+            path="characters/:characterId"
+            element={<CharacterManagerPage />}
+          />
+        </Routes>
+      </MemoryRouter>
+    </AppProviders>,
+  );
+}
+
 describe("character management", () => {
-  it("creates a character and refreshes the list", async () => {
+  it("creates a character and opens its management page", async () => {
     const requests: unknown[] = [];
     let items: Array<Record<string, unknown>> = [];
 
@@ -28,13 +49,23 @@ describe("character management", () => {
         items = [created, ...items];
         return HttpResponse.json(created, { status: 201 });
       }),
+      http.get("/api/admin/v1/characters/:id", ({ params }) =>
+        HttpResponse.json({
+          ...items.find((item) => item.id === params.id),
+          personas: [],
+          memories: [],
+        }),
+      ),
+      http.get("/api/admin/v1/characters/:id/profile-image", () =>
+        HttpResponse.json({
+          characterId: "character-2",
+          image: null,
+          crop: { x: 0.5, y: 0.5, zoom: 1 },
+        }),
+      ),
     );
 
-    render(
-      <AppProviders>
-        <CharactersPage />
-      </AppProviders>,
-    );
+    renderCharacterRoutes();
 
     await screen.findByText("표시할 항목이 없습니다.");
     await userEvent.click(screen.getByRole("button", { name: "캐릭터 추가" }));
@@ -60,8 +91,13 @@ describe("character management", () => {
         },
       ]),
     );
-    expect(await screen.findByText("새 캐릭터")).toBeInTheDocument();
-  });
+    expect(
+      await screen.findByRole("link", { name: "목록으로" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "새 캐릭터" }),
+    ).toBeInTheDocument();
+  }, 10_000);
 
   it("updates the profile and adds a persona from the character manager", async () => {
     const profileUpdates: unknown[] = [];
@@ -119,16 +155,16 @@ describe("character management", () => {
       ),
     );
 
-    render(
-      <AppProviders>
-        <CharactersPage />
-      </AppProviders>,
-    );
+    renderCharacterRoutes();
 
     await screen.findByText("기존 캐릭터");
-    await userEvent.click(screen.getByRole("button", { name: "관리" }));
+    expect(
+      screen.queryByRole("button", { name: "관리" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText("기존 캐릭터 관리"));
 
     const displayName = await screen.findByLabelText("표시 이름");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await userEvent.clear(displayName);
     await userEvent.type(displayName, "수정 캐릭터");
     await userEvent.click(screen.getByRole("button", { name: "프로필 저장" }));
@@ -204,14 +240,10 @@ describe("character management", () => {
       ),
     );
 
-    render(
-      <AppProviders>
-        <CharactersPage />
-      </AppProviders>,
-    );
+    renderCharacterRoutes();
 
     await screen.findByText("기존 캐릭터");
-    await userEvent.click(screen.getByRole("button", { name: "관리" }));
+    await userEvent.click(screen.getByText("기존 캐릭터"));
     await screen.findByLabelText("표시 이름");
     await userEvent.click(screen.getByRole("tab", { name: "페르소나" }));
 
@@ -319,14 +351,10 @@ describe("character management", () => {
       ),
     );
 
-    render(
-      <AppProviders>
-        <CharactersPage />
-      </AppProviders>,
-    );
+    renderCharacterRoutes();
 
     await screen.findByText("기존 캐릭터");
-    await userEvent.click(screen.getByRole("button", { name: "관리" }));
+    await userEvent.click(screen.getByText("기존 캐릭터"));
 
     await userEvent.click(screen.getByRole("tab", { name: "메모리" }));
     await userEvent.type(
@@ -451,14 +479,10 @@ describe("character management", () => {
       }),
     );
 
-    render(
-      <AppProviders>
-        <CharactersPage />
-      </AppProviders>,
-    );
+    renderCharacterRoutes();
 
     await screen.findByText("기존 캐릭터");
-    await userEvent.click(screen.getByRole("button", { name: "관리" }));
+    await userEvent.click(screen.getByText("기존 캐릭터"));
     await userEvent.click(await screen.findByRole("tab", { name: "게시글" }));
     expect(await screen.findByText("캐릭터 전용 게시글")).toBeInTheDocument();
 

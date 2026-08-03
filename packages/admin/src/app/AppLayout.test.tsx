@@ -21,10 +21,10 @@ describe("admin application shell", () => {
 
     render(
       <AppProviders queryClient={queryClient}>
-        <MemoryRouter initialEntries={["/posts"]}>
+        <MemoryRouter initialEntries={["/posts/post-1"]}>
           <Routes>
             <Route element={<AppLayout />}>
-              <Route path="posts" element={<div>게시글 화면</div>} />
+              <Route path="posts/*" element={<div>게시글 화면</div>} />
             </Route>
           </Routes>
         </MemoryRouter>
