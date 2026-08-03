@@ -610,6 +610,11 @@ model CreditPurchase {
   id                    String                       @id @default(uuid(7)) @db.Uuid
   userId                String                       @map("user_id") @db.Uuid
   provider              String
+  // Provider-side identifiers. Null for the local stub provider.
+  // providerOrderId is unique so the database rejects a second grant for the
+  // same provider order even if two webhook deliveries race.
+  providerCheckoutId    String?                      @map("provider_checkout_id")
+  providerOrderId       String?                      @unique @map("provider_order_id")
   status                CreditPurchaseStatus         @default(pending)
   creditAmount          Int                          @map("credit_amount")
   paidAmount            Int                          @map("paid_amount")
