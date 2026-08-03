@@ -32,6 +32,9 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 import { LlmLogsController } from "./llm-logs/llm-logs.controller";
 import { TokenUsageRepository } from "./llm-logs/token-usage.repository";
 import { TokenUsageService } from "./llm-logs/token-usage.service";
+import { LocationsController } from "./locations/locations.controller";
+import { LocationsRepository } from "./locations/locations.repository";
+import { LocationsService } from "./locations/locations.service";
 
 function storageEnv(config: S3Config | undefined) {
   return config
@@ -61,6 +64,7 @@ function storageEnv(config: S3Config | undefined) {
     AdminSettingsController,
     FilmFinishController,
     LlmLogsController,
+    LocationsController,
   ],
   providers: [
     AdminService,
@@ -75,6 +79,8 @@ function storageEnv(config: S3Config | undefined) {
     SettingsAuditRepository,
     TokenUsageService,
     TokenUsageRepository,
+    LocationsService,
+    LocationsRepository,
     {
       provide: GenerationService,
       // 위저드 장면 확장 플래너 — draft 기획과 동일한 planner.* 설정을

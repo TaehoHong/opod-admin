@@ -18,6 +18,16 @@ const CharacterManagerPage = lazy(() =>
     default: m.CharacterManagerPage,
   })),
 );
+const LocationsPage = lazy(() =>
+  import("../features/locations/LocationsPage").then((m) => ({
+    default: m.LocationsPage,
+  })),
+);
+const LocationManagerPage = lazy(() =>
+  import("../features/locations/LocationManagerPage").then((m) => ({
+    default: m.LocationManagerPage,
+  })),
+);
 const PostsPage = lazy(() =>
   import("../features/posts/PostsPage").then((m) => ({ default: m.PostsPage })),
 );
@@ -81,6 +91,7 @@ const SettingsPage = lazy(() =>
 export const NAV_ITEMS = [
   { id: "home", label: "홈", Page: HomePage },
   { id: "characters", label: "캐릭터", Page: CharactersPage },
+  { id: "locations", label: "장소", Page: LocationsPage },
   { id: "posts", label: "게시글", Page: PostsPage },
   { id: "media", label: "미디어", Page: MediaPage },
   { id: "drafts", label: "초안", Page: DraftsPage },
@@ -108,6 +119,7 @@ export function AppRoutes() {
           path="characters/:characterId"
           element={<CharacterManagerPage />}
         />
+        <Route path="locations/:locationId" element={<LocationManagerPage />} />
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Route>
     </Routes>

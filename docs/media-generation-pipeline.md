@@ -131,6 +131,10 @@ docs/api/admin-settings.md를 따른다.
   레퍼런스와 장소 `negative_prompt`를 전달한다.
 - 선택 장소는 `post_drafts.location_id`에, 샷별 선택과 실제 provider 입력은
   기존처럼 `generation_jobs.params_json._shot`에 추적한다.
+- 운영자는 admin의 `장소` 화면과 `/api/admin/v1/locations`에서 범용/캐릭터
+  전용 장소를 조회·필터·수정하고 레퍼런스 설명과 순서를 관리한다. 새 이미지는
+  공통 media presign → PUT → confirm 흐름으로 업로드한다. 연결 해제와 장소
+  soft delete는 media 원본과 기존 draft를 보존한다.
 
 ### 검수와 게시
 
