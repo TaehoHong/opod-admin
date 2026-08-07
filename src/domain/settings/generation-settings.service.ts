@@ -25,6 +25,11 @@ export const GENERATION_SETTING_KEYS = {
   agentLlmApiKey: "agent.llmApiKey",
   agentLlmModel: "agent.llmModel",
   agentEmbeddingModel: "agent.embeddingModel",
+  // 평가 워커 LLM — 미설정 필드는 planner.*를 상속 (chat과 같은 규칙).
+  // 플래너와 다른 모델을 지정해 자기 평가 편향을 줄일 수 있다.
+  evaluatorLlmApiUrl: "evaluator.llmApiUrl",
+  evaluatorLlmApiKey: "evaluator.llmApiKey",
+  evaluatorLlmModel: "evaluator.llmModel",
 } as const;
 
 type GenerationSettingField = keyof typeof GENERATION_SETTING_KEYS;
@@ -84,6 +89,9 @@ const ENV_KEYS: Record<GenerationSettingField, string> = {
   agentLlmApiKey: "AGENT_LLM_API_KEY",
   agentLlmModel: "AGENT_LLM_MODEL",
   agentEmbeddingModel: "AGENT_EMBEDDING_MODEL",
+  evaluatorLlmApiUrl: "EVALUATOR_LLM_API_URL",
+  evaluatorLlmApiKey: "EVALUATOR_LLM_API_KEY",
+  evaluatorLlmModel: "EVALUATOR_LLM_MODEL",
 };
 
 const CHAT_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
@@ -184,6 +192,23 @@ export class GenerationSettingsService {
         apiKey: apiKey.source,
         model: model.source,
       },
+    };
+  }
+
+  // 평가 워커 LLM 실효 설정 — 필드 단위로 evaluator.*(DB > env) 오버라이드,
+  // 미설정은 planner 실효값 상속 (resolveChatSettings와 같은 규칙).
+  async resolveEvaluatorSettings(
+    env: SettingsEnv = process.env,
+  ): Promise<PlannerProviderSettings> {
+    const db = await this.getSettings();
+    const planner = await this.resolvePlannerSettings(env);
+    const apiUrl = pick(db, env, "evaluatorLlmApiUrl");
+    const apiKey = pick(db, env, "evaluatorLlmApiKey");
+    const model = pick(db, env, "evaluatorLlmModel");
+    return {
+      apiUrl: apiUrl.value ?? planner.apiUrl,
+      apiKey: apiKey.value ?? planner.apiKey,
+      model: model.value ?? planner.model,
     };
   }
 
@@ -354,6 +379,7 @@ export function settingsChangeEntries(
     "falApiKey",
     "llmApiKey",
     "agentLlmApiKey",
+    "evaluatorLlmApiKey",
   ];
   const entries: {
     target: string;

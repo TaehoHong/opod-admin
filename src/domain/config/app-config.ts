@@ -40,6 +40,16 @@ export type DraftWorkerConfig = {
   schedulerEnabled: boolean;
 };
 
+// 평가 워커 (docs/plan-prompt-evaluation-agent.md). 기존 워커 둘과 달리
+// 전용 플래그를 갖는다 — 기본 비활성이 backend 마이그레이션 선행 배포의
+// 안전판이다. lease 단위는 기존 관례대로 초.
+export type EvaluationWorkerConfig = {
+  enabled: boolean;
+  pollIntervalMs: number;
+  leaseSeconds: number;
+  maxAttempts: number;
+};
+
 export type AppConfig = {
   databaseUrl: string;
   adminJwtSecret: string;
@@ -49,6 +59,7 @@ export type AppConfig = {
   s3?: S3Config;
   worker: GenerationWorkerConfig;
   draftWorker: DraftWorkerConfig;
+  evaluationWorker: EvaluationWorkerConfig;
 };
 
 const DEFAULT_PORT = 7100;
@@ -176,6 +187,16 @@ function parseDraftWorker(env: ConfigEnv): DraftWorkerConfig {
   };
 }
 
+function parseEvaluationWorker(env: ConfigEnv): EvaluationWorkerConfig {
+  return {
+    enabled: enabled(env.EVALUATION_WORKER_ENABLED),
+    pollIntervalMs:
+      parsePositiveNumber(env.EVALUATION_POLL_INTERVAL_MS) ?? 15_000,
+    leaseSeconds: parsePositiveNumber(env.EVALUATION_LEASE_SECONDS) ?? 120,
+    maxAttempts: parsePositiveNumber(env.EVALUATION_MAX_ATTEMPTS) ?? 3,
+  };
+}
+
 export function loadAppConfig(env: ConfigEnv = process.env): AppConfig {
   return {
     databaseUrl: required(env, "DATABASE_URL"),
@@ -195,5 +216,6 @@ export function loadAppConfig(env: ConfigEnv = process.env): AppConfig {
     ...(parseS3(env) ? { s3: parseS3(env) } : {}),
     worker: parseWorker(env),
     draftWorker: parseDraftWorker(env),
+    evaluationWorker: parseEvaluationWorker(env),
   };
 }

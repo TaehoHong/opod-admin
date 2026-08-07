@@ -15,6 +15,10 @@ export const LLM_LOG_TYPE = {
   referenceCaption: "admin.reference.caption",
   connectionTest: "admin.connection.test",
   imageGenerate: "admin.image.generate",
+  // 평가 워커 (docs/plan-prompt-evaluation-agent.md). draft 연결은
+  // 플래너와 같은 관례로 requestId = draft.id.
+  planEvaluate: "admin.plan.evaluate",
+  promptEvaluate: "admin.prompt.evaluate",
 } as const;
 
 export type LlmLogType = (typeof LLM_LOG_TYPE)[keyof typeof LLM_LOG_TYPE];
