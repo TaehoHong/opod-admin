@@ -154,6 +154,9 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     // 프로세스 재시작 없이 다음 잡부터 반영된다.
     private readonly resolveProviders: () => Promise<ImageGenerationProviders>,
     private readonly store: GeneratedMediaStore,
+    // 자동 루프 on/off도 tick마다 재해석 — 설정 화면 토글이 프로세스 재시작
+    // 없이 반영돼야 한다.
+    private readonly resolveEnabled: () => Promise<boolean>,
     private readonly config: WorkerConfig,
     private readonly sleep: (ms: number) => Promise<void> = defaultSleep,
     private readonly downloadBytes: (url: string) => Promise<Buffer> = download,
@@ -164,20 +167,17 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    if (!this.config.enabled) {
-      this.logger.log("Generation worker is disabled (WORKER_ENABLED)");
-      return;
-    }
+    // 루프는 항상 띄우고 켜짐 여부는 tick이 판단한다.
     void this.resolveProviders()
       .then((providers) =>
         this.logger.log(
-          `Generation worker enabled (t2i=${providers.t2i.name}, edit=${providers.edit.name}, interval=${this.config.pollIntervalMs}ms)`,
+          `Generation worker loop started (t2i=${providers.t2i.name}, edit=${providers.edit.name}, interval=${this.config.pollIntervalMs}ms)`,
         ),
       )
       .catch((error: unknown) =>
         // 설정이 없으면 잡마다 실패한다 — 시작 시점에 원인을 남긴다.
         this.logger.warn(
-          `Generation worker enabled but the image provider is unavailable (interval=${this.config.pollIntervalMs}ms): ${
+          `Generation worker loop started but the image provider is unavailable (interval=${this.config.pollIntervalMs}ms): ${
             error instanceof Error ? error.message : String(error)
           }`,
         ),
@@ -196,7 +196,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
 
   // admin의 수동 실행. 지정 잡(또는 다음 queued 잡)을 claim만 하고
   // 처리는 백그라운드로 넘긴다 — HTTP 응답이 생성 완료를 기다리지 않는다.
-  // WORKER_ENABLED와 무관하게 동작한다 (자동 루프만 env로 제어).
+  // 자동 루프 토글과 무관하게 동작한다 (토글은 자동 루프만 제어).
   async runJobNow(jobId?: string): Promise<{ jobId: string | null }> {
     const claimed = jobId
       ? await this.claimSpecificJob(jobId)
@@ -241,6 +241,11 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
 
   // 한 틱: 좀비 회수 → (서킷/예산 게이트) → claim → 처리. 테스트에서 직접 호출한다.
   async tick(): Promise<void> {
+    // 꺼져 있으면 lease 회수도 하지 않는다 — 자동 루프가 아무 일도 하지 않는
+    // 상태가 "꺼짐"의 정의다. 만료 lease는 다시 켤 때 회수된다.
+    if (!(await this.resolveEnabled())) {
+      return;
+    }
     await this.sweepExpiredLeases();
     for (let processed = 0; processed < this.config.jobsPerTick; processed++) {
       if (this.circuitOpen() || !(await this.withinDailyBudget())) {
@@ -418,7 +423,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
             )
             .filter(
               (reference): reference is (typeof uploaded)[number] =>
-              reference !== undefined,
+                reference !== undefined,
             );
     const characterVisible = shotCharacterVisible(job.paramsJson);
     const ordered =

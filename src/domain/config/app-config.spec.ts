@@ -6,16 +6,16 @@ const required = {
 };
 
 describe("loadAppConfig", () => {
-  it("preserves disabled worker defaults and parses explicit overrides", () => {
+  // 자동 루프 on/off는 여기 없다 — admin_settings가 소유한다
+  // (GenerationSettingsService.resolveWorkerToggles).
+  it("preserves worker defaults and parses explicit overrides", () => {
     const defaults = loadAppConfig(required);
     expect(defaults.worker).toMatchObject({
-      enabled: false,
       pollIntervalMs: 15_000,
       maxAttempts: 3,
       dailyBudgetUsd: undefined,
     });
     expect(defaults.draftWorker).toEqual({
-      enabled: false,
       pollIntervalMs: 15_000,
       planLeaseSeconds: 120,
       maxAttempts: 3,
@@ -25,7 +25,6 @@ describe("loadAppConfig", () => {
 
     const configured = loadAppConfig({
       ...required,
-      WORKER_ENABLED: "true",
       WORKER_POLL_INTERVAL_MS: "1000",
       WORKER_MAX_ATTEMPTS: "5",
       WORKER_DAILY_BUDGET_USD: "10",
@@ -35,13 +34,11 @@ describe("loadAppConfig", () => {
       DRAFT_SCHEDULER_ENABLED: "1",
     });
     expect(configured.worker).toMatchObject({
-      enabled: true,
       pollIntervalMs: 1000,
       maxAttempts: 5,
       dailyBudgetUsd: 10,
     });
     expect(configured.draftWorker).toEqual({
-      enabled: true,
       pollIntervalMs: 1000,
       planLeaseSeconds: 30,
       maxAttempts: 6,

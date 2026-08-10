@@ -18,8 +18,8 @@ import { adminHeaders } from "./admin-auth";
 const uniqueHandle = (base: string) => `${base}-${randomUUID().slice(0, 8)}`;
 const wait = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
+// 자동 루프는 resolveEnabled(false)로 끈다 — E2E는 수동 실행 경로만 본다.
 const disabledWorkerConfig: WorkerConfig = {
-  enabled: false,
   pollIntervalMs: 15_000,
   jobsPerTick: 1,
   leaseSeconds: 600,
@@ -369,6 +369,7 @@ describe("generation", () => {
               jobs,
               async () => ({ t2i: provider, edit: provider }),
               store,
+              async () => false,
               {
                 ...disabledWorkerConfig,
                 providerPollIntervalMs: 1,

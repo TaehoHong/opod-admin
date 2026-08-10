@@ -132,6 +132,54 @@ describe("GenerationSettingsService", () => {
     ).resolves.toMatchObject({ planner: "llm:gpt-5-mini" });
   });
 
+  // 평가 LLM은 DB 전용이다. env가 되살아나면 운영자가 화면에서 지운 키로
+  // 평가가 계속 과금된다.
+  it("inherits the planner per field for the evaluator and ignores evaluator env", async () => {
+    const repository = repositoryMock([
+      { key: "planner.llmApiKey", value: "sk-planner" },
+      { key: "planner.llmApiUrl", value: "https://planner.example/v1" },
+      { key: "planner.llmModel", value: "gpt-5-mini" },
+      { key: "evaluator.llmModel", value: "gpt-5" },
+    ]);
+
+    await expect(
+      makeService(repository).resolveEvaluatorSettings({
+        EVALUATOR_LLM_API_KEY: "sk-should-be-ignored",
+        EVALUATOR_LLM_MODEL: "ignored-model",
+      }),
+    ).resolves.toEqual({
+      apiUrl: "https://planner.example/v1",
+      apiKey: "sk-planner",
+      model: "gpt-5",
+      overridden: { apiUrl: false, apiKey: false, model: true },
+    });
+  });
+
+  // 토글을 잘못 읽으면 화면에서 끈 워커가 계속 돌아 이미지·평가 비용이 샌다.
+  it("resolves worker toggles from DB first and falls back to env defaults", async () => {
+    const repository = repositoryMock([
+      { key: "worker.enabled", value: "false" },
+    ]);
+
+    await expect(
+      makeService(repository).resolveWorkerToggles({
+        WORKER_ENABLED: "true",
+        EVALUATION_WORKER_ENABLED: "1",
+      }),
+    ).resolves.toEqual({
+      generation: { enabled: false, source: "db" },
+      evaluation: { enabled: true, source: "env" },
+    });
+
+    // 아무 곳에도 값이 없으면 꺼짐이다 — 새 배포가 스스로 지출하지 않는다.
+    await expect(
+      makeService(repositoryMock()).resolveWorkerToggles({}),
+    ).resolves.toEqual({
+      generation: { enabled: false, source: "none" },
+      evaluation: { enabled: false, source: "none" },
+    });
+  });
+
   // 이미지 설정이 없으면 생성은 실패하지만 설정 화면은 떠야 한다 —
   // 여기서 예외가 나가면 admin 설정 페이지 전체가 500이 된다.
   it("reports unconfigured image and planner providers without any key", async () => {

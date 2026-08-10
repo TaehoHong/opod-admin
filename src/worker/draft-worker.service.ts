@@ -55,6 +55,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly resolvePlanner: () => Promise<ContentPlanner>,
     // 프롬프트 빌더도 실행 시마다 재해석 (플래너와 동일한 이유).
     private readonly resolvePromptBuilder: () => Promise<ImagePromptBuilder>,
+    // 자동 루프 on/off도 tick마다 재해석 — 설정 화면 토글이 프로세스 재시작
+    // 없이 반영돼야 한다. 생성 워커와 같은 토글을 공유한다.
+    private readonly resolveEnabled: () => Promise<boolean>,
     private readonly config: DraftWorkerConfig,
     private readonly random: () => number = Math.random,
     // 게시 직전 마감본 업로드용 (초안 검수 미리보기와 동일 연산).
@@ -70,18 +73,16 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    if (!this.config.enabled) {
-      return;
-    }
+    // 루프는 항상 띄우고 켜짐 여부는 tick이 판단한다.
     void this.resolvePlanner()
       .then((planner) =>
         this.logger.log(
-          `Draft worker enabled (planner=${planner.name}, scheduler=${this.config.schedulerEnabled})`,
+          `Draft worker loop started (planner=${planner.name}, scheduler=${this.config.schedulerEnabled})`,
         ),
       )
       .catch(() =>
         this.logger.log(
-          `Draft worker enabled (scheduler=${this.config.schedulerEnabled})`,
+          `Draft worker loop started (scheduler=${this.config.schedulerEnabled})`,
         ),
       );
     this.scheduleNext();
@@ -116,6 +117,11 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
 
   // 테스트에서 직접 호출한다.
   async tick(): Promise<void> {
+    // 꺼져 있으면 lease 회수도 하지 않는다 — 자동 루프가 아무 일도 하지 않는
+    // 상태가 "꺼짐"의 정의다. 만료 lease는 다시 켤 때 회수된다.
+    if (!(await this.resolveEnabled())) {
+      return;
+    }
     await this.sweepExpiredPlanLeases();
     if (this.config.schedulerEnabled) {
       await this.createScheduledDrafts();
@@ -127,7 +133,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
 
   // ── 수동 실행 (admin 버튼) ──────────────────────────────────────────────
   // 자동 파이프라인과 같은 코드를 타되 타이밍만 운영자가 정한다.
-  // WORKER_ENABLED와 무관하게 동작한다 (자동 루프만 env로 제어).
+  // 자동 루프 토글과 무관하게 동작한다 (토글은 자동 루프만 제어).
 
   // 지정 draft를 즉시 기획한다. planned가 아니거나 캐릭터가 inactive면 false.
   // 기획 실패는 자동 경로와 동일하게 planned 복귀/failed 전이로 흡수된다.
@@ -390,8 +396,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           id: reference.mediaId,
           description: reference.description,
         }));
-      const availableLocations =
-        await this.repository.findAvailableLocations(draft.characterId);
+      const availableLocations = await this.repository.findAvailableLocations(
+        draft.characterId,
+      );
       const locationCatalog = availableLocations.map((location) => ({
         id: location.id,
         name: location.displayName,
@@ -440,10 +447,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           const referenceIds = shot.characterVisible
             ? shot.referenceIds.filter((id) => availableReferenceIds.has(id))
             : [];
-          const environmentReferenceIds =
-            (shot.environmentReferenceIds ?? []).filter((id) =>
-              availableEnvironmentIds.has(id),
-            );
+          const environmentReferenceIds = (
+            shot.environmentReferenceIds ?? []
+          ).filter((id) => availableEnvironmentIds.has(id));
           assertVisibleCharacterHasReference(
             shot.characterVisible,
             referenceIds.length,
@@ -473,8 +479,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
             characterVisible: shot.characterVisible,
             targetModelId: targetModelIdForShot(
               builder,
-              shot.referenceIds.length +
-                shot.environmentReferenceIds.length >
+              shot.referenceIds.length + shot.environmentReferenceIds.length >
                 0,
             ),
           }))
@@ -511,8 +516,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         jobs: plan.shots.map((shot, index) => {
           // 커스텀/구버전 플래너가 referenceIds를 생략해도 동작해야 한다.
           const referenceIds = shot.referenceIds ?? [];
-          const environmentReferenceIds =
-            shot.environmentReferenceIds ?? [];
+          const environmentReferenceIds = shot.environmentReferenceIds ?? [];
           const combinedReferenceIds = [
             ...referenceIds,
             ...environmentReferenceIds,

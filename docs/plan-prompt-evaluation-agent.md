@@ -66,7 +66,8 @@ draft 상태 전이에 영향을 주지 않는다.
 - 비용 게이트: 기존 예산·서킷브레이커는 `GenerationWorkerService` 내부의
   이미지 비용 전용이라 공유할 수 없다(리뷰 확인). 평가 워커는 자체 최소
   게이트를 갖는다 — tick당 kind별 1건 + 연속 실패 시 지수 백오프 +
-  `EVALUATION_WORKER_ENABLED`(기본 false).
+  전용 enable 플래그(기본 false). enable 플래그의 소유권은 2026-08-10에
+  env에서 `admin_settings`로 옮겼다(10절).
 
 ## 4. 평가 루브릭
 
@@ -166,7 +167,7 @@ TS 유니언 수정만으로 충분하다(마이그레이션 불필요).
 |---|---|---|
 | `PLAN_EVALUATOR_*`, `PROMPT_EVALUATOR_*`, `IMPROVEMENT_REPORTER_*` | `prompts/` | 순수 프롬프트 상수·조립만 (경계 규칙 동일) |
 | `resolvePlanEvaluator` / `resolvePromptEvaluator` | `src/worker/plan-evaluator.ts` 등 | LLM 호출 + JSON 파싱·검증 (resolver closure 패턴) |
-| `EvaluationWorkerService` | `src/worker/evaluation-worker.service.ts` | 폴링 tick: 미평가 draft 클레임 → 평가 → 저장. `EVALUATION_WORKER_ENABLED` 게이트 |
+| `EvaluationWorkerService` | `src/worker/evaluation-worker.service.ts` | 폴링 tick: 미평가 draft 클레임 → 평가 → 저장. tick 진입 시 `evaluator.workerEnabled` 게이트 (10절) |
 | `EvaluationRepository` | `src/worker/evaluation.repository.ts` | 클레임(SKIP LOCKED), 평가 저장, 휴먼 시그널 조인 질의 |
 | `EvaluationReportService` | `src/admin/evaluations/` | 오프라인 집계 실행(수동 트리거 or 주간), 리포트 생성·조회 |
 | Admin API | `GET /drafts/:id/evaluations`, `POST/GET /evaluation-reports` | 검수 화면 배지 + 리포트 열람 |
@@ -179,6 +180,8 @@ TS 유니언 수정만으로 충분하다(마이그레이션 불필요).
 `EVALUATION_POLL_INTERVAL_MS`, `EVALUATION_LEASE_SECONDS`,
 `EVALUATION_MAX_ATTEMPTS`. 기존 워커 둘은 `WORKER_ENABLED`를 공유하므로
 평가 전용 플래그는 신규 패턴이다(리뷰 확인). lease 단위는 기존 관례대로 초.
+2026-08-10에 `EVALUATION_WORKER_ENABLED`는 DB 미설정 시에만 쓰는 초기
+기본값으로 격하됐다(10절).
 
 평가자 LLM은 플래너와 **다른 모델을 지정할 수 있게** 설정을 분리한다
 (자기 평가 편향 완화, 저비용 모델 사용 가능). 미설정 필드는 플래너 설정을
@@ -223,3 +226,43 @@ diff로 검증한다.
 | 재평가 범위 | 콘텐츠 변경 시 새 attempt, 컷 재생성은 해당 컷 중심 재평가 | 이력 보존 원칙 |
 | 리포트 주기 | 초기 수동 트리거, 보존 무제한 | 데이터 축적 후 재결정 |
 | 루브릭 버전 비교 | 리포트는 단일 rubricVersion 창만 집계 | 혼합 집계 방지 |
+
+## 10. 워커 토글·평가 LLM 설정의 UI 이관 (2026-08-10)
+
+### 배경
+
+평가 워커를 켜는 유일한 방법이 `EVALUATION_WORKER_ENABLED` env였다. 운영자가
+검수 화면에서 "평가 결과 없음"을 보고도 어디서 켜는지 알 수 없었고, 켜려면
+프로세스를 재시작해야 했다. 평가 LLM 키도 `.env`로만 넣을 수 있었다.
+
+사용자 결정: 워커 토글(생성·평가 둘 다)과 평가 LLM 설정을 admin 설정 화면으로
+옮기고, 평가 LLM 키의 env 폴백은 제거한다.
+
+### 결정과 대안
+
+| 항목 | 결정 | 검토한 대안과 기각 사유 |
+|---|---|---|
+| 토글 반영 시점 | 워커가 tick 진입 시 재해석 | (a) 설정 저장 시 워커에 이벤트 → 워커가 admin을 역참조하거나 이벤트 버스가 필요해 `media-generation-pipeline.md` D1의 단방향 의존을 깬다. (b) 부팅 고정 유지 → 요청 자체를 만족하지 못한다 |
+| 소유권 | `admin_settings`(`worker.enabled`, `evaluator.workerEnabled`) | 이미 provider·planner·evaluator를 실행 시마다 재해석하는 관례와 동일. `AppConfigService`는 부팅 고정값만 남는다 |
+| env 잔존 범위 | 워커 토글은 DB 미설정 시 초기 기본값으로 존치, 평가 LLM은 완전 제거 | 토글은 기존 배포 동작 보존과 admin UI 장애 시 비상 경로가 필요하다. LLM 키는 사용자가 `.env` 관리를 하지 않기로 했다 |
+| 수동 실행 | `POST /evaluations/worker/run`, 동기 응답 | 이미지 생성은 분 단위라 백그라운드가 맞지만 평가는 단발 LLM 호출이고 수동 실행의 목적이 "지금 결과를 본다"다. 프록시 타임아웃이 문제가 되면 백그라운드로 옮긴다 |
+
+### 트레이드오프
+
+꺼진 상태에서도 폴링 타이머는 살아 있고 폴링 간격마다 `admin_settings` 조회가
+1회 발생한다. 기본 15초 간격의 인덱스 조회라 비용은 무시할 수준이고, 대신
+"화면에서 켜면 다음 tick부터 돈다"를 얻는다.
+
+꺼져 있을 때는 lease 회수(sweep)도 하지 않는다. 자동 루프가 아무 일도 하지
+않는 상태를 "꺼짐"의 정의로 잡았고, 만료 lease는 다시 켤 때 회수된다.
+
+`WORKER_ENABLED`는 원래부터 생성 워커와 draft 워커를 함께 게이트했으므로
+`worker.enabled` 토글 하나가 두 서비스를 제어한다. `DRAFT_SCHEDULER_ENABLED`
+(자동 초안 생성)는 별개 플래그이고 아직 env 전용이다.
+
+### 결과
+
+- 설정 화면에 `평가 LLM (평가 워커)` 섹션이 생겼다 — 채팅 LLM과 같은
+  상속 배지·키 삭제·연결 테스트 패턴.
+- 워커 카드에 생성·평가 자동 루프 스위치와 `대기 평가 실행` 버튼이 생겼다.
+- 평가 단계 화면의 "결과 없음" 안내가 설정 화면으로 링크한다.

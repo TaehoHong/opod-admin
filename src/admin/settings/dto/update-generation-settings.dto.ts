@@ -1,4 +1,10 @@
-import { IsOptional, IsString, Matches, MaxLength } from "class-validator";
+import {
+  IsBoolean,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from "class-validator";
 
 // 각 필드: 누락 = 유지, null·빈 문자열 = 삭제(env 폴백 복귀), 값 = 저장.
 // @IsOptional은 null도 검증에서 제외하므로 null 삭제 시맨틱과 호환된다.
@@ -62,4 +68,33 @@ export class UpdateGenerationSettingsDto {
   @IsString()
   @MaxLength(200)
   agentEmbeddingModel?: string | null;
+
+  // 평가 워커 LLM — 채팅 LLM과 같은 규칙이고 env 폴백은 없다.
+  @IsOptional()
+  @IsString()
+  @Matches(/^$|^https?:\/\//, {
+    message: "evaluatorLlmApiUrl must start with http:// or https://",
+  })
+  @MaxLength(500)
+  evaluatorLlmApiUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  evaluatorLlmApiKey?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  evaluatorLlmModel?: string | null;
+
+  // 워커 자동 루프 on/off. null = 삭제(env 기본값 복귀).
+  // workerEnabled는 생성 워커와 draft 워커를 함께 제어한다.
+  @IsOptional()
+  @IsBoolean()
+  workerEnabled?: boolean | null;
+
+  @IsOptional()
+  @IsBoolean()
+  evaluationWorkerEnabled?: boolean | null;
 }

@@ -46,7 +46,8 @@
 | Generated media storage   | `createGeneratedMediaStore`, `createReferenceUrlSigner` | provider 임시 결과를 owned storage에 보존                                                                                                                                                                                                                                                       | worker, draft publish                                |
 | Prompt construction       | exports under `prompts/`                                | pure construction; network/DB 없음                                                                                                                                                                                                                                                              | planner, prompt builder                              |
 | Shot generation contract  | `ContentPlanShot`, `paramsJson._shot`                   | `scene`과 `captureSetup` 분리, 인물 노출 샷은 업로드 완료 identity reference 필수. 장소는 게시물당 하나를 선택하며 environment reference는 별도 선별하고 인물 비노출 샷에도 사용 가능. provider 제출 사실은 `_shot.execution`에 기록하며 기획·실행 불일치는 검수 경고일 뿐 승인을 차단하지 않음 | planner, draft/generation worker, retry/regeneration |
-| Runtime config            | `AppConfigService` (`ConfigModule`은 `@Global`)         | database/auth/TLS/S3/worker의 부팅 고정값 소유. DB 우선 provider 설정은 `GenerationSettingsService`가 유지                                                                                                                                                                                      | `app-config.spec.ts`, module factories               |
+| Runtime config            | `AppConfigService` (`ConfigModule`은 `@Global`)         | database/auth/TLS/S3/worker의 부팅 고정값 소유. DB 우선 provider 설정과 워커 자동 루프 on/off는 `GenerationSettingsService`가 유지                                                                                                                                                                                      | `app-config.spec.ts`, module factories               |
+| Worker 자동 루프 on/off   | `GenerationSettingsService.resolveWorkerToggles`        | `admin_settings`의 `worker.enabled`(생성+draft), `evaluator.workerEnabled`(평가). 워커가 tick마다 재해석하므로 재시작 불필요. env는 DB 미설정 시 초기 기본값. 수동 실행 경로는 게이트하지 않는다                                                                                                                        | 세 워커 spec의 "loop switched off" 케이스            |
 | Validation/error boundary | `ValidationPipe`, `AllExceptionsFilter`                 | whitelist+transform, common error response                                                                                                                                                                                                                                                      | all HTTP routes                                      |
 | Admin shell navigation    | `packages/admin/src/app/AppLayout.tsx`                  | 현재 route 활성 표시, mobile 메뉴 닫기와 본문 바로가기 제공                                                                                                                                                                                                                                     | all admin UI routes                                  |
 | List status feedback      | `packages/admin/src/shared/ui/DataPage.tsx`             | 목록의 loading·empty 상태를 보이는 문구와 `role="status"`로 공지                                                                                                                                                                                                                                | list pages                                           |
@@ -188,7 +189,11 @@ job 등록/실행/완료/재시도가 모두 React에 있다. 사용자·게시�
 - 부팅 고정 설정은 `AppConfigService`로 주입한다. media upload, reference
   captioning과 worker service는 같은 typed S3/worker config를 사용하고
   `process.env`를 직접 읽지 않는다. DB 우선 provider/planner 설정은
-  `GenerationSettingsService`가 요청마다 재해석한다.
+  `GenerationSettingsService`가 요청마다 재해석한다. 워커 자동 루프 on/off도
+  같은 서비스가 소유하고 워커가 tick마다 재해석한다 — `AppConfigService`에는
+  `enabled` 필드가 없다.
+- 평가 LLM(`evaluator.*`)과 채팅 LLM(`agent.*`)은 env 폴백이 없다. DB 값이
+  없으면 planner 실효값을 필드 단위로 상속한다.
 - frontend는 nav 16개 화면과 admin 쓰기·상세 workflow를 React로 렌더한다.
   legacy entry, script, stylesheet, node:test suite는 제거했다.
 - Helmet CSP는 켜져 있다. `style-src`에 `'unsafe-inline'`이 남아 있고

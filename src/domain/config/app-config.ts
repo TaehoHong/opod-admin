@@ -16,8 +16,9 @@ export type S3Config = {
   publicBaseUrl?: string;
 };
 
+// 자동 루프 on/off는 여기 없다 — admin_settings(DB)가 소유하고 워커가 tick마다
+// 재해석한다 (GenerationSettingsService.resolveWorkerToggles).
 export type GenerationWorkerConfig = {
-  enabled: boolean;
   pollIntervalMs: number;
   jobsPerTick: number;
   leaseSeconds: number;
@@ -32,7 +33,6 @@ export type GenerationWorkerConfig = {
 };
 
 export type DraftWorkerConfig = {
-  enabled: boolean;
   pollIntervalMs: number;
   planLeaseSeconds: number;
   maxAttempts: number;
@@ -40,11 +40,9 @@ export type DraftWorkerConfig = {
   schedulerEnabled: boolean;
 };
 
-// 평가 워커 (docs/plan-prompt-evaluation-agent.md). 기존 워커 둘과 달리
-// 전용 플래그를 갖는다 — 기본 비활성이 backend 마이그레이션 선행 배포의
-// 안전판이다. lease 단위는 기존 관례대로 초.
+// 평가 워커 (docs/plan-prompt-evaluation-agent.md). lease 단위는 기존
+// 관례대로 초.
 export type EvaluationWorkerConfig = {
-  enabled: boolean;
   pollIntervalMs: number;
   leaseSeconds: number;
   maxAttempts: number;
@@ -156,7 +154,6 @@ function parseS3(env: ConfigEnv): S3Config | undefined {
 
 function parseWorker(env: ConfigEnv): GenerationWorkerConfig {
   return {
-    enabled: enabled(env.WORKER_ENABLED),
     pollIntervalMs: parsePositiveNumber(env.WORKER_POLL_INTERVAL_MS) ?? 15_000,
     jobsPerTick: parsePositiveNumber(env.WORKER_JOBS_PER_TICK) ?? 1,
     leaseSeconds: parsePositiveNumber(env.WORKER_LEASE_SECONDS) ?? 600,
@@ -178,7 +175,6 @@ function parseWorker(env: ConfigEnv): GenerationWorkerConfig {
 
 function parseDraftWorker(env: ConfigEnv): DraftWorkerConfig {
   return {
-    enabled: enabled(env.WORKER_ENABLED),
     pollIntervalMs: parsePositiveNumber(env.WORKER_POLL_INTERVAL_MS) ?? 15_000,
     planLeaseSeconds: parsePositiveNumber(env.DRAFT_PLAN_LEASE_SECONDS) ?? 120,
     maxAttempts: parsePositiveNumber(env.DRAFT_MAX_ATTEMPTS) ?? 3,
@@ -189,7 +185,6 @@ function parseDraftWorker(env: ConfigEnv): DraftWorkerConfig {
 
 function parseEvaluationWorker(env: ConfigEnv): EvaluationWorkerConfig {
   return {
-    enabled: enabled(env.EVALUATION_WORKER_ENABLED),
     pollIntervalMs:
       parsePositiveNumber(env.EVALUATION_POLL_INTERVAL_MS) ?? 15_000,
     leaseSeconds: parsePositiveNumber(env.EVALUATION_LEASE_SECONDS) ?? 120,

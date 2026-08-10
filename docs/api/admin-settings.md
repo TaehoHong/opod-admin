@@ -14,7 +14,7 @@ responses expose only `{ set, last4 }`.
 ## Get generation provider settings
 
 ```http
-GET /api/settings/generation
+GET /api/admin/v1/settings/generation
 ```
 
 ```json
@@ -29,9 +29,11 @@ GET /api/settings/generation
   },
   "worker": {
     "enabled": true,
+    "enabledSource": "db",
     "dailyBudgetUsd": 2,
     "jobCostEstimateUsd": 0.08,
-    "todaySpendUsd": 0.16
+    "todaySpendUsd": 0.16,
+    "evaluation": { "enabled": false, "enabledSource": "env" }
   }
 }
 ```
@@ -41,7 +43,16 @@ GET /api/settings/generation
 - `resolved.*Provider` is the provider name the worker would route to right
   now (`local` when no key resolves).
 - Each `sources` entry is `db`, `env`, or `none`.
-- `worker` reflects env-driven worker config plus today's (KST) `costUsd` sum.
+- `worker` carries today's (KST) `costUsd` sum, the boot-time tuning values
+  (interval, budget, cost estimate) and the two automatic-loop switches.
+- `worker.enabled` gates both the generation worker and the draft worker;
+  `worker.evaluation.enabled` gates the evaluation worker. Both live in
+  `admin_settings` and each worker re-reads its switch on every tick, so a
+  PUT takes effect on the next poll without a restart. `enabledSource: "env"`
+  means the switch has never been saved from the console and the
+  `WORKER_ENABLED` / `EVALUATION_WORKER_ENABLED` env value is still acting as
+  the initial default; the first save takes over permanently. Manual runs are
+  never gated by these switches.
 
 The same document also carries the **content-planner LLM** settings
 (OpenAI-compatible chat completions, used by the draft worker):
@@ -62,10 +73,24 @@ re-inherits. The connection test accepts `target: "chat"`. opod-agent
 re-reads these settings on a ~60s TTL, so console changes reach live chat
 without a restart.
 
+## Evaluation LLM (evaluation worker)
+
+The same document carries the evaluation LLM under `evaluator`, with the same
+`overrides` / `effective` shape as `chat`. Unset fields inherit the planner's
+effective values per field, which lets a cheaper or simply different judge
+model be pinned to reduce self-evaluation bias.
+
+Unlike the image and planner settings, `evaluator.*` has **no env fallback** —
+it is DB-only, so a stale `EVALUATOR_LLM_*` left in the environment can never
+resurrect a key that was cleared from the console. PUT accepts
+`evaluatorLlmApiUrl` / `evaluatorLlmApiKey` / `evaluatorLlmModel` with the
+usual omit/blank semantics; clearing a field re-inherits from the planner. The
+connection test accepts `target: "evaluator"`.
+
 ## Setting change history (audit)
 
 ```http
-GET /api/settings/generation/changes
+GET /api/admin/v1/settings/generation/changes
 ```
 
 Returns `{ items: [{ id, adminEmail, actionType, target, summary, createdAt }] }`
@@ -79,10 +104,11 @@ service-backend).
 ## Test a provider connection (read-only)
 
 ```http
-POST /api/settings/generation/test
+POST /api/admin/v1/settings/generation/test
 Content-Type: application/json
 
-{ "target": "image" | "planner", "falApiKey"?, "llmApiUrl"?, "llmApiKey"?, "llmModel"? }
+{ "target": "image" | "planner" | "chat" | "evaluator",
+  "falApiKey"?, "llmApiUrl"?, "llmApiKey"?, "llmModel"? }
 ```
 
 Validates the combination that WOULD apply after saving: supplied fields
@@ -94,7 +120,7 @@ without submitting a job (no cost); the planner check makes a minimal
 ## Update generation provider settings
 
 ```http
-PUT /api/settings/generation
+PUT /api/admin/v1/settings/generation
 ```
 
 Body (all fields optional):
@@ -107,18 +133,24 @@ Body (all fields optional):
 | `llmApiUrl` | same semantics; planner LLM endpoint (OpenAI-compatible) |
 | `llmApiKey` | same semantics; planner LLM key |
 | `llmModel` | same semantics; planner LLM model |
+| `agentLlmApiUrl` / `agentLlmApiKey` / `agentLlmModel` / `agentEmbeddingModel` | same semantics; blank re-inherits from the planner |
+| `evaluatorLlmApiUrl` / `evaluatorLlmApiKey` / `evaluatorLlmModel` | same semantics; blank re-inherits from the planner |
+| `workerEnabled` | boolean; `null` restores the `WORKER_ENABLED` env default |
+| `evaluationWorkerEnabled` | boolean; `null` restores the `EVALUATION_WORKER_ENABLED` env default |
 
 ```json
 { "falApiKey": "fal-...", "falImageModel": "fal-ai/nano-banana/edit" }
 ```
 
-The response is the same shape as `GET`. Validation: strings only, key ≤ 500
-chars, models ≤ 200 chars.
+The response is the same shape as `GET`. Validation: strings only (booleans for
+the two switches), key ≤ 500 chars, models ≤ 200 chars. Switch changes are
+audited like any other field, with the stored `"true"` / `"false"` as the
+summary.
 
 ## Run the generation worker manually
 
 ```http
-POST /api/generation/worker/run
+POST /api/admin/v1/generation/worker/run
 ```
 
 Body: `{ "jobId": "<uuid>" }` (optional). With `jobId` it claims that specific
@@ -134,7 +166,11 @@ processing continues in the background — the response returns immediately:
 - `400 Generation job is not queued (image jobs only)` — a specific `jobId`
   was requested but that job is not claimable.
 
-Manual runs work regardless of `WORKER_ENABLED` (which only controls the
-automatic polling loop). The run uses the currently resolved provider
-settings, so a key saved via `PUT /api/settings/generation` applies
+Manual runs work regardless of the `workerEnabled` switch (which only controls
+the automatic polling loop). The run uses the currently resolved provider
+settings, so a key saved via `PUT /api/admin/v1/settings/generation` applies
 immediately.
+
+The evaluation worker has the equivalent manual trigger at
+`POST /api/admin/v1/evaluations/worker/run` — see
+`docs/api/admin-evaluations.md`.

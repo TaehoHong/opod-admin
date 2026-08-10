@@ -7,7 +7,6 @@ import { ContentPlanner } from "./content-planner";
 import { ImagePromptBuilder } from "./image-prompt-builder";
 
 const baseConfig: DraftWorkerConfig = {
-  enabled: false,
   pollIntervalMs: 15_000,
   planLeaseSeconds: 120,
   maxAttempts: 3,
@@ -118,7 +117,12 @@ function plannedDraft(
 function makeService(
   repository: RepositoryFake,
   contentPlanner = planner(),
-  config: Partial<DraftWorkerConfig> = {},
+  // 자동 루프 on/off는 이제 config가 아니라 DB 설정이지만, 테스트에서는 같은
+  // 자리에서 켜고 끄는 편이 읽기 쉽다.
+  {
+    enabled = true,
+    ...config
+  }: Partial<DraftWorkerConfig> & { enabled?: boolean } = {},
   builder = promptBuilder(),
   random = () => 0.5,
   store = jest.fn().mockResolvedValue({
@@ -137,6 +141,7 @@ function makeService(
     repository as never,
     () => Promise.resolve(contentPlanner),
     () => Promise.resolve(builder),
+    () => Promise.resolve(enabled),
     { ...baseConfig, ...config },
     random,
     store,
@@ -250,7 +255,6 @@ describe("DraftWorkerService planning", () => {
       }),
     );
   });
-
 
   it("fails immediately when a visible shot has no uploaded identity reference", async () => {
     const repository = repositoryFake();
@@ -516,6 +520,42 @@ describe("DraftWorkerService prompt building", () => {
       reason: expect.stringContaining("identity reference"),
     });
     expect(repository.persistBuiltPrompts).not.toHaveBeenCalled();
+  });
+});
+
+describe("DraftWorkerService automatic loop toggle", () => {
+  // draft 워커는 생성 워커와 같은 토글을 공유한다. 여기서 새면 화면에서 끈
+  // 자동 기획·게시가 계속 돈다.
+  it("does nothing while the automatic loop is switched off", async () => {
+    const repository = repositoryFake();
+    repository.findGeneratingDrafts.mockResolvedValue([
+      {
+        id: "draft-1",
+        characterId: "character-1",
+        status: "generating",
+        jobs: [],
+      },
+    ]);
+
+    await makeService(repository, planner(), { enabled: false }).tick();
+
+    expect(repository.sweepExpiredPlanLeases).not.toHaveBeenCalled();
+    expect(repository.findGeneratingDrafts).not.toHaveBeenCalled();
+    expect(repository.requeueDraftWithoutJobs).not.toHaveBeenCalled();
+  });
+
+  // 수동 실행은 토글과 무관해야 한다 — 운영자가 타이밍만 정하는 경로다.
+  it("still plans a draft manually while the automatic loop is off", async () => {
+    const repository = repositoryFake();
+    repository.findPlannedDraft.mockResolvedValue(plannedDraft());
+    const service = makeService(repository, planner(), { enabled: false });
+
+    await expect(service.planDraftNow("draft-1")).resolves.toEqual({
+      planned: true,
+    });
+    expect(repository.persistPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ draftId: "draft-1", caption: "오늘의 산책" }),
+    );
   });
 });
 

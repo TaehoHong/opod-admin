@@ -59,6 +59,8 @@ function storageEnv(config: S3Config | undefined) {
               llmLogs,
             ),
           createGeneratedMediaStore(storageEnv(config.s3)),
+          async () =>
+            (await settings.resolveWorkerToggles()).generation.enabled,
           config.worker,
           undefined,
           undefined,
@@ -107,6 +109,9 @@ function storageEnv(config: S3Config | undefined) {
               llmLogs,
             );
           },
+          // draft 워커는 생성 워커와 같은 토글을 공유한다.
+          async () =>
+            (await settings.resolveWorkerToggles()).generation.enabled,
           config.draftWorker,
           undefined,
           // 게시 마감본 업로드/원본 읽기 — 생성 워커와 같은 스토어·서명자.
@@ -145,6 +150,8 @@ function storageEnv(config: S3Config | undefined) {
               fetch,
               llmLogs,
             ),
+          async () =>
+            (await settings.resolveWorkerToggles()).evaluation.enabled,
           config.evaluationWorker,
         ),
       inject: [
@@ -155,9 +162,15 @@ function storageEnv(config: S3Config | undefined) {
       ],
     },
   ],
-  // admin의 수동 실행이 주입해 쓴다 — 생성(generation/worker/run)과
-  // draft 즉시 기획/게시(drafts/:id/plan, drafts/:id/publish).
+  // admin의 수동 실행이 주입해 쓴다 — 생성(generation/worker/run), draft 즉시
+  // 기획/게시(drafts/:id/plan, drafts/:id/publish), 평가
+  // (evaluations/worker/run).
   // EvaluationRepository는 admin 평가 조회·리포트 집계가 함께 쓴다.
-  exports: [GenerationWorkerService, DraftWorkerService, EvaluationRepository],
+  exports: [
+    GenerationWorkerService,
+    DraftWorkerService,
+    EvaluationWorkerService,
+    EvaluationRepository,
+  ],
 })
 export class WorkerModule {}

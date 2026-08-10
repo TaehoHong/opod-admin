@@ -10,7 +10,6 @@ import { PLAN_EVAL_DIMENSIONS } from "../../prompts/plan-evaluator";
 import { PROMPT_EVAL_SHOT_DIMENSIONS } from "../../prompts/prompt-evaluator";
 
 const baseConfig: EvaluationWorkerConfig = {
-  enabled: true,
   pollIntervalMs: 15_000,
   leaseSeconds: 120,
   maxAttempts: 3,
@@ -161,16 +160,62 @@ function service(
   repository: jest.Mocked<EvaluationRepository>,
   plan: PlanEvaluator,
   prompt: PromptEvaluator,
+  enabled = true,
 ) {
   return new EvaluationWorkerService(
     repository,
     async () => plan,
     async () => prompt,
+    async () => enabled,
     baseConfig,
   );
 }
 
 describe("EvaluationWorkerService", () => {
+  // 자동 루프 토글은 설정 화면이 소유한다. 여기서 새면 화면에서 끈 평가가
+  // 계속 LLM을 호출한다.
+  it("자동 루프가 꺼져 있으면 lease 회수도 클레임도 하지 않는다", async () => {
+    const repository = repositoryFake();
+    repository.claim.mockResolvedValue(planClaim);
+
+    await service(
+      repository,
+      planEvaluatorFake(),
+      promptEvaluatorFake(),
+      false,
+    ).tick();
+
+    expect(repository.sweepExpiredLeases).not.toHaveBeenCalled();
+    expect(repository.claim).not.toHaveBeenCalled();
+  });
+
+  // 수동 실행은 토글과 무관해야 한다 — 꺼둔 채로 한 건만 돌려보는 것이
+  // 운영자가 평가를 켜기 전에 하는 일이다.
+  it("수동 실행은 자동 루프가 꺼져 있어도 실행한 종류를 돌려준다", async () => {
+    const repository = repositoryFake();
+    repository.claim.mockImplementation(async (kind) =>
+      kind === "plan" ? planClaim : undefined,
+    );
+
+    await expect(
+      service(
+        repository,
+        planEvaluatorFake(),
+        promptEvaluatorFake(),
+        false,
+      ).runOnce(),
+    ).resolves.toEqual({ evaluated: ["plan"] });
+    expect(repository.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("수동 실행에 대기 건이 없으면 빈 목록을 돌려준다", async () => {
+    const repository = repositoryFake();
+
+    await expect(
+      service(repository, planEvaluatorFake(), promptEvaluatorFake()).runOnce(),
+    ).resolves.toEqual({ evaluated: [] });
+  });
+
   it("평가자가 unconfigured면 클레임 없이 쉰다 — 실패 행을 쌓지 않는다", async () => {
     const repository = repositoryFake();
     const unconfigured = { name: "unconfigured", evaluate: jest.fn() };

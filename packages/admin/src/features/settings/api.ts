@@ -33,6 +33,20 @@ export type GenerationSettingsView = {
       };
     };
   };
+  // 평가 LLM은 env 폴백이 없다 — DB 오버라이드 아니면 기획 LLM 상속이다.
+  evaluator: {
+    overrides: {
+      apiUrl: string | null;
+      apiKey: SecretStatus;
+      model: string | null;
+    };
+    effective: {
+      apiUrl: string | null;
+      apiKeyLast4: string | null;
+      model: string | null;
+      overridden: { apiUrl: boolean; apiKey: boolean; model: boolean };
+    };
+  };
   resolved: {
     t2iProvider: string | null;
     editProvider: string | null;
@@ -48,11 +62,17 @@ export type GenerationSettingsView = {
       model: SettingSource;
     };
   };
+  // enabledSource가 "env"면 아직 UI에서 저장한 적이 없어 env 기본값을 쓰는 중.
   worker: {
     enabled: boolean;
+    enabledSource: SettingSource;
     dailyBudgetUsd: number | null;
     jobCostEstimateUsd: number;
     todaySpendUsd: number;
+    evaluation: {
+      enabled: boolean;
+      enabledSource: SettingSource;
+    };
   };
 };
 
@@ -69,9 +89,15 @@ export type GenerationSettingsUpdate = {
   agentLlmApiKey?: string | null;
   agentLlmModel?: string | null;
   agentEmbeddingModel?: string | null;
+  evaluatorLlmApiUrl?: string | null;
+  evaluatorLlmApiKey?: string | null;
+  evaluatorLlmModel?: string | null;
+  // 워커 자동 루프 — null = env 기본값으로 복귀.
+  workerEnabled?: boolean | null;
+  evaluationWorkerEnabled?: boolean | null;
 };
 
-export type ConnectionTestTarget = "image" | "planner" | "chat";
+export type ConnectionTestTarget = "image" | "planner" | "chat" | "evaluator";
 
 export type ConnectionTestResult = { ok: boolean; message: string };
 
@@ -115,4 +141,12 @@ export function fetchQueuedJobs(): Promise<CursorPage<{ id: string }>> {
 // 자동 루프가 꺼져 있어도 대기 중인 다음 작업 하나를 처리한다.
 export function runWorkerOnce(): Promise<{ jobId?: string }> {
   return apiRequest("/generation/worker/run", { method: "POST" });
+}
+
+// 평가도 같은 규칙 — 대기 중인 기획·프롬프트 평가를 종류별로 1건씩 처리하고
+// 실제로 실행한 종류를 돌려준다. 이미지 생성과 달리 결과를 기다린다.
+export function runEvaluationWorkerOnce(): Promise<{
+  evaluated: ("plan" | "prompt")[];
+}> {
+  return apiRequest("/evaluations/worker/run", { method: "POST" });
 }

@@ -53,7 +53,9 @@ export class AdminSettingsController {
     @Req() request: AdminRequest,
   ) {
     const before = await this.settings.getSettings();
-    const saved = await this.settings.updateSettings({
+    // 토글은 API에서 boolean, 저장은 문자열이다. 감사 로그도 이 정규화된
+    // update를 그대로 봐야 "무엇이 바뀌었는지"가 저장값과 일치한다.
+    const update = {
       ...("falApiKey" in body ? { falApiKey: body.falApiKey ?? null } : {}),
       ...("falImageModel" in body
         ? { falImageModel: body.falImageModel ?? null }
@@ -76,10 +78,28 @@ export class AdminSettingsController {
       ...("agentEmbeddingModel" in body
         ? { agentEmbeddingModel: body.agentEmbeddingModel ?? null }
         : {}),
-    });
+      ...("evaluatorLlmApiUrl" in body
+        ? { evaluatorLlmApiUrl: body.evaluatorLlmApiUrl ?? null }
+        : {}),
+      ...("evaluatorLlmApiKey" in body
+        ? { evaluatorLlmApiKey: body.evaluatorLlmApiKey ?? null }
+        : {}),
+      ...("evaluatorLlmModel" in body
+        ? { evaluatorLlmModel: body.evaluatorLlmModel ?? null }
+        : {}),
+      ...("workerEnabled" in body
+        ? { workerEnabled: toStoredFlag(body.workerEnabled) }
+        : {}),
+      ...("evaluationWorkerEnabled" in body
+        ? {
+            evaluationWorkerEnabled: toStoredFlag(body.evaluationWorkerEnabled),
+          }
+        : {}),
+    };
+    const saved = await this.settings.updateSettings(update);
 
     // 감사 로그 — 실제 달라진 필드만, 키는 last4 요약만 (console_logs).
-    const changes = settingsChangeEntries(before, saved, body);
+    const changes = settingsChangeEntries(before, saved, update);
     await this.audit.recordChanges(
       changes.map((change) => ({
         adminId: request.admin?.id ?? null,
@@ -93,14 +113,23 @@ export class AdminSettingsController {
   }
 
   private async buildView(saved: GenerationSettings) {
-    const [resolved, plannerResolved, chat, names, todaySpend] =
-      await Promise.all([
-        this.settings.resolveProviderSettings(),
-        this.settings.resolvePlannerSettings(),
-        this.settings.resolveChatSettings(),
-        this.settings.resolveProviderNames(),
-        this.audit.sumGenerationCostSince(startOfKstDay()),
-      ]);
+    const [
+      resolved,
+      plannerResolved,
+      chat,
+      evaluator,
+      toggles,
+      names,
+      todaySpend,
+    ] = await Promise.all([
+      this.settings.resolveProviderSettings(),
+      this.settings.resolvePlannerSettings(),
+      this.settings.resolveChatSettings(),
+      this.settings.resolveEvaluatorSettings(),
+      this.settings.resolveWorkerToggles(),
+      this.settings.resolveProviderNames(),
+      this.audit.sumGenerationCostSince(startOfKstDay()),
+    ]);
     const worker = this.config.worker;
     return {
       falApiKey: saved.falApiKey
@@ -132,6 +161,22 @@ export class AdminSettingsController {
           overridden: chat.overridden,
         },
       },
+      // 평가 LLM — 채팅 LLM과 같은 구조. env 폴백이 없어 상속 아니면 DB다.
+      evaluator: {
+        overrides: {
+          apiUrl: saved.evaluatorLlmApiUrl ?? null,
+          apiKey: saved.evaluatorLlmApiKey
+            ? { set: true, last4: saved.evaluatorLlmApiKey.slice(-4) }
+            : { set: false },
+          model: saved.evaluatorLlmModel ?? null,
+        },
+        effective: {
+          apiUrl: evaluator.apiUrl ?? null,
+          apiKeyLast4: evaluator.apiKey ? evaluator.apiKey.slice(-4) : null,
+          model: evaluator.model ?? null,
+          overridden: evaluator.overridden,
+        },
+      },
       resolved: {
         t2iProvider: names.t2i,
         editProvider: names.edit,
@@ -139,12 +184,24 @@ export class AdminSettingsController {
         sources: resolved.sources,
         plannerSources: plannerResolved.sources,
       },
+      // 자동 루프 on/off는 DB 소유다. source가 "env"면 아직 UI에서 한 번도
+      // 저장하지 않아 env 기본값을 쓰는 중이라는 뜻이다.
       worker: {
-        enabled: worker.enabled,
+        enabled: toggles.generation.enabled,
+        enabledSource: toggles.generation.source,
         dailyBudgetUsd: worker.dailyBudgetUsd ?? null,
         jobCostEstimateUsd: worker.jobCostEstimateUsd,
         todaySpendUsd: Number(todaySpend ?? 0),
+        evaluation: {
+          enabled: toggles.evaluation.enabled,
+          enabledSource: toggles.evaluation.source,
+        },
       },
     };
   }
+}
+
+// 토글 저장 형식 — null은 삭제(env 기본값 복귀), boolean은 "true"/"false".
+function toStoredFlag(value: boolean | null | undefined): string | null {
+  return value === null || value === undefined ? null : String(value);
 }

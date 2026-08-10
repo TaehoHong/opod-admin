@@ -30,6 +30,11 @@ export const GENERATION_SETTING_KEYS = {
   evaluatorLlmApiUrl: "evaluator.llmApiUrl",
   evaluatorLlmApiKey: "evaluator.llmApiKey",
   evaluatorLlmModel: "evaluator.llmModel",
+  // 워커 자동 루프 on/off. 워커가 tick마다 재해석하므로 프로세스 재시작 없이
+  // 설정 화면에서 켜고 끈다. worker.enabled는 생성 워커와 draft 워커를 함께
+  // 게이트한다 (env WORKER_ENABLED와 같은 범위).
+  workerEnabled: "worker.enabled",
+  evaluationWorkerEnabled: "evaluator.workerEnabled",
 } as const;
 
 type GenerationSettingField = keyof typeof GENERATION_SETTING_KEYS;
@@ -66,7 +71,7 @@ type SettingsEnv = Record<string, string | undefined>;
 
 // 연결 테스트 — 폼의 미저장 입력을 실효 설정 위에 덮어 검증한다.
 export type ConnectionTestInput = {
-  target: "image" | "planner" | "chat";
+  target: "image" | "planner" | "chat" | "evaluator";
   falApiKey?: string;
   llmApiUrl?: string;
   llmApiKey?: string;
@@ -80,24 +85,35 @@ const CONNECTION_TEST_TIMEOUT_MS = 10_000;
 // 연결 테스트 핑에서 쓰는 토큰 상한 파라미터 이름 (프로바이더마다 다르다).
 type TokenLimitParam = "max_tokens" | "max_completion_tokens";
 
-const ENV_KEYS: Record<GenerationSettingField, string> = {
+// env 폴백이 있는 필드만 여기 둔다. 빠진 필드는 DB 전용이다.
+const ENV_KEYS: Partial<Record<GenerationSettingField, string>> = {
   falApiKey: "FAL_API_KEY",
   falImageModel: "FAL_IMAGE_MODEL",
   falImageT2iModel: "FAL_IMAGE_T2I_MODEL",
   llmApiUrl: "LLM_API_URL",
   llmApiKey: "LLM_API_KEY",
   llmModel: "LLM_MODEL",
-  // agent.*는 admin 프로세스 env에 대응물이 없다 — DB 아니면 상속.
-  agentLlmApiUrl: "AGENT_LLM_API_URL",
-  agentLlmApiKey: "AGENT_LLM_API_KEY",
-  agentLlmModel: "AGENT_LLM_MODEL",
-  agentEmbeddingModel: "AGENT_EMBEDDING_MODEL",
-  evaluatorLlmApiUrl: "EVALUATOR_LLM_API_URL",
-  evaluatorLlmApiKey: "EVALUATOR_LLM_API_KEY",
-  evaluatorLlmModel: "EVALUATOR_LLM_MODEL",
+  // agent.*와 evaluator.*는 env 폴백이 없다 — DB 아니면 planner 상속이다.
+  // 평가 LLM 키를 .env로 관리하지 않기로 했다(2026-08-10).
+  // 워커 토글만 기존 배포 호환을 위해 env를 초기 기본값으로 남긴다.
+  workerEnabled: "WORKER_ENABLED",
+  evaluationWorkerEnabled: "EVALUATION_WORKER_ENABLED",
 };
 
 const CHAT_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
+
+// 평가 LLM 실효 설정 — evaluator.* 오버라이드(DB 전용), 없으면 planner 상속.
+export type ResolvedEvaluatorSettings = PlannerProviderSettings & {
+  overridden: { apiUrl: boolean; apiKey: boolean; model: boolean };
+};
+
+// 워커 자동 루프 상태. source는 화면이 "env 기본값을 쓰는 중"을 알리는 데 쓴다.
+export type ResolvedWorkerToggle = { enabled: boolean; source: Source };
+
+export type ResolvedWorkerToggles = {
+  generation: ResolvedWorkerToggle;
+  evaluation: ResolvedWorkerToggle;
+};
 
 // 채팅 LLM 실효 설정 — agent.* 오버라이드(DB) 우선, 없으면 planner 상속.
 export type ResolvedChatSettings = {
@@ -198,20 +214,34 @@ export class GenerationSettingsService {
     };
   }
 
-  // 평가 워커 LLM 실효 설정 — 필드 단위로 evaluator.*(DB > env) 오버라이드,
+  // 평가 워커 LLM 실효 설정 — 필드 단위로 evaluator.*(DB 전용) 오버라이드,
   // 미설정은 planner 실효값 상속 (resolveChatSettings와 같은 규칙).
   async resolveEvaluatorSettings(
     env: SettingsEnv = process.env,
-  ): Promise<PlannerProviderSettings> {
+  ): Promise<ResolvedEvaluatorSettings> {
     const db = await this.getSettings();
     const planner = await this.resolvePlannerSettings(env);
-    const apiUrl = pick(db, env, "evaluatorLlmApiUrl");
-    const apiKey = pick(db, env, "evaluatorLlmApiKey");
-    const model = pick(db, env, "evaluatorLlmModel");
     return {
-      apiUrl: apiUrl.value ?? planner.apiUrl,
-      apiKey: apiKey.value ?? planner.apiKey,
-      model: model.value ?? planner.model,
+      apiUrl: db.evaluatorLlmApiUrl ?? planner.apiUrl,
+      apiKey: db.evaluatorLlmApiKey ?? planner.apiKey,
+      model: db.evaluatorLlmModel ?? planner.model,
+      overridden: {
+        apiUrl: db.evaluatorLlmApiUrl !== undefined,
+        apiKey: db.evaluatorLlmApiKey !== undefined,
+        model: db.evaluatorLlmModel !== undefined,
+      },
+    };
+  }
+
+  // 워커 자동 루프 on/off — 워커가 tick마다 호출한다. DB에 값이 없을 때만
+  // env를 초기 기본값으로 쓰므로, UI에서 한 번 저장하면 env는 무시된다.
+  async resolveWorkerToggles(
+    env: SettingsEnv = process.env,
+  ): Promise<ResolvedWorkerToggles> {
+    const db = await this.getSettings();
+    return {
+      generation: toggle(pick(db, env, "workerEnabled")),
+      evaluation: toggle(pick(db, env, "evaluationWorkerEnabled")),
     };
   }
 
@@ -287,7 +317,9 @@ export class GenerationSettingsService {
       const resolved =
         input.target === "chat"
           ? await this.resolveChatSettings(env)
-          : await this.resolvePlannerSettings(env);
+          : input.target === "evaluator"
+            ? await this.resolveEvaluatorSettings(env)
+            : await this.resolvePlannerSettings(env);
       const apiUrl = input.llmApiUrl?.trim() || resolved.apiUrl;
       const apiKey = input.llmApiKey?.trim() || resolved.apiKey;
       const model = input.llmModel?.trim() || resolved.model;
@@ -298,10 +330,7 @@ export class GenerationSettingsService {
         };
       }
       // 최소 완성 호출 한 번으로 URL·키·모델을 함께 검증한다.
-      const ping = async (
-        tokenLimitParam: TokenLimitParam,
-        tokenLimit = 1,
-      ) => {
+      const ping = async (tokenLimitParam: TokenLimitParam, tokenLimit = 1) => {
         const requestJson = {
           model,
           messages: [{ role: "user", content: "ping" }],
@@ -439,6 +468,18 @@ export function settingsChangeEntries(
   return entries;
 }
 
+// 저장 형식은 문자열이므로 app-config의 env 파서와 같은 규칙으로 읽는다.
+// 값이 없으면(none) 꺼짐 — 새 배포가 아무것도 자동으로 돌리지 않는 쪽이 안전하다.
+function toggle(picked: {
+  value: string | undefined;
+  source: Source;
+}): ResolvedWorkerToggle {
+  return {
+    enabled: picked.value === "true" || picked.value === "1",
+    source: picked.source,
+  };
+}
+
 function pick(
   db: GenerationSettings,
   env: SettingsEnv,
@@ -448,7 +489,8 @@ function pick(
   if (dbValue) {
     return { value: dbValue, source: "db" };
   }
-  const envValue = env[ENV_KEYS[field]]?.trim();
+  const envKey = ENV_KEYS[field];
+  const envValue = envKey ? env[envKey]?.trim() : undefined;
   if (envValue) {
     return { value: envValue, source: "env" };
   }

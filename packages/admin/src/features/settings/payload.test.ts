@@ -19,6 +19,9 @@ const empty: SettingsFormValues = {
   agentLlmApiUrl: "",
   agentLlmModel: "",
   agentEmbeddingModel: "",
+  evaluatorLlmApiKey: "",
+  evaluatorLlmApiUrl: "",
+  evaluatorLlmModel: "",
 };
 
 describe("toSettingsUpdate", () => {
@@ -31,6 +34,8 @@ describe("toSettingsUpdate", () => {
       agentLlmApiUrl: null,
       agentLlmModel: null,
       agentEmbeddingModel: null,
+      evaluatorLlmApiUrl: null,
+      evaluatorLlmModel: null,
     });
   });
 
@@ -41,6 +46,7 @@ describe("toSettingsUpdate", () => {
         falApiKey: "  fal-secret  ",
         llmApiKey: "sk-secret",
         agentLlmApiKey: "sk-chat",
+        evaluatorLlmApiKey: "sk-eval",
         llmModel: " gpt-5-mini ",
       }),
     ).toEqual({
@@ -54,6 +60,9 @@ describe("toSettingsUpdate", () => {
       agentLlmApiUrl: null,
       agentLlmModel: null,
       agentEmbeddingModel: null,
+      evaluatorLlmApiKey: "sk-eval",
+      evaluatorLlmApiUrl: null,
+      evaluatorLlmModel: null,
     });
   });
 });
@@ -78,6 +87,22 @@ describe("toConnectionTestBody", () => {
       target: "chat",
       llmModel: "chat-model",
       llmApiKey: "sk-chat",
+    });
+  });
+
+  it("maps evaluator section inputs onto the shared llm test fields", () => {
+    expect(
+      toConnectionTestBody("evaluator", {
+        ...empty,
+        llmModel: "planner-model",
+        agentLlmModel: "chat-model",
+        evaluatorLlmModel: "eval-model",
+        evaluatorLlmApiKey: "sk-eval",
+      }),
+    ).toEqual({
+      target: "evaluator",
+      llmModel: "eval-model",
+      llmApiKey: "sk-eval",
     });
   });
 });

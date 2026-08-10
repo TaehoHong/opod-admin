@@ -22,6 +22,7 @@ import {
   type ConnectionTestTarget,
   type GenerationSettingsUpdate,
   type GenerationSettingsView,
+  type SecretStatus,
   type SettingSource,
 } from "./api";
 import {
@@ -61,10 +62,14 @@ export function GenerationSettingsForm({
       agentLlmApiUrl: settings.chat.overrides.apiUrl ?? "",
       agentLlmModel: settings.chat.overrides.model ?? "",
       agentEmbeddingModel: settings.chat.overrides.embeddingModel ?? "",
+      evaluatorLlmApiKey: "",
+      evaluatorLlmApiUrl: settings.evaluator.overrides.apiUrl ?? "",
+      evaluatorLlmModel: settings.evaluator.overrides.model ?? "",
     },
     validate: {
       llmApiUrl: httpUrlOrEmpty,
       agentLlmApiUrl: httpUrlOrEmpty,
+      evaluatorLlmApiUrl: httpUrlOrEmpty,
     },
   });
 
@@ -208,17 +213,10 @@ export function GenerationSettingsForm({
               key={form.key("agentLlmApiKey")}
               {...form.getInputProps("agentLlmApiKey")}
             />
-            {settings.chat.overrides.apiKey.set ? (
-              <Badge color="accent">
-                전용 키 ····{settings.chat.overrides.apiKey.last4}
-              </Badge>
-            ) : settings.chat.effective.apiKeyLast4 ? (
-              <Badge color="ink" variant="light">
-                기획 키 상속 ····{settings.chat.effective.apiKeyLast4}
-              </Badge>
-            ) : (
-              <Badge color="attention">키 없음</Badge>
-            )}
+            <InheritedKeyBadge
+              override={settings.chat.overrides.apiKey}
+              effectiveLast4={settings.chat.effective.apiKeyLast4}
+            />
             {settings.chat.overrides.apiKey.set ? (
               <ClearKeyButton
                 label="채팅 LLM 키 삭제"
@@ -252,10 +250,54 @@ export function GenerationSettingsForm({
             {...form.getInputProps("agentEmbeddingModel")}
           />
 
+          <Divider />
+          {sectionHeader("평가 LLM (평가 워커)", "evaluator")}
+          <Group gap="xs" align="flex-end" wrap="nowrap">
+            <PasswordInput
+              label="API 키"
+              placeholder="평가 전용 키로 바꿀 때만 입력"
+              autoComplete="off"
+              flex={1}
+              key={form.key("evaluatorLlmApiKey")}
+              {...form.getInputProps("evaluatorLlmApiKey")}
+            />
+            <InheritedKeyBadge
+              override={settings.evaluator.overrides.apiKey}
+              effectiveLast4={settings.evaluator.effective.apiKeyLast4}
+            />
+            {settings.evaluator.overrides.apiKey.set ? (
+              <ClearKeyButton
+                label="평가 LLM 키 삭제"
+                description="평가 전용 키를 지우고 기획 LLM 키를 다시 사용합니다."
+                loading={save.isPending}
+                onConfirm={() => clearKey("evaluatorLlmApiKey")}
+              />
+            ) : null}
+          </Group>
+          <TextInput
+            label="API URL"
+            placeholder={
+              settings.evaluator.effective.apiUrl ??
+              "https://api.openai.com/v1/chat/completions"
+            }
+            description="비우면 기획 LLM 값을 상속합니다"
+            key={form.key("evaluatorLlmApiUrl")}
+            {...form.getInputProps("evaluatorLlmApiUrl")}
+          />
+          <TextInput
+            label="모델"
+            placeholder={settings.evaluator.effective.model ?? "모델명"}
+            description="기획과 다른 모델을 쓰면 자기 평가 편향이 줄어듭니다"
+            key={form.key("evaluatorLlmModel")}
+            {...form.getInputProps("evaluatorLlmModel")}
+          />
+
           <Text size="xs" c="dimmed">
-            DB 설정이 env보다 우선하며 다음 잡·기획·대화부터 적용됩니다. 모델과
-            URL은 비우고 저장하면 상위 값으로 복귀하지만, API 키는 비워도
-            유지되고 삭제는 키 삭제 버튼으로만 합니다.
+            이미지·기획 설정은 DB 값이 env보다 우선하고, 채팅·평가 LLM은 DB
+            전용이라 비운 필드는 기획 LLM을 상속합니다. 저장하면 다음
+            잡·기획·대화·평가부터 적용됩니다. 모델과 URL은 비우고 저장하면 상위
+            값으로 복귀하지만, API 키는 비워도 유지되고 삭제는 키 삭제
+            버튼으로만 합니다.
           </Text>
 
           {testResult ? (
@@ -293,6 +335,28 @@ export function GenerationSettingsForm({
 // "지금 env의 무엇이 적용 중인지"를 잃기 때문이다.
 function sourceNote(source: SettingSource): string | undefined {
   return source === "env" ? "env 값 사용 중" : undefined;
+}
+
+// 기획 LLM을 상속하는 섹션(채팅·평가)의 키 상태. 전용 키 > 상속 > 없음 순으로
+// 지금 무엇이 쓰이는지 하나만 보여준다.
+function InheritedKeyBadge({
+  override,
+  effectiveLast4,
+}: {
+  override: SecretStatus;
+  effectiveLast4: string | null;
+}) {
+  if (override.set) {
+    return <Badge color="accent">전용 키 ····{override.last4}</Badge>;
+  }
+  if (effectiveLast4) {
+    return (
+      <Badge color="ink" variant="light">
+        기획 키 상속 ····{effectiveLast4}
+      </Badge>
+    );
+  }
+  return <Badge color="attention">키 없음</Badge>;
 }
 
 function SecretStatusBadge({

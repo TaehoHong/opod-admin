@@ -11,6 +11,9 @@ export type SettingsFormValues = {
   agentLlmApiUrl: string;
   agentLlmModel: string;
   agentEmbeddingModel: string;
+  evaluatorLlmApiKey: string;
+  evaluatorLlmApiUrl: string;
+  evaluatorLlmModel: string;
 };
 
 // 모델·URL은 비우면 null(상위 값 복귀), API 키는 비우면 생략(유지)한다.
@@ -32,6 +35,9 @@ export function toSettingsUpdate(
     agentLlmApiUrl: values.agentLlmApiUrl.trim() || null,
     agentLlmModel: values.agentLlmModel.trim() || null,
     agentEmbeddingModel: values.agentEmbeddingModel.trim() || null,
+    ...secret("evaluatorLlmApiKey", values.evaluatorLlmApiKey),
+    evaluatorLlmApiUrl: values.evaluatorLlmApiUrl.trim() || null,
+    evaluatorLlmModel: values.evaluatorLlmModel.trim() || null,
   };
 }
 
@@ -58,11 +64,17 @@ export function toConnectionTestBody(
           llmApiUrl: values.agentLlmApiUrl,
           llmModel: values.agentLlmModel,
         }
-      : {
-          llmApiKey: values.llmApiKey,
-          llmApiUrl: values.llmApiUrl,
-          llmModel: values.llmModel,
-        };
+      : target === "evaluator"
+        ? {
+            llmApiKey: values.evaluatorLlmApiKey,
+            llmApiUrl: values.evaluatorLlmApiUrl,
+            llmModel: values.evaluatorLlmModel,
+          }
+        : {
+            llmApiKey: values.llmApiKey,
+            llmApiUrl: values.llmApiUrl,
+            llmModel: values.llmModel,
+          };
   return {
     target,
     ...Object.fromEntries(

@@ -9,7 +9,6 @@ import {
 } from "./image-generation.provider";
 
 const baseConfig: WorkerConfig = {
-  enabled: true,
   pollIntervalMs: 15_000,
   jobsPerTick: 1,
   leaseSeconds: 600,
@@ -128,7 +127,12 @@ function bothProviders(provider: ImageGenerationProvider) {
 function makeService(
   repository: RepositoryFake,
   providers: ImageGenerationProvider | ImageGenerationProviders,
-  config: Partial<WorkerConfig> = {},
+  // 자동 루프 on/off는 이제 config가 아니라 DB 설정이지만, 테스트에서는 같은
+  // 자리에서 켜고 끄는 편이 읽기 쉽다.
+  {
+    enabled = true,
+    ...config
+  }: Partial<WorkerConfig> & { enabled?: boolean } = {},
   store = jest.fn().mockResolvedValue({
     url: "https://cdn.local/stored.png",
     storageKey: "generated/image/a.png",
@@ -145,6 +149,7 @@ function makeService(
     // 프로덕션에서는 잡마다 DB 설정을 재해석하는 resolver가 들어간다.
     () => Promise.resolve(pair),
     store,
+    () => Promise.resolve(enabled),
     { ...baseConfig, ...config },
     () => Promise.resolve(),
     downloadBytes,
@@ -319,6 +324,33 @@ describe("GenerationWorkerService", () => {
         jobId: "job-1",
       }),
     );
+  });
+
+  // 자동 루프 토글은 설정 화면이 소유한다. 여기서 새면 화면에서 끈 워커가
+  // 계속 이미지를 생성해 과금된다.
+  it("does nothing while the automatic loop is switched off", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValue("job-1");
+    const { service } = makeService(repository, providerMock([]), {
+      enabled: false,
+    });
+
+    await service.tick();
+
+    expect(repository.requeueExpiredLeases).not.toHaveBeenCalled();
+    expect(repository.claimNextQueuedImageJob).not.toHaveBeenCalled();
+  });
+
+  // 수동 실행은 토글과 무관해야 한다 — 리허설과 즉시 실행이 그 목적이다.
+  it("still runs a job manually while the automatic loop is off", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(claimedJob());
+    const { service } = makeService(repository, providerMock([]), {
+      enabled: false,
+    });
+
+    await expect(service.runJobNow()).resolves.toEqual({ jobId: "job-1" });
   });
 
   it("sweeps expired leases before claiming", async () => {
@@ -748,7 +780,6 @@ describe("GenerationWorkerService", () => {
       }),
     );
   });
-
 
   it("presigns S3-backed reference urls before sending them to the provider", async () => {
     const repository = repositoryFake();

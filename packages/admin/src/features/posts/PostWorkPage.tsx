@@ -1,5 +1,6 @@
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Code,
@@ -605,8 +606,12 @@ function EvaluationStage({
     >
       {!plan && !prompt ? (
         <Alert color="gray">
-          아직 평가 결과가 없습니다. 평가 Worker가 꺼져 있어도 이미지 생성을
-          계속할 수 있습니다.
+          아직 평가 결과가 없습니다. 평가 워커가 꺼져 있어도 이미지 생성을
+          계속할 수 있습니다. 켜거나 지금 한 건만 돌리려면{" "}
+          <Anchor component={Link} to="/settings">
+            설정 &gt; 평가 워커
+          </Anchor>
+          로 가세요.
         </Alert>
       ) : null}
       <EvaluationBlock label="기획 평가" evaluation={plan} />
