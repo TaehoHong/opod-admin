@@ -77,6 +77,9 @@ export type ConnectionTestResult = { ok: boolean; message: string };
 
 const CONNECTION_TEST_TIMEOUT_MS = 10_000;
 
+// 연결 테스트 핑에서 쓰는 토큰 상한 파라미터 이름 (프로바이더마다 다르다).
+type TokenLimitParam = "max_tokens" | "max_completion_tokens";
+
 const ENV_KEYS: Record<GenerationSettingField, string> = {
   falApiKey: "FAL_API_KEY",
   falImageModel: "FAL_IMAGE_MODEL",
@@ -295,34 +298,59 @@ export class GenerationSettingsService {
         };
       }
       // 최소 완성 호출 한 번으로 URL·키·모델을 함께 검증한다.
-      const requestJson = {
-        model,
-        messages: [{ role: "user", content: "ping" }],
-        max_tokens: 1,
+      const ping = async (
+        tokenLimitParam: TokenLimitParam,
+        tokenLimit = 1,
+      ) => {
+        const requestJson = {
+          model,
+          messages: [{ role: "user", content: "ping" }],
+          [tokenLimitParam]: tokenLimit,
+        };
+        const execute = () =>
+          fetchFn(apiUrl, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(requestJson),
+            signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
+          });
+        const response = this.llmLogs
+          ? await this.llmLogs.runJsonFetch({
+              type: LLM_LOG_TYPE.connectionTest,
+              provider: "openai-compatible",
+              model,
+              endpoint: apiUrl,
+              requestJson,
+              context: { metadata: { target: input.target } },
+              execute,
+            })
+          : await execute();
+        const detail = response.ok
+          ? ""
+          : (await response.text().catch(() => "")).slice(0, 200);
+        return { response, detail };
       };
-      const execute = () =>
-        fetchFn(apiUrl, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify(requestJson),
-          signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
-        });
-      const response = this.llmLogs
-        ? await this.llmLogs.runJsonFetch({
-            type: LLM_LOG_TYPE.connectionTest,
-            provider: "openai-compatible",
-            model,
-            endpoint: apiUrl,
-            requestJson,
-            context: { metadata: { target: input.target } },
-            execute,
-          })
-        : await execute();
+
+      // 최신 OpenAI 모델(o-시리즈·gpt-5 등)은 max_tokens를 거부하고
+      // max_completion_tokens를 요구한다. 반대로 다수의 OpenAI 호환
+      // 서버는 max_completion_tokens를 모르므로, 호환성이 넓은 쪽을
+      // 먼저 보내고 그 파라미터가 거부될 때만 새 이름으로 재시도한다.
+      let tokenLimitParam: TokenLimitParam = "max_tokens";
+      let { response, detail } = await ping(tokenLimitParam);
+      if (response.status === 400 && detail.includes("max_completion_tokens")) {
+        tokenLimitParam = "max_completion_tokens";
+        ({ response, detail } = await ping(tokenLimitParam));
+      }
+      if (
+        response.status === 400 &&
+        detail.includes("model output limit was reached")
+      ) {
+        ({ response, detail } = await ping(tokenLimitParam, 256));
+      }
       if (!response.ok) {
-        const detail = (await response.text().catch(() => "")).slice(0, 200);
         return {
           ok: false,
           message: `LLM 응답 ${response.status}${detail ? `: ${detail}` : ""}`,

@@ -73,7 +73,7 @@ export function PaymentsPage() {
                 <Table.Td>
                   <UserName id={item.userId} />
                 </Table.Td>
-                <Table.Td>{item.provider}</Table.Td>
+                <Table.Td>{item.provider ?? "—"}</Table.Td>
                 <Table.Td>
                   <Badge color={PROVIDER_STATUS_COLOR[item.providerStatus]}>
                     {PROVIDER_STATUS_LABEL[item.providerStatus]}

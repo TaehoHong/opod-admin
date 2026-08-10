@@ -68,15 +68,28 @@ export class AdminUserRepository {
     if (userIds.length === 0) {
       return new Map();
     }
-    const [grants, reservations] = await Promise.all([
-      this.prisma.creditLedgerEntry.groupBy({
+    // 남은 지급분은 컬럼이 아니라 파생값이다: 미만료 지급액 - 사용액 - 환불 회수액.
+    // canonical은 회수를 purchase 단위로 0에서 끊지만(grantState), 목록의 잔액
+    // 칼럼에는 사용자 합계로 충분해서 합산 한 번으로 계산한다.
+    const [grants, usages, recoveries, reservations] = await Promise.all([
+      this.prisma.creditLedger.groupBy({
         by: ["userId"],
         where: {
           userId: { in: userIds },
-          entryType: "grant",
+          type: "grant",
           OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
         },
-        _sum: { remainingAmount: true },
+        _sum: { amount: true },
+      }),
+      this.prisma.creditUsage.groupBy({
+        by: ["grantLedgerId"],
+        where: { grantLedger: { userId: { in: userIds } } },
+        _sum: { amount: true },
+      }),
+      this.prisma.creditLedger.groupBy({
+        by: ["userId"],
+        where: { userId: { in: userIds }, type: "refund_recovery" },
+        _sum: { amount: true },
       }),
       this.prisma.creditReservation.groupBy({
         by: ["userId"],
@@ -88,21 +101,54 @@ export class AdminUserRepository {
         _sum: { amount: true },
       }),
     ]);
+    const usedByUser = await this.usageByUser(usages);
     const reservedByUser = new Map(
       reservations.map((row) => [row.userId, row._sum.amount ?? 0]),
     );
+    const recoveredByUser = new Map(
+      recoveries.map((row) => [row.userId, row._sum.amount ?? 0]),
+    );
     return new Map(
       userIds.map((userId) => {
-        const grant = grants.find((row) => row.userId === userId);
+        const granted = grants.find((row) => row.userId === userId);
         return [
           userId,
           {
-            granted: grant?._sum.remainingAmount ?? 0,
+            granted: Math.max(
+              0,
+              (granted?._sum.amount ?? 0) -
+                (usedByUser.get(userId) ?? 0) -
+                (recoveredByUser.get(userId) ?? 0),
+            ),
             reserved: reservedByUser.get(userId) ?? 0,
           },
         ];
       }),
     );
+  }
+
+  // creditUsage는 지급 행에만 묶여 있어 사용자별 합계를 바로 낼 수 없다.
+  // 지급 행 → 사용자 매핑을 한 번 더 읽어 접는다.
+  private async usageByUser(
+    usages: Array<{ grantLedgerId: string; _sum: { amount: number | null } }>,
+  ): Promise<Map<string, number>> {
+    if (usages.length === 0) {
+      return new Map();
+    }
+    const grants = await this.prisma.creditLedger.findMany({
+      where: { id: { in: usages.map((row) => row.grantLedgerId) } },
+      select: { id: true, userId: true },
+    });
+    const ownerByGrant = new Map(grants.map((row) => [row.id, row.userId]));
+    const totals = new Map<string, number>();
+    for (const row of usages) {
+      const userId = ownerByGrant.get(row.grantLedgerId);
+      if (!userId) {
+        continue;
+      }
+      totals.set(userId, (totals.get(userId) ?? 0) + (row._sum.amount ?? 0));
+    }
+    return totals;
   }
 
   getUser(userId: string): Promise<AdminUserRecord | null> {

@@ -21,28 +21,46 @@ const createService = ({
     AdminService as unknown as new (...dependencies: object[]) => AdminService
   )(user, content, credit, moderation, analytics, generation);
 
+// 구매는 결제 수단·금액을 payments 행에서 가져온다 (schema.prisma CreditPurchase).
 const purchase = (
   overrides: Partial<{
     id: string;
     userId: string;
-    status: "pending" | "paid" | "failed" | "canceled" | "refunded";
+    status:
+      | "pending"
+      | "payment_processing"
+      | "completed"
+      | "failed"
+      | "canceled"
+      | "refunded"
+      | "reversed";
     creditAmount: number;
-    paidAmount: number;
+    payment: {
+      provider: string;
+      status: string;
+      amount: number | null;
+      currency: string | null;
+    } | null;
   }> = {},
 ) => {
   const createdAt = new Date("2026-07-02T00:00:00.000Z");
   return {
     id: "purchase-1",
     userId: "human-1",
-    provider: "local",
-    status: "paid" as const,
+    creditProductId: "product-1",
+    productId: "credits_500",
+    status: "completed" as const,
     creditAmount: 500,
-    paidAmount: 4900,
-    currency: "KRW",
-    providerPaymentId: null,
-    providerPayload: null,
+    idempotencyKey: "idem-1",
+    fulfilledAt: null,
     createdAt,
     updatedAt: createdAt,
+    payment: {
+      provider: "local",
+      status: "paid",
+      amount: 4900,
+      currency: "KRW",
+    },
     ...overrides,
   };
 };
@@ -363,7 +381,7 @@ describe("AdminService", () => {
             {
               id: "grant-1",
               purchaseId: "purchase-1",
-              entryType: "grant",
+              type: "grant",
               creditKind: "paid",
               promotionCode: null,
               amount: 500,
@@ -374,9 +392,10 @@ describe("AdminService", () => {
             {
               id: "refund-1",
               purchaseId: "purchase-1",
-              status: "refunded",
+              status: "completed",
               refundAmount: 5000,
-              allocations: [{ recoveryAmount: 500, recoveredAmount: 0 }],
+              recoveryAmount: 500,
+              debtAmount: 0,
             },
           ],
         }),
@@ -407,12 +426,13 @@ describe("AdminService", () => {
       recoveredCredits: 0,
       debtAdded: 0,
     };
+    // 재실행 판정은 원장의 external_reference UNIQUE 제약에 얹혀 있다.
     const createLedgerEntry = jest.fn();
     const session = {
-      getAction: jest.fn().mockResolvedValue({
+      findLedgerByReference: jest.fn().mockResolvedValue({
         purchaseId: "purchase-1",
-        actionType: "grant_missing_purchase",
-        details: receipt,
+        type: "grant",
+        amount: 500,
       }),
       createLedgerEntry,
     };
@@ -437,24 +457,26 @@ describe("AdminService", () => {
     expect(createLedgerEntry).not.toHaveBeenCalled();
   });
 
-  it("recovers used non-paid credits as debt and records a debit", async () => {
-    const createLedgerEntry = jest.fn();
-    const addPaidDebt = jest.fn();
+  it("recovers used non-paid credits as debt and records a recovery ledger", async () => {
+    // 500 지급 중 300이 이미 쓰였으면 남은 200만 회수로 덮이고 300은 미수가 된다.
+    const createLedgerEntry = jest.fn().mockResolvedValue({
+      purchaseId: "purchase-1",
+      type: "refund_recovery",
+      amount: 500,
+    });
     const session = {
-      getAction: jest.fn().mockResolvedValue(null),
-      listPurchaseGrants: jest.fn().mockResolvedValue([
+      findLedgerByReference: jest.fn().mockResolvedValue(null),
+      listPurchaseLedger: jest.fn().mockResolvedValue([
         {
           id: "grant-1",
+          type: "grant",
           amount: 500,
-          remainingAmount: 200,
           creditKind: "paid",
           promotionCode: null,
         },
       ]),
-      setLedgerRemaining: jest.fn(),
-      addPaidDebt,
+      sumUsageByGrant: jest.fn().mockResolvedValue(new Map([["grant-1", 300]])),
       createLedgerEntry,
-      recordAction: jest.fn(),
     };
     const service = createService({
       credit: {
@@ -477,44 +499,33 @@ describe("AdminService", () => {
       recoveredCredits: 500,
       debtAdded: 300,
     });
-    expect(addPaidDebt).toHaveBeenCalledWith("human-1", 300);
     expect(createLedgerEntry).toHaveBeenCalledWith(
       expect.objectContaining({
-        entryType: "debit",
+        type: "refund_recovery",
         amount: 500,
         externalReference: "credit_reconciliation:recover-purchase-1",
       }),
     );
   });
 
-  it("retries only the unrecovered portion of a completed refund", async () => {
-    const completeRefundAllocation = jest.fn();
-    const addPaidDebt = jest.fn();
+  it("recovers only the refunds whose recovery ledger is still missing", async () => {
+    // refund-1은 이미 회수 원장이 있어 건너뛰고 refund-2만 회수한다.
+    const createLedgerEntry = jest.fn();
     const session = {
-      getAction: jest.fn().mockResolvedValue(null),
-      listPurchaseGrants: jest.fn().mockResolvedValue([]),
-      listCompletedRefunds: jest.fn().mockResolvedValue([
+      findLedgerByReference: jest.fn().mockResolvedValue(null),
+      listPurchaseLedger: jest.fn().mockResolvedValue([
         {
-          id: "refund-1",
-          creditAmount: 500,
-          promotionAmount: 0,
-          allocations: [
-            {
-              refundId: "refund-1",
-              ledgerEntryId: "grant-1",
-              recoveryAmount: 500,
-              recoveredAmount: 200,
-              ledgerEntry: { remainingAmount: 100 },
-            },
-          ],
+          id: "recovery-1",
+          type: "refund_recovery",
+          amount: 200,
+          externalReference: "credit_refund:refund-1",
         },
       ]),
-      setLedgerRemaining: jest.fn(),
-      completeRefundAllocation,
-      hasDebitReference: jest.fn().mockResolvedValue(false),
-      createLedgerEntry: jest.fn(),
-      addPaidDebt,
-      recordAction: jest.fn(),
+      listCompletedRefunds: jest.fn().mockResolvedValue([
+        { id: "refund-1", recoveryAmount: 200, debtAmount: 0 },
+        { id: "refund-2", recoveryAmount: 300, debtAmount: 200 },
+      ]),
+      createLedgerEntry,
     };
     const service = createService({
       credit: {
@@ -539,20 +550,22 @@ describe("AdminService", () => {
       recoveredCredits: 300,
       debtAdded: 200,
     });
-    expect(completeRefundAllocation).toHaveBeenCalledWith(
-      "refund-1",
-      "grant-1",
-      500,
+    expect(createLedgerEntry).toHaveBeenCalledTimes(1);
+    expect(createLedgerEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "refund_recovery",
+        amount: 300,
+        externalReference: "credit_refund:refund-2",
+      }),
     );
-    expect(addPaidDebt).toHaveBeenCalledWith("human-1", 200);
   });
 
-  it("rejects reusing a reconciliation reference for a different action", async () => {
+  it("rejects reusing a reconciliation reference for another purchase", async () => {
     const session = {
-      getAction: jest.fn().mockResolvedValue({
-        purchaseId: "purchase-1",
-        actionType: "recover_nonpaid_grants",
-        details: {},
+      findLedgerByReference: jest.fn().mockResolvedValue({
+        purchaseId: "purchase-2",
+        type: "refund_recovery",
+        amount: 100,
       }),
     };
     const service = createService({

@@ -35,12 +35,12 @@ const referenceDescriptions = [
 ];
 
 const locationData = {
-  locationKey: "jibangbusuri-buldang-gym",
-  displayName: "지방부수리 불당점",
+  locationKey: "seorin-signature-gym",
+  displayName: "서린이 다니는 헬스장",
   description:
-    "천안 불당동의 365일 24시간 대형 머신 중심 헬스장. 서린은 고중량 기록보다 촬영 전 바디라인·자세·붓기와 운동복 핏을 관리하고 거울 콘텐츠를 촬영하기 위해 이용한다.",
+    "서린이 촬영 전 바디라인·자세·붓기와 운동복 핏을 관리하고 얼굴 없는 거울 콘텐츠를 촬영하기 위해 다니는 24시간 대형 머신 중심 헬스장. 고중량 기록이나 운동 성취보다 화면에 보이는 컨디션 관리가 목적이다.",
   visualPrompt:
-    "Large 450-pyeong 24-hour machine-focused gym in Buldang-dong, Cheonan, inspired by the real Jibangbusuri Buldang interior. Long low-ceilinged single-floor space with exposed concrete, silver HVAC ducts and white pipes, parallel violet-blue and soft-pink linear LED lighting, dark charcoal speckled square rubber tiles, dark gray rectangular columns, long wall mirrors, dense orderly rows of premium equipment mixing black pin-loaded machines with chrome guide rods and red plate-loaded frames, deep sightlines and a brighter window band at the far end. Keep a walkable central aisle and a small clear mirror-shooting area. Realistic Korean commercial gym, slightly dim, busy in equipment density but clean and maintained.",
+    "Large 24-hour machine-focused Korean commercial gym with a long low-ceilinged single-floor space, exposed concrete, silver HVAC ducts and white pipes, parallel violet-blue and soft-pink linear LED lighting, dark charcoal speckled square rubber tiles, dark gray rectangular columns, long wall mirrors, dense orderly rows of premium equipment mixing black pin-loaded machines with chrome guide rods and red plate-loaded frames, deep sightlines and a brighter window band at the far end. Keep a walkable central aisle and a small clear mirror-shooting area. Slightly dim, busy in equipment density but clean and maintained, with no identifiable brand or location signage.",
   negativePrompt:
     "readable brand text, logo, signage, watermark, minimalist boutique gym, sparse empty floor, white luxury fitness studio, hotel spa, CrossFit warehouse, boxing gym, bodybuilding stage, neon sign, cinematic fog, glossy CGI showroom, fisheye distortion, implausibly wide empty space, duplicated machines, deformed equipment",
 };

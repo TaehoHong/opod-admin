@@ -1,40 +1,45 @@
 import { Injectable } from "@nestjs/common";
+import type {
+  CreditKind,
+  CreditLedgerType,
+  CreditRefundStatus,
+} from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../domain/database/prisma.service";
 
-export type AdminCreditEntryRecord =
-  Prisma.CreditLedgerEntryGetPayload<Prisma.CreditLedgerEntryDefaultArgs>;
-export type AdminCreditPurchaseRecord =
-  Prisma.CreditPurchaseGetPayload<Prisma.CreditPurchaseDefaultArgs>;
-export type AdminReconciliationActionRecord =
-  Prisma.CreditReconciliationActionGetPayload<Prisma.CreditReconciliationActionDefaultArgs>;
+// 크레딧 원장은 canonical(opod-service-backend)의 규약을 그대로 따른다:
+// amount는 항상 양수이고 방향은 type이 정한다. 지급 회수는 grant 행을 고치는
+// 대신 purchaseId가 붙은 refund_recovery 행을 쌓아서 표현하며, 남은 지급분을
+// 넘어선 회수분은 자동으로 미수(음수 유료 잔액)가 된다.
+// 참고: opod-service-backend/src/domain/credits/credits.service.ts grantState().
+export type AdminCreditLedgerRecord =
+  Prisma.CreditLedgerGetPayload<Prisma.CreditLedgerDefaultArgs>;
+
+export type AdminCreditPurchaseRecord = Prisma.CreditPurchaseGetPayload<{
+  include: { payment: true };
+}>;
 
 export type AdminReconciliationLedgerRow = {
   id: string;
   purchaseId: string | null;
-  entryType: "grant" | "debit";
-  creditKind: "free" | "paid" | null;
+  type: CreditLedgerType;
+  creditKind: CreditKind | null;
   promotionCode: string | null;
   amount: number;
   externalReference: string | null;
 };
 
+export type AdminCompletedRefundRecord =
+  Prisma.CreditRefundGetPayload<Prisma.CreditRefundDefaultArgs>;
+
 export type AdminReconciliationRefundRow = {
   id: string;
   purchaseId: string;
-  status: "reserved" | "refunded" | "released";
+  status: CreditRefundStatus;
   refundAmount: number;
-  allocations: Array<{
-    recoveryAmount: number;
-    recoveredAmount: number;
-  }>;
+  recoveryAmount: number;
+  debtAmount: number;
 };
-
-export type AdminCompletedRefundRecord = Prisma.CreditRefundGetPayload<{
-  include: {
-    allocations: { include: { ledgerEntry: true } };
-  };
-}>;
 
 @Injectable()
 export class AdminCreditPaymentRepository {
@@ -42,7 +47,7 @@ export class AdminCreditPaymentRepository {
 
   async hasLedgerCursor(cursorId: string, userId?: string): Promise<boolean> {
     return (
-      (await this.prisma.creditLedgerEntry.findFirst({
+      (await this.prisma.creditLedger.findFirst({
         where: { id: cursorId, ...(userId ? { userId } : {}) },
         select: { id: true },
       })) !== null
@@ -53,8 +58,8 @@ export class AdminCreditPaymentRepository {
     userId?: string;
     cursorId?: string;
     limit: number;
-  }): Promise<AdminCreditEntryRecord[]> {
-    return this.prisma.creditLedgerEntry.findMany({
+  }): Promise<AdminCreditLedgerRecord[]> {
+    return this.prisma.creditLedger.findMany({
       where: input.userId ? { userId: input.userId } : {},
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: input.limit + 1,
@@ -76,23 +81,26 @@ export class AdminCreditPaymentRepository {
 
   createLedgerEntry(input: {
     userId: string;
-    entryType: "grant" | "debit";
+    type: CreditLedgerType;
     amount: number;
     reason: string;
     externalReference?: string;
-    remainingAmount?: number;
-    creditKind?: "free" | "paid";
+    creditKind?: CreditKind;
     purchaseId?: string;
     promotionCode?: string;
     expiresAt?: Date;
-  }): Promise<AdminCreditEntryRecord> {
-    return this.prisma.creditLedgerEntry.create({ data: input });
+  }): Promise<AdminCreditLedgerRecord> {
+    return this.prisma.creditLedger.create({ data: input });
   }
 
-  listPurchases(createdAt?: { gte?: Date; lte?: Date }) {
+  listPurchases(createdAt?: {
+    gte?: Date;
+    lte?: Date;
+  }): Promise<AdminCreditPurchaseRecord[]> {
     return this.prisma.creditPurchase.findMany({
       where: createdAt ? { createdAt } : {},
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      include: { payment: true },
     });
   }
 
@@ -104,12 +112,12 @@ export class AdminCreditPaymentRepository {
       return { entries: [], refunds: [] };
     }
     const [entries, refunds] = await Promise.all([
-      this.prisma.creditLedgerEntry.findMany({
+      this.prisma.creditLedger.findMany({
         where: { purchaseId: { in: purchaseIds } },
         select: {
           id: true,
           purchaseId: true,
-          entryType: true,
+          type: true,
           creditKind: true,
           promotionCode: true,
           amount: true,
@@ -123,9 +131,8 @@ export class AdminCreditPaymentRepository {
           purchaseId: true,
           status: true,
           refundAmount: true,
-          allocations: {
-            select: { recoveryAmount: true, recoveredAmount: true },
-          },
+          recoveryAmount: true,
+          debtAmount: true,
         },
       }),
     ]);
@@ -135,6 +142,7 @@ export class AdminCreditPaymentRepository {
   getPayment(paymentId: string): Promise<AdminCreditPurchaseRecord | null> {
     return this.prisma.creditPurchase.findUnique({
       where: { id: paymentId },
+      include: { payment: true },
     });
   }
 
@@ -155,114 +163,52 @@ export class AdminCreditPaymentRepository {
 export class AdminCreditReconciliationSession {
   constructor(private readonly tx: Prisma.TransactionClient) {}
 
-  getAction(
-    reference: string,
-  ): Promise<AdminReconciliationActionRecord | null> {
-    return this.tx.creditReconciliationAction.findUnique({
-      where: { reference },
-    });
+  findLedgerByReference(
+    externalReference: string,
+  ): Promise<AdminCreditLedgerRecord | null> {
+    return this.tx.creditLedger.findUnique({ where: { externalReference } });
   }
 
-  listPurchaseGrants(purchaseId: string): Promise<AdminCreditEntryRecord[]> {
-    return this.tx.creditLedgerEntry.findMany({
-      where: { purchaseId, entryType: "grant" },
+  listPurchaseLedger(purchaseId: string): Promise<AdminCreditLedgerRecord[]> {
+    return this.tx.creditLedger.findMany({
+      where: { purchaseId },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
   }
 
-  ensureCreditAccount(userId: string) {
-    return this.tx.creditAccount.upsert({
-      where: { userId },
-      create: { userId },
-      update: {},
+  // 지급 행별로 이미 쓰인 금액. 남은 지급분 = amount - 사용액이다.
+  async sumUsageByGrant(grantIds: string[]): Promise<Map<string, number>> {
+    if (grantIds.length === 0) {
+      return new Map();
+    }
+    const rows = await this.tx.creditUsage.groupBy({
+      by: ["grantLedgerId"],
+      where: { grantLedgerId: { in: grantIds } },
+      _sum: { amount: true },
     });
-  }
-
-  setPaidDebt(userId: string, paidDebt: number) {
-    return this.tx.creditAccount.update({
-      where: { userId },
-      data: { paidDebt },
-    });
-  }
-
-  clearDebtIdentity(userId: string) {
-    return this.tx.user.update({
-      where: { id: userId },
-      data: { debtIdentityHash: null },
-    });
-  }
-
-  createLedgerEntry(input: {
-    userId: string;
-    purchaseId: string;
-    entryType: "grant" | "debit";
-    creditKind?: "paid";
-    amount: number;
-    remainingAmount?: number;
-    reason: string;
-    externalReference: string;
-  }) {
-    return this.tx.creditLedgerEntry.create({ data: input });
+    return new Map(
+      rows.map((row) => [row.grantLedgerId, row._sum.amount ?? 0]),
+    );
   }
 
   listCompletedRefunds(
     purchaseId: string,
   ): Promise<AdminCompletedRefundRecord[]> {
     return this.tx.creditRefund.findMany({
-      where: { purchaseId, status: "refunded" },
-      include: { allocations: { include: { ledgerEntry: true } } },
+      where: { purchaseId, status: "completed" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
   }
 
-  setLedgerRemaining(entryId: string, remainingAmount: number) {
-    return this.tx.creditLedgerEntry.update({
-      where: { id: entryId },
-      data: { remainingAmount },
-    });
-  }
-
-  completeRefundAllocation(
-    refundId: string,
-    ledgerEntryId: string,
-    recoveredAmount: number,
-  ) {
-    return this.tx.creditRefundAllocation.update({
-      where: {
-        refundId_ledgerEntryId: { refundId, ledgerEntryId },
-      },
-      data: { recoveredAmount },
-    });
-  }
-
-  async hasDebitReference(externalReference: string): Promise<boolean> {
-    return (
-      (await this.tx.creditLedgerEntry.findFirst({
-        where: { entryType: "debit", externalReference },
-        select: { id: true },
-      })) !== null
-    );
-  }
-
-  addPaidDebt(userId: string, paidDebt: number) {
-    return this.tx.creditAccount.upsert({
-      where: { userId },
-      create: { userId, paidDebt },
-      update: { paidDebt: { increment: paidDebt } },
-    });
-  }
-
-  recordAction(input: {
-    actionType:
-      | "grant_missing_purchase"
-      | "recover_nonpaid_grants"
-      | "recover_duplicate_grants"
-      | "recover_completed_refund";
-    reference: string;
+  createLedgerEntry(input: {
+    userId: string;
     purchaseId: string;
-    adminId: string;
+    type: CreditLedgerType;
+    creditKind?: CreditKind;
+    amount: number;
     reason: string;
-    details: Prisma.InputJsonValue;
-  }) {
-    return this.tx.creditReconciliationAction.create({ data: input });
+    externalReference: string;
+  }): Promise<AdminCreditLedgerRecord> {
+    return this.tx.creditLedger.create({ data: input });
   }
 }

@@ -43,6 +43,7 @@ describe("user detail", () => {
               id: "credit-1",
               userId: user.id,
               entryType: "grant",
+              ledgerType: "grant",
               amount: 120,
               reason: "가입 보상",
               externalReference: "welcome-2026",

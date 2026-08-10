@@ -12,7 +12,11 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { UserName } from "../../shared/ui/EntityName";
 import { fetchPayment, type PaymentReconciliationItem } from "./api";
-import { LEDGER_STATUS_LABEL, PROVIDER_STATUS_LABEL } from "./labels";
+import {
+  LEDGER_STATUS_LABEL,
+  PAYMENT_STATUS_LABEL,
+  PROVIDER_STATUS_LABEL,
+} from "./labels";
 
 // 결제는 대상과 영향을 함께 보여준다 (docs/04-design-rules.md:69).
 // 목록의 정산 판정과 결제 원본을 한 화면에서 대조할 수 있게 둔다.
@@ -47,13 +51,20 @@ export function PaymentDetailPanel({
 
         {payment.data ? (
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
-            <Field label="결제 상태">
+            <Field label="구매 상태">
               {PROVIDER_STATUS_LABEL[payment.data.status] ??
                 payment.data.status}
             </Field>
-            <Field label="결제 수단">{payment.data.provider}</Field>
+            <Field label="결제 상태">
+              {payment.data.paymentStatus
+                ? PAYMENT_STATUS_LABEL[payment.data.paymentStatus]
+                : "결제 기록 없음"}
+            </Field>
+            <Field label="결제 수단">{payment.data.provider ?? "—"}</Field>
             <Field label="결제 금액">
-              {payment.data.paidAmount.toLocaleString()} {payment.data.currency}
+              {payment.data.paidAmount === undefined
+                ? "—"
+                : `${payment.data.paidAmount.toLocaleString()} ${payment.data.currency ?? ""}`.trim()}
             </Field>
             <Field label="지급 크레딧">
               {payment.data.creditAmount.toLocaleString()}

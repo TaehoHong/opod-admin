@@ -17,12 +17,20 @@ export class AdminAnalyticsRepository {
     });
   }
 
+  // 원장 금액은 항상 양수이고 방향은 type이 정한다. 지급은 grant 하나뿐이고
+  // 차감은 사용·환불 회수·조정 셋으로 나뉘어 있어 합쳐서 센다.
   async sumCredits(
-    entryType: "grant" | "debit",
+    direction: "grant" | "debit",
     createdAt?: { gte?: Date; lte?: Date },
   ): Promise<number> {
-    const result = await this.prisma.creditLedgerEntry.aggregate({
-      where: { entryType, ...(createdAt ? { createdAt } : {}) },
+    const result = await this.prisma.creditLedger.aggregate({
+      where: {
+        type:
+          direction === "grant"
+            ? "grant"
+            : { in: ["usage", "refund_recovery", "adjustment"] },
+        ...(createdAt ? { createdAt } : {}),
+      },
       _sum: { amount: true },
     });
     return result._sum.amount ?? 0;

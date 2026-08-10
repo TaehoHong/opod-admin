@@ -11,6 +11,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export type CsrfRequest = {
   method: string;
+  protocol?: string;
   header(name: string): string | undefined;
 };
 
@@ -48,5 +49,5 @@ function expectedOrigin(request: CsrfRequest): string {
   const host = request.header("host") ?? "";
   // TLS 종단이 앞단 프록시일 수 있으므로 전달된 스킴을 우선한다.
   const proto = request.header("x-forwarded-proto")?.split(",")[0]?.trim();
-  return `${proto || "https"}://${host}`;
+  return `${proto || request.protocol || "https"}://${host}`;
 }

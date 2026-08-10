@@ -38,6 +38,7 @@ describe("credit management", () => {
         const created = {
           id: "credit-1",
           entryType: "grant",
+          ledgerType: "grant",
           createdAt: "2026-07-31T01:00:00.000Z",
           ...body,
         };
@@ -113,6 +114,7 @@ describe("credit management", () => {
             id: "credit-1",
             userId: "user-1",
             entryType: "grant",
+            ledgerType: "grant",
             amount: 500,
             reason: "운영 보상",
             createdAt: "2026-07-31T01:00:00.000Z",

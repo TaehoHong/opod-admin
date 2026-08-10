@@ -6,7 +6,14 @@ import { DataPage, LoadMore } from "../../shared/ui/DataPage";
 import { UserName } from "../../shared/ui/EntityName";
 import { TableText } from "../../shared/ui/TableText";
 import { CreditGrantModal } from "./CreditGrantModal";
-import { fetchCreditLedger } from "./api";
+import { fetchCreditLedger, type CreditLedgerType } from "./api";
+
+const LEDGER_TYPE_LABEL: Record<CreditLedgerType, string> = {
+  grant: "지급",
+  usage: "사용",
+  refund_recovery: "환불 회수",
+  adjustment: "운영 조정",
+};
 
 export function CreditsPage() {
   const [userId, setUserId] = useState("");
@@ -53,6 +60,7 @@ export function CreditsPage() {
               <Table.Tr>
                 <Table.Th>구분</Table.Th>
                 <Table.Th>수량</Table.Th>
+                <Table.Th>사유 구분</Table.Th>
                 <Table.Th>종류</Table.Th>
                 <Table.Th>사유</Table.Th>
                 <Table.Th>사용자</Table.Th>
@@ -68,6 +76,7 @@ export function CreditsPage() {
                     </Badge>
                   </Table.Td>
                   <Table.Td>{entry.amount}</Table.Td>
+                  <Table.Td>{LEDGER_TYPE_LABEL[entry.ledgerType]}</Table.Td>
                   <Table.Td>{entry.creditKind ?? "—"}</Table.Td>
                   <Table.Td maw={280}>
                     <TableText>{entry.reason}</TableText>

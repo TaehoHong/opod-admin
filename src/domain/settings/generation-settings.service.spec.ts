@@ -195,6 +195,63 @@ describe("GenerationSettingsService", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("testConnection retries with max_completion_tokens when the model rejects max_tokens", async () => {
+    const repository = repositoryMock([
+      { key: "planner.llmApiUrl", value: "https://llm.test/v1/chat" },
+      { key: "planner.llmApiKey", value: "db-key" },
+      { key: "planner.llmModel", value: "gpt-5-mini" },
+    ]);
+    const service = makeService(repository);
+    const fetchMock = jest.fn();
+
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () =>
+        JSON.stringify({
+          error: {
+            message:
+              "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.",
+          },
+        }),
+    });
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200 });
+
+    await expect(
+      service.testConnection({ target: "planner" }, {}, fetchMock as never),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      max_tokens: 1,
+    });
+    const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(retryBody).toMatchObject({ max_completion_tokens: 1 });
+    expect(retryBody.max_tokens).toBeUndefined();
+  });
+
+  it("testConnection surfaces a 400 unrelated to max_tokens without retrying", async () => {
+    const repository = repositoryMock([
+      { key: "planner.llmApiUrl", value: "https://llm.test/v1/chat" },
+      { key: "planner.llmApiKey", value: "db-key" },
+      { key: "planner.llmModel", value: "gpt-5-mini" },
+    ]);
+    const service = makeService(repository);
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () => "model not found",
+    });
+
+    await expect(
+      service.testConnection({ target: "planner" }, {}, fetchMock as never),
+    ).resolves.toMatchObject({
+      ok: false,
+      message: "LLM 응답 400: model not found",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("settingsChangeEntries logs only real diffs and masks secrets to last4", () => {
     const entries = settingsChangeEntries(
       { falApiKey: "old-key-abcd", falImageModel: "fal-ai/nano-banana/edit" },

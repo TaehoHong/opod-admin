@@ -26,9 +26,9 @@ const location = {
   id: "location-1",
   characterId: "character-1",
   character: { id: "character-1", displayName: "서린", publicId: "seorin" },
-  locationKey: "jibangbusuri-buldang-gym",
-  displayName: "지방부수리 헬스장",
-  description: "천안 불당동 헬스장",
+  locationKey: "seorin-signature-gym",
+  displayName: "서린이 다니는 헬스장",
+  description: "서린의 바디라인 관리와 촬영을 위한 헬스장",
   visualPrompt: "modern gym",
   negativePrompt: "empty warehouse",
   referenceCount: 2,
@@ -86,7 +86,7 @@ describe("location management", () => {
     );
     renderRoutes();
 
-    await screen.findByText("지방부수리 헬스장");
+    await screen.findByText("서린이 다니는 헬스장");
     await userEvent.click(
       screen.getByRole("combobox", { name: "캐릭터 필터" }),
     );
@@ -119,7 +119,7 @@ describe("location management", () => {
     );
     renderRoutes("/locations/location-1");
 
-    await screen.findByRole("heading", { name: "지방부수리 헬스장" });
+    await screen.findByRole("heading", { name: "서린이 다니는 헬스장" });
     await userEvent.click(screen.getAllByRole("button", { name: "위로" })[1]);
     const description = screen.getByLabelText("이미지 1 설명");
     await userEvent.clear(description);

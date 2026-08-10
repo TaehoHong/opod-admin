@@ -19,9 +19,10 @@ import {
   AdminStoryRecord,
 } from "./admin-content.repository";
 import {
-  AdminCreditEntryRecord,
+  AdminCreditLedgerRecord,
   AdminCreditPaymentRepository,
   AdminCreditPurchaseRecord,
+  AdminCreditReconciliationSession,
   AdminReconciliationLedgerRow,
   AdminReconciliationRefundRow,
 } from "./admin-credit-payment.repository";
@@ -48,7 +49,14 @@ type ReportTargetType = "character" | "post" | "message";
 type ReportStatus = "submitted" | "reviewing" | "resolved" | "rejected";
 type GenerationRunProvider = "local";
 type CreditPurchaseStatus =
-  "pending" | "paid" | "failed" | "canceled" | "refunded";
+  | "pending"
+  | "payment_processing"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "refunded"
+  | "reversed";
+type CreditLedgerType = "grant" | "usage" | "refund_recovery" | "adjustment";
 type ReconciliationStatus = "mismatch" | "pending" | "resolved";
 type LedgerStatus = "granted" | "missing_grant" | "not_granted";
 type ReconciliationIssueCode =
@@ -58,7 +66,7 @@ type ReconciliationIssueCode =
   | "nonpaid_has_grant"
   | "refunded_without_completed_refund"
   | "refund_missing_recovery"
-  | "released_refund_has_recovery"
+  | "canceled_refund_has_recovery"
   | "refund_total_exceeds_payment";
 const analyticsMetricNames = [
   "events.count",
@@ -155,12 +163,15 @@ type AdminPostReaction = {
   createdAt: string;
 };
 
+// 원장 방향. 실제 원장 type은 넷이지만 지급은 grant 하나뿐이라
+// 운영 화면에는 지급/차감으로 접어 보여주고 원본 type을 ledgerType으로 함께 준다.
 type CreditEntryType = "grant" | "debit";
 
 type CreditEntry = {
   id: string;
   userId: string;
   entryType: CreditEntryType;
+  ledgerType: CreditLedgerType;
   creditKind?: "free" | "paid";
   purchaseId?: string;
   promotionCode?: string;
@@ -170,28 +181,43 @@ type CreditEntry = {
   createdAt: string;
 };
 
+// provider와 결제 금액은 payments 행에서 온다. 체크아웃 전 구매에는 결제 행이
+// 없어서 값이 비므로, 없는 값을 지어내지 않고 optional로 둔다.
 type PaymentReconciliationItem = {
   paymentId: string;
   userId: string;
-  provider: string;
+  provider?: string;
   providerStatus: CreditPurchaseStatus;
+  paymentStatus?: PaymentStatus;
   creditAmount: number;
-  paidAmount: number;
-  currency: string;
+  paidAmount?: number;
+  currency?: string;
   ledgerStatus: LedgerStatus;
   reason?: string;
   issueCodes?: ReconciliationIssueCode[];
   repairActions?: ReconciliationActionType[];
 };
 
+type PaymentStatus =
+  | "pending"
+  | "verified"
+  | "processing"
+  | "paid"
+  | "failed"
+  | "canceled"
+  | "partially_refunded"
+  | "refunded"
+  | "reversed";
+
 type AdminPayment = {
   id: string;
   userId: string;
-  provider: string;
+  provider?: string;
   status: CreditPurchaseStatus;
+  paymentStatus?: PaymentStatus;
   creditAmount: number;
-  paidAmount: number;
-  currency: string;
+  paidAmount?: number;
+  currency?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -910,11 +936,14 @@ export class AdminService {
         .map((item) => ({
           paymentId: item.paymentId,
           userId: item.userId,
-          provider: item.provider,
+          ...(item.provider ? { provider: item.provider } : {}),
           providerStatus: item.providerStatus,
+          ...(item.paymentStatus ? { paymentStatus: item.paymentStatus } : {}),
           creditAmount: item.creditAmount,
-          paidAmount: item.paidAmount,
-          currency: item.currency,
+          ...(item.paidAmount !== undefined
+            ? { paidAmount: item.paidAmount }
+            : {}),
+          ...(item.currency ? { currency: item.currency } : {}),
           ledgerStatus: item.ledgerStatus,
           ...(item.reason ? { reason: item.reason } : {}),
           ...(item.issueCodes?.length ? { issueCodes: item.issueCodes } : {}),
@@ -955,31 +984,30 @@ export class AdminService {
       throw new BadRequestException("Payment not found");
     }
 
+    // 멱등성은 별도 액션 테이블 대신 원장의 external_reference UNIQUE 제약에
+    // 얹는다. 네 액션 모두 원장 행을 정확히 하나 남기므로, 같은 reference로
+    // 다시 들어오면 그 행에서 영수증을 그대로 복원할 수 있다.
+    const anchorReference = `credit_reconciliation:${reference}`;
     return this.creditPaymentRepository.withReconciliationTransaction(
       purchase.userId,
       reference,
       async (session) => {
-        const existing = await session.getAction(reference);
+        const existing = await session.findLedgerByReference(anchorReference);
         if (existing) {
-          if (
-            existing.purchaseId !== input.purchaseId ||
-            existing.actionType !== input.action
-          ) {
+          if (existing.purchaseId !== purchase.id) {
             throw new ConflictException(
               "Reconciliation reference is already used",
             );
           }
-          return existing.details as ReconciliationActionReceipt;
+          return this.receiptFromLedger(reference, input.action, existing);
         }
 
-        const grants = await session.listPurchaseGrants(purchase.id);
-        let grantedCredits = 0;
-        let recoveredCredits = 0;
-        let debtAdded = 0;
+        const ledger = await session.listPurchaseLedger(purchase.id);
+        const grants = ledger.filter((entry) => entry.type === "grant");
 
         if (input.action === "grant_missing_purchase") {
-          if (purchase.status !== "paid") {
-            throw new ConflictException("Payment is not paid");
+          if (purchase.status !== "completed") {
+            throw new ConflictException("Payment is not completed");
           }
           const baseGrants = grants.filter(
             (grant) =>
@@ -989,147 +1017,164 @@ export class AdminService {
             throw new ConflictException("Payment already has a base grant");
           }
 
-          const account = await session.ensureCreditAccount(purchase.userId);
-          const offset = Math.min(account.paidDebt, purchase.creditAmount);
-          if (offset > 0) {
-            const nextDebt = account.paidDebt - offset;
-            await session.setPaidDebt(purchase.userId, nextDebt);
-            if (nextDebt === 0) {
-              await session.clearDebtIdentity(purchase.userId);
-            }
-          }
-          await session.createLedgerEntry({
+          // 미수(음수 유료 잔액)는 별도 컬럼이 아니라 이 구매의 회수 원장이
+          // 지급분을 초과한 만큼으로 계산된다. 지급 행을 새로 넣으면 잔액
+          // 계산에서 자동으로 상계되므로 여기서 따로 만질 것이 없다.
+          const created = await session.createLedgerEntry({
             userId: purchase.userId,
             purchaseId: purchase.id,
-            entryType: "grant",
+            type: "grant",
             creditKind: "paid",
             amount: purchase.creditAmount,
-            remainingAmount: purchase.creditAmount - offset,
             reason,
-            externalReference: `credit_purchase:${purchase.id}`,
+            externalReference: anchorReference,
           });
-          grantedCredits = purchase.creditAmount;
-        } else if (input.action === "recover_completed_refund") {
-          const refunds = await session.listCompletedRefunds(purchase.id);
-          let repaired = false;
-          for (const refund of refunds) {
-            const totalRecovery = refund.creditAmount + refund.promotionAmount;
-            if (totalRecovery === 0) {
-              continue;
-            }
-            for (const allocation of refund.allocations) {
-              const recoveryLeft =
-                allocation.recoveryAmount - allocation.recoveredAmount;
-              if (recoveryLeft <= 0) {
-                continue;
-              }
-              const remaining = allocation.ledgerEntry.remainingAmount ?? 0;
-              const recovered = Math.min(remaining, recoveryLeft);
-              if (recovered > 0) {
-                await session.setLedgerRemaining(
-                  allocation.ledgerEntryId,
-                  remaining - recovered,
-                );
-              }
-              debtAdded += recoveryLeft - recovered;
-              recoveredCredits += recoveryLeft;
-              await session.completeRefundAllocation(
-                allocation.refundId,
-                allocation.ledgerEntryId,
-                allocation.recoveryAmount,
-              );
-              repaired = true;
-            }
-            const debitReference = `credit_refund:${refund.id}`;
-            if (!(await session.hasDebitReference(debitReference))) {
-              await session.createLedgerEntry({
-                userId: purchase.userId,
-                purchaseId: purchase.id,
-                entryType: "debit",
-                amount: totalRecovery,
-                reason,
-                externalReference: debitReference,
-              });
-              repaired = true;
-            }
-          }
-          if (!repaired) {
-            throw new ConflictException("No incomplete refund recovery found");
-          }
-          if (debtAdded > 0) {
-            await session.addPaidDebt(purchase.userId, debtAdded);
-          }
-        } else {
-          if (
-            input.action === "recover_nonpaid_grants" &&
-            purchase.status === "paid"
-          ) {
-            throw new ConflictException("Payment is paid");
-          }
-
-          let targets = grants;
-          if (input.action === "recover_duplicate_grants") {
-            if (purchase.status !== "paid") {
-              throw new ConflictException("Payment is not paid");
-            }
-            const baseGrants = grants.filter(
-              (grant) =>
-                grant.creditKind === "paid" && grant.promotionCode === null,
-            );
-            const keeper = baseGrants.find(
-              (grant) => grant.amount === purchase.creditAmount,
-            );
-            if (!keeper || baseGrants.length < 2) {
-              throw new ConflictException(
-                "No safely repairable duplicate grant exists",
-              );
-            }
-            targets = baseGrants.filter((grant) => grant.id !== keeper.id);
-          }
-          if (targets.length === 0) {
-            throw new ConflictException("No recoverable grants found");
-          }
-
-          for (const grant of targets) {
-            const remaining = grant.remainingAmount ?? 0;
-            if (remaining > 0) {
-              await session.setLedgerRemaining(grant.id, 0);
-            }
-            recoveredCredits += grant.amount;
-            debtAdded += grant.amount - remaining;
-          }
-          if (debtAdded > 0) {
-            await session.addPaidDebt(purchase.userId, debtAdded);
-          }
-          await session.createLedgerEntry({
-            userId: purchase.userId,
-            purchaseId: purchase.id,
-            entryType: "debit",
-            amount: recoveredCredits,
-            reason,
-            externalReference: `credit_reconciliation:${reference}`,
-          });
+          return this.receiptFromLedger(reference, input.action, created);
         }
 
-        const receipt: ReconciliationActionReceipt = {
-          reference,
-          action: input.action,
+        // 환불 회수 행은 반드시 credit_refund:<환불 id>를 참조로 달아야 한다.
+        // 정산 탐지도 canonical 크레딧 서비스도 그 참조로 회수 여부를 읽는다.
+        if (input.action === "recover_completed_refund") {
+          const pending = await this.pendingRefundRecoveries(
+            session,
+            purchase.id,
+            ledger,
+          );
+          for (const refund of pending) {
+            await session.createLedgerEntry({
+              userId: purchase.userId,
+              purchaseId: purchase.id,
+              type: "refund_recovery",
+              creditKind: "paid",
+              amount: refund.recoveryAmount,
+              reason,
+              externalReference: `credit_refund:${refund.id}`,
+            });
+          }
+          return {
+            reference,
+            action: input.action,
+            purchaseId: purchase.id,
+            grantedCredits: 0,
+            recoveredCredits: pending.reduce(
+              (sum, refund) => sum + refund.recoveryAmount,
+              0,
+            ),
+            debtAdded: pending.reduce(
+              (sum, refund) => sum + refund.debtAmount,
+              0,
+            ),
+          };
+        }
+
+        const recovery = await this.plannedGrantRecovery(
+          session,
+          input.action,
+          purchase,
+          grants,
+        );
+        const created = await session.createLedgerEntry({
+          userId: purchase.userId,
           purchaseId: purchase.id,
-          grantedCredits,
-          recoveredCredits,
-          debtAdded,
-        };
-        await session.recordAction({
-          actionType: input.action,
-          reference,
-          purchaseId: purchase.id,
-          adminId: input.adminId,
+          type: "refund_recovery",
+          creditKind: "paid",
+          amount: recovery.amount,
           reason,
-          details: receipt,
+          externalReference: anchorReference,
         });
-        return receipt;
+        return {
+          ...this.receiptFromLedger(reference, input.action, created),
+          debtAdded: recovery.debtAdded,
+        };
       },
     );
+  }
+
+  // 회수할 금액과, 그중 남은 지급분으로 덮이지 않아 미수로 남는 금액을 정한다.
+  private async plannedGrantRecovery(
+    session: AdminCreditReconciliationSession,
+    action: Extract<
+      ReconciliationActionType,
+      "recover_nonpaid_grants" | "recover_duplicate_grants"
+    >,
+    purchase: AdminCreditPurchaseRecord,
+    grants: AdminCreditLedgerRecord[],
+  ): Promise<{ amount: number; debtAdded: number }> {
+    if (
+      action === "recover_nonpaid_grants" &&
+      purchase.status === "completed"
+    ) {
+      throw new ConflictException("Payment is completed");
+    }
+
+    let targets = grants;
+    if (action === "recover_duplicate_grants") {
+      if (purchase.status !== "completed") {
+        throw new ConflictException("Payment is not completed");
+      }
+      const baseGrants = grants.filter(
+        (grant) => grant.creditKind === "paid" && grant.promotionCode === null,
+      );
+      const keeper = baseGrants.find(
+        (grant) => grant.amount === purchase.creditAmount,
+      );
+      if (!keeper || baseGrants.length < 2) {
+        throw new ConflictException(
+          "No safely repairable duplicate grant exists",
+        );
+      }
+      targets = baseGrants.filter((grant) => grant.id !== keeper.id);
+    }
+    if (targets.length === 0) {
+      throw new ConflictException("No recoverable grants found");
+    }
+
+    const used = await session.sumUsageByGrant(targets.map((row) => row.id));
+    const amount = targets.reduce((sum, grant) => sum + grant.amount, 0);
+    const remaining = targets.reduce(
+      (sum, grant) =>
+        sum + Math.max(0, grant.amount - (used.get(grant.id) ?? 0)),
+      0,
+    );
+    return { amount, debtAdded: Math.max(0, amount - remaining) };
+  }
+
+  // 완료된 환불 중 회수 원장이 아직 없는 것들. 회수액과 미수액은 환불을 만들 때
+  // 이미 갈라져 저장돼 있어 여기서 다시 계산하지 않는다.
+  private async pendingRefundRecoveries(
+    session: AdminCreditReconciliationSession,
+    purchaseId: string,
+    ledger: AdminCreditLedgerRecord[],
+  ) {
+    const recovered = new Set(
+      ledger
+        .filter((entry) => entry.type === "refund_recovery")
+        .map((entry) => entry.externalReference),
+    );
+    const pending = (await session.listCompletedRefunds(purchaseId)).filter(
+      (refund) =>
+        refund.recoveryAmount > 0 &&
+        !recovered.has(`credit_refund:${refund.id}`),
+    );
+    if (pending.length === 0) {
+      throw new ConflictException("No incomplete refund recovery found");
+    }
+    return pending;
+  }
+
+  private receiptFromLedger(
+    reference: string,
+    action: ReconciliationActionType,
+    entry: AdminCreditLedgerRecord,
+  ): ReconciliationActionReceipt {
+    return {
+      reference,
+      action,
+      purchaseId: entry.purchaseId ?? "",
+      grantedCredits: entry.type === "grant" ? entry.amount : 0,
+      recoveredCredits: entry.type === "grant" ? 0 : entry.amount,
+      debtAdded: 0,
+    };
   }
 
   async listReports(
@@ -1232,13 +1277,14 @@ export class AdminService {
       throw new BadRequestException("Credit purchase not found");
     }
 
+    // 차감은 원장 type 중 adjustment로 남긴다. usage는 서비스가 실제 소비를
+    // 기록할 때 쓰는 type이고, refund_recovery는 환불 회수 전용이다.
     const entry = await this.creditPaymentRepository.createLedgerEntry({
       userId: input.userId,
-      entryType,
+      type: entryType === "grant" ? "grant" : "adjustment",
       amount: input.amount,
       ...(entryType === "grant"
         ? {
-            remainingAmount: input.amount,
             creditKind,
             purchaseId: input.purchaseId,
             promotionCode,
@@ -1298,11 +1344,12 @@ export class AdminService {
     }
   }
 
-  private toCreditEntry(entry: AdminCreditEntryRecord): CreditEntry {
+  private toCreditEntry(entry: AdminCreditLedgerRecord): CreditEntry {
     return {
       id: entry.id,
       userId: entry.userId,
-      entryType: entry.entryType,
+      entryType: entry.type === "grant" ? "grant" : "debit",
+      ledgerType: entry.type,
       creditKind: entry.creditKind ?? undefined,
       purchaseId: entry.purchaseId ?? undefined,
       promotionCode: entry.promotionCode ?? undefined,
@@ -1435,17 +1482,21 @@ export class AdminService {
     };
   }
 
-  private toPayment(payment: AdminCreditPurchaseRecord): AdminPayment {
+  private toPayment(purchase: AdminCreditPurchaseRecord): AdminPayment {
+    const payment = purchase.payment;
     return {
-      id: payment.id,
-      userId: payment.userId,
-      provider: payment.provider,
-      status: payment.status,
-      creditAmount: payment.creditAmount,
-      paidAmount: payment.paidAmount,
-      currency: payment.currency,
-      createdAt: payment.createdAt.toISOString(),
-      updatedAt: payment.updatedAt.toISOString(),
+      id: purchase.id,
+      userId: purchase.userId,
+      ...(payment ? { provider: payment.provider } : {}),
+      status: purchase.status,
+      ...(payment ? { paymentStatus: payment.status } : {}),
+      creditAmount: purchase.creditAmount,
+      ...(payment?.amount !== null && payment?.amount !== undefined
+        ? { paidAmount: payment.amount }
+        : {}),
+      ...(payment?.currency ? { currency: payment.currency } : {}),
+      createdAt: purchase.createdAt.toISOString(),
+      updatedAt: purchase.updatedAt.toISOString(),
     };
   }
 
@@ -1469,27 +1520,32 @@ export class AdminService {
     entries: AdminReconciliationLedgerRow[],
     refunds: AdminReconciliationRefundRow[],
   ): PaymentReconciliationRow {
+    const paid = purchase.payment?.amount ?? null;
     const payment = {
       paymentId: purchase.id,
       userId: purchase.userId,
-      provider: purchase.provider,
+      ...(purchase.payment ? { provider: purchase.payment.provider } : {}),
       providerStatus: purchase.status,
+      ...(purchase.payment ? { paymentStatus: purchase.payment.status } : {}),
       creditAmount: purchase.creditAmount,
-      paidAmount: purchase.paidAmount,
-      currency: purchase.currency,
+      ...(paid !== null ? { paidAmount: paid } : {}),
+      ...(purchase.payment?.currency
+        ? { currency: purchase.payment.currency }
+        : {}),
     };
-    const grants = entries.filter((entry) => entry.entryType === "grant");
+    const grants = entries.filter((entry) => entry.type === "grant");
     const baseGrants = grants.filter(
       (entry) => entry.creditKind === "paid" && entry.promotionCode === null,
     );
-    const debitReferences = new Set(
+    // 회수는 refund_recovery 행으로만 남는다 (credits.service.ts 규약).
+    const recoveryReferences = new Set(
       entries
-        .filter((entry) => entry.entryType === "debit")
+        .filter((entry) => entry.type === "refund_recovery")
         .map((entry) => entry.externalReference),
     );
     const issues: ReconciliationIssueCode[] = [];
 
-    if (purchase.status === "paid") {
+    if (purchase.status === "completed") {
       if (baseGrants.length === 0) {
         issues.push("paid_missing_grant");
       } else if (baseGrants.length > 1) {
@@ -1497,40 +1553,37 @@ export class AdminService {
       } else if (baseGrants[0].amount !== purchase.creditAmount) {
         issues.push("paid_grant_amount_mismatch");
       }
-    } else if (purchase.status !== "refunded" && grants.length > 0) {
+    } else if (
+      purchase.status !== "refunded" &&
+      purchase.status !== "reversed" &&
+      grants.length > 0
+    ) {
       issues.push("nonpaid_has_grant");
     }
 
     const completedRefunds = refunds.filter(
-      (refund) => refund.status === "refunded",
+      (refund) => refund.status === "completed",
     );
     if (purchase.status === "refunded" && completedRefunds.length === 0) {
       issues.push("refunded_without_completed_refund");
     }
     for (const refund of completedRefunds) {
-      const expectedRecovery = (refund.allocations ?? []).reduce(
-        (sum, allocation) => sum + allocation.recoveryAmount,
-        0,
-      );
       if (
-        expectedRecovery > 0 &&
-        (!debitReferences.has(`credit_refund:${refund.id}`) ||
-          (refund.allocations ?? []).some(
-            (allocation) =>
-              allocation.recoveredAmount < allocation.recoveryAmount,
-          ))
+        refund.recoveryAmount > 0 &&
+        !recoveryReferences.has(`credit_refund:${refund.id}`)
       ) {
         issues.push("refund_missing_recovery");
       }
     }
-    for (const refund of refunds.filter((item) => item.status === "released")) {
-      if (debitReferences.has(`credit_refund:${refund.id}`)) {
-        issues.push("released_refund_has_recovery");
+    for (const refund of refunds.filter((item) => item.status === "canceled")) {
+      if (recoveryReferences.has(`credit_refund:${refund.id}`)) {
+        issues.push("canceled_refund_has_recovery");
       }
     }
     if (
+      paid !== null &&
       completedRefunds.reduce((sum, refund) => sum + refund.refundAmount, 0) >
-      purchase.paidAmount
+        paid
     ) {
       issues.push("refund_total_exceeds_payment");
     }
@@ -1557,14 +1610,18 @@ export class AdminService {
       refunded_without_completed_refund:
         "refunded purchase has no completed refund",
       refund_missing_recovery: "completed refund has no recovery ledger",
-      released_refund_has_recovery: "released refund has recovery ledger",
+      canceled_refund_has_recovery: "canceled refund has recovery ledger",
       refund_total_exceeds_payment: "refund total exceeds payment amount",
     };
+    // 아직 끝나지 않은 환불이 걸려 있으면 불일치가 아니라 대기로 읽어야 한다.
     const hasActiveRefund = refunds.some(
-      (refund) => refund.status === "reserved",
+      (refund) =>
+        refund.status === "reserved" ||
+        refund.status === "payment_processing" ||
+        refund.status === "payment_succeeded",
     );
     const ledgerStatus: LedgerStatus =
-      purchase.status === "paid" && baseGrants.length === 0
+      purchase.status === "completed" && baseGrants.length === 0
         ? "missing_grant"
         : grants.length > 0
           ? "granted"
@@ -1576,7 +1633,7 @@ export class AdminService {
       reconciliationStatus:
         uniqueIssues.length > 0
           ? "mismatch"
-          : purchase.status === "pending" || hasActiveRefund
+          : this.isPurchaseInFlight(purchase.status) || hasActiveRefund
             ? "pending"
             : "resolved",
       ...(uniqueIssues.length > 0
@@ -1586,11 +1643,15 @@ export class AdminService {
               .join("; "),
             issueCodes: uniqueIssues,
           }
-        : purchase.status === "pending"
+        : this.isPurchaseInFlight(purchase.status)
           ? { reason: "payment pending" }
           : {}),
       ...(repairActions.length > 0 ? { repairActions } : {}),
     };
+  }
+
+  private isPurchaseInFlight(status: CreditPurchaseStatus): boolean {
+    return status === "pending" || status === "payment_processing";
   }
 
   private parseReportStatus(status?: string): ReportStatus | undefined {
