@@ -46,6 +46,23 @@ export type RegenerationSource = Prisma.GenerationJobGetPayload<{
 export type RegenerationResult =
   "regenerated" | "stale-job" | "draft-not-found" | "invalid-draft-status";
 
+const planEditFields = {
+  id: true,
+  characterId: true,
+  status: true,
+  leaseExpiresAt: true,
+  conceptJson: true,
+  jobs: {
+    where: { status: "draft" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true, sortOrder: true, paramsJson: true },
+  },
+} satisfies Prisma.PostDraftSelect;
+
+export type PlanEditDraft = Prisma.PostDraftGetPayload<{
+  select: typeof planEditFields;
+}>;
+
 @Injectable()
 export class DraftsRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -112,6 +129,90 @@ export class DraftsRepository {
     scheduledAt?: Date;
   }): Promise<DraftRow> {
     return this.prisma.postDraft.create({ data });
+  }
+
+  findPlanEditDraft(draftId: string): Promise<PlanEditDraft | null> {
+    return this.prisma.postDraft.findUnique({
+      where: { id: draftId },
+      select: planEditFields,
+    });
+  }
+
+  async updatePlan(input: {
+    draftId: string;
+    caption: string;
+    hashtags: string[];
+    conceptJson: Prisma.InputJsonValue;
+    shots: { jobId: string; paramsJson: Prisma.InputJsonValue }[];
+  }): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const draft = await tx.postDraft.updateMany({
+        where: {
+          id: input.draftId,
+          status: "generating",
+          leaseExpiresAt: null,
+        },
+        data: {
+          caption: input.caption,
+          hashtags: input.hashtags,
+          conceptJson: input.conceptJson,
+        },
+      });
+      if (draft.count === 0) return false;
+      for (const shot of input.shots) {
+        const updated = await tx.generationJob.updateMany({
+          where: { id: shot.jobId, draftId: input.draftId, status: "draft" },
+          data: { paramsJson: shot.paramsJson },
+        });
+        if (updated.count === 0) {
+          throw new Error("draft shot left editable state");
+        }
+      }
+      return true;
+    });
+  }
+
+  async updatePrompts(input: {
+    draftId: string;
+    items: { jobId: string; prompt: string }[];
+  }): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      for (const item of input.items) {
+        const updated = await tx.generationJob.updateMany({
+          where: { id: item.jobId, draftId: input.draftId, status: "draft" },
+          data: { prompt: item.prompt },
+        });
+        if (updated.count === 0) return false;
+      }
+      const touched = await tx.postDraft.updateMany({
+        where: { id: input.draftId, status: "generating" },
+        data: { updatedAt: new Date() },
+      });
+      return touched.count > 0;
+    });
+  }
+
+  async markManual(draftId: string): Promise<void> {
+    const draft = await this.prisma.postDraft.findUnique({
+      where: { id: draftId },
+      select: { status: true, conceptJson: true },
+    });
+    if (!draft || draft.status === "published" || draft.status === "rejected") {
+      return;
+    }
+    const concept =
+      draft.conceptJson &&
+      typeof draft.conceptJson === "object" &&
+      !Array.isArray(draft.conceptJson)
+        ? { ...(draft.conceptJson as Record<string, unknown>) }
+        : {};
+    if (concept.mode === "manual") return;
+    await this.prisma.postDraft.updateMany({
+      where: { id: draftId, status: { notIn: ["published", "rejected"] } },
+      data: {
+        conceptJson: { ...concept, mode: "manual" } as Prisma.InputJsonValue,
+      },
+    });
   }
 
   async findDraftConcept(

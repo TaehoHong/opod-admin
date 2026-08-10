@@ -84,7 +84,11 @@ export function GenerationPage() {
   );
 
   const jobs = useCursorList(["generation", "list", status], (cursor) =>
-    fetchGenerationJobs({ ...(status ? { status } : {}), cursor }),
+    fetchGenerationJobs({
+      ...(status ? { status } : {}),
+      scope: "standalone",
+      cursor,
+    }),
   );
   const providers = useQuery({
     queryKey: ["generation", "providers"],

@@ -44,6 +44,7 @@ export function fetchGenerationJobs(params: {
   characterId?: string;
   limit?: string;
   cursor?: string;
+  scope?: "standalone";
 }): Promise<CursorPage<GenerationJob>> {
   return apiRequest(`/generation/jobs${toQuery(params)}`);
 }

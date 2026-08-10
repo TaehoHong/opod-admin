@@ -1,0 +1,60 @@
+.rail {
+  display: flex;
+  gap: var(--mantine-spacing-xs);
+  overflow-x: auto;
+  padding-block: var(--mantine-spacing-xs);
+}
+
+.stageLink {
+  flex: 0 0 auto;
+  min-width: 112px;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  border: 1px solid var(--mantine-color-ink-2);
+  border-radius: var(--mantine-radius-sm);
+  color: var(--mantine-color-ink-9);
+  text-decoration: none;
+}
+
+.stageLink:hover {
+  background: var(--mantine-color-ink-0);
+}
+
+.stageLink:focus-visible {
+  outline: 2px solid var(--mantine-color-accent-4);
+  outline-offset: 2px;
+}
+
+.active {
+  border-color: var(--mantine-color-accent-4);
+  background: var(--mantine-color-accent-0);
+}
+
+.done {
+  border-color: var(--mantine-color-teal-5);
+}
+
+.promptLayout {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+  gap: var(--mantine-spacing-md);
+}
+
+@media (max-width: 48em) {
+  .promptLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mediaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--mantine-spacing-sm);
+}
+
+.media {
+  width: 100%;
+  max-height: 280px;
+  border: 1px solid var(--mantine-color-ink-2);
+  border-radius: var(--mantine-radius-sm);
+  object-fit: contain;
+}

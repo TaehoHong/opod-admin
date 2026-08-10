@@ -1,4 +1,5 @@
 import {
+  Alert,
   Badge,
   Card,
   Group,
@@ -11,6 +12,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import {
+  PENDING_QUEUE_LABEL,
   pendingCountLabel,
   usePendingCounts,
   type PendingQueue,
@@ -22,9 +24,9 @@ import { fetchHomeSummary, fetchRecentActionLogs } from "./api";
 const TODOS: Array<{ key: PendingQueue; label: string; description: string }> =
   [
     {
-      key: "drafts",
-      label: "검수 필요 초안",
-      description: "컷 확인 후 승인 또는 반려",
+      key: "posts",
+      label: "운영이 필요한 게시물",
+      description: "생성 단계 실행, 검수 또는 오류 확인",
     },
     {
       key: "moderation",
@@ -57,7 +59,7 @@ export function HomePage() {
   });
 
   const todos = TODOS.filter(
-    (todo) => (pending.data?.[todo.key].count ?? 0) > 0,
+    (todo) => (pending.data[todo.key]?.count ?? 0) > 0,
   );
   const today = new Intl.DateTimeFormat("ko-KR", { dateStyle: "full" }).format(
     new Date(),
@@ -67,11 +69,22 @@ export function HomePage() {
     <DataPage
       title="오늘의 운영 데스크"
       isPending={summary.isPending || pending.isPending}
-      error={summary.error ?? pending.error}
+      error={summary.error}
     >
       <Text size="sm" c="dimmed" mt={-8}>
         {today} — 처리 대기 항목을 먼저 확인하세요
       </Text>
+
+      {/* 집계에 실패한 큐는 0으로 접지 않고 이름을 밝힌다. 대기 항목이 없는
+          것과 세지 못한 것은 운영 판단이 전혀 다르다. */}
+      {pending.failedQueues.length > 0 ? (
+        <Alert color="attention" role="alert" title="일부 대기 건수 집계 실패">
+          {pending.failedQueues
+            .map((queue) => PENDING_QUEUE_LABEL[queue])
+            .join(", ")}{" "}
+          — 아래 숫자에 빠져 있습니다.
+        </Alert>
+      ) : null}
 
       {todos.length === 0 ? (
         <Text c="dimmed">
@@ -87,7 +100,7 @@ export function HomePage() {
               <Card padding="md">
                 <Group align="flex-start" wrap="nowrap" gap="md">
                   <Text fz={32} fw={600} ff="monospace" lh={1}>
-                    {pendingCountLabel(pending.data?.[todo.key])}
+                    {pendingCountLabel(pending.data[todo.key])}
                   </Text>
                   <Stack gap={2}>
                     <Text fw={600}>{todo.label} →</Text>

@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppLayout } from "./AppLayout";
 
 // 화면은 라우트 단위로 잘라서 받는다. 전부 한 번에 묶으면 초기 번들이 커지고,
@@ -33,11 +33,6 @@ const PostsPage = lazy(() =>
 );
 const MediaPage = lazy(() =>
   import("../features/media/MediaPage").then((m) => ({ default: m.MediaPage })),
-);
-const DraftsPage = lazy(() =>
-  import("../features/drafts/DraftsPage").then((m) => ({
-    default: m.DraftsPage,
-  })),
 );
 const GenerationPage = lazy(() =>
   import("../features/generation/GenerationPage").then((m) => ({
@@ -96,10 +91,9 @@ export const NAV_ITEMS = [
   { id: "home", label: "홈", Page: HomePage },
   { id: "characters", label: "캐릭터", Page: CharactersPage },
   { id: "locations", label: "장소", Page: LocationsPage },
-  { id: "posts", label: "게시글", Page: PostsPage },
+  { id: "posts", label: "게시물", Page: PostsPage },
   { id: "media", label: "미디어", Page: MediaPage },
-  { id: "drafts", label: "초안", Page: DraftsPage },
-  { id: "generation", label: "생성", Page: GenerationPage },
+  { id: "generation", label: "이미지 생성", Page: GenerationPage },
   { id: "llm-logs", label: "LLM 로그", Page: LlmLogsPage },
   { id: "logs", label: "로그", Page: LogsPage },
   { id: "users", label: "사용자", Page: UsersPage },
@@ -113,9 +107,8 @@ export const NAV_ITEMS = [
 
 // 캐릭터와 장소는 상세가 별도 페이지 컴포넌트라 아래에서 따로 건다.
 const DETAIL_ROUTES: { id: string; paths: string[] }[] = [
-  { id: "posts", paths: [":postId"] },
+  { id: "posts", paths: ["new/brief", ":workId", ":workId/:stage"] },
   { id: "media", paths: [":mediaId"] },
-  { id: "drafts", paths: [":draftId"] },
   { id: "generation", paths: [":jobId"] },
   { id: "llm-logs", paths: [":logId"] },
   { id: "users", paths: [":userId"] },
@@ -144,8 +137,17 @@ export function AppRoutes() {
           element={<CharacterManagerPage />}
         />
         <Route path="locations/:locationId" element={<LocationManagerPage />} />
+        <Route path="drafts" element={<Navigate to="/posts" replace />} />
+        <Route path="drafts/:draftId" element={<LegacyDraftRedirect />} />
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Route>
     </Routes>
+  );
+}
+
+function LegacyDraftRedirect() {
+  const { draftId } = useParams();
+  return (
+    <Navigate to={`/posts/${encodeURIComponent(draftId ?? "")}`} replace />
   );
 }

@@ -19,6 +19,7 @@ export function useDraftMutation<TVars = void>(
     onSuccess: (draft) => {
       queryClient.setQueryData(draftDetailKey(draftId), draft);
       void queryClient.invalidateQueries({ queryKey: ["drafts", "list"] });
+      void queryClient.invalidateQueries({ queryKey: ["post-work-items"] });
       void queryClient.invalidateQueries({ queryKey: ["pending-counts"] });
     },
   });

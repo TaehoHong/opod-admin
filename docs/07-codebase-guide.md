@@ -18,6 +18,7 @@
 | Admin auth     | `src/admin/auth/`                                                                                                  | login, admin 생성, cookie 세션, CSRF/JWT guard                       | `AdminAuthController`, `AdminAuthService`, `AdminJwtGuard`           | `src/admin/auth/*.spec.ts`, `test/admin-auth.e2e-spec.ts`   |
 | General admin  | `src/admin/admin.controller.ts`, `src/admin/admin.service.ts`, `src/admin/admin-*.repository.ts`, `src/admin/dto/` | user/content/credit/payment/report/analytics                         | `AdminController`, `AdminService`                                    | colocated specs, `test/admin-analytics.e2e-spec.ts`         |
 | Drafts         | `src/admin/drafts/`                                                                                                | draft CRUD, planning, generation, approval, publish                  | `DraftsController`, `DraftsService`                                  | `drafts.service.spec.ts`, generation E2E                    |
+| Post workspace | `src/admin/post-workspace/`                                                                                        | draft/Post 통합 운영 큐, 현재 단계와 대표 상태의 읽기 모델           | `PostWorkspaceController`, `PostWorkspaceService`                    | `post-workspace.service.spec.ts`                            |
 | Generation     | `src/admin/generation/`, `src/worker/`                                                                             | job 생성, provider 호출, lease/retry, planning, publish              | `GenerationService`, `GenerationWorkerService`, `DraftWorkerService` | colocated specs, `test/generation.e2e-spec.ts`              |
 | Evaluations    | `src/admin/evaluations/`, `src/worker/evaluation*`, `prompts/*evaluator.ts`                                        | 기획·프롬프트 비차단 평가, draft별 조회, 수동 집계 리포트             | `EvaluationWorkerService`, `EvaluationsService`                      | evaluator/worker/evaluations specs, draft RTL test          |
 | Characters     | `src/characters/`                                                                                                  | character/persona/memory/profile image/posting policy/visual profile | `CharactersController`, feature services와 repositories              | colocated specs, `test/character-profile-image.e2e-spec.ts` |
@@ -49,6 +50,7 @@
 | Validation/error boundary | `ValidationPipe`, `AllExceptionsFilter`                 | whitelist+transform, common error response                                                                                                                                                                                                                                                      | all HTTP routes                                      |
 | Admin shell navigation    | `packages/admin/src/app/AppLayout.tsx`                  | 현재 route 활성 표시, mobile 메뉴 닫기와 본문 바로가기 제공                                                                                                                                                                                                                                     | all admin UI routes                                  |
 | List status feedback      | `packages/admin/src/shared/ui/DataPage.tsx`             | 목록의 loading·empty 상태를 보이는 문구와 `role="status"`로 공지                                                                                                                                                                                                                                | list pages                                           |
+| Post lifecycle workspace  | `packages/admin/src/features/posts/`                     | 통합 운영 큐, 수동 브리프 생성, 8단계 route와 단계별 작업 화면                                                                                                                                                                                                                                  | posts routes and RTL specs                           |
 | Long table text           | `packages/admin/src/shared/ui/TableText.tsx`            | 긴 셀 내용을 줄 수로 제한하고 단일 문자열도 셀 안에서 줄바꿈하며 전체 문자열을 보존                                                                                                                                                                                                             | prose/file/prompt table cells                        |
 
 ## Current Canonical Examples
@@ -111,10 +113,12 @@ Query, Mantine form과 MSW 테스트를 한 번에 보여준다. characters feat
 example이다. `features/media/api.ts`의 `uploadMediaFile`은 한 화면에서 파일
 선택부터 연결까지 끝내야 할 때 쓰는 presign → PUT → confirm owner다.
 
-nav 16개 화면이 모두 React로 렌더된다. 라우트와 화면은 `app/routes.tsx`의
-`NAV_ITEMS` 한 배열이 소유하고, 각 화면은 `lazy()`로 라우트 단위로 받는다.
-목록 화면의 상세 경로는 같은 파일의 `DETAIL_ROUTES`가 소유하고
-(`/drafts/:draftId`, `/generation/:jobId`, `/payments/:paymentId` 등), 화면은
+상위 navigation과 화면은 `app/routes.tsx`의 `NAV_ITEMS` 한 배열이 소유하고,
+각 화면은 `lazy()`로 라우트 단위로 받는다. 게시 전 draft와 게시 완료 Post는
+`게시물` 메뉴의 최근 변경순 운영 큐에서 함께 보고, 상세는
+`/posts/:workId/:stage`의 8단계 화면으로 이동한다. 독립 이미지 생성만 `이미지
+생성` 메뉴에 남는다. 그 밖의 목록 상세 경로는 같은 파일의 `DETAIL_ROUTES`가
+소유하고(`/generation/:jobId`, `/payments/:paymentId` 등), 화면은
 선택 상태를 useState가 아니라 `shared/routing/useDetailSelection`으로 URL에
 둔다. 상세의 표현(인라인 패널 또는 modal)은 화면이 그대로 정한다. 캐릭터와
 장소처럼 상세가 독립 페이지인 화면은 `CharacterManagerPage`,
@@ -135,8 +139,7 @@ job 등록/실행/완료/재시도가 모두 React에 있다. 사용자·게시�
 공통화했다. application shell의 route 위치와 keyboard 우회 동작은
 `app/AppLayout`이, 긴 table 셀의 줄바꿈·말줄임은 `shared/ui/TableText`가
 공통으로 소유한다. `DataPage`는 빈 목록일 때 children을 통째로 감추므로 목록 외
-컨트롤(생성 폼, 상세 패널)을 children에 두는 화면은 빈 상태를 직접 그린다
-(`features/drafts/DraftsPage.tsx`).
+컨트롤(생성 폼, 상세 패널)을 children에 두는 화면은 빈 상태를 직접 그린다.
 
 이미지 확대(라이트박스)는 `shared/ui/ZoomableImage`가 소유한다. 이미지
 클릭이 다른 뜻을 갖지 않는 자리에서는 `ZoomableImage`로 감싸고, 클릭이 이미

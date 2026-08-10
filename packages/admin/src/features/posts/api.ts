@@ -3,6 +3,44 @@ import { toQuery, type CursorPage } from "../../shared/api/useCursorList";
 
 export type PostContentType = "feed" | "reel" | "story";
 
+export type PostWorkStage =
+  | "brief"
+  | "plan"
+  | "prompt"
+  | "evaluation"
+  | "generation"
+  | "review"
+  | "publish"
+  | "memory";
+
+export type PostWorkFilter =
+  "all" | "needs_action" | "agent" | "publish_waiting" | "published" | "failed";
+
+export type PostWorkItem = {
+  id: string;
+  kind: "draft" | "post";
+  draftId?: string;
+  postId?: string;
+  characterId: string;
+  contentType: string;
+  caption: string;
+  thumbnailUrl?: string;
+  currentStage: PostWorkStage;
+  stageIndex: number;
+  operationalStatus:
+    | "failed"
+    | "needs_action"
+    | "publish_waiting"
+    | "agent_running"
+    | "completed";
+  statusDetail: string;
+  executionMode: "manual" | "auto";
+  source: "manual" | "scheduler" | "direct" | "unknown";
+  scheduledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PostListItem = {
   id: string;
   characterId: string;
@@ -87,6 +125,17 @@ export function fetchPosts(params: {
   cursor?: string;
 }): Promise<CursorPage<PostListItem>> {
   return apiRequest(`/posts${toQuery(params)}`);
+}
+
+export function fetchPostWorkItems(params: {
+  filter?: PostWorkFilter;
+  cursor?: string;
+}): Promise<CursorPage<PostWorkItem>> {
+  return apiRequest(`/post-work-items${toQuery(params)}`);
+}
+
+export function fetchPostWorkItem(id: string): Promise<PostWorkItem> {
+  return apiRequest(`/post-work-items/${encodeURIComponent(id)}`);
 }
 
 export function fetchPost(postId: string): Promise<PostListItem> {

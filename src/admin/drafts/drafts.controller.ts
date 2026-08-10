@@ -21,6 +21,8 @@ import { RejectDraftDto } from "./dto/reject-draft.dto";
 import { SelectShotOutputDto } from "./dto/select-shot-output.dto";
 import { UpdateDraftDto } from "./dto/update-draft.dto";
 import { UpdateShotOutputFilterDto } from "./dto/update-shot-output-filter.dto";
+import { UpdateDraftPlanDto } from "./dto/update-draft-plan.dto";
+import { UpdateDraftPromptsDto } from "./dto/update-draft-prompts.dto";
 
 @Controller("api/admin/v1/drafts")
 @UseGuards(AdminJwtGuard)
@@ -72,6 +74,22 @@ export class DraftsController {
   @Patch(":id")
   updateDraft(@Param("id") draftId: string, @Body() body: UpdateDraftDto) {
     return this.draftsService.updateDraft({ draftId, ...body });
+  }
+
+  @Patch(":id/plan")
+  updateDraftPlan(
+    @Param("id") draftId: string,
+    @Body() body: UpdateDraftPlanDto,
+  ) {
+    return this.draftsService.updatePlan({ draftId, ...body });
+  }
+
+  @Patch(":id/prompts")
+  updateDraftPrompts(
+    @Param("id") draftId: string,
+    @Body() body: UpdateDraftPromptsDto,
+  ) {
+    return this.draftsService.updatePrompts({ draftId, ...body });
   }
 
   // 수동 기획 실행 — 워커 폴링을 기다리지 않고 이 draft를 즉시 기획한다.

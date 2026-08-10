@@ -227,6 +227,7 @@ export class AdminController {
     characterId?: string,
     @Query("status") status?: string,
     @Query("mediaType") mediaType?: string,
+    @Query("scope") scope?: string,
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
   ) {
@@ -234,6 +235,7 @@ export class AdminController {
       characterId,
       status,
       mediaType,
+      scope,
       ...parsePageQuery(cursor, limit),
     });
   }

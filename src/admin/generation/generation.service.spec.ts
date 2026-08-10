@@ -434,6 +434,7 @@ describe("GenerationService", () => {
         characterId: " ai-1 ",
         status: "completed",
         mediaType: "image",
+        scope: "standalone",
         cursor: Buffer.from(JSON.stringify({ id: "job-cursor" })).toString(
           "base64url",
         ),
@@ -447,11 +448,13 @@ describe("GenerationService", () => {
       characterId: "ai-1",
       status: "completed",
       mediaType: "image",
+      draftId: null,
     });
     expect(repository.findManyForList).toHaveBeenCalledWith({
       characterId: "ai-1",
       status: "completed",
       mediaType: "image",
+      draftId: null,
       take: 3,
       cursor: "job-cursor",
     });

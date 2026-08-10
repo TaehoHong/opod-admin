@@ -446,13 +446,22 @@ export class DraftWorkerRepository {
     });
   }
 
-  findGeneratingDrafts(take: number): Promise<AggregateDraft[]> {
+  async findGeneratingDrafts(take: number): Promise<AggregateDraft[]> {
+    // 수동으로 시작했거나 운영자 개입으로 manual이 된 draft는 단계 버튼으로만
+    // 집계한다. 먼저 id를 고르면 manual draft가 batch를 채워 자동 draft를
+    // 굶기는 문제도 피할 수 있다.
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT d.id
+      FROM opod.post_drafts d
+      WHERE d.status IN ('generating', 'regenerating')
+        AND d.lease_expires_at IS NULL
+        AND (d.concept_json->>'mode') IS DISTINCT FROM 'manual'
+      ORDER BY d.updated_at, d.id
+      LIMIT ${take}
+    `;
+    if (rows.length === 0) return [];
     return this.prisma.postDraft.findMany({
-      where: {
-        status: { in: ["generating", "regenerating"] },
-        leaseExpiresAt: null,
-      },
-      take,
+      where: { id: { in: rows.map((row) => row.id) } },
       select: aggregateDraftSelect,
     });
   }

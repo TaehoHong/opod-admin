@@ -8,7 +8,8 @@
 
 ## 0. 흐름 요약 모형 — 누가, 무엇을, 어떤 순서로
 
-자동/수동 구분 없이(사람이 진행 버튼을 누르냐 차이일 뿐) 실행 순서만 단순화한 모형.
+자동과 수동은 같은 파이프라인을 쓰며 위계가 없다. 실행 정책은 진입 경로가
+정한다: `게시물 만들기`는 수동, 스케줄러는 개입 전까지 자동이다.
 
 ```mermaid
 flowchart LR
@@ -96,29 +97,36 @@ flowchart LR
 ```mermaid
 flowchart TD
     START(["트리거"]) --> T1{"진입 경로"}
-    T1 -->|"스케줄러<br/>(CharacterPostingPolicy 주기)"| CREATE["PostDraft 생성 (planned)"]
-    T1 -->|"운영자 수동 생성<br/>POST /drafts"| CREATE
+    T1 -->|"스케줄러<br/>(CharacterPostingPolicy 주기)"| AUTO["PostDraft 생성<br/>source=scheduler"]
+    T1 -->|"게시물 만들기<br/>POST /drafts"| MANUAL["PostDraft 생성<br/>source=manual, mode=manual"]
 
-    CREATE --> MODE{"mode?"}
-    MODE -->|manual| MANUAL["각 단계를 운영자가<br/>버튼으로 직접 실행"]
-    MODE -->|auto| CLAIM["워커가 draft 클레임<br/>(lease + 시도횟수 증가)"]
+    AUTO --> CLAIM["워커가 draft 클레임<br/>(lease + 시도횟수 증가)"]
+    MANUAL --> CLAIM_MANUAL["운영자가 기획 실행"]
+    CLAIM_MANUAL --> PLAN
 
-    CLAIM --> PLAN["① 기획 (LLM)<br/>캡션·해시태그·장소·컷(shot) 구성"]
+    CLAIM --> PLAN["② 기획 (LLM)<br/>캡션·해시태그·장소·컷(shot) 구성"]
     PLAN --> VALIDATE{"검증 통과?<br/>JSON·컷 수·레퍼런스 정책·<br/>ID 환각 필터"}
     VALIDATE -->|"정책 위반<br/>(재시도 불가)"| FAILED["draft: failed"]
     VALIDATE -->|"일시 오류 & 시도 < 3"| CLAIM
-    VALIDATE -->|통과| BUILD["② 프롬프트 빌드 (LLM)<br/>한국어 장면 → 영어 모델별 프롬프트"]
+    VALIDATE -->|통과| BUILD["③ 프롬프트 빌드 (LLM)<br/>한국어 장면 → 영어 모델별 프롬프트"]
 
-    BUILD --> PERSIST["③ 계획 저장 (1 트랜잭션)<br/>PostDraft 갱신 + 컷별 GenerationJob 생성 (queued)"]
+    BUILD --> PERSIST["계획 저장<br/>자동=queued / 수동=draft"]
+    PERSIST --> EVAL["④ 기획·프롬프트 평가<br/>별도 워커의 비차단 품질 신호"]
 
-    PERSIST --> GATE{"서킷브레이커 열림<br/>or 일일 예산 초과?"}
+    PERSIST --> MODE{"진행 정책"}
+    MODE -->|자동| GATE{"서킷브레이커 열림<br/>or 일일 예산 초과?"}
+    MODE -->|수동| MANUAL_GEN["운영자가 컷별 이미지 생성 실행"]
+    EVAL -. "생성 진행을 막지 않음" .-> MODE
     GATE -->|예| WAIT["대기 (다음 tick)"]
     WAIT --> GATE
-    GATE -->|아니오| GEN["④ 이미지 생성 (잡별)<br/>fal.ai 제출→폴링→다운로드→S3 업로드<br/>→ Media + 후보 N장 저장"]
+    GATE -->|아니오| GEN["⑤ 이미지 생성 (잡별)<br/>fal.ai 제출→폴링→다운로드→S3 업로드<br/>→ Media + 후보 N장 저장"]
+    MANUAL_GEN --> GEN
 
-    GEN --> AGG{"⑤ 집계<br/>컷별 최신 잡 상태"}
+    GEN --> AGG{"컷별 최신 잡 상태 집계"}
+    AGG -->|수동| MANUAL_AGG["운영자가 검수로 보내기"]
+    MANUAL_AGG --> REVIEW
     AGG -->|하나라도 실패| FAILED
-    AGG -->|전부 완료| REVIEW["draft: needs_review"]
+    AGG -->|자동·전부 완료| REVIEW["draft: needs_review"]
 
     REVIEW --> HUMAN["⑥ 휴먼 검수<br/>컷별 후보 1장 선택·필터 프리셋·<br/>캡션/예약시간 수정"]
     HUMAN --> DECIDE{"판정"}
@@ -213,6 +221,7 @@ stateDiagram-v2
 | 큐 | 별도 큐 인프라 없음 — Postgres `FOR UPDATE SKIP LOCKED` + lease가 큐 역할 |
 | 복구 | 3계층: draft 재큐(≤3회) / 잡 재시도(≤3회, 폴링 재개) / 전역 게이트(서킷브레이커·일일 예산) |
 | 휴먼 게이트 | `needs_review` 승인 필수 (현재 POC 제약, 최종 목표는 완전 자동) |
-| 수동/자동 | `mode=manual`이면 모든 단계가 운영자 버튼 실행, 자동 게시 제외 |
+| 수동/자동 | 운영자 생성은 항상 manual. 스케줄러 생성은 auto이며 콘텐츠 수정·후보 교체·재생성 시 해당 draft만 manual로 전환 |
+| 평가 | UI에는 독립 선형 단계로 보이지만 상태 머신과 후속 생성을 차단하지 않음 |
 | 관측성 | 모든 LLM·이미지 호출 → `LlmLog`, 모든 상태 전이 → `CharacterActionLog` |
 | 피드백 루프 | 게시 시 `CharacterMemory` 기록 → 다음 기획 LLM의 입력으로 재사용 |

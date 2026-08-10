@@ -70,7 +70,7 @@ export function AppLayout() {
       <AppShell.Navbar p="xs" aria-label="주요 메뉴">
         {NAV_ITEMS.map((item) => {
           // 처리 대기가 있는 화면만 배지를 단다 — 0을 붙이면 신호가 흐려진다.
-          const queue = pending.data?.[item.id as PendingQueue];
+          const queue = pending.data[item.id as PendingQueue];
           return (
             <NavLink
               key={item.id}

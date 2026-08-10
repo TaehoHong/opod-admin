@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import {
   decodeCursor,
   Page,
@@ -363,15 +364,13 @@ export class DraftsService {
     return { ...this.toDraft(draft), shots };
   }
 
-  // 운영자 초안 생성. mode='manual'이면 어떤 단계도 자동으로 넘어가지 않는다 —
-  // 기획은 POST :id/plan, 컷 생성은 :id/jobs/:jobId/generate, 게시는 :id/publish
-  // 버튼으로만 진행된다. mode='auto'(기본)는 기존처럼 워커가 끝까지 진행한다.
+  // 운영자의 게시물 만들기 진입점은 항상 수동이다. 자동 draft는 스케줄러가
+  // 별도로 만들며, 같은 상태 머신을 쓰되 conceptJson.source만 다르다.
   async createDraft(input: {
     characterId: string;
     sceneHint?: string;
     scheduledAt?: string;
     contentType?: string;
-    mode?: string;
   }): Promise<AdminDraft> {
     if (!(await this.repository.characterExists(input.characterId))) {
       throw new BadRequestException("Character not found");
@@ -379,10 +378,6 @@ export class DraftsService {
     const contentType = input.contentType?.trim() || "feed";
     if (contentType !== "feed" && contentType !== "reel") {
       throw new BadRequestException("Draft content type must be feed or reel");
-    }
-    const mode = input.mode?.trim() || "auto";
-    if (mode !== "manual" && mode !== "auto") {
-      throw new BadRequestException("Draft mode must be manual or auto");
     }
     const scheduledAt = this.parseOptionalDate(input.scheduledAt);
     const sceneHint = input.sceneHint?.trim();
@@ -392,7 +387,7 @@ export class DraftsService {
       contentType,
       conceptJson: {
         source: "manual",
-        mode,
+        mode: "manual",
         ...(sceneHint ? { sceneHint } : {}),
       },
       ...(scheduledAt ? { scheduledAt } : {}),
@@ -401,9 +396,125 @@ export class DraftsService {
       input.characterId,
       draft.id,
       "DRAFT_CREATED",
-      `manual draft created (mode: ${mode}${sceneHint ? `, hint: ${sceneHint.slice(0, 100)}` : ""})`,
+      `manual draft created${sceneHint ? ` (hint: ${sceneHint.slice(0, 100)})` : ""}`,
     );
     return this.toDraft(draft);
+  }
+
+  async updatePlan(input: {
+    draftId: string;
+    caption: string;
+    hashtags: string[];
+    shots: { sortOrder: number; scene: string }[];
+  }): Promise<AdminDraft> {
+    const draft = await this.repository.findPlanEditDraft(input.draftId);
+    if (!draft) throw new BadRequestException("Draft not found");
+    const concept = this.record(draft.conceptJson);
+    if (
+      concept.mode !== "manual" ||
+      draft.status !== "generating" ||
+      draft.leaseExpiresAt
+    ) {
+      throw new BadRequestException(
+        "Only paused manual drafts can edit the content plan",
+      );
+    }
+    const plan = this.record(concept.plan);
+    const planShots = Array.isArray(plan.shots) ? plan.shots : [];
+    const latestJobs = new Map<number, (typeof draft.jobs)[number]>();
+    for (const job of draft.jobs) {
+      if (!latestJobs.has(job.sortOrder)) latestJobs.set(job.sortOrder, job);
+    }
+    if (
+      input.shots.length !== planShots.length ||
+      input.shots.some((shot) => !latestJobs.has(shot.sortOrder))
+    ) {
+      throw new BadRequestException(
+        "Plan shots must match the current draft shots",
+      );
+    }
+    const caption = input.caption.trim();
+    if (!caption || caption.length > CAPTION_MAX_LENGTH) {
+      throw new BadRequestException(
+        `Draft caption must be between 1 and ${CAPTION_MAX_LENGTH} characters`,
+      );
+    }
+    const scenes = new Map(
+      input.shots.map((shot) => [shot.sortOrder, shot.scene.trim()]),
+    );
+    if ([...scenes.values()].some((scene) => !scene)) {
+      throw new BadRequestException("Plan shot scene is required");
+    }
+    const updatedPlanShots = planShots.map((value, index) => {
+      const shot = this.record(value);
+      const sortOrder =
+        typeof shot.sortOrder === "number" ? shot.sortOrder : index;
+      return {
+        ...shot,
+        scene: scenes.get(sortOrder) ?? shot.scene,
+      };
+    });
+    const shots = [...latestJobs.entries()].map(([sortOrder, job]) => {
+      const params = this.record(job.paramsJson);
+      return {
+        jobId: job.id,
+        paramsJson: {
+          ...params,
+          _shot: {
+            ...this.record(params._shot),
+            scene: scenes.get(sortOrder),
+          },
+        },
+      };
+    });
+    const hashtags = this.cleanHashtags(input.hashtags);
+    const transitioned = await this.repository.updatePlan({
+      draftId: input.draftId,
+      caption,
+      hashtags,
+      conceptJson: {
+        ...concept,
+        plan: { ...plan, caption, hashtags, shots: updatedPlanShots },
+      } as Prisma.InputJsonValue,
+      shots: shots as { jobId: string; paramsJson: Prisma.InputJsonValue }[],
+    });
+    if (!transitioned) {
+      throw new BadRequestException("Draft plan is no longer editable");
+    }
+    return this.getDraft(input.draftId);
+  }
+
+  async updatePrompts(input: {
+    draftId: string;
+    items: { jobId: string; prompt: string }[];
+  }): Promise<AdminDraft> {
+    const draft = await this.repository.findPlanEditDraft(input.draftId);
+    if (!draft) throw new BadRequestException("Draft not found");
+    const concept = this.record(draft.conceptJson);
+    if (concept.mode !== "manual" || draft.status !== "generating") {
+      throw new BadRequestException(
+        "Only manual draft-state prompts can be edited",
+      );
+    }
+    const currentIds = new Set(draft.jobs.map((job) => job.id));
+    const items = input.items.map((item) => ({
+      jobId: item.jobId,
+      prompt: item.prompt.trim(),
+    }));
+    if (
+      items.length !== currentIds.size ||
+      items.some((item) => !item.prompt || !currentIds.has(item.jobId))
+    ) {
+      throw new BadRequestException(
+        "Prompts must be provided for every current draft shot",
+      );
+    }
+    if (
+      !(await this.repository.updatePrompts({ draftId: input.draftId, items }))
+    ) {
+      throw new BadRequestException("Draft prompts are no longer editable");
+    }
+    return this.getDraft(input.draftId);
   }
 
   async updateDraft(input: {
@@ -474,6 +585,13 @@ export class DraftsService {
       throw new BadRequestException(
         "Only needs_review or approved drafts can be edited",
       );
+    }
+    if (
+      input.caption !== undefined ||
+      input.hashtags !== undefined ||
+      input.finish !== undefined
+    ) {
+      await this.repository.markManual(input.draftId);
     }
     return this.getDraft(input.draftId);
   }
@@ -568,6 +686,7 @@ export class DraftsService {
         "Only draft-state shots of this draft can start generation",
       );
     }
+    await this.repository.markManual(input.draftId);
     const job = await this.repository.findShotIdentity(input.jobId);
     if (job) {
       await this.recordActionLog(
@@ -617,6 +736,7 @@ export class DraftsService {
         "Only needs_review or failed drafts can regenerate shots",
       );
     }
+    await this.repository.markManual(input.draftId);
     return this.getDraft(input.draftId);
   }
 
@@ -640,6 +760,7 @@ export class DraftsService {
     }
 
     await this.repository.selectShotOutput(input.jobId, input.mediaId);
+    await this.repository.markManual(input.draftId);
     return this.getDraft(input.draftId);
   }
 
@@ -665,6 +786,7 @@ export class DraftsService {
       throw new BadRequestException("Completed candidate output not found");
     }
     await this.repository.updateOutputFilter(output.id, input.filterPreset);
+    await this.repository.markManual(input.draftId);
     return this.getDraft(input.draftId);
   }
 
@@ -672,6 +794,12 @@ export class DraftsService {
     if (!(await this.repository.draftExists(draftId))) {
       throw new BadRequestException("Draft not found");
     }
+  }
+
+  private record(value: unknown): Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   }
 
   private parseOptionalStatus(status?: string): DraftStatus | undefined {

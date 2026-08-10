@@ -142,9 +142,34 @@ export function fetchDraftEvaluations(
 export function createDraft(body: {
   characterId: string;
   sceneHint?: string;
-  mode?: string;
+  scheduledAt?: string;
+  contentType?: "feed" | "reel";
 }): Promise<Draft> {
   return apiRequest("/drafts", { method: "POST", body });
+}
+
+export function updateDraftPlan(
+  draftId: string,
+  body: {
+    caption: string;
+    hashtags: string[];
+    shots: { sortOrder: number; scene: string }[];
+  },
+): Promise<Draft> {
+  return apiRequest(`/drafts/${encodeURIComponent(draftId)}/plan`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+export function updateDraftPrompts(
+  draftId: string,
+  body: { items: { jobId: string; prompt: string }[] },
+): Promise<Draft> {
+  return apiRequest(`/drafts/${encodeURIComponent(draftId)}/prompts`, {
+    method: "PATCH",
+    body,
+  });
 }
 
 export function updateDraft(

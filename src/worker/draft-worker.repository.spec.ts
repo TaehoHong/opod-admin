@@ -18,6 +18,9 @@ function prismaMock() {
   return {
     prisma: {
       $queryRaw: jest.fn(),
+      postDraft: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       $transaction: jest.fn(
         (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
       ),
@@ -42,6 +45,23 @@ describe("DraftWorkerRepository", () => {
     const repository = new DraftWorkerRepository(prisma as never);
 
     await expect(repository.claimPlannedDraft(120)).resolves.toBe("draft-1");
+  });
+
+  it("keeps manual drafts out of automatic generation aggregation", async () => {
+    const { prisma } = prismaMock();
+    prisma.$queryRaw.mockImplementation(
+      (strings: TemplateStringsArray, take: number) => {
+        expect(strings.join("?")).toContain(
+          "(d.concept_json->>'mode') IS DISTINCT FROM 'manual'",
+        );
+        expect(take).toBe(20);
+        return Promise.resolve([]);
+      },
+    );
+    const repository = new DraftWorkerRepository(prisma as never);
+
+    await expect(repository.findGeneratingDrafts(20)).resolves.toEqual([]);
+    expect(prisma.postDraft.findMany).not.toHaveBeenCalled();
   });
 
   it("aborts plan persistence when the draft lost generating state", async () => {

@@ -1,0 +1,25 @@
+.row {
+  cursor: pointer;
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--mantine-color-accent-4);
+  outline-offset: -2px;
+}
+
+.thumbnail {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  border: 1px solid var(--mantine-color-ink-2);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-ink-0);
+  object-fit: cover;
+}
+
+.placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--mantine-color-ink-5);
+  font-size: var(--mantine-font-size-xs);
+}

@@ -1,8 +1,31 @@
 # 게시물 생성 A-Z 파이프라인 화면 UX 설계
 
-Status: 설계 확정 (2026-08-07), 구현 전
+Status: 2차 IA 구현 (2026-08-10)
 목표: 게시물 하나의 전 생애주기(스케줄→기획→프롬프트→생성→평가→검수→게시→
-메모리)를 **한 화면에서** 파악·조작할 수 있게 검수 화면을 확장한다.
+메모리)를 `게시물` 하나의 작업공간에서 파악하되, 각 단계는 독립 화면으로
+분리해 현재 작업에만 집중하게 한다.
+
+## 0. 2026-08-10 정보 구조 결정
+
+기존 `게시글`·`초안`·draft 소속 `생성` 화면은 같은 게시물 생애주기를 서로 다른
+엔티티 목록으로 보여 주어, 운영자가 현재 위치와 다음 행동을 직접 조합해야 했다.
+따라서 다음 원칙으로 2차 IA를 확정했다.
+
+- 상위 메뉴는 `게시물` 하나다. 게시 전 draft와 게시 완료 Post를 최근 변경순
+  운영 큐에서 함께 본다.
+- 목록 기본 필터는 `전체`다. 운영 필요, Agent 진행, 게시 대기, 게시 완료,
+  실패로 좁힐 수 있다.
+- 별도 상세 버튼 없이 행 전체 클릭 또는 키보드 Enter로 현재 단계에 들어간다.
+- 상세는 브리프 → 기획 → 프롬프트 → 평가 → 이미지 생성 → 검수 → 게시 →
+  메모리의 8개 route다. 공통 헤더와 단계 레일만 유지하고 본문은 현재 단계
+  하나만 렌더한다.
+- 평가는 화면상 선형 단계지만 실행 상태 머신을 막지 않는 비차단 신호다.
+- `게시물 만들기`에서 시작한 작업은 항상 수동이다. 스케줄러 작업은 콘텐츠를
+  수정·후보 교체·재생성하기 전까지 자동이다. 이는 등급이 아니라 진입 경로가
+  정한 실행 정책이다.
+- manual로 전환된 draft는 자동 기획 claim, 자동 생성 집계, 자동 게시에서
+  제외한다. 이미 실행 중인 provider 작업은 완료될 수 있지만 다음 단계 전이는
+  운영자가 해당 단계 버튼으로 수행한다.
 
 ## 1. 레퍼런스 조사 요약
 
@@ -14,7 +37,7 @@ Status: 설계 확정 (2026-08-07), 구현 전
 | 패턴 | 출처 | 적용 |
 |---|---|---|
 | 스테이지별 타입 인지 렌더링 — 모든 단계를 generic JSON으로 그리지 않는다 | LangSmith run_type | 기획→구조화 플랜, 프롬프트→복사 가능한 텍스트, 생성→후보 썸네일 그리드, 평가→루브릭 점수표, 게시→영수증 |
-| 상단 스테이지 레일 + 세로 확장 섹션 하이브리드 | GitLab stage graph + GitHub Actions collapsible steps | 8단계 칩 레일(클릭=해당 섹션으로 스크롤) + 기존 DraftStage 세로 타임라인 유지 |
+| 상단 스테이지 레일 + 단계별 route | GitLab stage graph + GitHub Actions steps | 8단계 레일은 유지하고 클릭하면 해당 단계 화면으로 이동. 세로 전체 타임라인은 폐기 |
 | 휴먼 게이트를 시각적으로 구분되는 1급 노드로 | GitLab manual job(재생 아이콘) | 검수(⑥) 단계 칩에 사람 아이콘 — "지금 사람을 기다리는 중"이 한눈에 |
 | 점수 칩 인라인 + 판정 사유 펼침 | Braintrust, Phoenix, MLflow 원칙 | 평가 차원별 색상 칩, 클릭 시 LLM 판정 사유 텍스트 펼침. 점수만 있고 사유 없는 UI는 안티패턴 |
 | 자동 평가와 인간 판단을 한 스키마로 | Phoenix {label, score, explanation, annotator_kind: HUMAN/LLM/CODE} | 평가 표시 데이터 모델. 린트=CODE, LLM 심사=LLM, 검수 액션=HUMAN |
@@ -31,62 +54,66 @@ Status: 설계 확정 (2026-08-07), 구현 전
   수준이 되면 도입. 지금은 운영자 1인·저볼륨.
 - **DAG/Gantt 뷰**(Airflow/Dagster): 파이프라인이 선형+루프라 그래프는 과설계.
   세로 스테이지가 적합 (레퍼런스 종합의 결론과 일치).
-- **목록 미니 파이프라인 점**(GitLab mini graph): 목록 화면 개편은 별도 회차.
+- **목록 미니 파이프라인 점**(GitLab mini graph): 통합 목록은 구현했지만 각 행에
+  점 8개를 반복하면 현재 단계와 대표 상태보다 소음이 커서 넣지 않았다.
 - **딥링크·공유 URL**(Weave): admin 내부 도구라 후순위.
 
 ## 2. 정보 구조 (IA)
 
 ```
-DraftDetailPanel (기존 확장)
-├─ 헤더: 캐릭터·언어·상태 pill·예약 시각·기본 액션        [Stripe 헤더 패턴]
-├─ 스테이지 레일: ①…⑧ 칩 (상태 아이콘+구분: 자동/휴먼게이트) [GitLab]
-├─ ① 초안 생성   (기존 DraftStage 유지)
-├─ ② 기획        (기존) + 평가 칩 행: 기획 평가 8차원 + 총점
-│                  └ 펼침: 차원별 점수·사유·issues        [Braintrust]
-├─ ③ 프롬프트    (기존) + 컷별 린트 배지
-├─ ④ 생성        (기존 ShotCard) + 컷별 프롬프트 평가 칩
-│                  ├ CandidateCard: 선택 상태 (기존)
-│                  └ attempt 이력 드롭다운 (재생성 체인)    [GH Actions]
-├─ ⑤ 집계/검수   (기존 승인·거절·재생성 폼)
-│                  + 평가 요약·generationTrace 경고 인라인   [Radar]
-├─ ⑥ 게시        영수증: Post 링크·게시 시각·적용 필터      [Receipts]
-├─ ⑦ 메모리      영수증: 기록된 CharacterMemory 실제 텍스트
-└─ 이벤트 로그    LlmLog + CharacterActionLog 시간순, 펼침식 [Stripe 2고도]
+게시물 운영 큐 (/posts)
+└─ 행 클릭 → /posts/:workId/:stage
+   ├─ 공통 헤더: 캐릭터·상태·수동/자동·예약·최근 변경
+   ├─ 공통 단계 레일: ① 브리프 … ⑧ 메모리
+   └─ 현재 route 본문 하나
+      ├─ /brief       입력·출처 영수증
+      ├─ /plan        캡션·해시태그·컷 기획 편집
+      ├─ /prompt      좌측 컷 목록 + 선택한 한 컷 편집
+      ├─ /evaluation  기획/프롬프트 점수·사유 (비차단)
+      ├─ /generation  컷별 실행·후보 생성
+      ├─ /review      후보 선택·마감·캡션·승인/반려
+      ├─ /publish     게시 대기·게시 결과·댓글/반응 진입
+      └─ /memory      메모리 반영 영수증
 ```
 
 상태 타입 6종: `waiting / running / awaiting-human / done / failed / skipped`.
 기존 `StageTone`(done/current/failed/future)을 확장 매핑한다.
 
-## 3. 컴포넌트 계획 (디자인 시스템: Mantine, 정본 예시: DraftStage)
+## 3. 구현 컴포넌트 (디자인 시스템: Mantine)
 
 기존 `DraftStage`/`ShotCard`/`CandidateCard`/`DraftPlanSummary` 구조와
 Mantine 토큰을 재사용한다. 하드코딩 색상 금지 — `DRAFT_STATUS_COLOR` 관례 확장.
 
-| 컴포넌트 | 신규/수정 | 내용 |
+| 컴포넌트 | 상태 | 내용 |
 |---|---|---|
-| `StageRail` | 신규 | 8칩 가로 레일. 칩=Badge+아이콘, 클릭 시 스크롤. 휴먼 게이트 칩은 사람 아이콘 |
-| `EvaluationChips` | 신규 | 차원별 점수 칩 행 + Collapse로 사유·issues. annotator_kind 배지(린트/LLM) |
-| `AttemptSelect` | 신규 | 컷별 attempt 드롭다운(원 잡 체인). 기본=최신 |
-| `StageReceipt` | 신규 | 게시·메모리 영수증(링크·시각·본문 발췌) |
-| `DraftEventLog` | 신규 | LlmLog·ActionLog 병합 시간순, Spoiler/Code로 원시 JSON 펼침 |
-| `DraftStage` | 수정 | tone 확장(awaiting-human), 요약행에 소요시간 표시 |
-| `ShotCard` | 수정 | 프롬프트 평가 칩·린트 배지 삽입 |
-| `DraftDetailPanel` | 수정 | 레일+신규 섹션 조립. 실패/휴먼대기 섹션 자동 펼침(GH Actions) |
+| `PostQueuePage` | 구현 | draft/Post 통합 6열 운영 큐, URL 필터, 행/Enter 탐색 |
+| `PostWorkPage` | 구현 | 공통 헤더·8단계 route rail·현재 단계 단일 렌더 |
+| `PostBriefCreatePage` | 구현 | 항상 manual draft를 만드는 단일 생성 진입점 |
+| `EvaluationChips` | 재사용 | 차원별 점수와 사유를 평가 단계에 표시 |
+| `DraftPlanSummary` | 재사용 | 기획 구조와 컷 요약 표시 |
+| `ShotCard` / `CandidateCard` | 재사용 | 생성·검수 단계의 컷과 후보 조작 |
+| `DraftDetailPanel` | 유지 | 이전 컴포넌트. 현재 navigation에서는 `PostWorkPage`가 단계별 조립을 소유 |
 
 ## 4. 필요한 API 확장
 
-| 엔드포인트 | 용도 |
-|---|---|
-| `GET /drafts/:id/evaluations` | 평가(plan/prompt, attempt 포함) — 평가 Agent 설계와 공유 |
-| `GET /drafts/:id/timeline` | 이벤트 로그: 해당 draft의 CharacterActionLog + LlmLog(요청 requestId=draftId 또는 jobId 연결) 병합 |
-| `GET /drafts/:id` 확장 | 컷별 전체 잡 체인(attempt 이력), 게시 영수증(메모리 본문·Post 링크) 포함 |
+| 엔드포인트 | 상태 | 용도 |
+|---|---|---|
+| `GET /drafts/:id/evaluations` | 기존 구현 | 평가(plan/prompt, attempt 포함) |
+| `GET /post-work-items` | 구현 | draft와 독립 Post를 중복 없이 합친 최근 변경순 운영 큐 |
+| `GET /post-work-items/:id` | 구현 | workId가 draft/Post 중 무엇인지와 현재 단계 식별 |
+| `PATCH /drafts/:id/plan` | 구현 | manual draft의 기획과 컷 메타데이터 동시 수정 |
+| `PATCH /drafts/:id/prompts` | 구현 | draft-state 컷 프롬프트 일괄 확정 |
+| `GET /drafts/:id/timeline` | 백로그 | ActionLog와 LlmLog 병합 이벤트 로그 |
+| `GET /drafts/:id` attempt 확장 | 백로그 | 컷별 전체 잡 체인과 실제 메모리 row 연결 |
 
 ## 5. 단계적 구현
 
-1. **1차 (평가 Agent 구현과 동시)**: 스테이지 레일, 평가 칩(②·④), 검수 인라인
-   요약, 게시·메모리 영수증, 타임라인 API + 이벤트 로그 섹션.
-2. **2차**: attempt 이력 드롭다운, 컷 레시피(프롬프트 스냅숏) 보기.
-3. **백로그**: 키보드 검수, 목록 미니 파이프라인, 딥링크.
+1. **구현됨**: 통합 운영 큐, 8단계 딥링크, 평가 화면, 수동 브리프·기획·
+   프롬프트·생성·검수·게시, 독립 게시물의 게시/메모리 영수증.
+2. **부분 구현**: 메모리는 현재 schema에 draft FK가 없어 게시 당시 캡션을
+   영수증으로 표시한다. 평가 Worker가 꺼져 있으면 결과 없음 상태를 표시한다.
+3. **백로그**: attempt 전체 이력, draft 이벤트 로그 병합, 실제 CharacterMemory
+   row 연결. 현재 요청을 위해 schema나 추상화를 미리 추가하지 않는다.
 
 ## 6. 출처 색인
 

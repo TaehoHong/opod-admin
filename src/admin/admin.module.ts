@@ -37,6 +37,9 @@ import { LocationsRepository } from "./locations/locations.repository";
 import { LocationsService } from "./locations/locations.service";
 import { EvaluationsController } from "./evaluations/evaluations.controller";
 import { EvaluationsService } from "./evaluations/evaluations.service";
+import { PostWorkspaceController } from "./post-workspace/post-workspace.controller";
+import { PostWorkspaceRepository } from "./post-workspace/post-workspace.repository";
+import { PostWorkspaceService } from "./post-workspace/post-workspace.service";
 
 function storageEnv(config: S3Config | undefined) {
   return config
@@ -68,6 +71,7 @@ function storageEnv(config: S3Config | undefined) {
     LlmLogsController,
     LocationsController,
     EvaluationsController,
+    PostWorkspaceController,
   ],
   providers: [
     AdminService,
@@ -85,6 +89,8 @@ function storageEnv(config: S3Config | undefined) {
     LocationsService,
     LocationsRepository,
     EvaluationsService,
+    PostWorkspaceService,
+    PostWorkspaceRepository,
     {
       provide: GenerationService,
       // 위저드 장면 확장 플래너 — draft 기획과 동일한 planner.* 설정을

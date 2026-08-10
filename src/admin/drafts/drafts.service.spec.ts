@@ -12,6 +12,10 @@ function repositoryFake(overrides: Partial<DraftsRepository> = {}) {
     findMediaUrls: jest.fn().mockResolvedValue([]),
     characterExists: jest.fn().mockResolvedValue(true),
     createDraft: jest.fn(),
+    findPlanEditDraft: jest.fn().mockResolvedValue(null),
+    updatePlan: jest.fn().mockResolvedValue(true),
+    updatePrompts: jest.fn().mockResolvedValue(true),
+    markManual: jest.fn().mockResolvedValue(undefined),
     findDraftConcept: jest.fn().mockResolvedValue(null),
     updateEditableDraft: jest.fn().mockResolvedValue(true),
     approveDraft: jest.fn().mockResolvedValue(true),
@@ -219,7 +223,7 @@ describe("DraftsService", () => {
         caption: "",
         hashtags: [],
         scheduledAt: null,
-        conceptJson: { source: "manual", mode: "auto", sceneHint: "카페" },
+        conceptJson: { source: "manual", mode: "manual", sceneHint: "카페" },
       }),
     });
     const service = makeService(repository);
@@ -230,24 +234,14 @@ describe("DraftsService", () => {
     expect(repository.createDraft).toHaveBeenCalledWith({
       characterId: "ai-1",
       contentType: "feed",
-      conceptJson: { source: "manual", mode: "auto", sceneHint: "카페" },
+      conceptJson: { source: "manual", mode: "manual", sceneHint: "카페" },
     });
     expect(repository.recordActionLog).toHaveBeenCalledWith(
       expect.objectContaining({ actionType: "DRAFT_CREATED" }),
     );
   });
 
-  it("rejects unknown draft modes without persisting", async () => {
-    const repository = repositoryFake();
-    const service = makeService(repository);
-
-    await expect(
-      service.createDraft({ characterId: "ai-1", mode: "semi" }),
-    ).rejects.toThrow("Draft mode must be manual or auto");
-    expect(repository.createDraft).not.toHaveBeenCalled();
-  });
-
-  it("records manual mode so the pipeline remains operator-driven", async () => {
+  it("does not let a legacy request turn the operator entry point automatic", async () => {
     const repository = repositoryFake({
       createDraft: jest.fn().mockResolvedValue({
         ...draftRow,
@@ -257,7 +251,7 @@ describe("DraftsService", () => {
     });
     const service = makeService(repository);
 
-    await service.createDraft({ characterId: "ai-1", mode: "manual" });
+    await service.createDraft({ characterId: "ai-1", mode: "auto" } as never);
 
     expect(repository.createDraft).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -301,6 +295,7 @@ describe("DraftsService", () => {
       prompt: "수정된 프롬프트",
       candidateCount: 3,
     });
+    expect(repository.markManual).toHaveBeenCalledWith("draft-1");
     expect(repository.recordActionLog).toHaveBeenCalledWith(
       expect.objectContaining({
         actionType: "DRAFT_SHOT_GENERATION_STARTED",
@@ -322,6 +317,64 @@ describe("DraftsService", () => {
       ["needs_review", "approved"],
       { caption: "새 캡션" },
     );
+  });
+
+  it("keeps the plan JSON and shot metadata aligned when an operator edits the plan", async () => {
+    const repository = repositoryFake({
+      findPlanEditDraft: jest.fn().mockResolvedValue({
+        id: "draft-1",
+        characterId: "ai-1",
+        status: "generating",
+        leaseExpiresAt: null,
+        conceptJson: {
+          source: "manual",
+          mode: "manual",
+          plan: {
+            caption: "이전 캡션",
+            hashtags: ["이전"],
+            shots: [{ sortOrder: 0, scene: "이전 장면" }],
+          },
+        },
+        jobs: [
+          {
+            id: "job-1",
+            sortOrder: 0,
+            paramsJson: { _shot: { scene: "이전 장면", captureSetup: "wide" } },
+          },
+        ],
+      } as never),
+      findDraft: jest.fn().mockResolvedValue(draftRow),
+    });
+    const service = makeService(repository);
+
+    await service.updatePlan({
+      draftId: "draft-1",
+      caption: " 새 캡션 ",
+      hashtags: [" 새태그 "],
+      shots: [{ sortOrder: 0, scene: " 새 장면 " }],
+    });
+
+    expect(repository.updatePlan).toHaveBeenCalledWith({
+      draftId: "draft-1",
+      caption: "새 캡션",
+      hashtags: ["새태그"],
+      conceptJson: expect.objectContaining({
+        mode: "manual",
+        plan: expect.objectContaining({
+          caption: "새 캡션",
+          hashtags: ["새태그"],
+          shots: [expect.objectContaining({ scene: "새 장면" })],
+        }),
+      }),
+      shots: [
+        {
+          jobId: "job-1",
+          paramsJson: {
+            _shot: { scene: "새 장면", captureSetup: "wide" },
+          },
+        },
+      ],
+    });
   });
 
   it("requires a selected image for every shot before approval", async () => {
@@ -445,5 +498,6 @@ describe("DraftsService", () => {
       "output-1",
       "mono-film",
     );
+    expect(repository.markManual).toHaveBeenCalledWith("draft-1");
   });
 });

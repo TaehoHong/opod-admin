@@ -238,6 +238,7 @@ export class GenerationRepository {
       characterId?: string;
       status?: "draft" | "queued" | "running" | "completed" | "failed";
       mediaType?: "image" | "video";
+      draftId?: null;
     },
   ): Promise<boolean> {
     const row = await this.prisma.generationJob.findFirst({
@@ -251,15 +252,17 @@ export class GenerationRepository {
     characterId?: string;
     status?: "draft" | "queued" | "running" | "completed" | "failed";
     mediaType?: "image" | "video";
+    draftId?: null;
     take: number;
     cursor?: string;
   }): Promise<GenerationJobRow[]> {
-    const { take, cursor, characterId, status, mediaType } = input;
+    const { take, cursor, characterId, status, mediaType, draftId } = input;
     return this.prisma.generationJob.findMany({
       where: {
         ...(characterId ? { characterId } : {}),
         ...(status ? { status } : {}),
         ...(mediaType ? { mediaType } : {}),
+        ...(draftId === null ? { draftId: null } : {}),
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take,

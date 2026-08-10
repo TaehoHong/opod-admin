@@ -382,15 +382,21 @@ export class GenerationService {
       characterId?: string;
       status?: string;
       mediaType?: string;
+      scope?: string;
     } & PageInput,
   ): Promise<Page<GenerationJob>> {
     const characterId = input.characterId?.trim();
     const status = this.parseOptionalStatus(input.status);
     const mediaType = this.parseOptionalMediaType(input.mediaType);
+    const scope = input.scope?.trim();
+    if (scope && scope !== "standalone") {
+      throw new BadRequestException("Generation scope must be standalone");
+    }
     const filter = {
       ...(characterId ? { characterId } : {}),
       ...(status ? { status } : {}),
       ...(mediaType ? { mediaType } : {}),
+      ...(scope === "standalone" ? { draftId: null } : {}),
     };
     const cursorId = decodeCursor(input.cursor);
     if (

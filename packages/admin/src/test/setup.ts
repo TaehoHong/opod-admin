@@ -29,3 +29,14 @@ if (!window.ResizeObserver) {
     disconnect() {}
   } as unknown as typeof window.ResizeObserver;
 }
+
+if (!document.fonts) {
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      ready: Promise.resolve(),
+    },
+  });
+}

@@ -11,13 +11,18 @@ describe("admin application shell", () => {
     queryClient.setQueryDefaults(["session"], { staleTime: Infinity });
     queryClient.setQueryDefaults(["pending-counts"], { staleTime: Infinity });
     queryClient.setQueryData(["session"], { email: "admin@example.com" });
-    queryClient.setQueryData(["pending-counts"], {
-      drafts: { count: 0, hasMore: false },
-      media: { count: 0, hasMore: false },
-      generation: { count: 0, hasMore: false },
-      moderation: { count: 0, hasMore: false },
-      payments: { count: 0, hasMore: false },
-    });
+    for (const key of [
+      "posts",
+      "media",
+      "generation",
+      "moderation",
+      "payments",
+    ]) {
+      queryClient.setQueryData(["pending-counts", key], {
+        count: 0,
+        hasMore: false,
+      });
+    }
 
     render(
       <AppProviders queryClient={queryClient}>
@@ -31,7 +36,7 @@ describe("admin application shell", () => {
       </AppProviders>,
     );
 
-    expect(screen.getByRole("link", { name: "게시글" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "게시물" })).toHaveAttribute(
       "data-active",
       "true",
     );
@@ -44,7 +49,7 @@ describe("admin application shell", () => {
     await userEvent.click(screen.getByRole("button", { name: "메뉴 열기" }));
     expect(screen.getByRole("button", { name: "메뉴 닫기" })).toBeVisible();
 
-    await userEvent.click(screen.getByRole("link", { name: "게시글" }));
+    await userEvent.click(screen.getByRole("link", { name: "게시물" }));
     expect(screen.getByRole("button", { name: "메뉴 열기" })).toBeVisible();
   });
 });
