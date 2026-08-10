@@ -13,10 +13,12 @@ import {
 import { useForm } from "@mantine/form";
 import { ZoomableImage } from "../../shared/ui/ZoomableImage";
 import { CandidateCard } from "./CandidateCard";
+import { EvaluationChips } from "./EvaluationChips";
 import {
   generateShot,
   regenerateShot,
   type Draft,
+  type DraftEvaluation,
   type DraftReference,
   type DraftShot,
   type GenerationTrace,
@@ -24,7 +26,15 @@ import {
 import { SHOT_STATUS_COLOR, SHOT_STATUS_LABEL } from "./labels";
 import { useDraftMutation } from "./useDraftMutation";
 
-export function ShotCard({ draft, shot }: { draft: Draft; shot: DraftShot }) {
+export function ShotCard({
+  draft,
+  shot,
+  evaluation,
+}: {
+  draft: Draft;
+  shot: DraftShot;
+  evaluation?: DraftEvaluation;
+}) {
   const canRegenerate =
     draft.status === "needs_review" || draft.status === "failed";
 
@@ -57,6 +67,11 @@ export function ShotCard({ draft, shot }: { draft: Draft; shot: DraftShot }) {
             장면 · {shot.scene}
           </Text>
         ) : null}
+
+        <EvaluationChips
+          evaluation={evaluation}
+          shotSortOrder={shot.sortOrder}
+        />
 
         {shot.generationTrace ? (
           <GenerationTracePanel trace={shot.generationTrace} />

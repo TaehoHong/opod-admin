@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { AppProviders } from "../../app/providers";
 import { server } from "../../test/server";
 import { DraftDetailPanel } from "./DraftDetailPanel";
@@ -13,6 +13,14 @@ Object.defineProperty(document, "fonts", {
     removeEventListener: () => {},
     ready: Promise.resolve(),
   },
+});
+
+beforeEach(() => {
+  server.use(
+    http.get("/api/admin/v1/drafts/:draftId/evaluations", () =>
+      HttpResponse.json({ items: [] }),
+    ),
+  );
 });
 
 describe("draft generation trace", () => {
@@ -78,6 +86,68 @@ describe("draft generation trace", () => {
       await screen.findByText("기획과 실제 생성 조건이 다릅니다"),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "승인" })).not.toBeDisabled();
+  });
+});
+
+describe("draft evaluations", () => {
+  it("shows the latest plan score and expands the judge reason", async () => {
+    server.use(
+      http.get("/api/admin/v1/drafts/draft-1", () =>
+        HttpResponse.json({
+          id: "draft-1",
+          characterId: "character-1",
+          draftType: "post",
+          contentType: "feed",
+          caption: "노을 산책",
+          hashtags: [],
+          status: "needs_review",
+          attemptCount: 1,
+          conceptJson: { plan: { caption: "노을 산책", shots: [] } },
+          shots: [],
+          createdAt: "2026-08-07T01:00:00.000Z",
+          updatedAt: "2026-08-07T01:05:00.000Z",
+        }),
+      ),
+      http.get("/api/admin/v1/drafts/draft-1/evaluations", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: "evaluation-1",
+              draftId: "draft-1",
+              kind: "plan",
+              attempt: 1,
+              status: "completed",
+              rubricVersion: "eval-rubric-v1",
+              contentLanguage: "ko",
+              overallScore: 4,
+              scoresJson: {
+                scores: {
+                  persona_fit: {
+                    score: 4,
+                    reason: "캐릭터의 산책 취향과 잘 맞습니다.",
+                  },
+                },
+              },
+              createdAt: "2026-08-07T01:01:00.000Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    render(
+      <AppProviders>
+        <DraftDetailPanel draftId="draft-1" />
+      </AppProviders>,
+    );
+
+    expect(await screen.findByText("LLM 심사 4.0/5")).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "페르소나 4점 사유" }),
+    );
+    expect(
+      screen.getByText("페르소나 · 캐릭터의 산책 취향과 잘 맞습니다."),
+    ).toBeInTheDocument();
   });
 });
 

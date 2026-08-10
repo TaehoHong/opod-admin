@@ -36,7 +36,8 @@ describe("parsePlanEvaluation", () => {
   });
 
   it("차원이 누락되면 거절한다", () => {
-    const { persona_fit: _omitted, ...partial } = validScores;
+    const partial: Partial<typeof validScores> = { ...validScores };
+    delete partial.persona_fit;
     expect(() =>
       parsePlanEvaluation(JSON.stringify({ scores: partial })),
     ).toThrow(/persona_fit/);
@@ -46,7 +47,10 @@ describe("parsePlanEvaluation", () => {
     expect(() =>
       parsePlanEvaluation(
         JSON.stringify({
-          scores: { ...validScores, caption_quality: { score: 6, reason: "x" } },
+          scores: {
+            ...validScores,
+            caption_quality: { score: 6, reason: "x" },
+          },
         }),
       ),
     ).toThrow(/invalid score/);

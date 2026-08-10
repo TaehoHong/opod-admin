@@ -1,8 +1,8 @@
 // 평가 워커의 DB 접근 계층. 클레임은 "평가 대상 draft를 잠그고 pending
 // 평가 행을 삽입"으로 원자화한다 — draft 상태 머신은 건드리지 않는다
 // (docs/plan-prompt-evaluation-agent.md 3절).
-// attempt는 평가 시도 번호다: 실패 행이 maxAttempts 미만이면 다음 attempt로
-// 재클레임된다. pending + completed 행이 있으면 클레임 대상에서 빠진다.
+// attempt는 평가 시도 번호다. 재기획·프롬프트 재빌드·컷 재생성 action이 최신
+// 평가보다 새로우면 completed 이력을 보존한 채 다음 attempt를 클레임한다.
 
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
@@ -80,6 +80,14 @@ export class EvaluationRepository {
               WHERE j.draft_id = d.id AND j.prompt <> ''
             )`
           : Prisma.empty;
+      const relevantAction =
+        kind === "plan"
+          ? Prisma.sql`l.action_type = 'DRAFT_PLANNED'`
+          : Prisma.sql`l.action_type IN (
+              'DRAFT_PLANNED',
+              'DRAFT_PROMPTS_BUILT',
+              'DRAFT_SHOT_REGENERATED'
+            )`;
       const rows = await tx.$queryRaw<
         { id: string; character_id: string; content_language: string }[]
       >`
@@ -93,13 +101,44 @@ export class EvaluationRepository {
             SELECT 1 FROM opod.draft_evaluations e
             WHERE e.draft_id = d.id
               AND e.kind = ${kind}::opod.draft_evaluation_kind
-              AND e.status IN ('pending', 'completed')
+              AND e.status = 'pending'
+          )
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM opod.draft_evaluations e
+              WHERE e.draft_id = d.id
+                AND e.kind = ${kind}::opod.draft_evaluation_kind
+                AND e.status = 'completed'
+            )
+            OR EXISTS (
+              SELECT 1 FROM opod.character_action_logs l
+              WHERE l.target_table = 'post_drafts'
+                AND l.target_id = d.id
+                AND ${relevantAction}
+                AND l.created_at > (
+                  SELECT max(e.created_at)
+                  FROM opod.draft_evaluations e
+                  WHERE e.draft_id = d.id
+                    AND e.kind = ${kind}::opod.draft_evaluation_kind
+                    AND e.status = 'completed'
+                )
+            )
           )
           AND (
             SELECT count(*) FROM opod.draft_evaluations e
             WHERE e.draft_id = d.id
               AND e.kind = ${kind}::opod.draft_evaluation_kind
               AND e.status = 'failed'
+              AND e.created_at >= COALESCE(
+                (
+                  SELECT max(l.created_at)
+                  FROM opod.character_action_logs l
+                  WHERE l.target_table = 'post_drafts'
+                    AND l.target_id = d.id
+                    AND ${relevantAction}
+                ),
+                d.created_at
+              )
           ) < ${maxAttempts}
         ORDER BY d.created_at DESC, d.id
         LIMIT 1
@@ -268,7 +307,15 @@ export class EvaluationRepository {
             caption: true,
             conceptJson: true,
             publishedPostId: true,
-            jobs: { select: { id: true, originJobId: true, status: true } },
+            jobs: {
+              select: {
+                id: true,
+                sortOrder: true,
+                originJobId: true,
+                status: true,
+                outputs: { select: { selected: true } },
+              },
+            },
           },
         },
       },

@@ -1,7 +1,6 @@
 # 기획·프롬프트 평가 Agent 설계
 
-Status: 구현 승인 (2026-08-07) — 코드베이스 검증 리뷰 반영판.
-1~2차 구현 진행 중, 3차(개선 제안 생성)는 후속.
+Status: 1~2차 구현 완료 (2026-08-10 재구성), 3차(개선 제안 생성)는 후속.
 
 ## 1. 목적
 
@@ -157,8 +156,9 @@ TS 유니언 수정만으로 충분하다(마이그레이션 불필요).
 
 휴먼 시그널은 신규 저장 없이 기존 데이터를 조인해 쓴다:
 `PostDraft.status`(rejected), `GenerationJob.originJobId`(컷 재생성 횟수),
-캡션 수정 여부(plan 캡션 vs 게시 캡션 비교), `GenerationJobOutput.selected`,
-`CharacterActionLog`.
+캡션 수정 여부(plan 캡션 vs 현재 draft 캡션 비교),
+`GenerationJobOutput.selected`. `CharacterActionLog`는 이 상태 전이를 중복
+표현하고 추가 신호를 제공하지 않아 집계 조인에서 제외한다.
 
 ## 6. 컴포넌트 (기존 패턴 준수)
 
@@ -193,7 +193,8 @@ diff로 검증한다.
 1. 기간 내 `DraftEvaluation` + 휴먼 시그널 조인 →
    차원별 점수 분포, 저점 차원 순위, "평가는 높은데 사람이 거절한" /
    "평가는 낮은데 승인된" 불일치 사례 추출 (루브릭 보정 근거).
-2. 반복 실패 패턴 클러스터링(LLM): 대표 사례 draftId와 함께 기록.
+2. 반복 실패 패턴은 2차에서 언어·kind·저점 차원별 빈도와 대표 draftId로
+   결정적으로 기록한다. LLM 클러스터링은 개선 제안을 생성하는 3차로 미룬다.
 3. 개선 제안 생성(LLM): 실패 패턴별로 `prompts/content-planner.ts`,
    `prompts/image-prompt-builder.ts`의 구체 수정안(추가·수정할 규칙 문장)을
    제안. **diff 형식 제안까지만** — 반영은 사람이 검토 후 커밋.

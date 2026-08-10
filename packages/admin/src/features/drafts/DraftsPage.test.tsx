@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { renderPage } from "../../test/renderPage";
 import { server } from "../../test/server";
 import { DraftsPage } from "./DraftsPage";
@@ -41,6 +41,14 @@ const createdDraft = {
   createdAt: "2026-08-03T01:00:00.000Z",
   updatedAt: "2026-08-03T01:00:00.000Z",
 };
+
+beforeEach(() => {
+  server.use(
+    http.get("/api/admin/v1/drafts/:draftId/evaluations", () =>
+      HttpResponse.json({ items: [] }),
+    ),
+  );
+});
 
 describe("draft creation", () => {
   // 만든 초안의 단계 타임라인으로 바로 들어가지 못하면 방금 만든 초안을 다시

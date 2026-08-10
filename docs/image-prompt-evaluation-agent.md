@@ -210,3 +210,6 @@ sequenceDiagram
 
 추가 리뷰 반영: 빈 프롬프트 잡(수동 모드 기획 직후) 제외, 평가 시점 잡 id를
 `scoresJson.shots[].jobId`에 고정, LlmLog 연결은 `requestId = draft.id` 관례.
+구현에서는 재기획·프롬프트 재빌드·컷 재생성 action이 최신 완료 평가보다
+새로울 때 다음 attempt를 만들며, 검수 화면은 기획 총점/차원 사유와 컷별
+프롬프트 점수·정적 린트를 분리해 표시한다.

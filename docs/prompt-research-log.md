@@ -48,9 +48,9 @@
 - 알려진 한계: 물리적 정합성(카메라·손·거울) 위반이 프롬프트 단계에서
   검출되지 않음 → 평가 Agent의 prompt 평가로 계측 예정.
 
-## eval-rubric-v1 — 평가 루브릭 초판 설계 (2026-08-07)
+## eval-rubric-v1 — 평가 루브릭 초판 (2026-08-07)
 
-- 상태: 설계 확정, 구현 전 (`plan-prompt-evaluation-agent.md` 참조)
+- 상태: 적용 중 (2026-08-10 재구성, `plan-prompt-evaluation-agent.md` 참조)
 - 구성: 기획 평가 8차원 (persona_fit, voice_tone_fit, ai_tell_free,
   memory_continuity, location_coherence, shot_composition, reference_usage,
   caption_quality) + 프롬프트 평가 6차원 (scene_capture_separation,
@@ -69,5 +69,5 @@
     전 컷 배치 1콜로 컷 간 일관성(cross_shot_consistency)까지 판정.
     정답 신호는 생성 결과(실패율·재생성·후보 선택률)와의 상관으로 계측 —
     차원별 예측력 검증이 루브릭 v2 보정의 근거가 된다.
-- 다음: 1차 구현 후 실제 draft에 대한 점수 분포 확인 → 차원별 변별력 검증,
+- 다음: 실제 draft에 대한 점수 분포 확인 → 차원별 변별력 검증,
   휴먼 검수 결과와의 상관으로 루브릭 보정 (v2 후보)
