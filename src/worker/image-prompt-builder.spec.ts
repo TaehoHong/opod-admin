@@ -56,7 +56,7 @@ describe("imageModelFamily", () => {
       "Repeat that construction word-for-word",
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
-      "operating hand, forearm, chin, face, and hair completely above",
+      "A self-timer has no operating hand during the exposure",
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
       "non-identity artifacts",
@@ -165,10 +165,16 @@ describe("buildImagePromptBuilderUserPrompt", () => {
       "derive one locked wardrobe construction",
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
-      "must not cause an excluded phone or hand to be rendered",
+      "Capture metadata must not cause an excluded device to be rendered",
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "relaxed empty hands, arms in the planned pose, and unobstructed clothing",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "do not restate age ranges or body-analysis details",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "Never exclude the subject's arms, forearms, or empty hands",
     );
   });
 

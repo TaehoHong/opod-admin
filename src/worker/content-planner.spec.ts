@@ -58,6 +58,9 @@ describe("buildPlannerUserPrompt", () => {
     expect(PLANNER_SYSTEM_PROMPT).toContain(
       "removing a repeated device or occlusion is less reliable than adding",
     );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "every explicit operator exclusion as a hard final-frame constraint",
+    );
   });
 
   it("assembles personas, memories, and recent captions", () => {
