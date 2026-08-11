@@ -44,16 +44,19 @@ describe("imageModelFamily", () => {
       "hard frame boundary",
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
-      "top image edge crosses the base of the neck",
+      "do not use a boundary at the neck, collarbones, or shoulders",
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
       "opaque phone-and-hand silhouette",
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
-      "lock one exact wardrobe construction",
+      "lock only wardrobe attributes explicitly stated",
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
-      "Repeat that construction word-for-word",
+      "Repeat those known attributes word-for-word",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "Never fill an unspecified material",
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
       "A self-timer has no operating hand during the exposure",
@@ -159,10 +162,10 @@ describe("buildImagePromptBuilderUserPrompt", () => {
       "positive top-edge and bottom-edge landmarks",
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
-      "extend from the hairline through below the chin",
+      "extends from above the hairline through below the jaw-neck junction",
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
-      "derive one locked wardrobe construction",
+      "derive a locked wardrobe contract only from attributes explicitly stated",
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "Capture metadata must not cause an excluded device to be rendered",
@@ -175,6 +178,9 @@ describe("buildImagePromptBuilderUserPrompt", () => {
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "Never exclude the subject's arms, forearms, or empty hands",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "Do not invent missing material, seam placement, strap width",
     );
   });
 

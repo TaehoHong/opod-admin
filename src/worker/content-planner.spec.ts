@@ -61,6 +61,12 @@ describe("buildPlannerUserPrompt", () => {
     expect(PLANNER_SYSTEM_PROMPT).toContain(
       "every explicit operator exclusion as a hard final-frame constraint",
     );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "do not place the top frame edge at the collarbones or shoulders",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "lower edge extends below the jaw-neck junction",
+    );
   });
 
   it("assembles personas, memories, and recent captions", () => {
