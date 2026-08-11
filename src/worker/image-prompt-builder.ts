@@ -100,7 +100,9 @@ export const localImagePromptBuilder: ImagePromptBuilder = {
             shot.characterVisible
               ? "Use a physically plausible camera viewpoint consistent with the final-frame scene; do not add any off-frame photographer or capture equipment"
               : "Use a physically plausible camera viewpoint consistent with the final-frame scene; the character, photographer, hands, body, and capture equipment remain entirely outside the frame",
-          ].filter(Boolean).join(". "),
+          ]
+            .filter(Boolean)
+            .join(". "),
         ),
       ),
     });

@@ -167,10 +167,15 @@ export function parsePromptEvaluation(
     issues: stringArray(parsed.crossShot.issues),
   };
   const dimensionScores = shots.flatMap((shot) =>
-    PROMPT_EVAL_SHOT_DIMENSIONS.map((dimension) => shot.scores[dimension].score),
+    PROMPT_EVAL_SHOT_DIMENSIONS.map(
+      (dimension) => shot.scores[dimension].score,
+    ),
   );
   const overallScore = round2(
-    [...dimensionScores, crossShot.score].reduce((sum, score) => sum + score, 0) /
+    [...dimensionScores, crossShot.score].reduce(
+      (sum, score) => sum + score,
+      0,
+    ) /
       (dimensionScores.length + 1),
   );
   return { shots, crossShot, overallScore };

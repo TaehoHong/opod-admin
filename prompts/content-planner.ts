@@ -105,12 +105,14 @@ export function buildPlannerUserPrompt(input: ContentPlanInput): string {
       `## Available locations (optional; environment references are not identity references)\n${input
         .locationCatalog!.map(
           (location) =>
-            `### [${location.id}] ${location.name}\n${location.description}\n${location.references
-              .map(
-                (reference) =>
-                  `- [${reference.id}] ${reference.description || "(no description)"}`,
-              )
-              .join("\n") || "- (no usable environment references)"}`,
+            `### [${location.id}] ${location.name}\n${location.description}\n${
+              location.references
+                .map(
+                  (reference) =>
+                    `- [${reference.id}] ${reference.description || "(no description)"}`,
+                )
+                .join("\n") || "- (no usable environment references)"
+            }`,
         )
         .join("\n")}`,
     );

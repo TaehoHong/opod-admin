@@ -28,9 +28,7 @@ describe("lintPromptShot", () => {
       prompt:
         "A young woman holding an iced latte by the window, warm sunlight across the wooden table",
     });
-    expect(issues.map((issue) => issue.rule)).toContain(
-      "unmanned_person_leak",
-    );
+    expect(issues.map((issue) => issue.rule)).toContain("unmanned_person_leak");
   });
 
   it("인물 컷에서는 인물 어휘를 허용한다", () => {
@@ -55,9 +53,7 @@ describe("lintPromptShot", () => {
   it("빈/과소 프롬프트를 거절한다", () => {
     expect(
       lintPromptShot({ sortOrder: 0, characterVisible: true, prompt: " " }),
-    ).toEqual([
-      expect.objectContaining({ rule: "length_bounds" }),
-    ]);
+    ).toEqual([expect.objectContaining({ rule: "length_bounds" })]);
     const short = lintPromptShot({
       sortOrder: 0,
       characterVisible: true,
@@ -73,7 +69,11 @@ describe("lintPromptShots", () => {
       "A sunlit cafe table by the window, iced latte in a tall glass, soft morning light, cinematic depth";
     const result = lintPromptShots([
       { sortOrder: 0, characterVisible: true, prompt },
-      { sortOrder: 1, characterVisible: true, prompt: `  ${prompt.toUpperCase()}  ` },
+      {
+        sortOrder: 1,
+        characterVisible: true,
+        prompt: `  ${prompt.toUpperCase()}  `,
+      },
     ]);
     expect(result.get(0)).toEqual([]);
     expect(result.get(1)?.map((issue) => issue.rule)).toContain(

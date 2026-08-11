@@ -61,9 +61,7 @@ describe("buildPlannerUserPrompt", () => {
           id: "gym-1",
           name: "서린이 다니는 헬스장",
           description: "촬영 친화적인 24시간 헬스장",
-          references: [
-            { id: "gym-ref-1", description: "전신 거울 구역" },
-          ],
+          references: [{ id: "gym-ref-1", description: "전신 거울 구역" }],
         },
       ],
     });
@@ -99,9 +97,7 @@ describe("parseContentPlan", () => {
           id: "gym-1",
           name: "헬스장",
           description: "설명",
-          references: [
-            { id: "gym-ref-1", description: "거울 구역" },
-          ],
+          references: [{ id: "gym-ref-1", description: "거울 구역" }],
         },
       ],
     );

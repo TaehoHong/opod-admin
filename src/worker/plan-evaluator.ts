@@ -143,7 +143,11 @@ export function validateScore(
   label: string,
 ): DimensionScore {
   const score = entry.score;
-  if (!Number.isInteger(score) || (score as number) < 1 || (score as number) > 5) {
+  if (
+    !Number.isInteger(score) ||
+    (score as number) < 1 ||
+    (score as number) > 5
+  ) {
     throw new Error(`evaluation dimension ${label} has invalid score`);
   }
   const reason = typeof entry.reason === "string" ? entry.reason.trim() : "";
