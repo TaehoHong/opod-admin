@@ -51,6 +51,8 @@ const MODEL_FAMILY_GUIDANCE: Record<ImageModelFamily, string> = {
     "- Use clear descriptive instructions as if directing a person; this model follows instructions.",
     "- Do not use weighting syntax or quality tokens.",
     "- Specify the subject, composition, lighting, and mood concretely and without ambiguity.",
+    '- For an edit model with attached reference images, begin the generated prompt with this exact instruction: "Use the attached reference images only to preserve this same person\'s identity, hair, skin tone, and natural body proportions. Ignore their pose, crop, clothing, background, phone, and camera geometry; follow the written final-frame instructions instead."',
+    "- Treat a requested crop as a hard frame boundary. Explicitly name the body regions and objects that must remain outside the frame, especially when the face, head, feet, or full body must not appear.",
   ].join("\n"),
   "stable-diffusion": [
     "- Use a comma-separated tag and keyword list ordered as: primary subject, composition, lighting, style, quality.",
@@ -80,6 +82,8 @@ export const IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT = [
   "- If the appearance prompt is divided into [labeled] sections, include only sections for features actually visible in each shot. For example, omit face and nail details in a rear-view shot and omit full-body proportions in a hand close-up. Always include core identity sections whenever the character is visible.",
   "- Never invent or intensify age, bust, waist, hip, leg, or other anatomy details beyond the supplied appearance and final-frame scene. Preserve the identity reference's natural proportions; do not reshape or exaggerate the body for aesthetics.",
   "- Treat identity references as identity and proportion evidence only. Do not copy their studio background, pose, crop, lighting, or clothing when those conflict with the planned scene.",
+  '- For a reference-edit target, include this reference-role rule verbatim in the final image prompt itself; do not merely use it as private writing guidance: "Use the attached reference images only to preserve this same person\'s identity, hair, skin tone, and natural body proportions. Ignore their pose, crop, clothing, background, phone, and camera geometry; follow the written final-frame instructions instead."',
+  "- When a shot intentionally crops out a feature, write a non-negotiable frame-boundary instruction in the final prompt that names what must stay outside the image. Do not soften it into mood or composition prose.",
   "- Preserve the captureSetup's phone or camera placement, mirror relationship, framing, and lighting as a physically reachable viewpoint. Keep visible hands consistent with the action, and do not invent a moving follow-camera or additional people.",
   "- Translate the scene's location, composition, pose, lighting, and mood into concrete visual language the image model understands. Allow natural occlusion when framing or action hides an appearance feature; do not reposition hair, body, or clothing merely to expose it.",
   "- When an environment prompt is supplied, preserve its fixed architecture, materials, palette, fixtures, and lighting across every shot. Treat it as the canonical location, not as optional decoration.",

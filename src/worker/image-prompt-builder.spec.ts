@@ -37,6 +37,12 @@ describe("imageModelFamily", () => {
     expect(modelFamilyGuidance("fal-ai/flux/dev")).not.toEqual(
       modelFamilyGuidance("fal-ai/fast-sdxl"),
     );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "Use the attached reference images only to preserve this same person's identity",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "hard frame boundary",
+    );
   });
 });
 
@@ -118,6 +124,18 @@ describe("buildImagePromptBuilderUserPrompt", () => {
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "a spacious gym lined with strength-training machines",
+    );
+  });
+
+  it("requires reference-edit prompts to override reference composition", () => {
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "include this reference-role rule verbatim in the final image prompt itself",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "Ignore their pose, crop, clothing, background, phone, and camera geometry",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "non-negotiable frame-boundary instruction",
     );
   });
 
