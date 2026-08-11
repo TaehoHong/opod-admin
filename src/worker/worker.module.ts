@@ -67,6 +67,15 @@ function storageEnv(config: S3Config | undefined) {
           // 비공개 S3 레퍼런스를 프로바이더가 받을 수 있게 presigned URL로 서명.
           createReferenceUrlSigner(storageEnv(config.s3)) ?? undefined,
           llmLogs,
+          // 워커는 값만 필요하다 — 출처(db/default)는 설정 화면 표시용이다.
+          async () => {
+            const ratios = await settings.resolveAspectRatios();
+            return {
+              feed: ratios.feed.value,
+              story: ratios.story.value,
+              reel: ratios.reel.value,
+            };
+          },
         ),
       inject: [
         GenerationJobRepository,

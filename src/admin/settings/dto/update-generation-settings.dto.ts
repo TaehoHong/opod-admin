@@ -97,4 +97,28 @@ export class UpdateGenerationSettingsDto {
   @IsOptional()
   @IsBoolean()
   evaluationWorkerEnabled?: boolean | null;
+
+  // 포맷별 생성 이미지 종횡비. "가로:세로"만 허용하고 빈 문자열은 삭제(기본값
+  // 복귀)다. 프로바이더에 그대로 전달되는 값이라 형식이 어긋나면 생성이 422로
+  // 죽으므로 저장 전에 막는다.
+  @IsOptional()
+  @IsString()
+  @Matches(/^$|^\d{1,2}:\d{1,2}$/, {
+    message: "aspectRatioFeed must look like 4:5",
+  })
+  aspectRatioFeed?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^$|^\d{1,2}:\d{1,2}$/, {
+    message: "aspectRatioStory must look like 9:16",
+  })
+  aspectRatioStory?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^$|^\d{1,2}:\d{1,2}$/, {
+    message: "aspectRatioReel must look like 9:16",
+  })
+  aspectRatioReel?: string | null;
 }

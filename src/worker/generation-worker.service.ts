@@ -22,6 +22,10 @@ import {
   LlmLogService,
 } from "../domain/llm-logs/llm-log.service";
 import { assertVisibleCharacterHasReference } from "./content-planner";
+import {
+  AspectRatioFormat,
+  DEFAULT_ASPECT_RATIOS,
+} from "../domain/settings/generation-settings.service";
 
 export type WorkerConfig = AppConfig["worker"];
 
@@ -113,6 +117,8 @@ type ClaimedJob = {
     } | null;
   };
   draft: {
+    draftType: string;
+    contentType: string;
     location: {
       negativePrompt: string;
       references: {
@@ -126,6 +132,25 @@ type ClaimedJob = {
     } | null;
   } | null;
 };
+
+/**
+ * 게시 포맷을 초안에서 유도한다. draftType을 먼저 보는 이유는 스토리 초안도
+ * contentType 기본값이 feed로 들어오기 때문이다.
+ *
+ * 초안이 없는 잡(비주얼 프로필 테스트 생성)은 feed로 본다 — 인물 확인용
+ * 세로 이미지가 맞고, 비율을 안 보내면 모델이 가로로 뽑는다.
+ */
+export function aspectRatioFormatOf(
+  draft: { draftType: string; contentType: string } | null | undefined,
+): AspectRatioFormat {
+  if (!draft) {
+    return "feed";
+  }
+  if (draft.draftType === "story") {
+    return "story";
+  }
+  return draft.contentType === "reel" ? "reel" : "feed";
+}
 
 type CompletedGeneration = {
   images: GeneratedImage[];
@@ -164,6 +189,11 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     // null이면 원본 URL 그대로 전송 (공개 버킷/외부 URL 전제).
     private readonly signReferenceUrl: ReferenceUrlSigner | null = null,
     private readonly llmLogs?: LlmLogService,
+    // 포맷별 종횡비도 잡마다 재해석한다. 기본값을 두는 이유는 이 워커를 직접
+    // 조립하는 코드(테스트 등)가 설정 서비스를 몰라도 되게 하기 위해서다.
+    private readonly resolveAspectRatios: () => Promise<
+      Record<AspectRatioFormat, string>
+    > = async () => DEFAULT_ASPECT_RATIOS,
   ) {}
 
   onModuleInit(): void {
@@ -457,10 +487,15 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
             : Promise.resolve(reference.media.url),
         ),
     );
-    // 프로필의 프로바이더 기본값(providerConfig) 위에 잡별 파라미터(paramsJson)를
-    // 덮어쓴다. 종횡비 등 모델별 파라미터는 코드가 아니라 이 데이터로 주입한다.
+    // 우선순위: 포맷 종횡비 < 프로필 기본값(providerConfig) < 잡 파라미터.
+    // 종횡비를 맨 아래 두는 이유는 그것이 "기본값"이기 때문이다 — 명시적으로
+    // 설정한 값은 언제나 이긴다. 예전에는 데이터에만 맡겼는데 아무도 설정하지
+    // 않아 전 게시물이 모델 기본값(가로)으로 나왔다.
     // 밑줄 접두 키(_wizard 등)는 파이프라인 메타데이터 — 프로바이더에 보내지 않는다.
+    const aspectRatios = await this.resolveAspectRatios();
+    const format = aspectRatioFormatOf(job.draft);
     const extraParams = stripMetaKeys({
+      aspect_ratio: aspectRatios[format],
       ...(isRecord(profile?.providerConfig) ? profile.providerConfig : {}),
       ...(isRecord(job.paramsJson) ? job.paramsJson : {}),
     });

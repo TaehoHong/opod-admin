@@ -39,6 +39,16 @@ function httpUrlOrEmpty(value: string): string | null {
     : "http:// 또는 https:// 로 시작해야 합니다";
 }
 
+// 비우면 기본값으로 돌아간다. 형식이 어긋난 값은 프로바이더가 422로 거절하므로
+// 저장 전에 막는다.
+function aspectRatioOrEmpty(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return /^\d{1,2}:\d{1,2}$/.test(trimmed)
+    ? null
+    : "4:5 처럼 가로:세로 형식이어야 합니다";
+}
+
 export function GenerationSettingsForm({
   settings,
 }: {
@@ -65,11 +75,17 @@ export function GenerationSettingsForm({
       evaluatorLlmApiKey: "",
       evaluatorLlmApiUrl: settings.evaluator.overrides.apiUrl ?? "",
       evaluatorLlmModel: settings.evaluator.overrides.model ?? "",
+      aspectRatioFeed: settings.aspectRatios.overrides.feed ?? "",
+      aspectRatioStory: settings.aspectRatios.overrides.story ?? "",
+      aspectRatioReel: settings.aspectRatios.overrides.reel ?? "",
     },
     validate: {
       llmApiUrl: httpUrlOrEmpty,
       agentLlmApiUrl: httpUrlOrEmpty,
       evaluatorLlmApiUrl: httpUrlOrEmpty,
+      aspectRatioFeed: aspectRatioOrEmpty,
+      aspectRatioStory: aspectRatioOrEmpty,
+      aspectRatioReel: aspectRatioOrEmpty,
     },
   });
 
@@ -158,6 +174,31 @@ export function GenerationSettingsForm({
             description={sourceNote(settings.resolved.sources.t2iModel)}
             key={form.key("falImageT2iModel")}
             {...form.getInputProps("falImageT2iModel")}
+          />
+
+          <Divider />
+          {/* 연결 테스트 대상이 아니라 sectionHeader를 쓰지 않는다. */}
+          <Title order={6}>게시 포맷별 종횡비</Title>
+          <TextInput
+            label="피드 게시물"
+            placeholder={DEFAULT_ASPECT_RATIO_HINT.feed}
+            description={ratioNote(settings.aspectRatios.effective.feed)}
+            key={form.key("aspectRatioFeed")}
+            {...form.getInputProps("aspectRatioFeed")}
+          />
+          <TextInput
+            label="스토리"
+            placeholder={DEFAULT_ASPECT_RATIO_HINT.story}
+            description={ratioNote(settings.aspectRatios.effective.story)}
+            key={form.key("aspectRatioStory")}
+            {...form.getInputProps("aspectRatioStory")}
+          />
+          <TextInput
+            label="릴"
+            placeholder={DEFAULT_ASPECT_RATIO_HINT.reel}
+            description={ratioNote(settings.aspectRatios.effective.reel)}
+            key={form.key("aspectRatioReel")}
+            {...form.getInputProps("aspectRatioReel")}
           />
 
           <Divider />
@@ -335,6 +376,23 @@ export function GenerationSettingsForm({
 // "지금 env의 무엇이 적용 중인지"를 잃기 때문이다.
 function sourceNote(source: SettingSource): string | undefined {
   return source === "env" ? "env 값 사용 중" : undefined;
+}
+
+// 서버의 DEFAULT_ASPECT_RATIOS와 같은 값. 비웠을 때 무엇이 적용되는지 입력란에
+// 미리 보여주려고 둔다.
+const DEFAULT_ASPECT_RATIO_HINT = {
+  feed: "4:5",
+  story: "9:16",
+  reel: "9:16",
+} as const;
+
+function ratioNote(effective: {
+  value: string;
+  source: "db" | "default";
+}): string {
+  return effective.source === "default"
+    ? `기본값 ${effective.value} 사용 중 — 비워두면 유지됩니다`
+    : `적용 중: ${effective.value}`;
 }
 
 // 기획 LLM을 상속하는 섹션(채팅·평가)의 키 상태. 전용 키 > 상속 > 없음 순으로

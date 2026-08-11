@@ -14,6 +14,9 @@ export type SettingsFormValues = {
   evaluatorLlmApiKey: string;
   evaluatorLlmApiUrl: string;
   evaluatorLlmModel: string;
+  aspectRatioFeed: string;
+  aspectRatioStory: string;
+  aspectRatioReel: string;
 };
 
 // 모델·URL은 비우면 null(상위 값 복귀), API 키는 비우면 생략(유지)한다.
@@ -38,6 +41,9 @@ export function toSettingsUpdate(
     ...secret("evaluatorLlmApiKey", values.evaluatorLlmApiKey),
     evaluatorLlmApiUrl: values.evaluatorLlmApiUrl.trim() || null,
     evaluatorLlmModel: values.evaluatorLlmModel.trim() || null,
+    aspectRatioFeed: values.aspectRatioFeed.trim() || null,
+    aspectRatioStory: values.aspectRatioStory.trim() || null,
+    aspectRatioReel: values.aspectRatioReel.trim() || null,
   };
 }
 

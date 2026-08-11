@@ -62,6 +62,19 @@ export type GenerationSettingsView = {
       model: SettingSource;
     };
   };
+  // 게시 포맷별 생성 이미지 종횡비. source가 "default"면 저장한 적이 없어
+  // 코드 기본값을 쓰는 중이다.
+  aspectRatios: {
+    overrides: {
+      feed: string | null;
+      story: string | null;
+      reel: string | null;
+    };
+    effective: Record<
+      "feed" | "story" | "reel",
+      { value: string; source: "db" | "default" }
+    >;
+  };
   // enabledSource가 "env"면 아직 UI에서 저장한 적이 없어 env 기본값을 쓰는 중.
   worker: {
     enabled: boolean;
@@ -95,6 +108,10 @@ export type GenerationSettingsUpdate = {
   // 워커 자동 루프 — null = env 기본값으로 복귀.
   workerEnabled?: boolean | null;
   evaluationWorkerEnabled?: boolean | null;
+  // 종횡비 — null = 코드 기본값으로 복귀.
+  aspectRatioFeed?: string | null;
+  aspectRatioStory?: string | null;
+  aspectRatioReel?: string | null;
 };
 
 export type ConnectionTestTarget = "image" | "planner" | "chat" | "evaluator";

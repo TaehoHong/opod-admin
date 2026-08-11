@@ -35,7 +35,38 @@ export const GENERATION_SETTING_KEYS = {
   // 게이트한다 (env WORKER_ENABLED와 같은 범위).
   workerEnabled: "worker.enabled",
   evaluationWorkerEnabled: "evaluator.workerEnabled",
+  // 생성 이미지 종횡비. 게시 포맷마다 다르므로 캐릭터가 아니라 여기서 정한다 —
+  // 비주얼 프로필에 넣으면 같은 캐릭터의 피드와 스토리가 같은 비율로 나온다.
+  // 미설정이면 아래 DEFAULT_ASPECT_RATIOS를 쓴다 (env 폴백 없음).
+  aspectRatioFeed: "generation.aspectRatioFeed",
+  aspectRatioStory: "generation.aspectRatioStory",
+  aspectRatioReel: "generation.aspectRatioReel",
 } as const;
+
+// 게시 포맷. 초안의 draftType·contentType에서 유도한다.
+export type AspectRatioFormat = "feed" | "story" | "reel";
+
+// 설정하지 않았을 때 쓰는 값. 피드는 인스타그램 세로 표준, 스토리·릴은 전체화면.
+export const DEFAULT_ASPECT_RATIOS: Record<AspectRatioFormat, string> = {
+  feed: "4:5",
+  story: "9:16",
+  reel: "9:16",
+};
+
+// "가로:세로" 형태만 허용한다. 프로바이더에 그대로 전달되는 값이라 형식이
+// 어긋나면 생성 요청 자체가 422로 죽는다.
+export const ASPECT_RATIO_PATTERN = /^\d{1,2}:\d{1,2}$/;
+
+export type ResolvedAspectRatio = {
+  value: string;
+  // "default" = 저장된 값이 없어 코드 기본값을 쓰는 중.
+  source: "db" | "default";
+};
+
+export type ResolvedAspectRatios = Record<
+  AspectRatioFormat,
+  ResolvedAspectRatio
+>;
 
 type GenerationSettingField = keyof typeof GENERATION_SETTING_KEYS;
 
@@ -242,6 +273,27 @@ export class GenerationSettingsService {
     return {
       generation: toggle(pick(db, env, "workerEnabled")),
       evaluation: toggle(pick(db, env, "evaluationWorkerEnabled")),
+    };
+  }
+
+  // 포맷별 실효 종횡비. 워커가 잡마다 호출하므로 설정 변경이 재시작 없이 먹는다.
+  async resolveAspectRatios(): Promise<ResolvedAspectRatios> {
+    const db = await this.getSettings();
+    const resolve = (
+      field: "aspectRatioFeed" | "aspectRatioStory" | "aspectRatioReel",
+      format: AspectRatioFormat,
+    ): ResolvedAspectRatio => {
+      const stored = db[field]?.trim();
+      // 저장돼 있어도 형식이 깨졌으면 기본값으로 떨어진다. 잘못된 값을 그대로
+      // 보내 생성 전체를 실패시키는 것보다 낫다.
+      return stored && ASPECT_RATIO_PATTERN.test(stored)
+        ? { value: stored, source: "db" }
+        : { value: DEFAULT_ASPECT_RATIOS[format], source: "default" };
+    };
+    return {
+      feed: resolve("aspectRatioFeed", "feed"),
+      story: resolve("aspectRatioStory", "story"),
+      reel: resolve("aspectRatioReel", "reel"),
     };
   }
 

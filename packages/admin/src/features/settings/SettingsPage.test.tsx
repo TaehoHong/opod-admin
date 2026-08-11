@@ -55,6 +55,14 @@ function settingsView(
       sources: { apiKey: "none", editModel: "none", t2iModel: "none" },
       plannerSources: { apiUrl: "none", apiKey: "none", model: "none" },
     },
+    aspectRatios: {
+      overrides: { feed: null, story: null, reel: null },
+      effective: {
+        feed: { value: "4:5", source: "default" },
+        story: { value: "9:16", source: "default" },
+        reel: { value: "9:16", source: "default" },
+      },
+    },
     worker: {
       enabled: false,
       enabledSource: "none",

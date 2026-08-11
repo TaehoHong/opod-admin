@@ -22,6 +22,9 @@ const empty: SettingsFormValues = {
   evaluatorLlmApiKey: "",
   evaluatorLlmApiUrl: "",
   evaluatorLlmModel: "",
+  aspectRatioFeed: "",
+  aspectRatioStory: "",
+  aspectRatioReel: "",
 };
 
 describe("toSettingsUpdate", () => {
@@ -36,6 +39,10 @@ describe("toSettingsUpdate", () => {
       agentEmbeddingModel: null,
       evaluatorLlmApiUrl: null,
       evaluatorLlmModel: null,
+      // 비운 종횡비는 삭제 = 코드 기본값 복귀다. 생략(유지)이 아니다.
+      aspectRatioFeed: null,
+      aspectRatioStory: null,
+      aspectRatioReel: null,
     });
   });
 
@@ -48,6 +55,7 @@ describe("toSettingsUpdate", () => {
         agentLlmApiKey: "sk-chat",
         evaluatorLlmApiKey: "sk-eval",
         llmModel: " gpt-5-mini ",
+        aspectRatioFeed: " 4:5 ",
       }),
     ).toEqual({
       falApiKey: "fal-secret",
@@ -63,6 +71,9 @@ describe("toSettingsUpdate", () => {
       evaluatorLlmApiKey: "sk-eval",
       evaluatorLlmApiUrl: null,
       evaluatorLlmModel: null,
+      aspectRatioFeed: "4:5",
+      aspectRatioStory: null,
+      aspectRatioReel: null,
     });
   });
 });

@@ -139,6 +139,11 @@ function makeService(
   }),
   downloadBytes = jest.fn().mockResolvedValue(Buffer.from("png-bytes")),
   signReferenceUrl: ((storageKey: string) => Promise<string>) | null = null,
+  aspectRatios: Record<"feed" | "story" | "reel", string> = {
+    feed: "4:5",
+    story: "9:16",
+    reel: "9:16",
+  },
 ) {
   const pair =
     "t2i" in providers && "edit" in providers
@@ -154,6 +159,8 @@ function makeService(
     () => Promise.resolve(),
     downloadBytes,
     signReferenceUrl,
+    undefined,
+    () => Promise.resolve(aspectRatios),
   );
   return { service, store, downloadBytes };
 }
@@ -206,7 +213,8 @@ describe("GenerationWorkerService", () => {
       negativePrompt: "blurry",
       referenceImageUrls: ["https://cdn.local/reference.png"],
       candidateCount: 3,
-      extraParams: undefined,
+      // 포맷 종횡비는 항상 실린다 — 초안이 없으면 피드 기본값.
+      extraParams: { aspect_ratio: "4:5" },
     });
     expect(downloadBytes).toHaveBeenCalledTimes(2);
     // 후보 두 장을 저장 비용 추정치와 함께 넘긴다.
@@ -648,6 +656,104 @@ describe("GenerationWorkerService", () => {
     );
   });
 
+  // 종횡비를 데이터에만 맡겼더니 아무도 설정하지 않아 전 게시물이 모델 기본값인
+  // 가로(16:9)로 나왔다. 피드에 그대로 쓸 수 없는 이미지가 만들어진다.
+  it.each([
+    ["post", "feed", "4:5"],
+    ["story", "feed", "9:16"],
+    ["post", "reel", "9:16"],
+  ])(
+    "sends the %s/%s aspect ratio (%s) when nothing overrides it",
+    async (draftType, contentType, expected) => {
+      const repository = repositoryFake();
+      repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+      repository.findForProcessing.mockResolvedValue(
+        claimedJob({ draft: { draftType, contentType, location: null } }),
+      );
+      const provider = providerMock([
+        { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+      ]);
+      const { service } = makeService(repository, provider);
+
+      await service.tick();
+
+      expect(provider.submit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          extraParams: expect.objectContaining({ aspect_ratio: expected }),
+        }),
+      );
+    },
+  );
+
+  // 스토리 초안도 contentType 기본값은 feed다. contentType을 먼저 보면 스토리가
+  // 4:5로 나가 화면 위아래가 잘린다.
+  it("treats a story draft as a story even when its content type is feed", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        draft: { draftType: "story", contentType: "feed", location: null },
+      }),
+    );
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extraParams: expect.objectContaining({ aspect_ratio: "9:16" }),
+      }),
+    );
+  });
+
+  // 포맷 비율은 기본값이므로 명시적으로 설정한 값이 이겨야 한다. 반대면 잡별
+  // 재생성에서 비율을 바꿀 수 없다.
+  it("lets an explicit job parameter override the format aspect ratio", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        paramsJson: { aspect_ratio: "1:1" },
+        draft: { draftType: "post", contentType: "feed", location: null },
+      }),
+    );
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extraParams: expect.objectContaining({ aspect_ratio: "1:1" }),
+      }),
+    );
+  });
+
+  // 비주얼 프로필 테스트 생성은 초안이 없다. 비율을 안 보내면 인물 확인용
+  // 이미지가 가로로 나와 쓸모가 없다.
+  it("falls back to the feed ratio for jobs without a draft", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(claimedJob({ draft: null }));
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extraParams: expect.objectContaining({ aspect_ratio: "4:5" }),
+      }),
+    );
+  });
+
   it("sends anchors plus the shot's selected references", async () => {
     const reference = (mediaId: string) => ({
       mediaId,
@@ -832,7 +938,7 @@ describe("GenerationWorkerService", () => {
 
     expect(provider.submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        extraParams: { seed: 42 },
+        extraParams: { aspect_ratio: "4:5", seed: 42 },
       }),
     );
   });

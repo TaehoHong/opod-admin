@@ -180,6 +180,49 @@ describe("GenerationSettingsService", () => {
     });
   });
 
+  // 종횡비를 아무도 설정하지 않으면 모델이 제 기본값(가로)으로 뽑는다. 코드
+  // 기본값이 없으면 피드에 못 쓰는 이미지가 만들어진다.
+  it("falls back to format defaults when no ratio is stored", async () => {
+    await expect(
+      makeService(repositoryMock()).resolveAspectRatios(),
+    ).resolves.toEqual({
+      feed: { value: "4:5", source: "default" },
+      story: { value: "9:16", source: "default" },
+      reel: { value: "9:16", source: "default" },
+    });
+  });
+
+  it("uses a stored ratio and reports it as db-sourced", async () => {
+    const repository = repositoryMock([
+      { key: "generation.aspectRatioFeed", value: "1:1" },
+    ]);
+
+    await expect(
+      makeService(repository).resolveAspectRatios(),
+    ).resolves.toEqual({
+      feed: { value: "1:1", source: "db" },
+      story: { value: "9:16", source: "default" },
+      reel: { value: "9:16", source: "default" },
+    });
+  });
+
+  // 형식이 깨진 값을 그대로 보내면 프로바이더가 422로 거절해 생성 전체가 죽는다.
+  // 잘못된 설정 하나가 파이프라인을 멈추는 것보다 기본값으로 계속 도는 편이 낫다.
+  it.each(["16x9", "가로세로", "4:", "999:1000"])(
+    "ignores the malformed stored ratio %s",
+    async (value) => {
+      const repository = repositoryMock([
+        { key: "generation.aspectRatioFeed", value },
+      ]);
+
+      await expect(
+        makeService(repository).resolveAspectRatios(),
+      ).resolves.toMatchObject({
+        feed: { value: "4:5", source: "default" },
+      });
+    },
+  );
+
   // 이미지 설정이 없으면 생성은 실패하지만 설정 화면은 떠야 한다 —
   // 여기서 예외가 나가면 admin 설정 페이지 전체가 500이 된다.
   it("reports unconfigured image and planner providers without any key", async () => {

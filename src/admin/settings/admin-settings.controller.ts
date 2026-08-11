@@ -95,6 +95,15 @@ export class AdminSettingsController {
             evaluationWorkerEnabled: toStoredFlag(body.evaluationWorkerEnabled),
           }
         : {}),
+      ...("aspectRatioFeed" in body
+        ? { aspectRatioFeed: body.aspectRatioFeed ?? null }
+        : {}),
+      ...("aspectRatioStory" in body
+        ? { aspectRatioStory: body.aspectRatioStory ?? null }
+        : {}),
+      ...("aspectRatioReel" in body
+        ? { aspectRatioReel: body.aspectRatioReel ?? null }
+        : {}),
     };
     const saved = await this.settings.updateSettings(update);
 
@@ -121,6 +130,7 @@ export class AdminSettingsController {
       toggles,
       names,
       todaySpend,
+      aspectRatios,
     ] = await Promise.all([
       this.settings.resolveProviderSettings(),
       this.settings.resolvePlannerSettings(),
@@ -129,6 +139,7 @@ export class AdminSettingsController {
       this.settings.resolveWorkerToggles(),
       this.settings.resolveProviderNames(),
       this.audit.sumGenerationCostSince(startOfKstDay()),
+      this.settings.resolveAspectRatios(),
     ]);
     const worker = this.config.worker;
     return {
@@ -183,6 +194,16 @@ export class AdminSettingsController {
         plannerProvider: names.planner,
         sources: resolved.sources,
         plannerSources: plannerResolved.sources,
+      },
+      // 포맷별 종횡비. overrides는 저장된 원본(미저장은 null), effective는
+      // 워커가 실제로 쓰는 값이다. source가 "default"면 아직 저장한 적이 없다.
+      aspectRatios: {
+        overrides: {
+          feed: saved.aspectRatioFeed ?? null,
+          story: saved.aspectRatioStory ?? null,
+          reel: saved.aspectRatioReel ?? null,
+        },
+        effective: aspectRatios,
       },
       // 자동 루프 on/off는 DB 소유다. source가 "env"면 아직 UI에서 한 번도
       // 저장하지 않아 env 기본값을 쓰는 중이라는 뜻이다.
