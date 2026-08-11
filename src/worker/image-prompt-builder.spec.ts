@@ -44,6 +44,12 @@ describe("imageModelFamily", () => {
       "hard frame boundary",
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "top image edge crosses the base of the neck",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "opaque phone-and-hand silhouette",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
       "lock one exact wardrobe construction",
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
@@ -142,6 +148,12 @@ describe("buildImagePromptBuilderUserPrompt", () => {
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "non-negotiable frame-boundary instruction",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "positive top-edge and bottom-edge landmarks",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "extend from the hairline through below the chin",
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "derive one locked wardrobe construction",
