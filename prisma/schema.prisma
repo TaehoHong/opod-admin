@@ -31,6 +31,16 @@ enum MessageSenderType {
   @@schema("opod")
 }
 
+enum MessageReplyJobStatus {
+  queued
+  running
+  completed
+  failed
+
+  @@map("message_reply_job_status")
+  @@schema("opod")
+}
+
 enum CreditKind {
   free
   paid
@@ -577,6 +587,7 @@ model MessageConversation {
   user        User      @relation(fields: [userId], references: [id])
   character   Character @relation(fields: [characterId], references: [id])
   messages    Message[]
+  replyJobs   MessageReplyJob[]
 
   @@unique([userId, characterId])
   @@map("message_conversations")
@@ -589,10 +600,53 @@ model Message {
   senderType     MessageSenderType   @map("sender_type")
   body           String
   createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  // 이 메시지가 속한 답변 작업. 사용자 메시지와 그 답변이 같은 작업을 가리킨다.
+  // N:1인 이유는 나중에 발화 묶음(연속 메시지 1회 답변)을 되살릴 때 스키마를
+  // 바꾸지 않기 위해서다. 비동기 전환 이전 메시지는 null이다.
+  replyJobId     String?             @map("reply_job_id") @db.Uuid
   conversation   MessageConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  replyJob       MessageReplyJob?    @relation(fields: [replyJobId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
+  @@index([replyJobId])
   @@map("messages")
+  @@schema("opod")
+}
+
+// DM 답변 생성의 영속 작업. POST /messages는 이 행까지만 만들고 반환하며,
+// worker가 집어서 opod-agent를 호출한다. 프로세스가 죽어도 작업이 남아야 답변이
+// 유실되지 않으므로 진행 상태를 메모리가 아니라 여기에 둔다.
+model MessageReplyJob {
+  id             String                @id @default(uuid(7)) @db.Uuid
+  conversationId String                @map("conversation_id") @db.Uuid
+  // 이 작업을 유발한 사용자 메시지 ID. Agent 요청 헤더의 turn 키와 같은 값이라
+  // 재시도해도 Agent 쪽에서 같은 턴으로 보인다.
+  turnId         String                @unique @map("turn_id") @db.Uuid
+  status         MessageReplyJobStatus @default(queued)
+  // chat_reply 예약 참조. 작업이 직접 capture/release하므로 예약에 TTL이 없다.
+  reservationReference String?          @map("reservation_reference")
+  // 처리 순서 키이자 재시도 지연. 재시도는 이 값을 현재 시각으로 다시 찍어
+  // 대화의 마지막 순서로 보낸다.
+  readyAt        DateTime              @default(now()) @map("ready_at") @db.Timestamptz(6)
+  attemptCount   Int                   @default(0) @map("attempt_count")
+  // 워커 claim 시 설정. 만료된 running 작업은 다음 tick이 회수한다.
+  leaseExpiresAt DateTime?             @map("lease_expires_at") @db.Timestamptz(6)
+  startedAt      DateTime?             @map("started_at") @db.Timestamptz(6)
+  // 최초 처리 시작 기준 15분. 넘기면 재시도하지 않고 실패로 닫는다.
+  deadlineAt     DateTime?             @map("deadline_at") @db.Timestamptz(6)
+  completedAt    DateTime?             @map("completed_at") @db.Timestamptz(6)
+  failedAt       DateTime?             @map("failed_at") @db.Timestamptz(6)
+  // 내부 분류만 저장한다. 사용자에게는 노출하지 않는다.
+  failureReason  String?               @map("failure_reason")
+  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  conversation   MessageConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  messages       Message[]
+
+  @@index([status, readyAt])
+  @@index([conversationId, status])
+  @@index([status, leaseExpiresAt])
+  @@map("message_reply_jobs")
   @@schema("opod")
 }
 
@@ -881,7 +935,10 @@ model CreditReservation {
   amount     Int
   status     CreditReservationStatus @default(reserved)
   reference  String                  @unique
-  expiresAt  DateTime                @map("expires_at") @db.Timestamptz(6)
+  // null이면 소유한 작업이 수명을 관리하는 예약이다. DM 답변 작업처럼 대기·재시도
+  // 시간이 TTL보다 길 수 있는 경우, 독립 TTL을 두면 답변 성공과 예약 만료가
+  // 경합한다. 가용 잔액에는 만료 예약과 달리 계속 포함된다.
+  expiresAt  DateTime?               @map("expires_at") @db.Timestamptz(6)
   createdAt  DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
   user       User                    @relation(fields: [userId], references: [id])
