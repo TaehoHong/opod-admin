@@ -194,6 +194,12 @@ describe("buildImagePromptBuilderUserPrompt", () => {
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "override contradictory handheld capture metadata",
     );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "Final reference-edit preflight",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "forbidden examples include Korean woman, any age, curvy-slim",
+    );
   });
 
   it("includes model, appearance, style, and numbered scenes", () => {
