@@ -43,6 +43,12 @@ describe("imageModelFamily", () => {
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
       "hard frame boundary",
     );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "lock one exact wardrobe construction",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "Repeat that construction word-for-word",
+    );
   });
 });
 
@@ -136,6 +142,9 @@ describe("buildImagePromptBuilderUserPrompt", () => {
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "non-negotiable frame-boundary instruction",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "derive one locked wardrobe construction",
     );
   });
 
