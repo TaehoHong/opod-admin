@@ -8,7 +8,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../domain/database/prisma.service";
 
-export type DraftEvaluationKind = "plan" | "prompt";
+export type DraftEvaluationKind = "plan" | "prompt" | "image";
 
 export type ClaimedEvaluation = {
   evaluationId: string;
@@ -42,6 +42,27 @@ export type PromptEvaluationSource = {
   caption: string;
   conceptJson: unknown;
   jobs: PromptEvaluationJob[];
+};
+
+export type ImageEvaluationSource = PromptEvaluationSource & {
+  jobs: (PromptEvaluationJob & {
+    status: string;
+    outputs: {
+      mediaId: string;
+      candidateIndex: number;
+      media: {
+        url: string;
+        storageKey: string | null;
+        contentType: string | null;
+      };
+    }[];
+  })[];
+  referenceMedia: {
+    id: string;
+    url: string;
+    storageKey: string | null;
+    contentType: string | null;
+  }[];
 };
 
 @Injectable()
@@ -80,10 +101,40 @@ export class EvaluationRepository {
               WHERE j.draft_id = d.id AND j.prompt <> ''
             )`
           : Prisma.empty;
+      const imageGate =
+        kind === "image"
+          ? Prisma.sql`AND EXISTS (
+              SELECT 1
+              FROM opod.generation_jobs j
+              JOIN opod.generation_job_outputs o ON o.job_id = j.id
+              WHERE j.draft_id = d.id AND j.status = 'completed'
+            )
+            AND EXISTS (
+              SELECT 1 FROM opod.character_action_logs ready
+              WHERE ready.target_table = 'post_drafts'
+                AND ready.target_id = d.id
+                AND ready.action_type = 'DRAFT_READY_FOR_REVIEW'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM opod.character_action_logs regenerated
+              WHERE regenerated.target_table = 'post_drafts'
+                AND regenerated.target_id = d.id
+                AND regenerated.action_type = 'DRAFT_SHOT_REGENERATED'
+                AND regenerated.created_at > (
+                  SELECT max(ready.created_at)
+                  FROM opod.character_action_logs ready
+                  WHERE ready.target_table = 'post_drafts'
+                    AND ready.target_id = d.id
+                    AND ready.action_type = 'DRAFT_READY_FOR_REVIEW'
+                )
+            )`
+          : Prisma.empty;
       const relevantAction =
         kind === "plan"
           ? Prisma.sql`l.action_type = 'DRAFT_PLANNED'`
-          : Prisma.sql`l.action_type IN (
+          : kind === "image"
+            ? Prisma.sql`l.action_type = 'DRAFT_READY_FOR_REVIEW'`
+            : Prisma.sql`l.action_type IN (
               'DRAFT_PLANNED',
               'DRAFT_PROMPTS_BUILT',
               'DRAFT_SHOT_REGENERATED'
@@ -97,6 +148,7 @@ export class EvaluationRepository {
         WHERE d.draft_type = 'post'
           AND d.concept_json ? 'plan'
           ${promptGate}
+          ${imageGate}
           AND NOT EXISTS (
             SELECT 1 FROM opod.draft_evaluations e
             WHERE e.draft_id = d.id
@@ -242,6 +294,76 @@ export class EvaluationRepository {
     };
   }
 
+  async loadImageSource(
+    draftId: string,
+  ): Promise<ImageEvaluationSource | null> {
+    const draft = await this.prisma.postDraft.findUnique({
+      where: { id: draftId },
+      select: {
+        id: true,
+        caption: true,
+        conceptJson: true,
+        jobs: {
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: {
+            id: true,
+            sortOrder: true,
+            prompt: true,
+            paramsJson: true,
+            createdAt: true,
+            status: true,
+            outputs: {
+              orderBy: { candidateIndex: "asc" },
+              select: {
+                mediaId: true,
+                candidateIndex: true,
+                media: {
+                  select: {
+                    url: true,
+                    storageKey: true,
+                    contentType: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!draft) return null;
+
+    const referenceIds = [
+      ...new Set(
+        draft.jobs.flatMap((job) => {
+          const params = isJsonRecord(job.paramsJson);
+          const shot = isJsonRecord(params?._shot);
+          return [
+            ...jsonStrings(shot?.identityReferenceMediaIds),
+            ...jsonStrings(shot?.environmentReferenceMediaIds),
+          ];
+        }),
+      ),
+    ];
+    const referenceMedia = referenceIds.length
+      ? await this.prisma.media.findMany({
+          where: { id: { in: referenceIds } },
+          select: {
+            id: true,
+            url: true,
+            storageKey: true,
+            contentType: true,
+          },
+        })
+      : [];
+    return {
+      draftId: draft.id,
+      caption: draft.caption,
+      conceptJson: draft.conceptJson,
+      jobs: draft.jobs,
+      referenceMedia,
+    };
+  }
+
   async complete(input: {
     evaluationId: string;
     evaluatorName: string;
@@ -353,4 +475,16 @@ export class EvaluationRepository {
   findReport(id: string) {
     return this.prisma.evaluationReport.findUnique({ where: { id } });
   }
+}
+
+function isJsonRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function jsonStrings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }

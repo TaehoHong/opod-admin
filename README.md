@@ -32,7 +32,7 @@ compose files in this repo or overwrite them during deploy.
 ./deploy.sh
 ```
 
-This builds the Linux image locally, uploads it with the server deploy script,
-and restarts only the `admin` service. Keep the 7100 listener, TLS certificate
-paths, database URL, volumes, and shared Docker network in the server-local
-`~/opod-admin/docker-compose.yml` and `.env`.
+This sends the local build context to the VPS Docker daemon over SSH, builds the
+Linux/amd64 image natively on the VPS, and restarts only the `admin` service.
+Keep the 7100 listener, TLS certificate paths, database URL, volumes, and shared
+Docker network in the server-local `~/opod-admin/docker-compose.yml` and `.env`.

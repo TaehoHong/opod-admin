@@ -679,6 +679,7 @@ function GenerationStage({
   const navigate = useNavigate();
   const shots = draft.shots ?? [];
   const evaluation = latestEvaluation(evaluations, "prompt");
+  const imageEvaluation = latestEvaluation(evaluations, "image");
   const aggregate = useDraftMutation(draft.id, () =>
     runDraftStage(draft.id, "aggregate"),
   );
@@ -698,6 +699,7 @@ function GenerationStage({
           draft={draft}
           shot={shot}
           evaluation={evaluation}
+          imageEvaluation={imageEvaluation}
         />
       ))}
       {aggregate.isError ? <MutationError error={aggregate.error} /> : null}
@@ -729,6 +731,7 @@ function ReviewStage({
 }) {
   const shots = draft.shots ?? [];
   const promptEvaluation = latestEvaluation(evaluations, "prompt");
+  const imageEvaluation = latestEvaluation(evaluations, "image");
   const approve = useDraftMutation(draft.id, () =>
     runDraftStage(draft.id, "approve"),
   );
@@ -742,6 +745,7 @@ function ReviewStage({
       description="게시 후보, 캡션과 일정을 확인하고 승인 또는 반려합니다."
     >
       <EvaluationChips evaluation={promptEvaluation} />
+      <EvaluationChips evaluation={imageEvaluation} />
       {draft.status === "needs_review" && !ready ? (
         <Alert color="attention">
           게시 이미지 {selected}/{shots.length} 선택 · 컷마다 한 장을 선택해
@@ -754,6 +758,7 @@ function ReviewStage({
           draft={draft}
           shot={shot}
           evaluation={promptEvaluation}
+          imageEvaluation={imageEvaluation}
         />
       ))}
       {draft.status === "needs_review" || draft.status === "approved" ? (

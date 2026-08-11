@@ -30,10 +30,12 @@ export function ShotCard({
   draft,
   shot,
   evaluation,
+  imageEvaluation,
 }: {
   draft: Draft;
   shot: DraftShot;
   evaluation?: DraftEvaluation;
+  imageEvaluation?: DraftEvaluation;
 }) {
   const canRegenerate =
     draft.status === "needs_review" || draft.status === "failed";
@@ -100,7 +102,7 @@ export function ShotCard({
           </Text>
         )}
 
-        <ShotBody draft={draft} shot={shot} />
+        <ShotBody draft={draft} shot={shot} imageEvaluation={imageEvaluation} />
 
         {canRegenerate && shot.status !== "draft" ? (
           <Group>
@@ -238,7 +240,15 @@ function GenerationTracePanel({ trace }: { trace: GenerationTrace }) {
   );
 }
 
-function ShotBody({ draft, shot }: { draft: Draft; shot: DraftShot }) {
+function ShotBody({
+  draft,
+  shot,
+  imageEvaluation,
+}: {
+  draft: Draft;
+  shot: DraftShot;
+  imageEvaluation?: DraftEvaluation;
+}) {
   if (shot.status === "draft") {
     return <GenerateShotForm draft={draft} shot={shot} />;
   }
@@ -272,6 +282,8 @@ function ShotBody({ draft, shot }: { draft: Draft; shot: DraftShot }) {
           draft={draft}
           jobId={shot.jobId}
           output={output}
+          shotSortOrder={shot.sortOrder}
+          imageEvaluation={imageEvaluation}
         />
       ))}
     </SimpleGrid>

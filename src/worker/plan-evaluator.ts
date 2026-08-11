@@ -129,11 +129,9 @@ export function parsePlanEvaluation(raw: string): PlanEvaluationResult {
         (value): value is string => typeof value === "string",
       )
     : [];
-  const overallScore = round2(
-    PLAN_EVAL_DIMENSIONS.reduce(
-      (sum, dimension) => sum + scores[dimension].score,
-      0,
-    ) / PLAN_EVAL_DIMENSIONS.length,
+  const overallScore = strictOverallScore(
+    PLAN_EVAL_DIMENSIONS.map((dimension) => scores[dimension].score),
+    issues.length > 0 || suggestions.length > 0,
   );
   return { scores, issues, suggestions, overallScore };
 }
@@ -171,6 +169,21 @@ export function extractJson(raw: string): unknown {
 
 export function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+// 평균이 치명적 저점을 숨기지 못하게 한다. 2점 이하는 생성 전 수정 대상이고,
+// 지적·제안이나 3점이 하나라도 있으면 "준비 완료" 범위(4+)로 올라갈 수 없다.
+export function strictOverallScore(
+  scores: number[],
+  hasIssues: boolean,
+): number {
+  const average = round2(
+    scores.reduce((sum, score) => sum + score, 0) / scores.length,
+  );
+  const lowest = Math.min(...scores);
+  if (lowest <= 2) return Math.min(average, 2.99);
+  if (hasIssues || lowest === 3) return Math.min(average, 3.99);
+  return average;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

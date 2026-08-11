@@ -102,6 +102,7 @@ function DraftTimeline({
   );
   const planEvaluation = latestEvaluation(evaluations, "plan");
   const promptEvaluation = latestEvaluation(evaluations, "prompt");
+  const imageEvaluation = latestEvaluation(evaluations, "image");
 
   return (
     <Paper p="md" component="section">
@@ -153,8 +154,13 @@ function DraftTimeline({
             mode={mode}
             stage={stage}
             evaluation={promptEvaluation}
+            imageEvaluation={imageEvaluation}
           />
-          <StageReview draft={draft} stage={stage} />
+          <StageReview
+            draft={draft}
+            stage={stage}
+            imageEvaluation={imageEvaluation}
+          />
           <StagePublish draft={draft} stage={stage} />
         </Stack>
 
@@ -292,12 +298,14 @@ function StageShots({
   mode,
   stage,
   evaluation,
+  imageEvaluation,
 }: {
   draft: Draft;
   concept: DraftConcept;
   mode: string;
   stage: StageMutation;
   evaluation?: DraftEvaluation;
+  imageEvaluation?: DraftEvaluation;
 }) {
   const shots = draft.shots ?? [];
   const planShots = concept.plan?.shots ?? [];
@@ -365,6 +373,7 @@ function StageShots({
               draft={draft}
               shot={shot}
               evaluation={evaluation}
+              imageEvaluation={imageEvaluation}
             />
           ))}
         </Stack>
@@ -373,7 +382,15 @@ function StageShots({
   );
 }
 
-function StageReview({ draft, stage }: { draft: Draft; stage: StageMutation }) {
+function StageReview({
+  draft,
+  stage,
+  imageEvaluation,
+}: {
+  draft: Draft;
+  stage: StageMutation;
+  imageEvaluation?: DraftEvaluation;
+}) {
   const shots = draft.shots ?? [];
   const reviewable = draft.status === "needs_review";
   const editable = reviewable || draft.status === "approved";
@@ -433,6 +450,7 @@ function StageReview({ draft, stage }: { draft: Draft; stage: StageMutation }) {
       action={action}
     >
       <Stack gap="sm">
+        <EvaluationChips evaluation={imageEvaluation} />
         {reviewable && !selectionComplete ? (
           <Alert color="attention">
             게시 이미지 {selectedShots}/{shots.length} 선택 · 컷마다 한 장을

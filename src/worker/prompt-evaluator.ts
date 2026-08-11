@@ -22,7 +22,7 @@ import {
 import {
   DimensionScore,
   extractJson,
-  round2,
+  strictOverallScore,
   validateScore,
 } from "./plan-evaluator";
 
@@ -108,6 +108,7 @@ export function resolvePromptEvaluator(
       return parsePromptEvaluation(
         content,
         input.shots.map((shot) => shot.sortOrder),
+        input.shots.some((shot) => shot.lintIssues.length > 0),
       );
     },
   };
@@ -117,6 +118,7 @@ export function resolvePromptEvaluator(
 export function parsePromptEvaluation(
   raw: string,
   expectedSortOrders: number[],
+  hasLintIssues = false,
 ): PromptEvaluationResult {
   const parsed = extractJson(raw);
   if (!isRecord(parsed) || !Array.isArray(parsed.shots)) {
@@ -171,12 +173,13 @@ export function parsePromptEvaluation(
       (dimension) => shot.scores[dimension].score,
     ),
   );
-  const overallScore = round2(
-    [...dimensionScores, crossShot.score].reduce(
-      (sum, score) => sum + score,
-      0,
-    ) /
-      (dimensionScores.length + 1),
+  const overallScore = strictOverallScore(
+    [...dimensionScores, crossShot.score],
+    hasLintIssues ||
+      shots.some(
+        (shot) => shot.issues.length > 0 || shot.suggestions.length > 0,
+      ) ||
+      crossShot.issues.length > 0,
   );
   return { shots, crossShot, overallScore };
 }

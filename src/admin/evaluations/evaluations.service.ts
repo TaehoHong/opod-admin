@@ -13,7 +13,7 @@ const LOW_SCORE = 2;
 
 type ScoreSample = {
   draftId: string;
-  kind: "plan" | "prompt";
+  kind: "plan" | "prompt" | "image";
   dimension: string;
   score: number;
 };
@@ -163,6 +163,7 @@ function summarizeLanguage(
     byKind: {
       plan: rows.filter((row) => row.kind === "plan").length,
       prompt: rows.filter((row) => row.kind === "prompt").length,
+      image: rows.filter((row) => row.kind === "image").length,
     },
     dimensions: Object.fromEntries(
       [...dimensions.entries()].map(([dimension, values]) => [
@@ -204,7 +205,7 @@ function scoreSamples(
 }
 
 function scoresFromJson(
-  kind: "plan" | "prompt",
+  kind: "plan" | "prompt" | "image",
   value: unknown,
 ): { dimension: string; score: number }[] {
   if (!isRecord(value)) return [];
@@ -212,11 +213,18 @@ function scoresFromJson(
     return isRecord(value.scores) ? scoresFromRecord(value.scores) : [];
   }
   const shots = Array.isArray(value.shots) ? value.shots : [];
-  const shotScores = shots.flatMap((shot) =>
-    isRecord(shot) && isRecord(shot.scores)
-      ? scoresFromRecord(shot.scores)
-      : [],
-  );
+  const shotScores = shots.flatMap((shot) => {
+    if (!isRecord(shot)) return [];
+    if (kind === "image") {
+      const candidates = Array.isArray(shot.candidates) ? shot.candidates : [];
+      return candidates.flatMap((candidate) =>
+        isRecord(candidate) && isRecord(candidate.scores)
+          ? scoresFromRecord(candidate.scores)
+          : [],
+      );
+    }
+    return isRecord(shot.scores) ? scoresFromRecord(shot.scores) : [];
+  });
   const crossShot = isRecord(value.crossShot)
     ? value.crossShot.score
     : undefined;
