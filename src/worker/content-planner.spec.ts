@@ -73,6 +73,12 @@ describe("buildPlannerUserPrompt", () => {
     expect(PLANNER_SYSTEM_PROMPT).toContain(
       "background palette, and light most closely match",
     );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "Apply reference ordering as a hard filter",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "keep the complete face and chin outside the top frame",
+    );
   });
 
   it("assembles personas, memories, and recent captions", () => {
