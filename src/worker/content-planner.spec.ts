@@ -65,7 +65,13 @@ describe("buildPlannerUserPrompt", () => {
       "do not place the top frame edge at the collarbones or shoulders",
     );
     expect(PLANNER_SYSTEM_PROMPT).toContain(
-      "lower edge extends below the jaw-neck junction",
+      "normal handheld smartphone is not a reliable hard-privacy mask",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "Never call that shot handheld or a handheld mirror selfie",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "background palette, and light most closely match",
     );
   });
 

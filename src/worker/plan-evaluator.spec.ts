@@ -1,5 +1,8 @@
 import { parsePlanEvaluation } from "./plan-evaluator";
-import { PLAN_EVAL_DIMENSIONS } from "../../prompts/plan-evaluator";
+import {
+  PLAN_EVAL_DIMENSIONS,
+  PLAN_EVALUATOR_SYSTEM_PROMPT,
+} from "../../prompts/plan-evaluator";
 
 // 파서가 느슨하면 오염된 평가(차원 누락·범위 밖 점수·사유 없는 점수)가
 // DB와 오프라인 집계에 유입된다 — 거절 규칙이 보호 대상 행동이다.
@@ -79,6 +82,17 @@ describe("parsePlanEvaluation", () => {
   it("JSON이 아니면 거절한다", () => {
     expect(() => parsePlanEvaluation("평가 결과: 좋음")).toThrow(
       /not valid JSON/,
+    );
+  });
+});
+
+describe("plan evaluator instructions", () => {
+  it("does not require an unavailable catalog location", () => {
+    expect(PLAN_EVALUATOR_SYSTEM_PROMPT).toContain(
+      "Do not penalize locationId being null",
+    );
+    expect(PLAN_EVALUATOR_SYSTEM_PROMPT).toContain(
+      "when a suitable catalog location is actually available",
     );
   });
 });

@@ -44,7 +44,7 @@ describe("imageModelFamily", () => {
       "hard frame boundary",
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
-      "do not use a boundary at the neck, collarbones, or shoulders",
+      "visibly cuts through the upper garment cups below the shoulders",
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
       "opaque phone-and-hand silhouette",
@@ -63,6 +63,12 @@ describe("imageModelFamily", () => {
     );
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
       "non-identity artifacts",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "fixed self-timer photograph, never a handheld selfie",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "that garment is outside the final frame",
     );
   });
 });
@@ -174,13 +180,19 @@ describe("buildImagePromptBuilderUserPrompt", () => {
       "relaxed empty hands, arms in the planned pose, and unobstructed clothing",
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
-      "do not restate age ranges or body-analysis details",
+      "mandatory reference-role sentence is the complete identity instruction",
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "Never exclude the subject's arms, forearms, or empty hands",
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "Do not invent missing material, seam placement, strap width",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "mandatory reference-role sentence is the complete identity instruction",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "override contradictory handheld capture metadata",
     );
   });
 
