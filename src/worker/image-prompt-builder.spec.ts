@@ -55,6 +55,9 @@ describe("imageModelFamily", () => {
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
       "Repeat that construction word-for-word",
     );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "operating hand, forearm, chin, face, and hair completely above",
+    );
   });
 });
 
@@ -157,6 +160,9 @@ describe("buildImagePromptBuilderUserPrompt", () => {
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "derive one locked wardrobe construction",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "must not cause an excluded phone or hand to be rendered",
     );
   });
 

@@ -45,6 +45,13 @@ describe("buildPlannerUserPrompt", () => {
     expect(PLANNER_SYSTEM_PROMPT).toContain(
       "do not invent a conflicting construction",
     );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "shared reference as the first identity-and-wardrobe anchor",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "completely above the top frame edge",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain("analysis-only");
   });
 
   it("assembles personas, memories, and recent captions", () => {
