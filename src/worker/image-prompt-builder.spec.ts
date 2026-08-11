@@ -58,6 +58,9 @@ describe("imageModelFamily", () => {
     expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
       "operating hand, forearm, chin, face, and hair completely above",
     );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "non-identity artifacts",
+    );
   });
 });
 
@@ -163,6 +166,9 @@ describe("buildImagePromptBuilderUserPrompt", () => {
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "must not cause an excluded phone or hand to be rendered",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "relaxed empty hands, arms in the planned pose, and unobstructed clothing",
     );
   });
 

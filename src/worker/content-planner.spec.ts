@@ -52,6 +52,12 @@ describe("buildPlannerUserPrompt", () => {
       "completely above the top frame edge",
     );
     expect(PLANNER_SYSTEM_PROMPT).toContain("analysis-only");
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "neutral, unobstructed, accessory-free shared anchor",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "removing a repeated device or occlusion is less reliable than adding",
+    );
   });
 
   it("assembles personas, memories, and recent captions", () => {
