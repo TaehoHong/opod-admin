@@ -1,4 +1,7 @@
-import { buildPlannerUserPrompt } from "../../prompts/content-planner";
+import {
+  buildPlannerUserPrompt,
+  PLANNER_SYSTEM_PROMPT,
+} from "../../prompts/content-planner";
 import {
   createLlmContentPlanner,
   parseContentPlan,
@@ -32,6 +35,18 @@ describe("resolveContentPlanner", () => {
 });
 
 describe("buildPlannerUserPrompt", () => {
+  it("requires shot-specific reference matching and evidence-based wardrobe continuity", () => {
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "Match references shot by shot, not once for the whole post",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "repeat the same wording in every shots.scene",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "do not invent a conflicting construction",
+    );
+  });
+
   it("assembles personas, memories, and recent captions", () => {
     const prompt = buildPlannerUserPrompt({
       characterName: "한소이",
