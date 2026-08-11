@@ -20,9 +20,10 @@
 1. 변경 위험에 맞는 로컬 검증을 통과한다.
 2. schema 변경이 있다면 `opod-service-backend`의 migration을 먼저
    검증하고 배포한다.
-3. 명시적인 commit의 Linux/amd64 image를 build한다.
-4. image를 운영 서버로 전송한다.
-5. server-local compose/deploy 설정으로 admin service를 재시작한다.
+3. 명시적인 commit의 build context를 SSH로 운영 서버 Docker daemon에
+   전송한다.
+4. 운영 서버에서 Linux/amd64 image를 네이티브로 build한다.
+5. server-local compose 설정으로 admin service를 재시작한다.
 6. 로그인, 주요 화면, DB 연결, media 접근과 worker 상태를 수동으로
    확인한다.
 
