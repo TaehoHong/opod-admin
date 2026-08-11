@@ -19,6 +19,7 @@ export const LLM_LOG_TYPE = {
   // 플래너와 같은 관례로 requestId = draft.id.
   planEvaluate: "admin.plan.evaluate",
   promptEvaluate: "admin.prompt.evaluate",
+  imageEvaluate: "admin.image.evaluate",
 } as const;
 
 export type LlmLogType = (typeof LLM_LOG_TYPE)[keyof typeof LLM_LOG_TYPE];

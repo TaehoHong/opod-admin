@@ -19,6 +19,8 @@ import { resolveImageGenerationProviders } from "./image-generation.provider";
 import { resolveImagePromptBuilder } from "./image-prompt-builder";
 import { resolvePlanEvaluator } from "./plan-evaluator";
 import { resolvePromptEvaluator } from "./prompt-evaluator";
+import { resolveImageEvaluator } from "./image-evaluator";
+import { createMediaBytesReader } from "./reference-captioner";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 
 function storageEnv(config: S3Config | undefined) {
@@ -156,6 +158,13 @@ function storageEnv(config: S3Config | undefined) {
           async () =>
             resolvePromptEvaluator(
               await settings.resolveEvaluatorSettings(),
+              fetch,
+              llmLogs,
+            ),
+          async () =>
+            resolveImageEvaluator(
+              await settings.resolveEvaluatorSettings(),
+              createMediaBytesReader(config.s3),
               fetch,
               llmLogs,
             ),

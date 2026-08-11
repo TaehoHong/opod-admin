@@ -17,6 +17,24 @@ const LABELS: Record<string, string> = {
   plan_fidelity: "기획 충실도",
   reference_alignment: "레퍼런스 정렬",
   cross_shot_consistency: "컷 간 일관성",
+  capture_fidelity: "촬영 충실도",
+  identity_preservation: "정체성 보존",
+  outfit_continuity: "의상 일관성",
+  environment_continuity: "공간 일관성",
+  photorealism: "사진 현실감",
+  artifact_free: "생성 결함",
+};
+
+const HARD_FAILURE_LABELS: Record<string, string> = {
+  face_visibility_mismatch: "얼굴 노출 불일치",
+  crop_or_pose_mismatch: "크롭·포즈 불일치",
+  phone_orientation_mismatch: "휴대폰 방향 불일치",
+  outfit_changed: "의상 변경",
+  identity_or_body_proportion_drift: "정체성·신체 비율 변화",
+  environment_changed: "공간 변경",
+  reflection_or_hand_physics_error: "반사·손 물리 오류",
+  severe_ai_artifact: "심각한 AI 생성 결함",
+  cross_shot_continuity_break: "컷 간 연속성 붕괴",
 };
 
 type ScoreEntry = { dimension: string; score: number; reason?: string };
@@ -24,9 +42,11 @@ type ScoreEntry = { dimension: string; score: number; reason?: string };
 export function EvaluationChips({
   evaluation,
   shotSortOrder,
+  candidateIndex,
 }: {
   evaluation?: DraftEvaluation;
   shotSortOrder?: number;
+  candidateIndex?: number;
 }) {
   const [expanded, setExpanded] = useState<string>();
   if (!evaluation) return null;
@@ -39,18 +59,33 @@ export function EvaluationChips({
     );
   }
 
-  const entries = scoreEntries(evaluation, shotSortOrder);
+  const entries = scoreEntries(evaluation, shotSortOrder, candidateIndex);
   const lint = lintEntries(evaluation, shotSortOrder);
-  if (entries.length === 0 && lint.length === 0) return null;
+  const hardFailures = hardFailureEntries(
+    evaluation,
+    shotSortOrder,
+    candidateIndex,
+  );
+  const verdict = candidateVerdict(evaluation, shotSortOrder, candidateIndex);
+  if (entries.length === 0 && lint.length === 0 && hardFailures.length === 0)
+    return null;
 
   const prefix =
-    shotSortOrder === undefined ? evaluation.kind : `shot-${shotSortOrder}`;
+    shotSortOrder === undefined
+      ? evaluation.kind
+      : `shot-${shotSortOrder}-candidate-${candidateIndex ?? "all"}`;
   return (
     <Stack gap={6}>
       <Group gap={6} wrap="wrap">
         {shotSortOrder === undefined && evaluation.overallScore != null ? (
           <Badge variant="filled" color={scoreColor(evaluation.overallScore)}>
-            LLM 심사 {evaluation.overallScore.toFixed(1)}/5
+            {evaluation.kind === "image" ? "이미지 심사" : "LLM 심사"}{" "}
+            {evaluation.overallScore.toFixed(1)}/5
+          </Badge>
+        ) : null}
+        {verdict ? (
+          <Badge color={verdict === "pass" ? "teal" : "red"}>
+            {verdict === "pass" ? "통과" : "반려"}
           </Badge>
         ) : null}
         {entries.map((entry) => {
@@ -84,6 +119,23 @@ export function EvaluationChips({
             </Badge>
           </UnstyledButton>
         ) : null}
+        {hardFailures.length > 0 ? (
+          <UnstyledButton
+            aria-expanded={expanded === `${prefix}:hard-failures`}
+            aria-label={`하드 실패 ${hardFailures.length}건 내용`}
+            onClick={() =>
+              setExpanded(
+                expanded === `${prefix}:hard-failures`
+                  ? undefined
+                  : `${prefix}:hard-failures`,
+              )
+            }
+          >
+            <Badge variant="filled" color="red">
+              하드 실패 {hardFailures.length}건
+            </Badge>
+          </UnstyledButton>
+        ) : null}
       </Group>
 
       {entries.map((entry) => {
@@ -103,6 +155,15 @@ export function EvaluationChips({
           ))}
         </Stack>
       ) : null}
+      {expanded === `${prefix}:hard-failures` ? (
+        <Stack gap={2}>
+          {hardFailures.map((detail) => (
+            <Text key={detail} size="xs" c="red">
+              {HARD_FAILURE_LABELS[detail] ?? detail}
+            </Text>
+          ))}
+        </Stack>
+      ) : null}
     </Stack>
   );
 }
@@ -110,6 +171,7 @@ export function EvaluationChips({
 function scoreEntries(
   evaluation: DraftEvaluation,
   shotSortOrder?: number,
+  candidateIndex?: number,
 ): ScoreEntry[] {
   const scores = asRecord(evaluation.scoresJson);
   if (!scores) return [];
@@ -120,6 +182,12 @@ function scoreEntries(
     const shot = array(scores.shots).find(
       (value) => asRecord(value)?.sortOrder === shotSortOrder,
     );
+    if (evaluation.kind === "image" && candidateIndex !== undefined) {
+      const candidate = array(asRecord(shot)?.candidates).find(
+        (value) => asRecord(value)?.candidateIndex === candidateIndex,
+      );
+      return entriesFromRecord(asRecord(asRecord(candidate)?.scores));
+    }
     return entriesFromRecord(asRecord(asRecord(shot)?.scores));
   }
   const crossShot = asRecord(scores.crossShot);
@@ -132,6 +200,56 @@ function scoreEntries(
         },
       ]
     : [];
+}
+
+function imageCandidate(
+  evaluation: DraftEvaluation,
+  shotSortOrder?: number,
+  candidateIndex?: number,
+) {
+  if (
+    evaluation.kind !== "image" ||
+    shotSortOrder === undefined ||
+    candidateIndex === undefined
+  )
+    return undefined;
+  const scores = asRecord(evaluation.scoresJson);
+  const shot = array(scores?.shots).find(
+    (value) => asRecord(value)?.sortOrder === shotSortOrder,
+  );
+  return asRecord(
+    array(asRecord(shot)?.candidates).find(
+      (value) => asRecord(value)?.candidateIndex === candidateIndex,
+    ),
+  );
+}
+
+function candidateVerdict(
+  evaluation: DraftEvaluation,
+  shotSortOrder?: number,
+  candidateIndex?: number,
+) {
+  const verdict = imageCandidate(
+    evaluation,
+    shotSortOrder,
+    candidateIndex,
+  )?.verdict;
+  return verdict === "pass" || verdict === "reject" ? verdict : undefined;
+}
+
+function hardFailureEntries(
+  evaluation: DraftEvaluation,
+  shotSortOrder?: number,
+  candidateIndex?: number,
+) {
+  if (evaluation.kind !== "image") return [];
+  if (shotSortOrder === undefined) {
+    const crossShot = asRecord(asRecord(evaluation.scoresJson)?.crossShot);
+    return stringArray(crossShot?.hardFailures);
+  }
+  return stringArray(
+    imageCandidate(evaluation, shotSortOrder, candidateIndex)?.hardFailures,
+  );
 }
 
 function lintEntries(evaluation: DraftEvaluation, shotSortOrder?: number) {

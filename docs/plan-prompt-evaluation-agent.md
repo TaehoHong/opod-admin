@@ -1,6 +1,6 @@
 # 기획·프롬프트 평가 Agent 설계
 
-Status: 1~2차 구현 완료 (2026-08-10 재구성), 3차(개선 제안 생성)는 후속.
+Status: 기획·프롬프트·생성 이미지 평가 구현 완료 (2026-08-11), 개선 제안 자동 생성은 후속.
 
 ## 1. 목적
 
@@ -11,7 +11,7 @@ LLM 평가자가 정량·정성 평가하고, 축적된 평가와 휴먼 검수 
 
 확정된 운영 방식:
 
-- **인라인 평가 (비차단)** — 기획·프롬프트 생성 직후 평가 점수와 사유를
+- **인라인 평가 (비차단)** — 기획·프롬프트 생성 직후와 이미지 생성 완료 후 평가 점수와 사유를
   기록한다. 파이프라인 진행을 막지 않고 검수 화면에 참고 정보로 노출한다.
 - **오프라인 집계** — 축적된 평가 + 휴먼 검수 시그널을 주기적으로 집계해
   실패 패턴을 도출한다.
@@ -24,7 +24,7 @@ LLM 평가자가 정량·정성 평가하고, 축적된 평가와 휴먼 검수 
 flowchart LR
     P["③ 계획 저장<br/>(persistPlan)"]
     G["④ 이미지 생성<br/>(GenerationWorker)"]
-    EV["🔍 EvaluationWorker<br/><b>인라인 평가</b><br/><br/>기획 평가 + 프롬프트 평가<br/>(비동기·비차단)"]
+    EV["🔍 EvaluationWorker<br/><b>인라인 평가</b><br/><br/>기획 + 프롬프트 + 생성 이미지 평가<br/>(비동기·비차단)"]
     R["👤 검수 화면<br/><br/>평가 점수·사유<br/>참고 배지 노출"]
     H["휴먼 시그널<br/><br/>거절·컷 재생성·<br/>캡션 수정·후보 선택"]
     AGG["📈 오프라인 집계<br/><br/>평가 점수 ×<br/>휴먼 시그널 상관 분석"]
@@ -135,7 +135,7 @@ Character.contentLanguage          // 신규 컬럼, 기본 "ko" (기존 행동 
                                    // 캡션 언어·AI 티 팩 선택의 단일 출처
 
 DraftEvaluation
-  id, draftId(FK PostDraft), kind(plan|prompt), attempt,
+  id, draftId(FK PostDraft), kind(plan|prompt|image), attempt,
   status(pending|completed|failed), leaseExpiresAt,
   evaluatorName, rubricVersion, contentLanguage,   // 평가 시점 언어 스냅숏
   overallScore, scoresJson,        // 차원별 점수·사유 (+shots[].jobId 고정)
@@ -165,15 +165,15 @@ TS 유니언 수정만으로 충분하다(마이그레이션 불필요).
 
 | 신규 컴포넌트 | 위치 | 책임 |
 |---|---|---|
-| `PLAN_EVALUATOR_*`, `PROMPT_EVALUATOR_*`, `IMPROVEMENT_REPORTER_*` | `prompts/` | 순수 프롬프트 상수·조립만 (경계 규칙 동일) |
-| `resolvePlanEvaluator` / `resolvePromptEvaluator` | `src/worker/plan-evaluator.ts` 등 | LLM 호출 + JSON 파싱·검증 (resolver closure 패턴) |
+| `PLAN_EVALUATOR_*`, `PROMPT_EVALUATOR_*`, `IMAGE_EVALUATOR_*`, `IMPROVEMENT_REPORTER_*` | `prompts/` | 순수 프롬프트 상수·조립만 (경계 규칙 동일) |
+| `resolvePlanEvaluator` / `resolvePromptEvaluator` / `resolveImageEvaluator` | `src/worker/*-evaluator.ts` | LLM 호출 + JSON 파싱·검증 (resolver closure 패턴) |
 | `EvaluationWorkerService` | `src/worker/evaluation-worker.service.ts` | 폴링 tick: 미평가 draft 클레임 → 평가 → 저장. tick 진입 시 `evaluator.workerEnabled` 게이트 (10절) |
 | `EvaluationRepository` | `src/worker/evaluation.repository.ts` | 클레임(SKIP LOCKED), 평가 저장, 휴먼 시그널 조인 질의 |
 | `EvaluationReportService` | `src/admin/evaluations/` | 오프라인 집계 실행(수동 트리거 or 주간), 리포트 생성·조회 |
 | Admin API | `GET /drafts/:id/evaluations`, `POST/GET /evaluation-reports` | 검수 화면 배지 + 리포트 열람 |
 
 공통 인프라 재사용: `GenerationSettingsService`(DB 설정 > env),
-`LlmLogService`(신규 타입 `admin.plan.evaluate`, `admin.prompt.evaluate`).
+`LlmLogService`(타입 `admin.plan.evaluate`, `admin.prompt.evaluate`, `admin.image.evaluate`).
 비용 게이트는 3절대로 평가 워커 자체 게이트(공유 인프라 없음).
 
 신규 env: `EVALUATION_WORKER_ENABLED`(기본 false),

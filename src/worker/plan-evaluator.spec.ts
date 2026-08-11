@@ -24,8 +24,8 @@ describe("parsePlanEvaluation", () => {
     );
     expect(result.scores.ai_tell_free.score).toBe(2);
     expect(result.issues).toHaveLength(1);
-    // (4*7 + 2) / 8 = 3.75
-    expect(result.overallScore).toBe(3.75);
+    // 한 차원이라도 2점이면 평균과 무관하게 재작업 등급으로 제한한다.
+    expect(result.overallScore).toBe(2.99);
   });
 
   it("마크다운 펜스로 감싼 JSON을 허용한다", () => {

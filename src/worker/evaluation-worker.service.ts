@@ -20,6 +20,7 @@ import {
   PromptEvaluationPromptInput,
   PromptEvaluator,
 } from "./prompt-evaluator";
+import { ImageEvaluationPromptInput, ImageEvaluator } from "./image-evaluator";
 import { lintPromptShots } from "./prompt-lint";
 import {
   ClaimedEvaluation,
@@ -30,7 +31,7 @@ import { errorMessage, isRecord } from "./value-utils";
 
 export type EvaluationWorkerConfig = AppConfig["evaluationWorker"];
 
-export type EvaluationKind = "plan" | "prompt";
+export type EvaluationKind = "plan" | "prompt" | "image";
 
 const BACKOFF_MAX_MULTIPLIER = 8;
 
@@ -57,6 +58,7 @@ export class EvaluationWorkerService implements OnModuleInit, OnModuleDestroy {
     // 미설정 필드는 플래너 설정을 상속한다.
     private readonly resolvePlanEvaluator: () => Promise<PlanEvaluator>,
     private readonly resolvePromptEvaluator: () => Promise<PromptEvaluator>,
+    private readonly resolveImageEvaluator: () => Promise<ImageEvaluator>,
     // 자동 루프 on/off도 tick마다 재해석 — 설정 화면 토글이 프로세스 재시작
     // 없이 반영돼야 한다.
     private readonly resolveEnabled: () => Promise<boolean>,
@@ -127,14 +129,16 @@ export class EvaluationWorkerService implements OnModuleInit, OnModuleDestroy {
 
   private async evaluatePending(): Promise<EvaluationKind[]> {
     // 평가자가 unconfigured면 클레임 없이 조용히 쉰다 — 실패 행을 쌓지 않는다.
-    const [planEvaluator, promptEvaluator] = await Promise.all([
+    const [planEvaluator, promptEvaluator, imageEvaluator] = await Promise.all([
       this.resolvePlanEvaluator(),
       this.resolvePromptEvaluator(),
+      this.resolveImageEvaluator(),
     ]);
     const evaluated: EvaluationKind[] = [];
     if (
       planEvaluator.name === "unconfigured" &&
-      promptEvaluator.name === "unconfigured"
+      promptEvaluator.name === "unconfigured" &&
+      imageEvaluator.name === "unconfigured"
     ) {
       return evaluated;
     }
@@ -149,6 +153,12 @@ export class EvaluationWorkerService implements OnModuleInit, OnModuleDestroy {
       (await this.evaluateNextPrompt(promptEvaluator))
     ) {
       evaluated.push("prompt");
+    }
+    if (
+      imageEvaluator.name !== "unconfigured" &&
+      (await this.evaluateNextImage(imageEvaluator))
+    ) {
+      evaluated.push("image");
     }
     return evaluated;
   }
@@ -254,6 +264,85 @@ export class EvaluationWorkerService implements OnModuleInit, OnModuleDestroy {
     return true;
   }
 
+  private async evaluateNextImage(evaluator: ImageEvaluator): Promise<boolean> {
+    const claimed = await this.repository.claim(
+      "image",
+      // 후보·레퍼런스 바이트 읽기 + 비전 호출은 텍스트 평가보다 길다. 기본
+      // 120초 lease를 그대로 쓰면 정상 처리 중 sweep되어 중복 과금될 수 있다.
+      Math.max(this.config.leaseSeconds, 240),
+      this.config.maxAttempts,
+      EVAL_RUBRIC_VERSION,
+    );
+    if (!claimed) return false;
+
+    try {
+      const { input, outputMediaIds, jobIds } =
+        await this.buildImageInput(claimed);
+      const result = await evaluator.evaluate(input, {
+        requestId: claimed.draftId,
+        characterId: claimed.characterId,
+      });
+      await this.repository.complete({
+        evaluationId: claimed.evaluationId,
+        evaluatorName: evaluator.name,
+        overallScore: result.overallScore,
+        scoresJson: {
+          shots: result.shots.map((shot) => ({
+            ...shot,
+            jobId: jobIds.get(shot.sortOrder),
+            candidates: shot.candidates.map((candidate) => ({
+              ...candidate,
+              mediaId: outputMediaIds.get(
+                `${shot.sortOrder}:${candidate.candidateIndex}`,
+              ),
+            })),
+          })),
+          crossShot: result.crossShot,
+        },
+        issuesJson: [
+          ...result.shots.flatMap((shot) =>
+            shot.candidates.flatMap((candidate) => [
+              ...candidate.hardFailures.map((detail) => ({
+                dimension: `shot_${shot.sortOrder}_candidate_${candidate.candidateIndex}`,
+                type: "hard_failure",
+                detail,
+              })),
+              ...candidate.issues.map((detail) => ({
+                dimension: `shot_${shot.sortOrder}_candidate_${candidate.candidateIndex}`,
+                type: "issue",
+                detail,
+              })),
+            ]),
+          ),
+          ...result.crossShot.hardFailures.map((detail) => ({
+            dimension: "cross_shot",
+            type: "hard_failure",
+            detail,
+          })),
+          ...result.crossShot.issues.map((detail) => ({
+            dimension: "cross_shot",
+            type: "issue",
+            detail,
+          })),
+        ],
+        suggestionsJson: result.shots.flatMap((shot) =>
+          shot.candidates.flatMap((candidate) => candidate.suggestions),
+        ),
+      });
+      this.consecutiveFailures = 0;
+      this.logger.log(
+        `Images evaluated: draft=${claimed.draftId} score=${result.overallScore}`,
+      );
+    } catch (error) {
+      this.consecutiveFailures += 1;
+      await this.repository.fail(claimed.evaluationId, errorMessage(error));
+      this.logger.warn(
+        `Image evaluation failed: draft=${claimed.draftId} — ${errorMessage(error)}`,
+      );
+    }
+    return true;
+  }
+
   // 기획 평가 입력은 conceptJson.planInput 스냅숏을 그대로 쓴다 — 기획
   // 시점의 페르소나·메모리·최근 캡션과 대조해야 공정한 평가다.
   private async buildPlanInput(
@@ -277,6 +366,8 @@ export class EvaluationWorkerService implements OnModuleInit, OnModuleDestroy {
       personas: personasOr(planInput.personas),
       memories: stringsOr(planInput.memories) ?? [],
       recentCaptions: stringsOr(planInput.recentCaptions) ?? [],
+      referenceCatalog: referenceCatalogOr(planInput.referenceCatalog),
+      locationCatalog: locationCatalogOr(planInput.locationCatalog),
       ...(source.locationName ? { locationName: source.locationName } : {}),
       plan: {
         caption: plan.caption,
@@ -343,6 +434,77 @@ export class EvaluationWorkerService implements OnModuleInit, OnModuleDestroy {
       jobIds: new Map(jobs.map((job) => [job.sortOrder, job.id])),
     };
   }
+
+  private async buildImageInput(claimed: ClaimedEvaluation): Promise<{
+    input: ImageEvaluationPromptInput;
+    outputMediaIds: Map<string, string>;
+    jobIds: Map<number, string>;
+  }> {
+    const source = await this.repository.loadImageSource(claimed.draftId);
+    if (!source) throw new Error("draft not found for image evaluation");
+
+    const latestPerShot = new Map<number, (typeof source.jobs)[number]>();
+    for (const job of source.jobs) {
+      if (!latestPerShot.has(job.sortOrder))
+        latestPerShot.set(job.sortOrder, job);
+    }
+    const jobs = [...latestPerShot.values()].sort(
+      (a, b) => a.sortOrder - b.sortOrder,
+    );
+    if (jobs.length === 0) {
+      throw new Error("draft has no completed image candidates to evaluate");
+    }
+    if (
+      jobs.some((job) => job.status !== "completed" || job.outputs.length === 0)
+    ) {
+      throw new Error("draft latest image jobs are not all completed");
+    }
+
+    const mediaById = new Map(
+      source.referenceMedia.map((media) => [media.id, media]),
+    );
+    const shots = jobs.map((job) => {
+      const params = isRecord(job.paramsJson) ? job.paramsJson : {};
+      const shotMeta = isRecord(params._shot) ? params._shot : {};
+      const media = (ids: string[]) =>
+        ids.flatMap((mediaId) => {
+          const item = mediaById.get(mediaId);
+          return item ? [{ mediaId, ...item }] : [];
+        });
+      return {
+        sortOrder: job.sortOrder,
+        scene: stringOr(shotMeta.scene) ?? "",
+        captureSetup: stringOr(shotMeta.captureSetup) ?? "",
+        prompt: job.prompt,
+        identityReferences: media(
+          stringsOr(shotMeta.identityReferenceMediaIds) ?? [],
+        ),
+        environmentReferences: media(
+          stringsOr(shotMeta.environmentReferenceMediaIds) ?? [],
+        ),
+        candidates: job.outputs.map((output) => ({
+          mediaId: output.mediaId,
+          candidateIndex: output.candidateIndex,
+          ...output.media,
+        })),
+      };
+    });
+    return {
+      input: { caption: source.caption, shots },
+      outputMediaIds: new Map(
+        jobs.flatMap((job) =>
+          job.outputs.map(
+            (output) =>
+              [
+                `${job.sortOrder}:${output.candidateIndex}`,
+                output.mediaId,
+              ] as const,
+          ),
+        ),
+      ),
+      jobIds: new Map(jobs.map((job) => [job.sortOrder, job.id])),
+    };
+  }
 }
 
 function stringOr(value: unknown): string | undefined {
@@ -366,6 +528,41 @@ function personasOr(value: unknown): { title: string; content: string }[] {
       ? [{ title: item.title, content: item.content }]
       : [],
   );
+}
+
+function referenceCatalogOr(
+  value: unknown,
+): { id: string; description: string }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const id = stringOr(item.id);
+    const description = stringOr(item.description);
+    return id && description ? [{ id, description }] : [];
+  });
+}
+
+function locationCatalogOr(value: unknown): {
+  id: string;
+  name: string;
+  description: string;
+  references: { id: string; description: string }[];
+}[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const id = stringOr(item.id);
+    const name = stringOr(item.name);
+    if (!id || !name) return [];
+    return [
+      {
+        id,
+        name,
+        description: stringOr(item.description) ?? "",
+        references: referenceCatalogOr(item.references),
+      },
+    ];
+  });
 }
 
 function planShots(value: unknown): PlanShot[] {

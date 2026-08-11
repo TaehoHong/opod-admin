@@ -6,8 +6,10 @@ import {
 import { EvaluationRepository } from "./evaluation.repository";
 import { PlanEvaluator } from "./plan-evaluator";
 import { PromptEvaluator } from "./prompt-evaluator";
+import { ImageEvaluator } from "./image-evaluator";
 import { PLAN_EVAL_DIMENSIONS } from "../../prompts/plan-evaluator";
 import { PROMPT_EVAL_SHOT_DIMENSIONS } from "../../prompts/prompt-evaluator";
+import { IMAGE_EVAL_DIMENSIONS } from "../../prompts/image-evaluator";
 
 const baseConfig: EvaluationWorkerConfig = {
   pollIntervalMs: 15_000,
@@ -94,12 +96,56 @@ const promptSource = {
   ],
 };
 
+const imageSource = {
+  ...promptSource,
+  jobs: [
+    {
+      ...promptSource.jobs[0],
+      status: "completed",
+      paramsJson: {
+        _shot: {
+          scene: "창가 테이블",
+          captureSetup: "폰 셀피",
+          identityReferenceMediaIds: ["identity-1"],
+          environmentReferenceMediaIds: ["environment-1"],
+        },
+      },
+      outputs: [
+        {
+          mediaId: "candidate-1",
+          candidateIndex: 0,
+          media: {
+            url: "https://example.com/candidate.jpg",
+            storageKey: null,
+            contentType: "image/jpeg",
+          },
+        },
+      ],
+    },
+  ],
+  referenceMedia: [
+    {
+      id: "identity-1",
+      url: "https://example.com/identity.jpg",
+      storageKey: null,
+      contentType: "image/jpeg",
+    },
+    {
+      id: "environment-1",
+      url: "https://example.com/environment.jpg",
+      storageKey: null,
+      contentType: "image/jpeg",
+    },
+  ],
+};
+
 function repositoryFake() {
   return {
     sweepExpiredLeases: jest.fn().mockResolvedValue(0),
     claim: jest.fn().mockResolvedValue(undefined),
     loadPlanSource: jest.fn().mockResolvedValue(planSource),
     loadPromptSource: jest.fn().mockResolvedValue(promptSource),
+    loadImageSource: jest.fn().mockResolvedValue(imageSource),
     complete: jest.fn().mockResolvedValue(undefined),
     fail: jest.fn().mockResolvedValue(undefined),
     findByDraft: jest.fn().mockResolvedValue([]),
@@ -108,6 +154,45 @@ function repositoryFake() {
     listReports: jest.fn(),
     findReport: jest.fn(),
   } as unknown as jest.Mocked<EvaluationRepository>;
+}
+
+function imageEvaluatorFake(
+  overrides: Partial<ImageEvaluator> = {},
+): ImageEvaluator {
+  return {
+    name: "unconfigured",
+    evaluate: jest.fn().mockResolvedValue({
+      shots: [
+        {
+          sortOrder: 0,
+          candidates: [
+            {
+              candidateIndex: 0,
+              scores: Object.fromEntries(
+                IMAGE_EVAL_DIMENSIONS.map((dimension) => [
+                  dimension,
+                  { score: 4, reason: "ok" },
+                ]),
+              ),
+              hardFailures: [],
+              issues: [],
+              suggestions: [],
+              verdict: "pass",
+              overallScore: 4,
+            },
+          ],
+        },
+      ],
+      crossShot: {
+        score: 4,
+        selectedCandidates: [{ sortOrder: 0, candidateIndex: 0 }],
+        hardFailures: [],
+        issues: [],
+      },
+      overallScore: 4,
+    }),
+    ...overrides,
+  } as ImageEvaluator;
 }
 
 function planEvaluatorFake(
@@ -160,12 +245,14 @@ function service(
   repository: jest.Mocked<EvaluationRepository>,
   plan: PlanEvaluator,
   prompt: PromptEvaluator,
+  image: ImageEvaluator = imageEvaluatorFake(),
   enabled = true,
 ) {
   return new EvaluationWorkerService(
     repository,
     async () => plan,
     async () => prompt,
+    async () => image,
     async () => enabled,
     baseConfig,
   );
@@ -182,6 +269,7 @@ describe("EvaluationWorkerService", () => {
       repository,
       planEvaluatorFake(),
       promptEvaluatorFake(),
+      imageEvaluatorFake(),
       false,
     ).tick();
 
@@ -202,6 +290,7 @@ describe("EvaluationWorkerService", () => {
         repository,
         planEvaluatorFake(),
         promptEvaluatorFake(),
+        imageEvaluatorFake(),
         false,
       ).runOnce(),
     ).resolves.toEqual({ evaluated: ["plan"] });
@@ -223,6 +312,7 @@ describe("EvaluationWorkerService", () => {
       repository,
       unconfigured as unknown as PlanEvaluator,
       unconfigured as unknown as PromptEvaluator,
+      unconfigured as unknown as ImageEvaluator,
     ).tick();
     expect(repository.claim).not.toHaveBeenCalled();
     expect(repository.fail).not.toHaveBeenCalled();
@@ -313,6 +403,53 @@ describe("EvaluationWorkerService", () => {
     expect(repository.fail).toHaveBeenCalledWith(
       "eval-3",
       expect.stringContaining("no built prompts"),
+    );
+  });
+
+  it("이미지 평가는 실제 후보와 참조를 심사하고 jobId·mediaId를 고정 기록한다", async () => {
+    const repository = repositoryFake();
+    repository.claim.mockImplementation(async (kind) =>
+      kind === "image"
+        ? { ...planClaim, evaluationId: "eval-image" }
+        : undefined,
+    );
+    const image = imageEvaluatorFake({ name: "llm:vision-judge" });
+    await service(
+      repository,
+      planEvaluatorFake(),
+      promptEvaluatorFake(),
+      image,
+    ).tick();
+
+    expect(image.evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shots: [
+          expect.objectContaining({
+            sortOrder: 0,
+            identityReferences: [
+              expect.objectContaining({ mediaId: "identity-1" }),
+            ],
+            environmentReferences: [
+              expect.objectContaining({ mediaId: "environment-1" }),
+            ],
+            candidates: [expect.objectContaining({ mediaId: "candidate-1" })],
+          }),
+        ],
+      }),
+      { requestId: "draft-1", characterId: "char-1" },
+    );
+    expect(repository.complete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        evaluationId: "eval-image",
+        scoresJson: expect.objectContaining({
+          shots: [
+            expect.objectContaining({
+              jobId: "job-new",
+              candidates: [expect.objectContaining({ mediaId: "candidate-1" })],
+            }),
+          ],
+        }),
+      }),
     );
   });
 });

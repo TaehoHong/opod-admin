@@ -3,7 +3,7 @@
 // 루브릭 버전·차원 정의·언어별 AI 티 패턴 팩은 전부 여기서 관리한다
 // (docs/plan-prompt-evaluation-agent.md 4.1절, docs/prompt-research-log.md).
 
-export const EVAL_RUBRIC_VERSION = "eval-rubric-v1";
+export const EVAL_RUBRIC_VERSION = "eval-rubric-v2";
 
 export const PLAN_EVAL_DIMENSIONS = [
   "persona_fit",
@@ -28,6 +28,13 @@ export type PlanEvaluationPromptInput = {
   memories: string[];
   // voice_tone_fit 비교 기준 — 이 캐릭터가 실제로 써 온 캡션.
   recentCaptions: string[];
+  referenceCatalog: { id: string; description: string }[];
+  locationCatalog: {
+    id: string;
+    name: string;
+    description: string;
+    references: { id: string; description: string }[];
+  }[];
   locationName?: string;
   plan: {
     caption: string;
@@ -88,7 +95,16 @@ export const PLAN_EVALUATOR_SYSTEM_PROMPT = [
   "- shot_composition: shots form a varied, story-like sequence rather than near-duplicates.",
   "- reference_usage: identity/environment reference selection matches each shot's intent (references only on character-visible shots, environment refs only for the chosen location).",
   "- caption_quality: caption and hashtags are natural and platform-appropriate for the content language.",
-  "Scoring: for each dimension, first reason briefly, then give an integer score 1-5 (5 = excellent, 3 = acceptable with issues, 1 = must fix).",
+  "Use this strict scoring scale. Do not reward intent when an executable detail is missing:",
+  "- 5: publication-ready, fully evidenced by the input, with no issue or suggestion for that dimension.",
+  "- 4: one minor cosmetic weakness that cannot change generated image content or meaning.",
+  "- 3: usable only after a concrete edit; any issue or suggestion means the affected dimension is at most 3.",
+  "- 2: must fix before generation because the defect is likely to waste a generation or break continuity.",
+  "- 1: unusable, contradictory, unsafe, or missing a required foundation.",
+  "Mandatory caps:",
+  "- Near-duplicate shots, a missing location while scenes depend on a specific place, contradictory capture mechanics, or a selected reference whose description conflicts with the planned framing score at most 2 in the affected dimension.",
+  "- A character-visible shot without a clearly suitable identity reference, or a location-dependent shot without a suitable environment reference when such references are available, scores reference_usage at most 2.",
+  "- Do not give 5 when the evidence is absent. State the missing evidence and score 3 or lower.",
   "Also list concrete issues (each tied to a dimension) and actionable suggestions.",
   "Write reasons, issues, and suggestions in Korean (operator-facing), quoting problematic caption text verbatim in its original language.",
   "Return only the JSON below, with no explanation or Markdown:",
@@ -121,6 +137,29 @@ export function buildPlanEvaluatorUserPrompt(
       `## Recent captions by this character (voice/tone baseline; also check topic repetition)\n${input.recentCaptions
         .slice(0, 10)
         .map((caption) => `- ${caption}`)
+        .join("\n")}`,
+    );
+  }
+  if (input.referenceCatalog.length > 0) {
+    sections.push(
+      `## Identity reference catalog\n${input.referenceCatalog
+        .map((reference) => `- [${reference.id}] ${reference.description}`)
+        .join("\n")}`,
+    );
+  }
+  if (input.locationCatalog.length > 0) {
+    sections.push(
+      `## Location and environment reference catalog\n${input.locationCatalog
+        .map(
+          (location) =>
+            `### [${location.id}] ${location.name}\n${location.description}\n${
+              location.references
+                .map(
+                  (reference) => `- [${reference.id}] ${reference.description}`,
+                )
+                .join("\n") || "- (no references)"
+            }`,
+        )
         .join("\n")}`,
     );
   }

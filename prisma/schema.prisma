@@ -113,6 +113,7 @@ enum PostDraftStatus {
 enum DraftEvaluationKind {
   plan
   prompt
+  image
 
   @@map("draft_evaluation_kind")
   @@schema("opod")
@@ -1041,7 +1042,7 @@ model PostDraft {
   @@schema("opod")
 }
 
-// docs/plan-prompt-evaluation-agent.md — 기획·프롬프트 자동 평가.
+// docs/plan-prompt-evaluation-agent.md — 기획·프롬프트·생성 이미지 평가.
 // 평가는 draft 상태 머신에 영향을 주지 않는 참고 데이터다. 재기획·재생성 시
 // 새 attempt 행을 추가하며 기존 평가는 이력으로 보존한다.
 model DraftEvaluation {

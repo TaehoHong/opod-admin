@@ -170,12 +170,14 @@ export function WorkerCard({
 
 // 실행 결과는 "무엇이 돌았는지"를 그대로 말한다 — 대기 건이 없었던 것과
 // 실행한 것을 운영자가 구분해야 한다.
-function evaluationRunMessage(evaluated: ("plan" | "prompt")[]): string {
+function evaluationRunMessage(
+  evaluated: ("plan" | "prompt" | "image")[],
+): string {
   if (evaluated.length === 0) {
     return "대기 중인 평가가 없습니다.";
   }
   const names = evaluated.map((kind) =>
-    kind === "plan" ? "기획" : "프롬프트",
+    kind === "plan" ? "기획" : kind === "prompt" ? "프롬프트" : "이미지",
   );
   return `${names.join("·")} 평가를 실행했습니다.`;
 }

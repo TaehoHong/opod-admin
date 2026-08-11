@@ -149,6 +149,65 @@ describe("draft evaluations", () => {
       screen.getByText("페르소나 · 캐릭터의 산책 취향과 잘 맞습니다."),
     ).toBeInTheDocument();
   });
+
+  it("shows a generated candidate rejection and its hard failure", async () => {
+    server.use(
+      http.get("/api/admin/v1/drafts/draft-1", () =>
+        HttpResponse.json(draftWithCandidate("none")),
+      ),
+      http.get("/api/admin/v1/drafts/draft-1/evaluations", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: "evaluation-image-1",
+              draftId: "draft-1",
+              kind: "image",
+              attempt: 1,
+              status: "completed",
+              rubricVersion: "eval-rubric-v2",
+              contentLanguage: "ko",
+              overallScore: 2.99,
+              scoresJson: {
+                shots: [
+                  {
+                    sortOrder: 0,
+                    candidates: [
+                      {
+                        candidateIndex: 0,
+                        mediaId: "media-1",
+                        verdict: "reject",
+                        scores: {
+                          capture_fidelity: {
+                            score: 2,
+                            reason: "휴대폰이 가로 방향입니다.",
+                          },
+                        },
+                        hardFailures: ["phone_orientation_mismatch"],
+                      },
+                    ],
+                  },
+                ],
+                crossShot: { score: 2, hardFailures: [], issues: [] },
+              },
+              createdAt: "2026-08-11T13:00:00.000Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    render(
+      <AppProviders>
+        <DraftDetailPanel draftId="draft-1" />
+      </AppProviders>,
+    );
+
+    expect((await screen.findAllByText("반려")).length).toBeGreaterThan(0);
+    await userEvent.click(
+      screen.getByRole("button", { name: "하드 실패 1건 내용" }),
+    );
+    expect(screen.getByText("휴대폰 방향 불일치")).toBeInTheDocument();
+  });
 });
 
 function draftWithCandidate(filterPreset: string) {

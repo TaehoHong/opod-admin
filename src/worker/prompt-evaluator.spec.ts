@@ -25,8 +25,8 @@ describe("parsePromptEvaluation", () => {
     );
     expect(result.shots).toHaveLength(2);
     expect(result.crossShot.issues).toHaveLength(1);
-    // (4*10 + 2) / 11 = 3.82
-    expect(result.overallScore).toBe(3.82);
+    // cross-shot 2점이면 평균과 무관하게 재생성 등급으로 제한한다.
+    expect(result.overallScore).toBe(2.99);
   });
 
   it("컷 수가 다르면 거절한다 — 누락된 컷이 무평가로 통과하면 안 된다", () => {
