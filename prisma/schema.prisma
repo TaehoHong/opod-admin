@@ -112,6 +112,7 @@ enum PostDraftStatus {
 // docs/plan-prompt-evaluation-agent.md — 평가 Agent 데이터 모델.
 enum DraftEvaluationKind {
   plan
+  image_plan
   prompt
   image
 

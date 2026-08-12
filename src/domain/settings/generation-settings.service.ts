@@ -3,6 +3,7 @@ import { LLM_LOG_TYPE, LlmLogService } from "../llm-logs/llm-log.service";
 import { GenerationSettingsRepository } from "./generation-settings.repository";
 import {
   PlannerProviderSettings,
+  contentFromChatCompletion,
   resolveContentPlanner,
 } from "../../worker/content-planner";
 import {
@@ -35,6 +36,7 @@ export const GENERATION_SETTING_KEYS = {
   // 게이트한다 (env WORKER_ENABLED와 같은 범위).
   workerEnabled: "worker.enabled",
   evaluationWorkerEnabled: "evaluator.workerEnabled",
+  pipelineV3Enabled: "pipeline.v3Enabled",
   // 생성 이미지 종횡비. 게시 포맷마다 다르므로 캐릭터가 아니라 여기서 정한다 —
   // 비주얼 프로필에 넣으면 같은 캐릭터의 피드와 스토리가 같은 비율로 나온다.
   // 미설정이면 아래 DEFAULT_ASPECT_RATIOS를 쓴다 (env 폴백 없음).
@@ -129,6 +131,7 @@ const ENV_KEYS: Partial<Record<GenerationSettingField, string>> = {
   // 워커 토글만 기존 배포 호환을 위해 env를 초기 기본값으로 남긴다.
   workerEnabled: "WORKER_ENABLED",
   evaluationWorkerEnabled: "EVALUATION_WORKER_ENABLED",
+  pipelineV3Enabled: "POST_PIPELINE_V3_ENABLED",
 };
 
 const CHAT_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
@@ -145,6 +148,8 @@ export type ResolvedWorkerToggles = {
   generation: ResolvedWorkerToggle;
   evaluation: ResolvedWorkerToggle;
 };
+
+export type ResolvedPipelineV3 = ResolvedWorkerToggle;
 
 // 채팅 LLM 실효 설정 — agent.* 오버라이드(DB) 우선, 없으면 planner 상속.
 export type ResolvedChatSettings = {
@@ -274,6 +279,117 @@ export class GenerationSettingsService {
       generation: toggle(pick(db, env, "workerEnabled")),
       evaluation: toggle(pick(db, env, "evaluationWorkerEnabled")),
     };
+  }
+
+  async resolvePipelineV3(
+    env: SettingsEnv = process.env,
+  ): Promise<ResolvedPipelineV3> {
+    const db = await this.getSettings();
+    return toggle(pick(db, env, "pipelineV3Enabled"));
+  }
+
+  async testPipelineV3Capability(
+    env: SettingsEnv = process.env,
+    fetchFn: typeof fetch = fetch,
+  ): Promise<ConnectionTestResult> {
+    try {
+      const resolved = await this.resolvePlannerSettings(env);
+      const apiUrl = resolved.apiUrl?.trim();
+      const apiKey = resolved.apiKey?.trim();
+      const model = resolved.model?.trim();
+      if (!apiUrl || !apiKey || !model) {
+        return {
+          ok: false,
+          message: "V3에는 기획 LLM URL·키·모델이 모두 필요합니다",
+        };
+      }
+      const probe = async (tokenLimitParam: TokenLimitParam) => {
+        const requestJson = {
+          model,
+          messages: [
+            {
+              role: "user",
+              content: 'Return exactly {"ok":true}.',
+            },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "opod_pipeline_v3_probe",
+              strict: true,
+              schema: {
+                type: "object",
+                properties: { ok: { type: "boolean", const: true } },
+                required: ["ok"],
+                additionalProperties: false,
+              },
+            },
+          },
+          [tokenLimitParam]: 64,
+        };
+        const execute = () =>
+          fetchFn(apiUrl, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(requestJson),
+            signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
+          });
+        const response = this.llmLogs
+          ? await this.llmLogs.runJsonFetch({
+              type: LLM_LOG_TYPE.connectionTest,
+              provider: "openai-compatible",
+              model,
+              endpoint: apiUrl,
+              requestJson,
+              context: { metadata: { target: "pipeline-v3" } },
+              execute,
+            })
+          : await execute();
+        const detail = response.ok
+          ? ""
+          : (await response.text().catch(() => "")).slice(0, 200);
+        return { response, detail };
+      };
+      let { response, detail } = await probe("max_tokens");
+      if (response.status === 400 && detail.includes("max_completion_tokens")) {
+        ({ response, detail } = await probe("max_completion_tokens"));
+      }
+      if (!response.ok) {
+        return {
+          ok: false,
+          message: `V3 strict JSON schema 미지원 (${response.status})${
+            detail ? `: ${detail}` : ""
+          }`,
+        };
+      }
+      const content = contentFromChatCompletion(await response.json());
+      let parsed: unknown;
+      try {
+        parsed = content ? JSON.parse(content) : null;
+      } catch {
+        parsed = null;
+      }
+      if (!isStrictProbeResult(parsed)) {
+        return {
+          ok: false,
+          message: "V3 strict JSON schema 응답이 계약과 일치하지 않습니다",
+        };
+      }
+      return {
+        ok: true,
+        message: `V3 strict JSON schema 지원 확인 (${model})`,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: `V3 capability 확인 실패: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
   }
 
   // 포맷별 실효 종횡비. 워커가 잡마다 호출하므로 설정 변경이 재시작 없이 먹는다.
@@ -547,4 +663,14 @@ function pick(
     return { value: envValue, source: "env" };
   }
   return { value: undefined, source: "none" };
+}
+
+function isStrictProbeResult(value: unknown): value is { ok: true } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 1 &&
+    (value as { ok?: unknown }).ok === true
+  );
 }

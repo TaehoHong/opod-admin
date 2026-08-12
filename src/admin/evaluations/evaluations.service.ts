@@ -13,7 +13,7 @@ const LOW_SCORE = 2;
 
 type ScoreSample = {
   draftId: string;
-  kind: "plan" | "prompt" | "image";
+  kind: "plan" | "image_plan" | "prompt" | "image";
   dimension: string;
   score: number;
 };
@@ -162,6 +162,7 @@ function summarizeLanguage(
     evaluationCount: rows.length,
     byKind: {
       plan: rows.filter((row) => row.kind === "plan").length,
+      imagePlan: rows.filter((row) => row.kind === "image_plan").length,
       prompt: rows.filter((row) => row.kind === "prompt").length,
       image: rows.filter((row) => row.kind === "image").length,
     },
@@ -205,11 +206,11 @@ function scoreSamples(
 }
 
 function scoresFromJson(
-  kind: "plan" | "prompt" | "image",
+  kind: "plan" | "image_plan" | "prompt" | "image",
   value: unknown,
 ): { dimension: string; score: number }[] {
   if (!isRecord(value)) return [];
-  if (kind === "plan") {
+  if (kind === "plan" || kind === "image_plan") {
     return isRecord(value.scores) ? scoresFromRecord(value.scores) : [];
   }
   const shots = Array.isArray(value.shots) ? value.shots : [];

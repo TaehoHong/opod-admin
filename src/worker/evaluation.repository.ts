@@ -8,7 +8,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../domain/database/prisma.service";
 
-export type DraftEvaluationKind = "plan" | "prompt" | "image";
+export type DraftEvaluationKind = "plan" | "image_plan" | "prompt" | "image";
 
 export type ClaimedEvaluation = {
   evaluationId: string;
@@ -50,6 +50,7 @@ export type ImageEvaluationSource = PromptEvaluationSource & {
     outputs: {
       mediaId: string;
       candidateIndex: number;
+      selected: boolean;
       media: {
         url: string;
         storageKey: string | null;
@@ -94,6 +95,14 @@ export class EvaluationRepository {
     return this.prisma.$transaction(async (tx) => {
       // prompt 평가는 빌드된(비어 있지 않은) 프롬프트가 있어야 한다 —
       // 수동 모드 draft는 기획 시점에 prompt = ''로 잡을 만든다.
+      const v3Gate =
+        kind === "image_plan"
+          ? Prisma.sql`AND d.concept_json ? 'imagePlanning'`
+          : kind === "plan"
+            ? Prisma.sql`AND (d.concept_json ? 'plan' OR d.concept_json ? 'postPlanning')`
+            : kind === "prompt"
+              ? Prisma.sql`AND (d.concept_json ? 'plan' OR d.concept_json ? 'promptBuild')`
+              : Prisma.sql`AND (d.concept_json ? 'plan' OR d.concept_json ? 'imagePlanning')`;
       const promptGate =
         kind === "prompt"
           ? Prisma.sql`AND EXISTS (
@@ -127,14 +136,34 @@ export class EvaluationRepository {
                     AND ready.target_id = d.id
                     AND ready.action_type = 'DRAFT_READY_FOR_REVIEW'
                 )
+            )
+            AND (
+              d.concept_json->>'pipelineVersion' IS DISTINCT FROM 'post-pipeline-v3'
+              OR NOT EXISTS (
+                SELECT 1
+                FROM opod.generation_jobs latest
+                WHERE latest.draft_id = d.id
+                  AND NOT EXISTS (
+                    SELECT 1 FROM opod.generation_jobs newer
+                    WHERE newer.draft_id = latest.draft_id
+                      AND newer.sort_order = latest.sort_order
+                      AND (newer.created_at, newer.id) > (latest.created_at, latest.id)
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM opod.generation_job_outputs selected
+                    WHERE selected.job_id = latest.id AND selected.selected = true
+                  )
+              )
             )`
           : Prisma.empty;
       const relevantAction =
         kind === "plan"
-          ? Prisma.sql`l.action_type = 'DRAFT_PLANNED'`
-          : kind === "image"
-            ? Prisma.sql`l.action_type = 'DRAFT_READY_FOR_REVIEW'`
-            : Prisma.sql`l.action_type IN (
+          ? Prisma.sql`l.action_type IN ('DRAFT_PLANNED', 'DRAFT_V3_POST_PLAN_READY')`
+          : kind === "image_plan"
+            ? Prisma.sql`l.action_type IN ('DRAFT_V3_IMAGE_PLAN_READY', 'DRAFT_V3_PAUSED')`
+            : kind === "image"
+              ? Prisma.sql`l.action_type = 'DRAFT_READY_FOR_REVIEW'`
+              : Prisma.sql`l.action_type IN (
               'DRAFT_PLANNED',
               'DRAFT_PROMPTS_BUILT',
               'DRAFT_SHOT_REGENERATED'
@@ -146,7 +175,7 @@ export class EvaluationRepository {
         FROM opod.post_drafts d
         JOIN opod.characters c ON c.id = d.character_id AND c.status = 'active'
         WHERE d.draft_type = 'post'
-          AND d.concept_json ? 'plan'
+          ${v3Gate}
           ${promptGate}
           ${imageGate}
           AND NOT EXISTS (
@@ -317,6 +346,7 @@ export class EvaluationRepository {
               select: {
                 mediaId: true,
                 candidateIndex: true,
+                selected: true,
                 media: {
                   select: {
                     url: true,
@@ -370,7 +400,7 @@ export class EvaluationRepository {
     overallScore: number;
     scoresJson: Prisma.InputJsonValue;
     issuesJson: Prisma.InputJsonValue;
-    suggestionsJson: Prisma.InputJsonValue;
+    suggestionsJson: Prisma.InputJsonValue | null;
   }): Promise<void> {
     await this.prisma.draftEvaluation.updateMany({
       where: { id: input.evaluationId, status: "pending" },
@@ -380,7 +410,10 @@ export class EvaluationRepository {
         overallScore: input.overallScore,
         scoresJson: input.scoresJson,
         issuesJson: input.issuesJson,
-        suggestionsJson: input.suggestionsJson,
+        suggestionsJson:
+          input.suggestionsJson === null
+            ? Prisma.DbNull
+            : input.suggestionsJson,
         leaseExpiresAt: null,
         errorMessage: null,
         completedAt: new Date(),

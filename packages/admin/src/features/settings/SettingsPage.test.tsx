@@ -63,6 +63,7 @@ function settingsView(
         reel: { value: "9:16", source: "default" },
       },
     },
+    pipelineV3: { enabled: false, source: "none" },
     worker: {
       enabled: false,
       enabledSource: "none",
@@ -91,6 +92,34 @@ function stubReads(view: () => GenerationSettingsView) {
 }
 
 describe("settings worker card", () => {
+  it("activates V3 only through the settings endpoint and reflects the pinned rollout state", async () => {
+    let view = settingsView();
+    const saved: unknown[] = [];
+
+    server.use(
+      ...stubReads(() => view),
+      http.put("/api/admin/v1/settings/generation", async ({ request }) => {
+        saved.push(await request.json());
+        view = { ...view, pipelineV3: { enabled: true, source: "db" } };
+        return HttpResponse.json(view);
+      }),
+    );
+
+    render(
+      <AppProviders>
+        <SettingsPage />
+      </AppProviders>,
+    );
+
+    const rollout = await screen.findByRole("switch", {
+      name: "게시글 생성 Agent V3 신규 초안 적용",
+    });
+    await userEvent.click(rollout);
+
+    await waitFor(() => expect(saved).toEqual([{ pipelineV3Enabled: true }]));
+    await waitFor(() => expect(rollout).toBeChecked());
+  });
+
   it("saves the evaluation worker switch as a boolean and reflects the new state", async () => {
     let view = settingsView();
     const saved: unknown[] = [];
@@ -152,7 +181,7 @@ describe("settings worker card", () => {
     );
 
     expect(
-      await screen.findByText("기획 평가를 실행했습니다."),
+      await screen.findByText("게시글 기획 평가를 실행했습니다."),
     ).toBeInTheDocument();
   });
 

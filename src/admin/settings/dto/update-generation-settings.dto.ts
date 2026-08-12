@@ -98,6 +98,12 @@ export class UpdateGenerationSettingsDto {
   @IsBoolean()
   evaluationWorkerEnabled?: boolean | null;
 
+  // 신규 draft만 V3 계약으로 pin한다. true 저장은 controller가 현재 기획
+  // LLM의 strict JSON schema capability를 실제 확인한 뒤에만 허용한다.
+  @IsOptional()
+  @IsBoolean()
+  pipelineV3Enabled?: boolean | null;
+
   // 포맷별 생성 이미지 종횡비. "가로:세로"만 허용하고 빈 문자열은 삭제(기본값
   // 복귀)다. 프로바이더에 그대로 전달되는 값이라 형식이 어긋나면 생성이 422로
   // 죽으므로 저장 전에 막는다.

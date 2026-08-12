@@ -33,6 +33,8 @@ const FILTERS: { value: PostWorkFilter; label: string }[] = [
 const STAGE_LABEL: Record<PostWorkItem["currentStage"], string> = {
   brief: "브리프",
   plan: "기획",
+  post_plan: "게시글 기획",
+  image_plan: "이미지 기획",
   prompt: "프롬프트",
   evaluation: "평가",
   generation: "이미지 생성",

@@ -23,6 +23,8 @@ export type PostWorkFilter = (typeof POST_WORK_FILTERS)[number];
 export type PostWorkStage =
   | "brief"
   | "plan"
+  | "post_plan"
+  | "image_plan"
   | "prompt"
   | "evaluation"
   | "generation"
@@ -31,6 +33,31 @@ export type PostWorkStage =
   | "memory";
 export type OperationalStatus =
   "failed" | "needs_action" | "publish_waiting" | "agent_running" | "completed";
+
+export type PostPipelineV3ReadModel = {
+  version: "post-pipeline-v3";
+  stage:
+    | "post_plan"
+    | "image_plan"
+    | "image_prompt"
+    | "generation"
+    | "review"
+    | "publish"
+    | "memory";
+  state: string;
+  imageCount: number | null;
+  reasonCodes: string[];
+  nextAction: string;
+  artifacts: {
+    postPlan?: { revision: number; status: string; premise?: string };
+    imagePlan?: { revision: number; status: string; shotCount?: number };
+    promptBuild?: {
+      revision: number;
+      shotCount: number;
+      targetModelId?: string;
+    };
+  };
+};
 
 export type PostWorkItem = {
   id: string;
@@ -50,6 +77,7 @@ export type PostWorkItem = {
   scheduledAt?: string;
   createdAt: string;
   updatedAt: string;
+  pipelineV3?: PostPipelineV3ReadModel;
 };
 
 type WorkCursor = Pick<PostWorkItem, "id" | "kind" | "updatedAt">;
@@ -59,6 +87,17 @@ const STAGES: PostWorkStage[] = [
   "plan",
   "prompt",
   "evaluation",
+  "generation",
+  "review",
+  "publish",
+  "memory",
+];
+
+const V3_STAGES: PostWorkStage[] = [
+  "brief",
+  "post_plan",
+  "image_plan",
+  "prompt",
   "generation",
   "review",
   "publish",
@@ -168,6 +207,7 @@ function toDraftWorkItem(draft: PostWorkDraft): PostWorkItem {
   const latestJobs = latestJobsPerShot(draft);
   const currentStage = stageForDraft(draft, latestJobs);
   const operational = statusForDraft(draft, latestJobs, currentStage, mode);
+  const pipelineV3 = v3ReadModel(concept);
   const publishedThumbnail =
     draft.publishedPost?.postMedia[0]?.media.url ?? undefined;
   const generatedThumbnail = latestJobs
@@ -187,7 +227,7 @@ function toDraftWorkItem(draft: PostWorkDraft): PostWorkItem {
       ? { thumbnailUrl: publishedThumbnail ?? generatedThumbnail }
       : {}),
     currentStage,
-    stageIndex: STAGES.indexOf(currentStage) + 1,
+    stageIndex: (pipelineV3 ? V3_STAGES : STAGES).indexOf(currentStage) + 1,
     operationalStatus: operational.status,
     statusDetail: operational.detail,
     executionMode: mode,
@@ -197,6 +237,7 @@ function toDraftWorkItem(draft: PostWorkDraft): PostWorkItem {
       : {}),
     createdAt: draft.createdAt.toISOString(),
     updatedAt: draft.updatedAt.toISOString(),
+    ...(pipelineV3 ? { pipelineV3 } : {}),
   };
 }
 
@@ -242,6 +283,17 @@ function stageForDraft(
     return "review";
   }
   const concept = record(draft.conceptJson);
+  if (concept.pipelineVersion === "post-pipeline-v3") {
+    const stage = record(concept.pipeline).stage;
+    if (stage === "post_plan") return "post_plan";
+    if (stage === "image_plan") return "image_plan";
+    if (stage === "image_prompt") return "prompt";
+    if (stage === "generation") return "generation";
+    if (stage === "review") return "review";
+    if (stage === "publish") return "publish";
+    if (stage === "memory") return "memory";
+    return "post_plan";
+  }
   if (!record(concept.plan)) return "plan";
   if (jobs.length === 0) return "prompt";
   if (jobs.some((job) => job.status === "queued" || job.status === "running")) {
@@ -284,6 +336,28 @@ function statusForDraft(
   if (draft.status === "rejected") {
     return { status: "completed", detail: "반려됨" };
   }
+  const concept = record(draft.conceptJson);
+  if (concept.pipelineVersion === "post-pipeline-v3") {
+    const pipeline = record(concept.pipeline);
+    const state =
+      typeof pipeline.state === "string" ? pipeline.state : "pending";
+    if (
+      [
+        "needs_input",
+        "conflict",
+        "blocked",
+        "unsupported_plan",
+        "needs_configuration",
+      ].includes(state)
+    ) {
+      return { status: "needs_action", detail: v3StateCopy(state).detail };
+    }
+    if (state === "failed")
+      return { status: "failed", detail: v3StateCopy(state).detail };
+    if (state === "running" || (state === "pending" && mode === "auto")) {
+      return { status: "agent_running", detail: "Agent 진행 중" };
+    }
+  }
   if (
     jobs.some((job) => job.status === "queued" || job.status === "running") ||
     mode === "auto"
@@ -293,6 +367,8 @@ function statusForDraft(
   const detail: Record<PostWorkStage, string> = {
     brief: "브리프 작성 필요",
     plan: "기획 실행 필요",
+    post_plan: "게시글 기획 실행 필요",
+    image_plan: "이미지 기획 실행 필요",
     prompt: "프롬프트 생성 필요",
     evaluation: "평가 확인 후 생성",
     generation: "이미지 생성 필요",
@@ -301,6 +377,134 @@ function statusForDraft(
     memory: "완료",
   };
   return { status: "needs_action", detail: detail[stage] };
+}
+
+function v3ReadModel(
+  concept: Record<string, unknown>,
+): PostPipelineV3ReadModel | undefined {
+  if (concept.pipelineVersion !== "post-pipeline-v3") return undefined;
+  const pipeline = record(concept.pipeline);
+  const rawStage = pipeline.stage;
+  const stage =
+    (
+      [
+        "post_plan",
+        "image_plan",
+        "image_prompt",
+        "generation",
+        "review",
+        "publish",
+        "memory",
+      ] as const
+    ).find((candidate) => candidate === rawStage) ?? "post_plan";
+  const state = typeof pipeline.state === "string" ? pipeline.state : "pending";
+  const imageCount = Number.isInteger(pipeline.imageCount)
+    ? (pipeline.imageCount as number)
+    : null;
+  const reasonCodes = Array.isArray(pipeline.reasonCodes)
+    ? pipeline.reasonCodes.filter(
+        (value): value is string => typeof value === "string",
+      )
+    : [];
+  const postPlanning = record(concept.postPlanning);
+  const postOutput = record(postPlanning.output);
+  const postIntent = record(postOutput.intent);
+  const imagePlanning = record(concept.imagePlanning);
+  const imageOutput = record(imagePlanning.output);
+  const promptBuild = record(concept.promptBuild);
+  const promptOutput = record(promptBuild.output);
+  const promptInput = record(promptBuild.input);
+  const modelPolicy = record(promptInput.modelPolicy);
+  return {
+    version: "post-pipeline-v3",
+    stage,
+    state,
+    imageCount,
+    reasonCodes,
+    nextAction: v3StateCopy(state).nextAction,
+    artifacts: {
+      ...(Number.isInteger(postPlanning.revision)
+        ? {
+            postPlan: {
+              revision: postPlanning.revision as number,
+              status:
+                typeof postOutput.status === "string"
+                  ? postOutput.status
+                  : "unknown",
+              ...(typeof postIntent.premise === "string"
+                ? { premise: postIntent.premise }
+                : {}),
+            },
+          }
+        : {}),
+      ...(Number.isInteger(imagePlanning.revision)
+        ? {
+            imagePlan: {
+              revision: imagePlanning.revision as number,
+              status:
+                typeof imageOutput.status === "string"
+                  ? imageOutput.status
+                  : "unknown",
+              ...(Array.isArray(imageOutput.shots)
+                ? { shotCount: imageOutput.shots.length }
+                : {}),
+            },
+          }
+        : {}),
+      ...(Number.isInteger(promptBuild.revision)
+        ? {
+            promptBuild: {
+              revision: promptBuild.revision as number,
+              shotCount: Array.isArray(promptOutput.shots)
+                ? promptOutput.shots.length
+                : 0,
+              ...(typeof modelPolicy.modelId === "string"
+                ? { targetModelId: modelPolicy.modelId }
+                : {}),
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+function v3StateCopy(state: string): { detail: string; nextAction: string } {
+  const copy: Record<string, { detail: string; nextAction: string }> = {
+    pending: {
+      detail: "다음 Agent 실행 대기",
+      nextAction: "현재 단계를 실행하세요.",
+    },
+    running: {
+      detail: "Agent 진행 중",
+      nextAction: "완료될 때까지 기다리세요.",
+    },
+    ready: { detail: "단계 완료", nextAction: "다음 단계를 진행하세요." },
+    needs_input: {
+      detail: "필수 입력이 부족합니다",
+      nextAction: "캐릭터 정보나 운영자 요청을 보완한 뒤 다시 실행하세요.",
+    },
+    conflict: {
+      detail: "요청과 확정 정보가 충돌합니다",
+      nextAction: "운영자 요청을 수정하거나 이 작업을 중단하세요.",
+    },
+    blocked: {
+      detail: "현재 기획으로 진행할 수 없습니다",
+      nextAction: "레퍼런스나 이미지 기획을 보완하세요.",
+    },
+    unsupported_plan: {
+      detail: "현재 모델이 이 기획을 지원하지 않습니다",
+      nextAction: "이미지 모델 또는 기획을 변경하세요.",
+    },
+    needs_configuration: {
+      detail: "Agent 설정이 필요합니다",
+      nextAction: "설정의 연결 테스트를 통과한 뒤 다시 실행하세요.",
+    },
+    failed: {
+      detail: "Agent 실행이 실패했습니다",
+      nextAction: "오류를 확인한 뒤 현재 단계를 재실행하세요.",
+    },
+  };
+  return copy[state] ?? copy.pending;
 }
 
 function sourceOf(value: unknown): PostWorkItem["source"] {

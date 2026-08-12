@@ -99,7 +99,7 @@ export type Draft = {
   updatedAt: string;
 };
 
-export type DraftEvaluationKind = "plan" | "prompt" | "image";
+export type DraftEvaluationKind = "plan" | "image_plan" | "prompt" | "image";
 export type DraftEvaluationStatus = "pending" | "completed" | "failed";
 
 export type DraftEvaluation = {

@@ -51,11 +51,21 @@ import {
 import styles from "./PostWorkPage.module.css";
 
 const POLL_INTERVAL_MS = 3000;
-const STAGES: { id: PostWorkStage; label: string }[] = [
+const LEGACY_STAGES: { id: PostWorkStage; label: string }[] = [
   { id: "brief", label: "브리프" },
   { id: "plan", label: "기획" },
   { id: "prompt", label: "프롬프트" },
   { id: "evaluation", label: "평가" },
+  { id: "generation", label: "이미지 생성" },
+  { id: "review", label: "검수" },
+  { id: "publish", label: "게시" },
+  { id: "memory", label: "메모리" },
+];
+const V3_STAGES: { id: PostWorkStage; label: string }[] = [
+  { id: "brief", label: "브리프" },
+  { id: "post_plan", label: "게시글 기획" },
+  { id: "image_plan", label: "이미지 기획" },
+  { id: "prompt", label: "프롬프트" },
   { id: "generation", label: "이미지 생성" },
   { id: "review", label: "검수" },
   { id: "publish", label: "게시" },
@@ -117,6 +127,14 @@ export function PostWorkPage({
     return (
       <Navigate
         to={`/posts/${encodeURIComponent(workId)}/${work.data.currentStage}`}
+        replace
+      />
+    );
+  }
+  if (work.data.pipelineV3 && (stage === "plan" || stage === "evaluation")) {
+    return (
+      <Navigate
+        to={`/posts/${encodeURIComponent(workId)}/${stage === "plan" ? "post_plan" : "prompt"}`}
         replace
       />
     );
@@ -217,6 +235,21 @@ function PostWorkHeader({
           {draft.errorMessage}
         </Alert>
       ) : null}
+      {item.pipelineV3 &&
+      !["pending", "running", "ready"].includes(item.pipelineV3.state) ? (
+        <Alert
+          color={item.pipelineV3.state === "failed" ? "red" : "yellow"}
+          title={item.statusDetail}
+          mt="sm"
+        >
+          <Text size="sm">다음 행동 · {item.pipelineV3.nextAction}</Text>
+          {item.pipelineV3.reasonCodes.length ? (
+            <Text size="xs" c="dimmed">
+              사유 코드 · {item.pipelineV3.reasonCodes.join(", ")}
+            </Text>
+          ) : null}
+        </Alert>
+      ) : null}
     </Paper>
   );
 }
@@ -228,9 +261,10 @@ function StageRail({
   item: PostWorkItem;
   activeStage: PostWorkStage;
 }) {
+  const stages = item.pipelineV3 ? V3_STAGES : LEGACY_STAGES;
   return (
     <nav className={styles.rail} aria-label="게시물 생성 단계">
-      {STAGES.map((stage, index) => {
+      {stages.map((stage, index) => {
         const active = stage.id === activeStage;
         const done = index + 1 < item.stageIndex;
         const skipped = item.kind === "post" && done;
@@ -279,10 +313,29 @@ function StageBody({
     return <UnavailableStage stage={stage} />;
   }
   if (stage === "brief") return <BriefStage draft={draft!} />;
+  if (stage === "post_plan") {
+    return (
+      <V3ArtifactStage item={item} evaluations={evaluations} kind="post_plan" />
+    );
+  }
+  if (stage === "image_plan") {
+    return (
+      <V3ArtifactStage
+        item={item}
+        evaluations={evaluations}
+        kind="image_plan"
+      />
+    );
+  }
   if (stage === "plan")
     return <PlanStage key={draft!.updatedAt} draft={draft!} />;
-  if (stage === "prompt")
-    return <PromptStage key={draft!.updatedAt} draft={draft!} />;
+  if (stage === "prompt") {
+    return item.pipelineV3 ? (
+      <V3PromptStage item={item} evaluations={evaluations} />
+    ) : (
+      <PromptStage key={draft!.updatedAt} draft={draft!} />
+    );
+  }
   if (stage === "evaluation") {
     return <EvaluationStage draft={draft!} evaluations={evaluations} />;
   }
@@ -296,6 +349,128 @@ function StageBody({
     return <PublishStage item={item} draft={draft} post={post} />;
   }
   return <MemoryStage item={item} draft={draft} />;
+}
+
+function V3ArtifactStage({
+  item,
+  evaluations,
+  kind,
+}: {
+  item: PostWorkItem;
+  evaluations: DraftEvaluation[];
+  kind: "post_plan" | "image_plan";
+}) {
+  const pipeline = item.pipelineV3;
+  const isPostPlan = kind === "post_plan";
+  const artifact = isPostPlan
+    ? pipeline?.artifacts.postPlan
+    : pipeline?.artifacts.imagePlan;
+  const evaluation = latestEvaluation(
+    evaluations,
+    isPostPlan ? "plan" : "image_plan",
+  );
+  const run = useDraftMutation(item.draftId ?? "", () =>
+    runDraftStage(item.draftId!, "plan"),
+  );
+  const runnable =
+    Boolean(item.draftId) &&
+    pipeline?.state === "pending" &&
+    pipeline.stage === kind;
+  return (
+    <StagePaper
+      title={`${isPostPlan ? "②" : "③"} ${isPostPlan ? "게시글 기획" : "이미지 기획"}`}
+      description={
+        isPostPlan
+          ? "캐릭터 맥락을 바탕으로 게시글 의도와 문안을 확정합니다."
+          : "확정된 게시글을 몇 장의 이미지로 보여줄지 구성합니다."
+      }
+    >
+      {artifact ? (
+        <Paper p="md">
+          <Stack gap="xs">
+            <Meta label="산출물">
+              revision {artifact.revision} · {artifact.status}
+            </Meta>
+            {isPostPlan && "premise" in artifact && artifact.premise ? (
+              <Meta label="전제">{artifact.premise}</Meta>
+            ) : null}
+            {!isPostPlan && "shotCount" in artifact ? (
+              <Meta label="이미지 장수">
+                {artifact.shotCount ?? pipeline?.imageCount ?? "—"}장
+              </Meta>
+            ) : null}
+          </Stack>
+        </Paper>
+      ) : (
+        <Alert color="gray">아직 이 단계의 산출물이 없습니다.</Alert>
+      )}
+      <EvaluationBlock
+        label={`${isPostPlan ? "게시글" : "이미지 기획"} 평가`}
+        evaluation={evaluation}
+      />
+      {pipeline ? (
+        <Alert color="blue">다음 행동 · {pipeline.nextAction}</Alert>
+      ) : null}
+      {run.isError ? <MutationError error={run.error} /> : null}
+      {runnable ? (
+        <Group>
+          <Button loading={run.isPending} onClick={() => run.mutate(undefined)}>
+            {isPostPlan ? "게시글 기획 실행" : "이미지 기획 실행"}
+          </Button>
+        </Group>
+      ) : null}
+    </StagePaper>
+  );
+}
+
+function V3PromptStage({
+  item,
+  evaluations,
+}: {
+  item: PostWorkItem;
+  evaluations: DraftEvaluation[];
+}) {
+  const artifact = item.pipelineV3?.artifacts.promptBuild;
+  const evaluation = latestEvaluation(evaluations, "prompt");
+  const run = useDraftMutation(item.draftId ?? "", () =>
+    runDraftStage(item.draftId!, "plan"),
+  );
+  const runnable =
+    Boolean(item.draftId) &&
+    item.pipelineV3?.state === "pending" &&
+    item.pipelineV3.stage === "image_prompt";
+  return (
+    <StagePaper
+      title="④ 프롬프트"
+      description="확정된 이미지 기획과 모델 정책을 컷별 이미지 프롬프트로 변환합니다."
+    >
+      {artifact ? (
+        <Paper p="md">
+          <Stack gap="xs">
+            <Meta label="산출물">revision {artifact.revision}</Meta>
+            <Meta label="프롬프트">{artifact.shotCount}개</Meta>
+            {artifact.targetModelId ? (
+              <Meta label="대상 모델">{artifact.targetModelId}</Meta>
+            ) : null}
+          </Stack>
+        </Paper>
+      ) : (
+        <Alert color="gray">아직 프롬프트 산출물이 없습니다.</Alert>
+      )}
+      <EvaluationBlock label="프롬프트 평가" evaluation={evaluation} />
+      {item.pipelineV3 ? (
+        <Alert color="blue">다음 행동 · {item.pipelineV3.nextAction}</Alert>
+      ) : null}
+      {run.isError ? <MutationError error={run.error} /> : null}
+      {runnable ? (
+        <Group>
+          <Button loading={run.isPending} onClick={() => run.mutate(undefined)}>
+            이미지 프롬프트 생성
+          </Button>
+        </Group>
+      ) : null}
+    </StagePaper>
+  );
 }
 
 function StagePaper({
@@ -998,10 +1173,14 @@ function MemoryStage({ item, draft }: { item: PostWorkItem; draft?: Draft }) {
 }
 
 function UnavailableStage({ stage }: { stage: PostWorkStage }) {
-  const definition = STAGES.find((item) => item.id === stage)!;
+  const stages = [...V3_STAGES, ...LEGACY_STAGES];
+  const definition = stages.find((item) => item.id === stage)!;
+  const index = (
+    V3_STAGES.some((item) => item.id === stage) ? V3_STAGES : LEGACY_STAGES
+  ).findIndex((item) => item.id === stage);
   return (
     <StagePaper
-      title={`${STAGE_NUMBER[STAGES.indexOf(definition)]} ${definition.label}`}
+      title={`${STAGE_NUMBER[index]} ${definition.label}`}
       description="직접 작성된 게시물에는 생성 Agent 단계 이력이 없습니다."
     >
       <Alert color="gray">이 단계는 건너뛰었습니다.</Alert>
@@ -1046,7 +1225,7 @@ function latestEvaluation(
 }
 
 function isStage(value: string): value is PostWorkStage {
-  return STAGES.some((stage) => stage.id === value);
+  return [...V3_STAGES, ...LEGACY_STAGES].some((stage) => stage.id === value);
 }
 
 function sourceLabel(source: PostWorkItem["source"]) {

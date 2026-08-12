@@ -35,8 +35,13 @@ function repositoryFake(overrides: Partial<DraftsRepository> = {}) {
   } as unknown as RepositoryFake;
 }
 
-function makeService(repository: RepositoryFake) {
-  return new DraftsService(repository);
+function makeService(repository: RepositoryFake, pipelineV3Enabled = false) {
+  return new DraftsService(repository, {
+    resolvePipelineV3: jest.fn().mockResolvedValue({
+      enabled: pipelineV3Enabled,
+      source: pipelineV3Enabled ? "db" : "none",
+    }),
+  } as never);
 }
 
 const draftRow = {
@@ -239,6 +244,42 @@ describe("DraftsService", () => {
     expect(repository.recordActionLog).toHaveBeenCalledWith(
       expect.objectContaining({ actionType: "DRAFT_CREATED" }),
     );
+  });
+
+  it("pins an enabled new draft to V3 without converting legacy fields", async () => {
+    const repository = repositoryFake({
+      createDraft: jest.fn().mockResolvedValue({
+        ...draftRow,
+        status: "planned",
+        caption: "",
+        hashtags: [],
+        scheduledAt: null,
+        conceptJson: {},
+      }),
+    });
+    const service = makeService(repository, true);
+
+    await service.createDraft({
+      characterId: "ai-1",
+      sceneHint: " 카페에서 비 오는 오후 ",
+    });
+
+    expect(repository.createDraft).toHaveBeenCalledWith({
+      characterId: "ai-1",
+      contentType: "feed",
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v3",
+        source: "manual",
+        mode: "manual",
+        operatorRequest: "카페에서 비 오는 오후",
+        pipeline: {
+          stage: "post_plan",
+          state: "pending",
+          imageCount: null,
+          reasonCodes: [],
+        },
+      },
+    });
   });
 
   it("does not let a legacy request turn the operator entry point automatic", async () => {

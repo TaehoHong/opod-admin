@@ -12,6 +12,9 @@ import { LlmLogRepository, type LlmLogStatus } from "./llm-log.repository";
 export const LLM_LOG_TYPE = {
   contentPlan: "admin.content.plan",
   imagePromptBuild: "admin.image.prompt",
+  postPlanV3: "admin.v3.post.plan",
+  imagePlanV3: "admin.v3.image.plan",
+  imagePromptV3: "admin.v3.image.prompt",
   referenceCaption: "admin.reference.caption",
   connectionTest: "admin.connection.test",
   imageGenerate: "admin.image.generate",
@@ -128,6 +131,21 @@ export class LlmLogService {
     execute(): Promise<Response>;
     isSuccessful?(response: Response): boolean;
   }): Promise<Response> {
+    return (await this.runJsonFetchWithLog(input)).response;
+  }
+
+  // V3 artifact는 producerLogId를 저장해 accepted output과 원본 LLM attempt를
+  // 연결한다. 기존 호출자는 Response만 받는 계약을 그대로 유지한다.
+  async runJsonFetchWithLog(input: {
+    type: LlmLogType;
+    provider: string;
+    model: string;
+    endpoint: string;
+    requestJson: unknown;
+    context?: LlmLogContext;
+    execute(): Promise<Response>;
+    isSuccessful?(response: Response): boolean;
+  }): Promise<{ response: Response; logId: string }> {
     const handle = await this.start({
       ...input,
       isStreaming: false,
@@ -158,7 +176,7 @@ export class LlmLogService {
         },
       );
     }
-    return response;
+    return { response, logId: handle.id.toString() };
   }
 
   async start(input: {

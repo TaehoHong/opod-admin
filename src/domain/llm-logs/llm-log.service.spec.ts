@@ -55,6 +55,24 @@ describe("LlmLogService", () => {
     ).resolves.toMatchObject({ status: 200 });
   });
 
+  it("returns the persisted attempt id with a V3 JSON response", async () => {
+    const service = serviceWith({
+      create: jest.fn().mockResolvedValue(42n),
+      finish: jest.fn().mockResolvedValue(undefined),
+    });
+
+    await expect(
+      service.runJsonFetchWithLog({
+        type: "admin.v3.post.plan",
+        provider: "openai-compatible",
+        model: "model",
+        endpoint: "https://llm.example/v1/chat/completions",
+        requestJson: { model: "model", messages: [] },
+        execute: () => Promise.resolve(Response.json({ ok: true })),
+      }),
+    ).resolves.toMatchObject({ response: { status: 200 }, logId: "42" });
+  });
+
   // id가 BigInt라 그대로 내보내면 JSON 직렬화가 터진다.
   it("serializes BigInt ids in the read-only list contract", async () => {
     const row: LlmLogListRow = {
