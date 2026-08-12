@@ -22,6 +22,7 @@ const jobWithOutputs = {
         select: {
           negativePrompt: true,
           referenceMedia: {
+            where: { isActive: true },
             select: { media: { select: { uploadedAt: true } } },
           },
         },
@@ -57,6 +58,7 @@ const imageDraftCharacter = {
       stylePrompt: true,
       negativePrompt: true,
       referenceMedia: {
+        where: { isActive: true },
         orderBy: { sortOrder: "asc" },
         select: {
           mediaId: true,

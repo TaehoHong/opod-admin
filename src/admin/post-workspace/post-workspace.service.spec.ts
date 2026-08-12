@@ -90,4 +90,49 @@ describe("PostWorkspaceService", () => {
 
     expect(page.items.map((item) => item.id)).toEqual(["draft-1"]);
   });
+
+  it("exposes a typed V3 stage and paused next action without reporting it as running", async () => {
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v3",
+        source: "manual",
+        mode: "manual",
+        pipeline: {
+          stage: "image_plan",
+          state: "blocked",
+          imageCount: 2,
+          reasonCodes: ["missing_identity_reference"],
+        },
+        postPlanning: {
+          revision: 1,
+          output: {
+            status: "ready",
+            intent: { premise: "비 오는 날의 산책" },
+          },
+        },
+        imagePlanning: {
+          revision: 1,
+          output: { status: "blocked" },
+        },
+      },
+      jobs: [],
+    } as never);
+
+    const item = await service.get("draft-1");
+
+    expect(item).toEqual(
+      expect.objectContaining({
+        currentStage: "image_plan",
+        stageIndex: 3,
+        operationalStatus: "needs_action",
+        pipelineV3: expect.objectContaining({
+          state: "blocked",
+          imageCount: 2,
+          reasonCodes: ["missing_identity_reference"],
+          nextAction: "레퍼런스나 이미지 기획을 보완하세요.",
+        }),
+      }),
+    );
+  });
 });

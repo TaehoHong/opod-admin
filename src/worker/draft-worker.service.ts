@@ -30,6 +30,7 @@ import {
   targetModelIdForShot,
 } from "./image-prompt-builder";
 import { errorMessage, isRecord } from "./value-utils";
+import { isPostPipelineV3 } from "./post-pipeline-v3";
 
 export type DraftWorkerConfig = AppConfig["draftWorker"];
 
@@ -70,6 +71,10 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly downloadBytes: (
       url: string,
     ) => Promise<Buffer> = downloadMediaBytes,
+    private readonly resolvePipelineV3Enabled: () => Promise<boolean> = () =>
+      Promise.resolve(false),
+    private readonly runV3Stage:
+      ((draftId: string) => Promise<void>) | null = null,
   ) {}
 
   onModuleInit(): void {
@@ -126,6 +131,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     if (this.config.schedulerEnabled) {
       await this.createScheduledDrafts();
     }
+    await this.planClaimedV3Drafts();
     await this.planClaimedDrafts();
     await this.aggregateGeneratingDrafts();
     await this.publishDueDrafts();
@@ -138,6 +144,16 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
   // 지정 draft를 즉시 기획한다. planned가 아니거나 캐릭터가 inactive면 false.
   // 기획 실패는 자동 경로와 동일하게 planned 복귀/failed 전이로 흡수된다.
   async planDraftNow(draftId: string): Promise<{ planned: boolean }> {
+    if (this.runV3Stage) {
+      const claimedV3 = await this.repository.claimV3DraftNow(
+        draftId,
+        this.config.planLeaseSeconds,
+      );
+      if (claimedV3) {
+        await this.runV3Stage(draftId);
+        return { planned: true };
+      }
+    }
     const claimed = await this.repository.claimDraftNow(
       draftId,
       this.config.planLeaseSeconds,
@@ -346,12 +362,31 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
 
   private async sweepExpiredPlanLeases(): Promise<void> {
     const now = new Date();
+    const v3 = await this.repository.sweepExpiredV3Leases(
+      this.config.maxAttempts,
+    );
+    if (v3.requeued > 0 || v3.failed > 0) {
+      this.logger.warn(
+        `Recovered V3 leases (requeued=${v3.requeued}, failed=${v3.failed})`,
+      );
+    }
     const requeued = await this.repository.sweepExpiredPlanLeases(
       now,
       this.config.maxAttempts,
     );
     if (requeued > 0) {
       this.logger.warn(`Requeued ${requeued} expired planning draft(s)`);
+    }
+  }
+
+  private async planClaimedV3Drafts(): Promise<void> {
+    if (!this.runV3Stage) return;
+    for (;;) {
+      const draftId = await this.repository.claimV3Draft(
+        this.config.planLeaseSeconds,
+      );
+      if (!draftId) return;
+      await this.runV3Stage(draftId);
     }
   }
 
@@ -739,7 +774,14 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       caption: draft.caption,
       hashtags,
       // 메모리 역반영 — 확정 세계관 캐릭터가 다음 기획에서 모순을 내지 않게 한다.
-      memoryContent: publishedMemoryContent(draft.caption, draft.conceptJson),
+      ...(isPostPipelineV3(draft.conceptJson)
+        ? { memories: selectedPublishedMemories(draft.conceptJson) }
+        : {
+            memoryContent: publishedMemoryContent(
+              draft.caption,
+              draft.conceptJson,
+            ),
+          }),
       media: orderedMedia.map(({ mediaId }, index) => ({
         originalMediaId: mediaId,
         finishedFile: finishedFiles[index],
@@ -796,6 +838,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
   // 다음 KST 시간창 내 랜덤 시각으로 planned draft를 생성한다.
   private async createScheduledDrafts(): Promise<void> {
     const policies = await this.repository.findEnabledPostingPolicies();
+    const pipelineV3Enabled = await this.resolvePipelineV3Enabled();
 
     const now = new Date();
     for (const policy of policies) {
@@ -824,6 +867,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       await this.repository.createScheduledDraft(
         policy.characterId,
         scheduledAt,
+        pipelineV3Enabled,
       );
       await this.recordActionLog(
         policy.characterId,
@@ -968,6 +1012,46 @@ export function publishedMemoryContent(
   return scenes.length > 0
     ? `${kstDate} 게시: "${captionPart}" (장면: ${scenes.join(" / ")})`
     : `${kstDate} 게시: "${captionPart}"`;
+}
+
+export function selectedPublishedMemories(
+  conceptJson: unknown,
+): { type: string; content: string; reason: string }[] {
+  if (
+    !isRecord(conceptJson) ||
+    conceptJson.pipelineVersion !== "post-pipeline-v3"
+  )
+    return [];
+  const postPlanning = isRecord(conceptJson.postPlanning)
+    ? conceptJson.postPlanning
+    : {};
+  const currentHash =
+    typeof postPlanning.hash === "string" ? postPlanning.hash : null;
+  if (!currentHash || !Array.isArray(conceptJson.memoryCandidates)) return [];
+  const seen = new Set<string>();
+  const result: { type: string; content: string; reason: string }[] = [];
+  for (const candidate of conceptJson.memoryCandidates) {
+    if (
+      !isRecord(candidate) ||
+      candidate.selected !== true ||
+      candidate.sourcePostPlanHash !== currentHash ||
+      typeof candidate.type !== "string" ||
+      typeof candidate.content !== "string" ||
+      !candidate.content.trim()
+    )
+      continue;
+    const type = candidate.type.trim();
+    const content = candidate.content.trim();
+    const dedupeKey = `${type}\u0000${content}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    result.push({
+      type,
+      content,
+      reason: `post-pipeline-v3: selected candidate from ${currentHash}`,
+    });
+  }
+  return result;
 }
 
 function clampHour(value: number, fallback: number): number {

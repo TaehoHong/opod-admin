@@ -65,6 +65,12 @@ function shotCharacterVisible(paramsJson: unknown): boolean | undefined {
     : undefined;
 }
 
+function v3Metadata(paramsJson: unknown): Record<string, unknown> | null {
+  return isRecord(paramsJson) && isRecord(paramsJson._v3)
+    ? paramsJson._v3
+    : null;
+}
+
 type ShotExecution = {
   route: "t2i" | "edit";
   referenceMediaIds: string[];
@@ -444,6 +450,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     // "컨텍스트 선별"). 필드 없음은 구버전 잡 호환을 위해 전체를 쓰고,
     // 빈 배열은 인물 없는 샷이므로 레퍼런스를 보내지 않는다.
     const selectedIds = shotReferenceMediaIds(job.paramsJson);
+    const v3 = v3Metadata(job.paramsJson);
     const selected =
       selectedIds === undefined
         ? uploadedIdentity
@@ -457,9 +464,32 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
             );
     const characterVisible = shotCharacterVisible(job.paramsJson);
     const ordered =
-      characterVisible === false
+      !v3 && characterVisible === false
         ? selected.filter((reference) => !identityIds.has(reference.mediaId))
         : selected;
+    if (v3 && selectedIds) {
+      const bindings = Array.isArray(v3.referenceBindings)
+        ? v3.referenceBindings
+        : [];
+      const bindingIds = bindings.map((binding) =>
+        isRecord(binding) && typeof binding.referenceId === "string"
+          ? binding.referenceId
+          : null,
+      );
+      const actualIds = ordered.map((reference) => reference.mediaId);
+      if (
+        bindingIds.some((id) => id === null) ||
+        bindingIds.length !== selectedIds.length ||
+        bindingIds.some((id, index) => id !== selectedIds[index]) ||
+        actualIds.length !== selectedIds.length ||
+        actualIds.some((id, index) => id !== selectedIds[index])
+      ) {
+        throw new ProviderJobFailedError(
+          `shot ${job.id} V3 reference binding/asset order mismatch`,
+          true,
+        );
+      }
+    }
     try {
       assertVisibleCharacterHasReference(
         characterVisible === true,
@@ -502,7 +532,13 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     const request: ImageGenerationRequest = {
       prompt: job.prompt,
       negativePrompt:
-        [profile?.negativePrompt, job.draft?.location?.negativePrompt]
+        [
+          profile?.negativePrompt,
+          job.draft?.location?.negativePrompt,
+          v3 && typeof v3.negativePrompt === "string"
+            ? v3.negativePrompt
+            : undefined,
+        ]
           .map((value) => value?.trim())
           .filter(Boolean)
           .join(", ") || undefined,

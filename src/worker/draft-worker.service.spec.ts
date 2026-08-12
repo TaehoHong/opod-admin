@@ -2,6 +2,7 @@ import {
   DraftWorkerConfig,
   DraftWorkerService,
   publishedMemoryContent,
+  selectedPublishedMemories,
 } from "./draft-worker.service";
 import { ContentPlanner } from "./content-planner";
 import { ImagePromptBuilder } from "./image-prompt-builder";
@@ -25,6 +26,9 @@ function repositoryFake() {
     findPromptBuildDraft: jest.fn().mockResolvedValue(null),
     findDraftImageJobs: jest.fn().mockResolvedValue([]),
     persistBuiltPrompts: jest.fn().mockResolvedValue(undefined),
+    sweepExpiredV3Leases: jest
+      .fn()
+      .mockResolvedValue({ requeued: 0, failed: 0 }),
     sweepExpiredPlanLeases: jest.fn().mockResolvedValue(0),
     claimPlannedDraft: jest.fn().mockResolvedValue(undefined),
     findPlannedDraft: jest.fn().mockResolvedValue(null),
@@ -121,8 +125,12 @@ function makeService(
   // 자리에서 켜고 끄는 편이 읽기 쉽다.
   {
     enabled = true,
+    pipelineV3Enabled = false,
     ...config
-  }: Partial<DraftWorkerConfig> & { enabled?: boolean } = {},
+  }: Partial<DraftWorkerConfig> & {
+    enabled?: boolean;
+    pipelineV3Enabled?: boolean;
+  } = {},
   builder = promptBuilder(),
   random = () => 0.5,
   store = jest.fn().mockResolvedValue({
@@ -148,6 +156,7 @@ function makeService(
     null,
     finishImage,
     downloadBytes,
+    () => Promise.resolve(pipelineV3Enabled),
   );
 }
 
@@ -875,7 +884,7 @@ describe("DraftWorkerService scheduler", () => {
     const service = makeService(
       repository,
       planner(),
-      { schedulerEnabled: true },
+      { schedulerEnabled: true, pipelineV3Enabled: true },
       promptBuilder(),
       () => 0.5,
     );
@@ -885,6 +894,7 @@ describe("DraftWorkerService scheduler", () => {
     expect(repository.createScheduledDraft).toHaveBeenCalledWith(
       "character-1",
       new Date("2026-07-31T11:00:00.000Z"),
+      true,
     );
     expect(repository.recordActionLog).toHaveBeenCalledWith(
       expect.objectContaining({ actionType: "DRAFT_SCHEDULED" }),
@@ -934,5 +944,44 @@ describe("publishedMemoryContent", () => {
     ).toBe('2026-07-31 게시: "오늘의 산책" (장면: 한강 / 카페)');
 
     jest.useRealTimers();
+  });
+});
+
+describe("selectedPublishedMemories", () => {
+  it("keeps only selected candidates from the current PostPlan and deduplicates them", () => {
+    expect(
+      selectedPublishedMemories({
+        pipelineVersion: "post-pipeline-v3",
+        postPlanning: { hash: "sha256:current" },
+        memoryCandidates: [
+          {
+            type: "routine",
+            content: " 매주 산책한다 ",
+            selected: true,
+            sourcePostPlanHash: "sha256:current",
+          },
+          {
+            type: "routine",
+            content: "매주 산책한다",
+            selected: true,
+            sourcePostPlanHash: "sha256:current",
+          },
+          {
+            type: "fact",
+            content: "stale",
+            selected: true,
+            sourcePostPlanHash: "sha256:old",
+          },
+          {
+            type: "fact",
+            content: "not selected",
+            selected: false,
+            sourcePostPlanHash: "sha256:current",
+          },
+        ],
+      }),
+    ).toEqual([
+      expect.objectContaining({ type: "routine", content: "매주 산책한다" }),
+    ]);
   });
 });

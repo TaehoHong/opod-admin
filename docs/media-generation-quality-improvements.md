@@ -2,6 +2,11 @@
 
 Status: 전수 분석 완료, 1차 핵심 개선 및 인물 레퍼런스 누락 차단 구현
 
+> 이 문서는 V2 품질 결함과 1차 보강의 근거 문서다. 결합형 `ContentPlanner`를
+> 전문 Agent 구조로 교체하는 다음 개선은
+> [게시글 생성 Agent 아키텍처 V3 개선안](./post-creation-agent-architecture-v3.md)에
+> 기록한다.
+
 ## 1. 목표
 
 게시글 생성 Agent가 만든 기획, 이미지와 게시 이력이 다음 조건을 만족하도록

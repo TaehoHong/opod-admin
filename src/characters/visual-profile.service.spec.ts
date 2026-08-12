@@ -37,7 +37,16 @@ const storedProfile = {
     {
       mediaId: "media-1",
       sortOrder: 10,
+      isActive: true,
+      description: "front portrait",
       media: { url: "https://cdn.local/ref-1.png" },
+    },
+    {
+      mediaId: "media-2",
+      sortOrder: 20,
+      isActive: false,
+      description: "side portrait",
+      media: { url: "https://cdn.local/ref-2.png" },
     },
   ],
 } as unknown as VisualProfileRow;
@@ -82,7 +91,17 @@ describe("VisualProfileService", () => {
       characterId: "ai-1",
       appearancePrompt: "young woman, short black hair",
       referenceMedia: [
-        { mediaId: "media-1", url: "https://cdn.local/ref-1.png" },
+        {
+          mediaId: "media-1",
+          url: "https://cdn.local/ref-1.png",
+          isActive: true,
+        },
+        {
+          mediaId: "media-2",
+          url: "https://cdn.local/ref-2.png",
+          isActive: false,
+          description: "side portrait",
+        },
       ],
     });
     expect(repository.upsertProfile).toHaveBeenCalledWith(

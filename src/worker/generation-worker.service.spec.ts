@@ -844,6 +844,79 @@ describe("GenerationWorkerService", () => {
     );
   });
 
+  it("rejects a V3 binding-to-asset mismatch instead of silently dropping it", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        paramsJson: {
+          _shot: {
+            characterVisible: false,
+            referenceMediaIds: ["reference-1"],
+          },
+          _v3: {
+            referenceBindings: [
+              {
+                bindingId: "environment-1",
+                referenceId: "missing-reference",
+                slot: "Image 1",
+              },
+            ],
+            negativePrompt: null,
+          },
+        },
+      }),
+    );
+    const provider = providerMock([]);
+    const { service } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(provider.submit).not.toHaveBeenCalled();
+    expect(repository.markFailed).toHaveBeenCalledWith(
+      "job-1",
+      "shot job-1 V3 reference binding/asset order mismatch",
+    );
+  });
+
+  it("preserves a V3 reference contract even when identity is not visible", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        paramsJson: {
+          _shot: {
+            characterVisible: false,
+            referenceMediaIds: ["reference-1"],
+          },
+          _v3: {
+            referenceBindings: [
+              {
+                bindingId: "wardrobe-1",
+                referenceId: "reference-1",
+                slot: "Image 1",
+              },
+            ],
+            negativePrompt: "no visible logos",
+          },
+        },
+      }),
+    );
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referenceImageUrls: ["https://cdn.local/reference.png"],
+        negativePrompt: "blurry, no visible logos",
+      }),
+    );
+  });
+
   it("keeps location references for a hidden-character shot and combines negative prompts", async () => {
     const repository = repositoryFake();
     repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");

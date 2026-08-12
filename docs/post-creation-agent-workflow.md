@@ -1,5 +1,10 @@
 # opod-admin 게시물 생성 Agent — 아키텍처 UML
 
+> 문서 상태: 현재 운영 코드의 V2 아키텍처를 설명한다. 역할 분리, strict artifact
+> 계약과 생성 Agent 3개·검증 Agent 4개로 전환하는 목표 구조는
+> [게시글 생성 Agent 아키텍처 V3 개선안](./post-creation-agent-architecture-v3.md)을
+> 정본으로 사용한다. V3 적용 전까지 이 문서의 V2 흐름이 현재 저장소 사실이다.
+
 파이프라인 한 줄 요약: **기획 → 프롬프트 빌드 → 이미지 생성 → 저장 → 검수(휴먼) → 게시 → 메모리 반영**
 
 오케스트레이션 패턴: 별도 큐 시스템(Redis/BullMQ) 없이 **PostgreSQL을 내구성 큐로 쓰는 상태 머신 + lease 기반 클레임 + 15초 폴링 워커**.

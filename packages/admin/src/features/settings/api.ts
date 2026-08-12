@@ -75,6 +75,10 @@ export type GenerationSettingsView = {
       { value: string; source: "db" | "default" }
     >;
   };
+  pipelineV3: {
+    enabled: boolean;
+    source: SettingSource;
+  };
   // enabledSource가 "env"면 아직 UI에서 저장한 적이 없어 env 기본값을 쓰는 중.
   worker: {
     enabled: boolean;
@@ -108,6 +112,7 @@ export type GenerationSettingsUpdate = {
   // 워커 자동 루프 — null = env 기본값으로 복귀.
   workerEnabled?: boolean | null;
   evaluationWorkerEnabled?: boolean | null;
+  pipelineV3Enabled?: boolean | null;
   // 종횡비 — null = 코드 기본값으로 복귀.
   aspectRatioFeed?: string | null;
   aspectRatioStory?: string | null;
@@ -163,7 +168,7 @@ export function runWorkerOnce(): Promise<{ jobId?: string }> {
 // 평가도 같은 규칙 — 대기 중인 기획·프롬프트 평가를 종류별로 1건씩 처리하고
 // 실제로 실행한 종류를 돌려준다. 이미지 생성과 달리 결과를 기다린다.
 export function runEvaluationWorkerOnce(): Promise<{
-  evaluated: ("plan" | "prompt" | "image")[];
+  evaluated: ("plan" | "image_plan" | "prompt" | "image")[];
 }> {
   return apiRequest("/evaluations/worker/run", { method: "POST" });
 }

@@ -48,7 +48,7 @@ export const PROMPT_EVALUATOR_SYSTEM_PROMPT = [
   "Mandatory score caps:",
   "- Added age or anatomy descriptors, body-shape intensification, weakened identity traits, or invented aesthetics score plan_fidelity and reference_alignment at most 2.",
   "- Conflicting mirror/camera/phone/hand instructions score physical_consistency at most 2.",
-  "- Missing explicit invariants for outfit construction, phone orientation/device, location/mirror, lighting, hair, or natural body proportions across related shots score cross_shot_consistency at most 2.",
+  "- Missing explicit invariants for visible outfit construction, visible phone orientation/device, visible location/mirror, lighting, hair, or natural body proportions across related shots score cross_shot_consistency at most 2. Do not require an off-frame or fully occluded object to repeat invisible appearance details merely for textual symmetry.",
   "- A static lint finding caps its affected dimension at 2. Never return a high score while repeating the finding as an issue.",
   "Static lint findings are provided per shot as hints; verify them, do not merely repeat them.",
   "Write reasons and issues in Korean (operator-facing), quoting problematic prompt fragments verbatim in English.",

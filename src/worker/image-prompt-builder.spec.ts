@@ -37,6 +37,39 @@ describe("imageModelFamily", () => {
     expect(modelFamilyGuidance("fal-ai/flux/dev")).not.toEqual(
       modelFamilyGuidance("fal-ai/fast-sdxl"),
     );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "Use the attached reference images only to preserve this same person's identity",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "hard frame boundary",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "visibly cuts through the upper garment cups below the shoulders",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "opaque phone-and-hand silhouette",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "lock only wardrobe attributes explicitly stated",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "Repeat those known attributes word-for-word",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "Never fill an unspecified material",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "A self-timer has no operating hand during the exposure",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "non-identity artifacts",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "fixed self-timer photograph, never a handheld selfie",
+    );
+    expect(modelFamilyGuidance("fal-ai/nano-banana-pro/edit")).toContain(
+      "that garment is outside the final frame",
+    );
   });
 });
 
@@ -118,6 +151,54 @@ describe("buildImagePromptBuilderUserPrompt", () => {
     );
     expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
       "a spacious gym lined with strength-training machines",
+    );
+  });
+
+  it("requires reference-edit prompts to override reference composition", () => {
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "include this reference-role rule verbatim in the final image prompt itself",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "Ignore their pose, crop, clothing, background, phone, and camera geometry",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "non-negotiable frame-boundary instruction",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "positive top-edge and bottom-edge landmarks",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "extends from above the hairline through below the jaw-neck junction",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "derive a locked wardrobe contract only from attributes explicitly stated",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "Capture metadata must not cause an excluded device to be rendered",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "relaxed empty hands, arms in the planned pose, and unobstructed clothing",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "mandatory reference-role sentence is the complete identity instruction",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "Never exclude the subject's arms, forearms, or empty hands",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "Do not invent missing material, seam placement, strap width",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "mandatory reference-role sentence is the complete identity instruction",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "override contradictory handheld capture metadata",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "Final reference-edit preflight",
+    );
+    expect(IMAGE_PROMPT_BUILDER_SYSTEM_PROMPT).toContain(
+      "forbidden examples include Korean woman, any age, curvy-slim",
     );
   });
 

@@ -1,4 +1,7 @@
-import { buildPlannerUserPrompt } from "../../prompts/content-planner";
+import {
+  buildPlannerUserPrompt,
+  PLANNER_SYSTEM_PROMPT,
+} from "../../prompts/content-planner";
 import {
   createLlmContentPlanner,
   parseContentPlan,
@@ -32,6 +35,52 @@ describe("resolveContentPlanner", () => {
 });
 
 describe("buildPlannerUserPrompt", () => {
+  it("requires shot-specific reference matching and evidence-based wardrobe continuity", () => {
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "Match references shot by shot, not once for the whole post",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "repeat the same wording in every shots.scene",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "do not invent a conflicting construction",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "shared reference as the first identity-and-wardrobe anchor",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "completely above the top frame edge",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain("analysis-only");
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "neutral, unobstructed, accessory-free shared anchor",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "removing a repeated device or occlusion is less reliable than adding",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "every explicit operator exclusion as a hard final-frame constraint",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "do not place the top frame edge at the collarbones or shoulders",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "normal handheld smartphone is not a reliable hard-privacy mask",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "Never call that shot handheld or a handheld mirror selfie",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "background palette, and light most closely match",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "Apply reference ordering as a hard filter",
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain(
+      "keep the complete face and chin outside the top frame",
+    );
+  });
+
   it("assembles personas, memories, and recent captions", () => {
     const prompt = buildPlannerUserPrompt({
       characterName: "한소이",

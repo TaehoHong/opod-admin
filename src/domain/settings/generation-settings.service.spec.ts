@@ -180,6 +180,86 @@ describe("GenerationSettingsService", () => {
     });
   });
 
+  it("keeps V3 off by default and resolves its rollout flag from DB before env", async () => {
+    const repository = repositoryMock([
+      { key: "pipeline.v3Enabled", value: "false" },
+    ]);
+
+    await expect(
+      makeService(repository).resolvePipelineV3({
+        POST_PIPELINE_V3_ENABLED: "true",
+      }),
+    ).resolves.toEqual({ enabled: false, source: "db" });
+    await expect(
+      makeService(repositoryMock()).resolvePipelineV3({}),
+    ).resolves.toEqual({ enabled: false, source: "none" });
+  });
+
+  it("probes strict JSON schema support before V3 activation", async () => {
+    const repository = repositoryMock([
+      { key: "planner.llmApiUrl", value: "https://llm.test/v1/chat" },
+      { key: "planner.llmApiKey", value: "db-key" },
+      { key: "planner.llmModel", value: "gpt-5-mini" },
+    ]);
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: '{"ok":true}' } }],
+      }),
+    });
+
+    await expect(
+      makeService(repository).testPipelineV3Capability({}, fetchMock as never),
+    ).resolves.toEqual({
+      ok: true,
+      message: "V3 strict JSON schema 지원 확인 (gpt-5-mini)",
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.response_format).toMatchObject({
+      type: "json_schema",
+      json_schema: {
+        name: "opod_pipeline_v3_probe",
+        strict: true,
+        schema: { additionalProperties: false },
+      },
+    });
+  });
+
+  it("retries the V3 capability probe with max_completion_tokens when required", async () => {
+    const repository = repositoryMock([
+      { key: "planner.llmApiUrl", value: "https://llm.test/v1/chat" },
+      { key: "planner.llmApiKey", value: "db-key" },
+      { key: "planner.llmModel", value: "gpt-5-mini" },
+    ]);
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: async () => "use max_completion_tokens instead",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: '{"ok":true}' } }],
+        }),
+      });
+
+    await expect(
+      makeService(repository).testPipelineV3Capability({}, fetchMock as never),
+    ).resolves.toMatchObject({ ok: true });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toHaveProperty(
+      "max_tokens",
+      64,
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toHaveProperty(
+      "max_completion_tokens",
+      64,
+    );
+  });
+
   // 종횡비를 아무도 설정하지 않으면 모델이 제 기본값(가로)으로 뽑는다. 코드
   // 기본값이 없으면 피드에 못 쓰는 이미지가 만들어진다.
   it("falls back to format defaults when no ratio is stored", async () => {

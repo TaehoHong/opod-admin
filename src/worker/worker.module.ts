@@ -22,6 +22,8 @@ import { resolvePromptEvaluator } from "./prompt-evaluator";
 import { resolveImageEvaluator } from "./image-evaluator";
 import { createMediaBytesReader } from "./reference-captioner";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
+import { PostPipelineV3Runner } from "./post-pipeline-v3.runner";
+import { StrictJsonAgentClient } from "./strict-json-agent";
 
 function storageEnv(config: S3Config | undefined) {
   return config
@@ -43,6 +45,21 @@ function storageEnv(config: S3Config | undefined) {
   providers: [
     GenerationJobRepository,
     DraftWorkerRepository,
+    {
+      provide: PostPipelineV3Runner,
+      useFactory: (
+        drafts: DraftWorkerRepository,
+        settings: GenerationSettingsService,
+        llmLogs: LlmLogService,
+        config: AppConfigService,
+      ) => new PostPipelineV3Runner(drafts, settings, llmLogs, config),
+      inject: [
+        DraftWorkerRepository,
+        GenerationSettingsService,
+        LlmLogService,
+        AppConfigService,
+      ],
+    },
     {
       provide: GenerationWorkerService,
       // 프로바이더는 잡 처리 시마다 재해석 — admin 설정(DB)이 env보다 우선.
@@ -94,6 +111,7 @@ function storageEnv(config: S3Config | undefined) {
         settings: GenerationSettingsService,
         llmLogs: LlmLogService,
         config: AppConfigService,
+        v3: PostPipelineV3Runner,
       ) =>
         new DraftWorkerService(
           drafts,
@@ -128,12 +146,17 @@ function storageEnv(config: S3Config | undefined) {
           // 게시 마감본 업로드/원본 읽기 — 생성 워커와 같은 스토어·서명자.
           createGeneratedMediaStore(storageEnv(config.s3)),
           createReferenceUrlSigner(storageEnv(config.s3)),
+          undefined,
+          undefined,
+          async () => (await settings.resolvePipelineV3()).enabled,
+          (draftId) => v3.runCurrentStage(draftId),
         ),
       inject: [
         DraftWorkerRepository,
         GenerationSettingsService,
         LlmLogService,
         AppConfigService,
+        PostPipelineV3Runner,
       ],
     },
     EvaluationRepository,
@@ -171,6 +194,21 @@ function storageEnv(config: S3Config | undefined) {
           async () =>
             (await settings.resolveWorkerToggles()).evaluation.enabled,
           config.evaluationWorker,
+          async () => {
+            const resolved = await settings.resolveEvaluatorSettings();
+            return resolved.apiUrl && resolved.apiKey && resolved.model
+              ? new StrictJsonAgentClient(
+                  {
+                    apiUrl: resolved.apiUrl,
+                    apiKey: resolved.apiKey,
+                    model: resolved.model,
+                  },
+                  fetch,
+                  llmLogs,
+                )
+              : null;
+          },
+          createMediaBytesReader(config.s3),
         ),
       inject: [
         EvaluationRepository,

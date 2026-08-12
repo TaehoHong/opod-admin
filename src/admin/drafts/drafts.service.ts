@@ -7,6 +7,8 @@ import {
   pageFromRows,
 } from "../../domain/database/page";
 import { parseFinishPreset } from "../../worker/film-finish";
+import { GenerationSettingsService } from "../../domain/settings/generation-settings.service";
+import { createPostPipelineV3Concept } from "../../worker/post-pipeline-v3";
 import { DraftJobRow, DraftRow, DraftsRepository } from "./drafts.repository";
 
 type DraftStatus =
@@ -261,7 +263,10 @@ function generationTrace(
 
 @Injectable()
 export class DraftsService {
-  constructor(private readonly repository: DraftsRepository) {}
+  constructor(
+    private readonly repository: DraftsRepository,
+    private readonly settings: GenerationSettingsService,
+  ) {}
 
   async listDrafts(
     input: { status?: string; characterId?: string } & PageInput,
@@ -381,15 +386,22 @@ export class DraftsService {
     }
     const scheduledAt = this.parseOptionalDate(input.scheduledAt);
     const sceneHint = input.sceneHint?.trim();
+    const pipelineV3 = await this.settings.resolvePipelineV3();
 
     const draft = await this.repository.createDraft({
       characterId: input.characterId,
       contentType,
-      conceptJson: {
-        source: "manual",
-        mode: "manual",
-        ...(sceneHint ? { sceneHint } : {}),
-      },
+      conceptJson: pipelineV3.enabled
+        ? createPostPipelineV3Concept({
+            source: "manual",
+            mode: "manual",
+            ...(sceneHint ? { operatorRequest: sceneHint } : {}),
+          })
+        : {
+            source: "manual",
+            mode: "manual",
+            ...(sceneHint ? { sceneHint } : {}),
+          },
       ...(scheduledAt ? { scheduledAt } : {}),
     });
     await this.recordActionLog(

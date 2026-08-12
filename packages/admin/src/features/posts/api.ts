@@ -6,6 +6,8 @@ export type PostContentType = "feed" | "reel" | "story";
 export type PostWorkStage =
   | "brief"
   | "plan"
+  | "post_plan"
+  | "image_plan"
   | "prompt"
   | "evaluation"
   | "generation"
@@ -39,6 +41,30 @@ export type PostWorkItem = {
   scheduledAt?: string;
   createdAt: string;
   updatedAt: string;
+  pipelineV3?: {
+    version: "post-pipeline-v3";
+    stage:
+      | "post_plan"
+      | "image_plan"
+      | "image_prompt"
+      | "generation"
+      | "review"
+      | "publish"
+      | "memory";
+    state: string;
+    imageCount: number | null;
+    reasonCodes: string[];
+    nextAction: string;
+    artifacts: {
+      postPlan?: { revision: number; status: string; premise?: string };
+      imagePlan?: { revision: number; status: string; shotCount?: number };
+      promptBuild?: {
+        revision: number;
+        shotCount: number;
+        targetModelId?: string;
+      };
+    };
+  };
 };
 
 export type PostListItem = {

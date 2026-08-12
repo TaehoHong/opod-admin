@@ -70,6 +70,7 @@ export type VisualProfile = {
     mediaId: string;
     url: string;
     sortOrder: number;
+    isActive: boolean;
     description: string;
   }>;
   updatedAt?: string;

@@ -270,7 +270,7 @@ function cleanReferenceIds(
   return cleaned;
 }
 
-function cleanHashtags(values: unknown[]): string[] {
+export function cleanHashtags(values: unknown[]): string[] {
   const cleaned: string[] = [];
   for (const value of values) {
     if (typeof value !== "string") {

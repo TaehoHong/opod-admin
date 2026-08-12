@@ -11,10 +11,10 @@ import { PrismaService } from "../domain/database/prisma.service";
 
 const profileInclude = {
   referenceMedia: {
-    orderBy: { sortOrder: "asc" },
+    orderBy: [{ isActive: "desc" }, { sortOrder: "asc" }],
     include: { media: { select: { url: true } } },
   },
-} as const;
+} satisfies Prisma.CharacterVisualProfileInclude;
 
 export type VisualProfileRow = Prisma.CharacterVisualProfileGetPayload<{
   include: typeof profileInclude;
@@ -76,6 +76,7 @@ export class VisualProfileRepository {
     return this.prisma.characterVisualProfileReference.findMany({
       where: {
         profile: { characterId },
+        isActive: true,
         description: "",
         media: { uploadedAt: { not: null } },
       },
@@ -99,8 +100,8 @@ export class VisualProfileRepository {
     });
   }
 
-  // 레퍼런스 세트 동기화는 한 트랜잭션이어야 한다. 중간에 끊기면 프로필이
-  // 레퍼런스 없이 남는다. 유지되는 관계는 upsert라 캡션이 보존된다.
+  // 활성 레퍼런스 세트 동기화는 한 트랜잭션이어야 한다. 선택 해제된 관계는
+  // 삭제하지 않고 비활성화해 캡션과 정렬을 보존한다.
   replaceReferences(
     characterId: string,
     mediaIds: string[],
@@ -112,18 +113,25 @@ export class VisualProfileRepository {
         update: {},
         select: { id: true },
       });
-      await tx.characterVisualProfileReference.deleteMany({
+      await tx.characterVisualProfileReference.updateMany({
         where: {
           profileId: upserted.id,
+          isActive: true,
           ...(mediaIds.length > 0 ? { mediaId: { notIn: mediaIds } } : {}),
         },
+        data: { isActive: false },
       });
       for (const [index, mediaId] of mediaIds.entries()) {
         const sortOrder = (index + 1) * 10;
         await tx.characterVisualProfileReference.upsert({
           where: { profileId_mediaId: { profileId: upserted.id, mediaId } },
-          create: { profileId: upserted.id, mediaId, sortOrder },
-          update: { sortOrder },
+          create: {
+            profileId: upserted.id,
+            mediaId,
+            sortOrder,
+            isActive: true,
+          },
+          update: { sortOrder, isActive: true },
         });
       }
       // 방금 upsert한 행이라 반드시 있다 — 없으면 트랜잭션이 깨진 것이므로

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -52,6 +53,12 @@ export class AdminSettingsController {
     @Body() body: UpdateGenerationSettingsDto,
     @Req() request: AdminRequest,
   ) {
+    if (body.pipelineV3Enabled === true) {
+      const capability = await this.settings.testPipelineV3Capability();
+      if (!capability.ok) {
+        throw new BadRequestException(capability.message);
+      }
+    }
     const before = await this.settings.getSettings();
     // 토글은 API에서 boolean, 저장은 문자열이다. 감사 로그도 이 정규화된
     // update를 그대로 봐야 "무엇이 바뀌었는지"가 저장값과 일치한다.
@@ -95,6 +102,9 @@ export class AdminSettingsController {
             evaluationWorkerEnabled: toStoredFlag(body.evaluationWorkerEnabled),
           }
         : {}),
+      ...("pipelineV3Enabled" in body
+        ? { pipelineV3Enabled: toStoredFlag(body.pipelineV3Enabled) }
+        : {}),
       ...("aspectRatioFeed" in body
         ? { aspectRatioFeed: body.aspectRatioFeed ?? null }
         : {}),
@@ -131,6 +141,7 @@ export class AdminSettingsController {
       names,
       todaySpend,
       aspectRatios,
+      pipelineV3,
     ] = await Promise.all([
       this.settings.resolveProviderSettings(),
       this.settings.resolvePlannerSettings(),
@@ -140,6 +151,7 @@ export class AdminSettingsController {
       this.settings.resolveProviderNames(),
       this.audit.sumGenerationCostSince(startOfKstDay()),
       this.settings.resolveAspectRatios(),
+      this.settings.resolvePipelineV3(),
     ]);
     const worker = this.config.worker;
     return {
@@ -204,6 +216,10 @@ export class AdminSettingsController {
           reel: saved.aspectRatioReel ?? null,
         },
         effective: aspectRatios,
+      },
+      pipelineV3: {
+        enabled: pipelineV3.enabled,
+        source: pipelineV3.source,
       },
       // 자동 루프 on/off는 DB 소유다. source가 "env"면 아직 UI에서 한 번도
       // 저장하지 않아 env 기본값을 쓰는 중이라는 뜻이다.

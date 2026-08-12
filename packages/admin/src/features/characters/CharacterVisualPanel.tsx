@@ -65,7 +65,7 @@ export function CharacterVisualPanel({ characterId }: { characterId: string }) {
   return (
     <VisualProfileForms
       key={`${profile.data.updatedAt ?? "new"}:${profile.data.referenceMedia
-        .map((item) => item.mediaId)
+        .map((item) => `${item.mediaId}:${item.isActive}`)
         .join(",")}`}
       characterId={characterId}
       profile={profile.data}
@@ -99,7 +99,9 @@ function VisualProfileForms({
   const references = useForm({
     mode: "uncontrolled",
     initialValues: {
-      mediaIds: profile.referenceMedia.map((item) => item.mediaId),
+      mediaIds: profile.referenceMedia
+        .filter((item) => item.isActive)
+        .map((item) => item.mediaId),
     },
   });
   const test = useForm({
@@ -219,9 +221,9 @@ function VisualProfileForms({
           </form>
           <RecentGenerations
             characterId={characterId}
-            referenceMediaIds={profile.referenceMedia.map(
-              (item) => item.mediaId,
-            )}
+            referenceMediaIds={profile.referenceMedia
+              .filter((item) => item.isActive)
+              .map((item) => item.mediaId)}
           />
         </Paper>
       </Stack>
@@ -235,8 +237,8 @@ function VisualProfileForms({
           <Stack gap="sm">
             <Title order={5}>레퍼런스 이미지</Title>
             <MultiSelect
-              label="업로드 완료 이미지"
-              description="최대 20개까지 선택할 수 있습니다"
+              label="활성 레퍼런스"
+              description="선택 해제하면 삭제하지 않고 비활성화합니다. 최대 20개"
               data={options}
               searchable
               maxValues={20}
@@ -259,7 +261,7 @@ function VisualProfileForms({
                 type="button"
                 variant="default"
                 loading={caption.isPending}
-                disabled={profile.referenceMedia.length === 0}
+                disabled={!profile.referenceMedia.some((item) => item.isActive)}
                 onClick={() => caption.mutate()}
               >
                 빈 캡션 생성
@@ -298,12 +300,20 @@ function VisualProfileForms({
                   const source = previewUrl(reference.url);
                   return (
                     <Stack key={reference.mediaId} gap={4}>
+                      <Badge
+                        color={reference.isActive ? "teal" : "gray"}
+                        variant="light"
+                        size="xs"
+                      >
+                        {reference.isActive ? "활성" : "비활성"}
+                      </Badge>
                       {source ? (
                         <ZoomableImage
                           src={source}
                           alt="캐릭터 레퍼런스"
                           h={120}
                           fit="cover"
+                          style={{ opacity: reference.isActive ? 1 : 0.45 }}
                         />
                       ) : null}
                       <Text size="xs" c="dimmed" lineClamp={3}>

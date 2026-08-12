@@ -11,6 +11,27 @@ const repositoryWithTransaction = (tx: Record<string, unknown>) => {
 };
 
 describe("GenerationRepository", () => {
+  it("loads only active references for image drafts and job context", async () => {
+    const findCharacter = jest.fn().mockResolvedValue(null);
+    const findJob = jest.fn().mockResolvedValue(null);
+    const repository = new GenerationRepository({
+      character: { findUnique: findCharacter },
+      generationJob: { findUnique: findJob },
+    } as never);
+
+    await repository.findCharacterForImageDraft("character-1");
+    await repository.findJobDetail("job-1");
+
+    expect(
+      findCharacter.mock.calls[0][0].select.visualProfile.select.referenceMedia
+        .where,
+    ).toEqual({ isActive: true });
+    expect(
+      findJob.mock.calls[0][0].include.character.select.visualProfile.select
+        .referenceMedia.where,
+    ).toEqual({ isActive: true });
+  });
+
   it("confirms a draft and records its audit action in the same transaction", async () => {
     const createLog = jest.fn().mockResolvedValue({});
     const tx = {

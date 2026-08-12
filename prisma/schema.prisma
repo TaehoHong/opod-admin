@@ -112,6 +112,7 @@ enum PostDraftStatus {
 // docs/plan-prompt-evaluation-agent.md — 평가 Agent 데이터 모델.
 enum DraftEvaluationKind {
   plan
+  image_plan
   prompt
   image
 
@@ -1148,6 +1149,7 @@ model CharacterVisualProfileReference {
   profileId   String                 @map("profile_id") @db.Uuid
   mediaId     String                 @map("media_id") @db.Uuid
   sortOrder   Int                    @default(0) @map("sort_order")
+  isActive    Boolean                @default(true) @map("is_active")
   // 비전 LLM이 생성한 이미지 서술(장면·구도·의상·조명) — 기획 LLM이 샷별로
   // 관련 레퍼런스를 선별하는 데 쓴다. 빈 값은 캡셔닝 전(백필 대상).
   description String                 @default("")

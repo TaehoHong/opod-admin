@@ -57,6 +57,20 @@ export function WorkerCard({
       <Stack gap="sm">
         <Title order={6}>생성 워커</Title>
         <Stack gap={6}>
+          <Row label="파이프라인">
+            <LoopSwitch
+              label="게시글 생성 Agent V3 신규 초안 적용"
+              enabled={settings.pipelineV3.enabled}
+              source={settings.pipelineV3.source}
+              pending={
+                toggle.isPending &&
+                toggle.variables?.pipelineV3Enabled !== undefined
+              }
+              onChange={(pipelineV3Enabled) =>
+                toggle.mutate({ pipelineV3Enabled })
+              }
+            />
+          </Row>
           <Row label="자동 루프">
             <LoopSwitch
               label="생성 워커 자동 루프"
@@ -80,6 +94,12 @@ export function WorkerCard({
             </Text>
           </Row>
         </Stack>
+
+        <Text size="xs" c="dimmed">
+          V3는 설정을 켠 뒤 새로 만드는 초안에만 적용됩니다. 기존 V2 초안은 기존
+          경로로 끝까지 처리됩니다. 켤 때 현재 기획 LLM의 strict JSON schema
+          지원을 실제로 확인합니다.
+        </Text>
 
         <Text size="xs" c="dimmed">
           자동 루프는 초안 기획·게시와 이미지 생성을 함께 제어합니다. 수동
@@ -171,13 +191,19 @@ export function WorkerCard({
 // 실행 결과는 "무엇이 돌았는지"를 그대로 말한다 — 대기 건이 없었던 것과
 // 실행한 것을 운영자가 구분해야 한다.
 function evaluationRunMessage(
-  evaluated: ("plan" | "prompt" | "image")[],
+  evaluated: ("plan" | "image_plan" | "prompt" | "image")[],
 ): string {
   if (evaluated.length === 0) {
     return "대기 중인 평가가 없습니다.";
   }
   const names = evaluated.map((kind) =>
-    kind === "plan" ? "기획" : kind === "prompt" ? "프롬프트" : "이미지",
+    kind === "plan"
+      ? "게시글 기획"
+      : kind === "image_plan"
+        ? "이미지 기획"
+        : kind === "prompt"
+          ? "프롬프트"
+          : "이미지",
   );
   return `${names.join("·")} 평가를 실행했습니다.`;
 }

@@ -1,6 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../domain/database/prisma.service";
+import {
+  createPostPipelineV3Concept,
+  POST_PIPELINE_V3,
+  PostPipelineV3ArtifactKey,
+} from "./post-pipeline-v3";
 
 const aggregateDraftSelect = {
   id: true,
@@ -18,6 +23,7 @@ const plannedDraftInclude = {
       displayName: true,
       bio: true,
       interests: true,
+      contentLanguage: true,
       personas: {
         where: { deletedAt: null },
         orderBy: { sortOrder: "asc" },
@@ -27,18 +33,28 @@ const plannedDraftInclude = {
         where: { deletedAt: null },
         orderBy: { createdAt: "desc" },
         take: 20,
-        select: { content: true },
+        select: { type: true, content: true },
       },
       posts: {
         orderBy: { createdAt: "desc" },
         take: 20,
-        select: { content: true },
+        select: {
+          content: true,
+          hashtags: { select: { hashtag: { select: { name: true } } } },
+          sourceDrafts: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            select: { conceptJson: true },
+          },
+        },
       },
       visualProfile: {
         select: {
           appearancePrompt: true,
           stylePrompt: true,
+          negativePrompt: true,
           referenceMedia: {
+            where: { isActive: true },
             orderBy: { sortOrder: "asc" },
             select: {
               mediaId: true,
@@ -152,6 +168,12 @@ export class DraftWorkerRepository {
         status: "planned",
         draftType: "post",
         character: { status: "active" },
+        NOT: {
+          conceptJson: {
+            path: ["pipelineVersion"],
+            equals: POST_PIPELINE_V3,
+          },
+        },
       },
       data: {
         status: "generating",
@@ -220,6 +242,7 @@ export class DraftWorkerRepository {
                 appearancePrompt: true,
                 stylePrompt: true,
                 referenceMedia: {
+                  where: { isActive: true },
                   orderBy: { sortOrder: "asc" },
                   select: {
                     mediaId: true,
@@ -307,6 +330,70 @@ export class DraftWorkerRepository {
     });
   }
 
+  async persistV3Artifact(input: {
+    draftId: string;
+    characterId: string;
+    expected: {
+      stage: string;
+      state: string;
+      artifactKey: PostPipelineV3ArtifactKey;
+      revision: number | null;
+    };
+    conceptJson: Prisma.InputJsonValue;
+    actionType: string;
+    reason: string;
+  }): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.postDraft.updateMany({
+        where: {
+          id: input.draftId,
+          status: "generating",
+          AND: [
+            {
+              conceptJson: {
+                path: ["pipeline", "stage"],
+                equals: input.expected.stage,
+              },
+            },
+            {
+              conceptJson: {
+                path: ["pipeline", "state"],
+                equals: input.expected.state,
+              },
+            },
+            ...(input.expected.revision === null
+              ? []
+              : [
+                  {
+                    conceptJson: {
+                      path: [input.expected.artifactKey, "revision"],
+                      equals: input.expected.revision,
+                    },
+                  },
+                ]),
+          ],
+        },
+        data: {
+          conceptJson: input.conceptJson,
+          status: "planned",
+          leaseExpiresAt: null,
+          errorMessage: null,
+        },
+      });
+      if (updated.count !== 1) return false;
+      await tx.characterActionLog.create({
+        data: {
+          characterId: input.characterId,
+          actionType: input.actionType,
+          targetTable: "post_drafts",
+          targetId: input.draftId,
+          reason: input.reason,
+        },
+      });
+      return true;
+    });
+  }
+
   async sweepExpiredPlanLeases(
     now: Date,
     maxAttempts: number,
@@ -316,6 +403,12 @@ export class DraftWorkerRepository {
         status: "generating",
         leaseExpiresAt: { lt: now },
         attemptCount: { lt: maxAttempts },
+        NOT: {
+          conceptJson: {
+            path: ["pipelineVersion"],
+            equals: POST_PIPELINE_V3,
+          },
+        },
       },
       data: { status: "planned", leaseExpiresAt: null },
     });
@@ -324,6 +417,12 @@ export class DraftWorkerRepository {
         status: "generating",
         leaseExpiresAt: { lt: now },
         attemptCount: { gte: maxAttempts },
+        NOT: {
+          conceptJson: {
+            path: ["pipelineVersion"],
+            equals: POST_PIPELINE_V3,
+          },
+        },
       },
       data: {
         status: "failed",
@@ -332,6 +431,40 @@ export class DraftWorkerRepository {
       },
     });
     return requeued.count;
+  }
+
+  async sweepExpiredV3Leases(
+    maxAttempts: number,
+  ): Promise<{ requeued: number; failed: number }> {
+    const requeued = await this.prisma.$queryRaw<{ id: string }[]>`
+      UPDATE opod.post_drafts
+      SET status = 'planned',
+          lease_expires_at = NULL,
+          concept_json = jsonb_set(concept_json, '{pipeline,state}', '"pending"'::jsonb),
+          updated_at = now()
+      WHERE status = 'generating'
+        AND lease_expires_at < now()
+        AND attempt_count < ${maxAttempts}
+        AND concept_json->>'pipelineVersion' = ${POST_PIPELINE_V3}
+      RETURNING id
+    `;
+    const failed = await this.prisma.$queryRaw<{ id: string }[]>`
+      UPDATE opod.post_drafts
+      SET status = 'failed',
+          lease_expires_at = NULL,
+          error_message = 'V3 stage lease expired',
+          concept_json = jsonb_set(
+            jsonb_set(concept_json, '{pipeline,state}', '"failed"'::jsonb),
+            '{pipeline,reasonCodes}', '["lease_expired"]'::jsonb
+          ),
+          updated_at = now()
+      WHERE status = 'generating'
+        AND lease_expires_at < now()
+        AND attempt_count >= ${maxAttempts}
+        AND concept_json->>'pipelineVersion' = ${POST_PIPELINE_V3}
+      RETURNING id
+    `;
+    return { requeued: requeued.length, failed: failed.length };
   }
 
   // Prisma에는 SKIP LOCKED claim의 동등한 API가 없어 tagged SQL을 쓴다.
@@ -348,6 +481,7 @@ export class DraftWorkerRepository {
         JOIN opod.characters c ON c.id = d.character_id AND c.status = 'active'
         WHERE d.status = 'planned' AND d.draft_type = 'post'
           AND (d.concept_json->>'mode') IS DISTINCT FROM 'manual'
+          AND (d.concept_json->>'pipelineVersion') IS DISTINCT FROM ${POST_PIPELINE_V3}
         ORDER BY d.created_at, d.id
         LIMIT 1
         FOR UPDATE OF d SKIP LOCKED
@@ -355,6 +489,186 @@ export class DraftWorkerRepository {
       RETURNING id
     `;
     return rows[0]?.id;
+  }
+
+  async claimV3Draft(leaseSeconds: number): Promise<string | undefined> {
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      UPDATE opod.post_drafts
+      SET status = 'generating',
+          lease_expires_at = now() + make_interval(secs => ${leaseSeconds}),
+          attempt_count = attempt_count + 1,
+          concept_json = jsonb_set(concept_json, '{pipeline,state}', '"running"'::jsonb),
+          updated_at = now()
+      WHERE id = (
+        SELECT d.id FROM opod.post_drafts d
+        JOIN opod.characters c ON c.id = d.character_id AND c.status = 'active'
+        WHERE d.status = 'planned' AND d.draft_type = 'post'
+          AND d.concept_json->>'pipelineVersion' = ${POST_PIPELINE_V3}
+          AND d.concept_json#>>'{pipeline,state}' = 'pending'
+          AND (d.concept_json->>'mode') IS DISTINCT FROM 'manual'
+        ORDER BY d.created_at, d.id
+        LIMIT 1
+        FOR UPDATE OF d SKIP LOCKED
+      )
+      RETURNING id
+    `;
+    return rows[0]?.id;
+  }
+
+  async claimV3DraftNow(
+    draftId: string,
+    leaseSeconds: number,
+  ): Promise<boolean> {
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      UPDATE opod.post_drafts
+      SET status = 'generating',
+          lease_expires_at = now() + make_interval(secs => ${leaseSeconds}),
+          attempt_count = attempt_count + 1,
+          concept_json = jsonb_set(concept_json, '{pipeline,state}', '"running"'::jsonb),
+          updated_at = now()
+      WHERE id = ${draftId}::uuid
+        AND status = 'planned'
+        AND draft_type = 'post'
+        AND concept_json->>'pipelineVersion' = ${POST_PIPELINE_V3}
+        AND concept_json#>>'{pipeline,state}' = 'pending'
+      RETURNING id
+    `;
+    return rows.length === 1;
+  }
+
+  async persistV3Paused(input: {
+    draftId: string;
+    characterId: string;
+    expectedStage: string;
+    conceptJson: Prisma.InputJsonValue;
+    reason: string;
+  }): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.postDraft.updateMany({
+        where: {
+          id: input.draftId,
+          status: "generating",
+          AND: [
+            {
+              conceptJson: {
+                path: ["pipeline", "stage"],
+                equals: input.expectedStage,
+              },
+            },
+            {
+              conceptJson: {
+                path: ["pipeline", "state"],
+                equals: "running",
+              },
+            },
+          ],
+        },
+        data: {
+          conceptJson: input.conceptJson,
+          status: "planned",
+          leaseExpiresAt: null,
+          errorMessage: null,
+        },
+      });
+      if (updated.count !== 1) return false;
+      await tx.characterActionLog.create({
+        data: {
+          characterId: input.characterId,
+          actionType: "DRAFT_V3_PAUSED",
+          targetTable: "post_drafts",
+          targetId: input.draftId,
+          reason: input.reason,
+        },
+      });
+      return true;
+    });
+  }
+
+  async persistV3PromptJobs(input: {
+    draftId: string;
+    characterId: string;
+    caption: string;
+    hashtags: string[];
+    locationId: string | null;
+    conceptJson: Prisma.InputJsonValue;
+    manual: boolean;
+    jobs: {
+      prompt: string;
+      sortOrder: number;
+      paramsJson: Prisma.InputJsonValue;
+    }[];
+  }): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.postDraft.updateMany({
+        where: {
+          id: input.draftId,
+          status: "generating",
+          AND: [
+            {
+              conceptJson: {
+                path: ["pipeline", "stage"],
+                equals: "image_prompt",
+              },
+            },
+            {
+              conceptJson: {
+                path: ["pipeline", "state"],
+                equals: "running",
+              },
+            },
+          ],
+        },
+        data: {
+          caption: input.caption,
+          hashtags: input.hashtags,
+          locationId: input.locationId,
+          conceptJson: input.conceptJson,
+          leaseExpiresAt: null,
+          errorMessage: null,
+        },
+      });
+      if (updated.count !== 1) return false;
+      for (const job of input.jobs) {
+        await tx.generationJob.create({
+          data: {
+            characterId: input.characterId,
+            mediaType: "image",
+            prompt: job.prompt,
+            draftId: input.draftId,
+            sortOrder: job.sortOrder,
+            ...(input.manual ? { status: "draft" as const } : {}),
+            paramsJson: job.paramsJson,
+          },
+        });
+      }
+      await tx.characterActionLog.create({
+        data: {
+          characterId: input.characterId,
+          actionType: "DRAFT_V3_PROMPTS_READY",
+          targetTable: "post_drafts",
+          targetId: input.draftId,
+          reason: `${input.jobs.length} V3 prompt job(s) stored`,
+        },
+      });
+      return true;
+    });
+  }
+
+  async requeueOrFailV3(input: {
+    draftId: string;
+    conceptJson: Prisma.InputJsonValue;
+    message: string;
+    terminal: boolean;
+  }): Promise<void> {
+    await this.prisma.postDraft.updateMany({
+      where: { id: input.draftId, status: "generating" },
+      data: {
+        status: input.terminal ? "failed" : "planned",
+        conceptJson: input.conceptJson,
+        errorMessage: input.message,
+        leaseExpiresAt: null,
+      },
+    });
   }
 
   findPlannedDraft(draftId: string): Promise<PlannedDraft | null> {
@@ -558,7 +872,8 @@ export class DraftWorkerRepository {
     contentType: string;
     caption: string;
     hashtags: string[];
-    memoryContent: string;
+    memoryContent?: string;
+    memories?: { type: string; content: string; reason: string }[];
     media: {
       originalMediaId: string;
       finishedFile: FinishedPublishFile | null;
@@ -628,13 +943,38 @@ export class DraftWorkerRepository {
           reason: `auto-published from draft ${input.draftId}`,
         },
       });
-      await tx.characterMemory.create({
-        data: {
-          characterId: input.characterId,
-          content: input.memoryContent,
-          reason: "auto: post published from draft",
-        },
-      });
+      const memories =
+        input.memories ??
+        (input.memoryContent
+          ? [
+              {
+                type: "fact",
+                content: input.memoryContent,
+                reason: "auto: post published from draft",
+              },
+            ]
+          : []);
+      for (const memory of memories) {
+        const existing = await tx.characterMemory.findFirst({
+          where: {
+            characterId: input.characterId,
+            type: memory.type,
+            content: memory.content,
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+        if (!existing) {
+          await tx.characterMemory.create({
+            data: {
+              characterId: input.characterId,
+              type: memory.type,
+              content: memory.content,
+              reason: memory.reason,
+            },
+          });
+        }
+      }
     });
   }
 
@@ -694,11 +1034,14 @@ export class DraftWorkerRepository {
   async createScheduledDraft(
     characterId: string,
     scheduledAt: Date,
+    pipelineV3Enabled = false,
   ): Promise<void> {
     await this.prisma.postDraft.create({
       data: {
         characterId,
-        conceptJson: { source: "scheduler" },
+        conceptJson: pipelineV3Enabled
+          ? createPostPipelineV3Concept({ source: "scheduler", mode: "auto" })
+          : { source: "scheduler" },
         scheduledAt,
       },
     });
