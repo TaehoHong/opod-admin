@@ -576,7 +576,15 @@ describe("visual reference promotion", () => {
             appearancePrompt: "",
             stylePrompt: "",
             negativePrompt: "",
-            referenceMedia: [{ mediaId: "media-9", url: "" }],
+            referenceMedia: [
+              {
+                mediaId: "media-9",
+                url: "",
+                sortOrder: 10,
+                isActive: true,
+                description: "",
+              },
+            ],
           });
         },
       ),
@@ -608,6 +616,7 @@ describe("visual reference promotion", () => {
       personas: [],
       memories: [],
     };
+    let updatedAt = 0;
     const visualProfile = {
       characterId: character.id,
       appearancePrompt: "",
@@ -665,8 +674,16 @@ describe("visual reference promotion", () => {
       http.put(
         "/api/admin/v1/characters/:id/visual-profile/references",
         async ({ request }) => {
-          referenceUpdates.push(await request.json());
-          return HttpResponse.json(visualProfile);
+          const body = (await request.json()) as { mediaIds: string[] };
+          referenceUpdates.push(body);
+          for (const reference of visualProfile.referenceMedia) {
+            reference.isActive = body.mediaIds.includes(reference.mediaId);
+          }
+          updatedAt += 1;
+          return HttpResponse.json({
+            ...visualProfile,
+            updatedAt: `2026-08-01T00:00:0${updatedAt}.000Z`,
+          });
         },
       ),
     );
@@ -678,17 +695,37 @@ describe("visual reference promotion", () => {
     expect(await screen.findByText("inactive portrait")).toBeInTheDocument();
     expect(screen.getByText("비활성")).toBeInTheDocument();
 
-    const select = screen.getByRole("combobox", { name: "활성 레퍼런스" });
-    await userEvent.click(select);
-    await userEvent.click(await screen.findByText("media-inactive"));
+    const activeSelect = screen.getByRole("combobox", {
+      name: "활성 레퍼런스",
+    });
+    await userEvent.click(activeSelect);
+    await userEvent.keyboard("{Backspace}");
+    await userEvent.click(
+      screen.getByRole("button", { name: "레퍼런스 저장" }),
+    );
+
+    await waitFor(() => expect(referenceUpdates).toEqual([{ mediaIds: [] }]));
+    expect(screen.getAllByText("비활성")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "빈 캡션 생성" })).toBeDisabled();
+
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "활성 레퍼런스" }),
+    );
+    await userEvent.click(
+      await screen.findByText("media-inactive", {
+        selector: '[role="option"] span',
+      }),
+    );
     await userEvent.click(
       screen.getByRole("button", { name: "레퍼런스 저장" }),
     );
 
     await waitFor(() =>
       expect(referenceUpdates).toEqual([
-        { mediaIds: ["media-active", "media-inactive"] },
+        { mediaIds: [] },
+        { mediaIds: ["media-inactive"] },
       ]),
     );
+    expect(screen.getByText("활성")).toBeInTheDocument();
   }, 15_000);
 });
