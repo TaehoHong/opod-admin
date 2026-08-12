@@ -16,6 +16,7 @@ type VisualProfileReference = {
   mediaId: string;
   url: string;
   sortOrder: number;
+  isActive: boolean;
   // 비전 LLM 캡션 — 기획 LLM의 샷별 레퍼런스 선별에 쓰인다. 빈 값 = 캡셔닝 전.
   description: string;
 };
@@ -145,7 +146,7 @@ export class VisualProfileService {
     return this.toVisualProfile(profile);
   }
 
-  // 레퍼런스 세트를 동기화한다. 유지된 관계는 캡션을 보존하고 순서만 갱신한다.
+  // 활성 레퍼런스 세트를 동기화한다. 선택 해제된 관계는 삭제하지 않는다.
   async setReferences(input: {
     characterId: string;
     mediaIds: string[];
@@ -260,6 +261,7 @@ export class VisualProfileService {
         mediaId: reference.mediaId,
         url: reference.media.url,
         sortOrder: reference.sortOrder,
+        isActive: reference.isActive,
         description: reference.description,
       })),
       updatedAt: profile.updatedAt.toISOString(),

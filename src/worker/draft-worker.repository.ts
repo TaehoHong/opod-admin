@@ -39,6 +39,7 @@ const plannedDraftInclude = {
           appearancePrompt: true,
           stylePrompt: true,
           referenceMedia: {
+            where: { isActive: true },
             orderBy: { sortOrder: "asc" },
             select: {
               mediaId: true,
@@ -220,6 +221,7 @@ export class DraftWorkerRepository {
                 appearancePrompt: true,
                 stylePrompt: true,
                 referenceMedia: {
+                  where: { isActive: true },
                   orderBy: { sortOrder: "asc" },
                   select: {
                     mediaId: true,

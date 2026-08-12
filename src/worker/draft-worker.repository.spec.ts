@@ -64,6 +64,26 @@ describe("DraftWorkerRepository", () => {
     expect(prisma.postDraft.findMany).not.toHaveBeenCalled();
   });
 
+  it("loads only active character references for planning and prompt building", async () => {
+    const findUnique = jest.fn().mockResolvedValue(null);
+    const findFirst = jest.fn().mockResolvedValue(null);
+    const repository = new DraftWorkerRepository({
+      postDraft: { findUnique, findFirst },
+    } as never);
+
+    await repository.findPlannedDraft("draft-1");
+    await repository.findPromptBuildDraft("draft-1");
+
+    expect(
+      findUnique.mock.calls[0][0].include.character.select.visualProfile.select
+        .referenceMedia.where,
+    ).toEqual({ isActive: true });
+    expect(
+      findFirst.mock.calls[0][0].select.character.select.visualProfile.select
+        .referenceMedia.where,
+    ).toEqual({ isActive: true });
+  });
+
   it("aborts plan persistence when the draft lost generating state", async () => {
     const { prisma, tx } = prismaMock();
     tx.postDraft.updateMany.mockResolvedValue({ count: 0 });

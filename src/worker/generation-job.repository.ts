@@ -16,6 +16,7 @@ const jobWithProfile = {
       visualProfile: {
         include: {
           referenceMedia: {
+            where: { isActive: true },
             orderBy: { sortOrder: "asc" },
             include: {
               media: {
