@@ -48,6 +48,7 @@ function registerHandlers(
   concept: Record<string, unknown>,
   item: Record<string, unknown> = v3Item,
   draft: Record<string, unknown> = {},
+  evaluations: Record<string, unknown>[] = [],
 ) {
   server.use(
     http.get("/api/admin/v1/post-work-items/:id", () =>
@@ -71,7 +72,7 @@ function registerHandlers(
       }),
     ),
     http.get("/api/admin/v1/drafts/:id/evaluations", () =>
-      HttpResponse.json({ items: [] }),
+      HttpResponse.json({ items: evaluations }),
     ),
     http.get("/api/admin/v1/characters", () =>
       HttpResponse.json({
@@ -87,9 +88,15 @@ function renderStage(
   overrides: {
     item?: Record<string, unknown>;
     draft?: Record<string, unknown>;
+    evaluations?: Record<string, unknown>[];
   } = {},
 ) {
-  registerHandlers(concept, overrides.item ?? v3Item, overrides.draft ?? {});
+  registerHandlers(
+    concept,
+    overrides.item ?? v3Item,
+    overrides.draft ?? {},
+    overrides.evaluations ?? [],
+  );
   renderPage(<PostWorkPage workId="draft-1" stage={stage} />, {
     path: `/posts/draft-1/${stage}`,
     routes: ["posts/:workId/:stage"],
@@ -189,6 +196,57 @@ describe("post work stage screens", () => {
     // selected여도 기획을 다시 돌렸으면 저장되지 않는다.
     expect(body.getByText("무효")).toBeInTheDocument();
     expect(body.getAllByText("저장됨")).toHaveLength(1);
+  });
+
+  // V3는 지적이 없으면 issuesJson이 []이고 suggestionsJson은 항상 null이다.
+  // 그 두 컬럼만 덤프하면 "원문 보기"가 빈 껍데기를 보여준다 — Agent가 실제로
+  // 무엇을 근거로 통과시켰는지 확인할 길이 사라진다.
+  it("shows the V3 agent output as the raw evaluation, not the empty legacy columns", async () => {
+    renderStage(
+      "post_plan",
+      { pipelineVersion: "post-pipeline-v3", source: "manual", mode: "manual" },
+      {
+        evaluations: [
+          {
+            id: "evaluation-1",
+            draftId: "draft-1",
+            kind: "plan",
+            attempt: 1,
+            status: "completed",
+            rubricVersion: "v1",
+            contentLanguage: "ko",
+            evaluatorName: "post-evaluator-v1",
+            overallScore: 5,
+            scoresJson: {
+              _meta: {
+                evaluatorVersion: "post-evaluator-v1",
+                targetHash: "sha256:3226b8b",
+              },
+              result: {
+                status: "evaluated_ready",
+                verdict: "pass",
+                scores: { voice_fit: 5 },
+                issues: [],
+              },
+            },
+            // V3가 실제로 저장하는 모양 — 지적이 없으면 둘 다 비어 있다.
+            issuesJson: [],
+            suggestionsJson: null,
+            createdAt: "2026-08-13T01:15:00.000Z",
+            completedAt: "2026-08-13T01:15:04.000Z",
+          },
+        ],
+      },
+    );
+
+    // Spoiler는 jsdom에서 높이를 0으로 보고 접지 않으므로 본문이 바로 붙는다.
+    const raw = await screen.findByText(/evaluated_ready/);
+    expect(raw).toHaveTextContent("sha256:3226b8b");
+    expect(raw).toHaveTextContent("post-evaluator-v1");
+    // 예전에는 이 자리에 빈 껍데기만 나왔다.
+    expect(raw.textContent).not.toBe(
+      JSON.stringify({ issues: [], suggestions: null }, null, 2),
+    );
   });
 
   it("shows the planning input snapshot the agent actually received", async () => {

@@ -1389,21 +1389,10 @@ function EvaluationBlock({
             {evaluation.errorMessage}
           </Alert>
         ) : null}
-        {evaluation.issuesJson || evaluation.suggestionsJson ? (
-          <Spoiler
-            maxHeight={0}
-            showLabel="지적·제안 원문 보기"
-            hideLabel="접기"
-          >
+        {rawEvaluation(evaluation) ? (
+          <Spoiler maxHeight={0} showLabel="평가 원문 보기" hideLabel="접기">
             <Code block>
-              {JSON.stringify(
-                {
-                  issues: evaluation.issuesJson,
-                  suggestions: evaluation.suggestionsJson,
-                },
-                null,
-                2,
-              )}
+              {JSON.stringify(rawEvaluation(evaluation), null, 2)}
             </Code>
           </Spoiler>
         ) : null}
@@ -1984,6 +1973,28 @@ function MutationError({ error }: { error: Error }) {
       {error.message}
     </Alert>
   );
+}
+
+// V3 Agent의 실제 산출물은 scoresJson(_meta + result)에 통째로 들어 있다.
+// issuesJson은 거기서 추려낸 사본이고 suggestionsJson은 항상 null이라, V2용
+// 두 컬럼만 덤프하면 지적이 없는 평가는 `{"issues": [], "suggestions": null}`
+// 이라는 빈 껍데기가 된다. V2 평가는 반대로 scoresJson에 점수만 있으므로
+// 기존 두 컬럼이 원문이다.
+function rawEvaluation(evaluation: DraftEvaluation): unknown {
+  const scores = evaluation.scoresJson;
+  if (
+    typeof scores === "object" &&
+    scores !== null &&
+    !Array.isArray(scores) &&
+    "result" in scores
+  )
+    return scores;
+  return evaluation.issuesJson || evaluation.suggestionsJson
+    ? {
+        issues: evaluation.issuesJson,
+        suggestions: evaluation.suggestionsJson,
+      }
+    : undefined;
 }
 
 // 평가에는 artifact와 달리 실제 시각이 있다. 얼마나 걸렸는지가 "돌긴 돌았나"를
