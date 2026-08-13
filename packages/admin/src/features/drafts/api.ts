@@ -55,6 +55,11 @@ export type DraftShot = {
   provider?: string;
   costUsd?: string;
   errorMessage?: string;
+  attemptCount?: number;
+  startedAt?: string;
+  // 종료된 잡에만 내려온다. 진행 중인 잡의 "지금까지"를 소요 시간으로 읽지
+  // 않게 하기 위해서다.
+  settledAt?: string;
   outputs: DraftShotOutput[];
 };
 

@@ -50,6 +50,16 @@ const LABELS: Record<string, string> = {
   block_qualification: "차단 성립",
   block_grounding: "차단 근거",
   block_completeness: "차단 완전성",
+  // V3 생성 이미지 평가
+  scene_fidelity: "장면 충실도",
+  capture_and_composition: "촬영·구도",
+  identity_and_appearance: "정체성·외모",
+  reference_adherence: "레퍼런스 준수",
+  style_fidelity: "화풍 충실도",
+  text_fidelity: "텍스트 정확도",
+  visual_integrity: "시각 무결성",
+  set_continuity: "세트 연속성",
+  set_distinctness: "세트 구별성",
   // V3 프롬프트 평가
   shot_contract_fidelity: "컷 계약 충실도",
   character_contract_fidelity: "인물 계약 충실도",
@@ -107,6 +117,10 @@ export function EvaluationChips({
     );
   }
 
+  // V3 이미지 평가는 후보가 아니라 컷의 선택된 한 장을 본다. 후보 카드에
+  // 붙이면 후보별 품질 차이로 오독된다.
+  if (v3ImageShots(evaluation) && candidateIndex !== undefined) return null;
+
   const entries = scoreEntries(evaluation, shotSortOrder, candidateIndex);
   const lint = lintEntries(evaluation, shotSortOrder);
   const hardFailures = hardFailureEntries(
@@ -114,6 +128,7 @@ export function EvaluationChips({
     shotSortOrder,
     candidateIndex,
   );
+  const severe = severeEntries(evaluation, shotSortOrder);
   const verdict = candidateVerdict(evaluation, shotSortOrder, candidateIndex);
   const overall =
     shotSortOrder === undefined ? evaluation.overallScore : undefined;
@@ -123,6 +138,7 @@ export function EvaluationChips({
     entries.length === 0 &&
     lint.length === 0 &&
     hardFailures.length === 0 &&
+    severe.length === 0 &&
     overall == null &&
     !verdict
   )
@@ -194,6 +210,23 @@ export function EvaluationChips({
             </Badge>
           </UnstyledButton>
         ) : null}
+        {severe.length > 0 ? (
+          <UnstyledButton
+            aria-expanded={expanded === `${prefix}:severe`}
+            aria-label={`중대 이상 지적 ${severe.length}건 내용`}
+            onClick={() =>
+              setExpanded(
+                expanded === `${prefix}:severe`
+                  ? undefined
+                  : `${prefix}:severe`,
+              )
+            }
+          >
+            <Badge variant="filled" color="red">
+              중대 지적 {severe.length}건
+            </Badge>
+          </UnstyledButton>
+        ) : null}
       </Group>
 
       {entries.map((entry) => {
@@ -222,6 +255,15 @@ export function EvaluationChips({
           ))}
         </Stack>
       ) : null}
+      {expanded === `${prefix}:severe` ? (
+        <Stack gap={2}>
+          {severe.map((detail, index) => (
+            <Text key={`${detail}:${index}`} size="xs" c="red">
+              {detail}
+            </Text>
+          ))}
+        </Stack>
+      ) : null}
     </Stack>
   );
 }
@@ -236,10 +278,9 @@ function v3Result(
 }
 
 // V3에는 차원별 reason이 없다. 사유는 issues[]에 dimension으로 붙어 온다.
-function v3Reasons(evaluation: DraftEvaluation): Map<string, string> {
-  const issues = array(v3Result(evaluation)?.issues);
+function reasonsFromIssues(value: unknown): Map<string, string> {
   const reasons = new Map<string, string>();
-  for (const issue of issues) {
+  for (const issue of array(value)) {
     const record = asRecord(issue);
     const dimension = record?.dimension;
     const detail = record?.detail;
@@ -250,6 +291,62 @@ function v3Reasons(evaluation: DraftEvaluation): Map<string, string> {
   return reasons;
 }
 
+// V3 생성 이미지 평가는 컷마다 **선택된 한 장**을 본다(evaluator input의
+// selectedImages). 후보 단위 점수가 아니므로 후보 카드에는 붙이지 않는다 —
+// 같은 점수를 후보마다 반복하면 후보 간 품질 차이로 오독된다.
+function v3ImageShots(evaluation: DraftEvaluation): unknown[] | undefined {
+  const result = v3Result(evaluation);
+  return result && Array.isArray(result.shots) ? result.shots : undefined;
+}
+
+function v3ImageShot(evaluation: DraftEvaluation, shotSortOrder: number) {
+  return asRecord(
+    array(v3ImageShots(evaluation)).find(
+      (value) => asRecord(value)?.sortOrder === shotSortOrder,
+    ),
+  );
+}
+
+// V3 이미지 차원은 { applicable, score } 형태다. 계약이 없어 평가 대상이
+// 아닌 차원(applicable: false)과 낮은 점수를 받은 차원은 다르다.
+function dimensionEntries(
+  value?: Record<string, unknown>,
+  reasons?: Map<string, string>,
+): ScoreEntry[] {
+  if (!value) return [];
+  return Object.entries(value).flatMap(([dimension, raw]) => {
+    const entry = asRecord(raw);
+    if (!entry || entry.applicable === false) return [];
+    if (typeof entry.score !== "number") return [];
+    const reason = reasons?.get(dimension);
+    return [{ dimension, score: entry.score, ...(reason ? { reason } : {}) }];
+  });
+}
+
+// V3에는 hardFailures 배열이 없고 issue마다 심각도가 붙는다. 심각도를 버리면
+// "지적 있음"과 "치명적 결함"이 화면에서 같아 보인다.
+function severeEntries(
+  evaluation: DraftEvaluation,
+  shotSortOrder?: number,
+): string[] {
+  const result = v3Result(evaluation);
+  if (!result || !v3ImageShots(evaluation)) return [];
+  const issues =
+    shotSortOrder === undefined
+      ? array(result.setIssues)
+      : array(v3ImageShot(evaluation, shotSortOrder)?.issues);
+  return issues.flatMap((raw) => {
+    const issue = asRecord(raw);
+    if (!issue || (issue.severity !== "major" && issue.severity !== "critical"))
+      return [];
+    const dimension = String(issue.dimension);
+    const label = LABELS[dimension] ?? dimension;
+    return [
+      `${issue.severity === "critical" ? "치명" : "중대"} · ${label} · ${String(issue.detail)}`,
+    ];
+  });
+}
+
 function scoreEntries(
   evaluation: DraftEvaluation,
   shotSortOrder?: number,
@@ -257,10 +354,24 @@ function scoreEntries(
 ): ScoreEntry[] {
   const scores = asRecord(evaluation.scoresJson);
   if (!scores) return [];
-  const v3 = asRecord(v3Result(evaluation)?.scores);
+  const result = v3Result(evaluation);
+  const v3 = asRecord(result?.scores);
   if (v3) {
-    const reasons = v3Reasons(evaluation);
-    return entriesFromRecord(v3, reasons);
+    return entriesFromRecord(v3, reasonsFromIssues(result?.issues));
+  }
+  if (v3ImageShots(evaluation)) {
+    // 컷 단위는 그 컷의 차원, 세트 단위는 setDimensions를 본다.
+    if (shotSortOrder === undefined) {
+      return dimensionEntries(
+        asRecord(result?.setDimensions),
+        reasonsFromIssues(result?.setIssues),
+      );
+    }
+    const shot = v3ImageShot(evaluation, shotSortOrder);
+    return dimensionEntries(
+      asRecord(shot?.dimensions),
+      reasonsFromIssues(shot?.issues),
+    );
   }
   if (evaluation.kind === "plan") {
     return entriesFromRecord(asRecord(scores.scores));

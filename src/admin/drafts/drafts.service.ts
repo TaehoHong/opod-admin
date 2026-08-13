@@ -91,6 +91,11 @@ type DraftShot = {
   provider?: string;
   costUsd?: string;
   errorMessage?: string;
+  // 실행이 실제로 돌았는지 판단하는 가장 싼 신호. 재시도 횟수와 소요 시간이
+  // 없으면 "queued 그대로인지 한참 돌다 끝난 건지"를 구분할 수 없다.
+  attemptCount: number;
+  startedAt: string;
+  settledAt?: string;
   outputs: DraftShotOutput[];
 };
 
@@ -356,6 +361,13 @@ export class DraftsService {
           ...(job.provider ? { provider: job.provider } : {}),
           ...(job.costUsd != null ? { costUsd: job.costUsd.toString() } : {}),
           ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
+          attemptCount: job.attemptCount,
+          startedAt: job.createdAt.toISOString(),
+          // 아직 끝나지 않은 잡의 updatedAt은 "지금까지"일 뿐이라 소요 시간으로
+          // 읽으면 안 된다. 종료된 잡에만 내린다.
+          ...(job.status === "completed" || job.status === "failed"
+            ? { settledAt: job.updatedAt.toISOString() }
+            : {}),
           outputs: job.outputs.map((output) => ({
             mediaId: output.mediaId,
             url: output.media.url,

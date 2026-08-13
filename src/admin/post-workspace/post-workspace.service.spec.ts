@@ -135,4 +135,112 @@ describe("PostWorkspaceService", () => {
       }),
     );
   });
+
+  // 기획이 이상할 때 프롬프트를 의심하기 전에 Agent가 실제로 본 입력을 확인할
+  // 수 있어야 한다. 필드명이 어긋나면 스냅숏이 조용히 빈 값이 된다.
+  it("exposes the planning input the post planning agent actually received", async () => {
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v3",
+        source: "manual",
+        mode: "manual",
+        pipeline: { stage: "image_plan", state: "pending", imageCount: 1 },
+        postPlanning: {
+          revision: 1,
+          hash: "sha256:plan-1",
+          input: {
+            persona: {
+              characterContext: [{ title: "identity", content: "필름 사진가" }],
+              writingProfile: {
+                contentStyle: [
+                  { title: "content_style", content: "일상 기록" },
+                ],
+                voice: [{ title: "voice", content: "짧게 끊어 쓴다" }],
+              },
+              boundaries: [{ title: "boundaries", content: "" }],
+              additionalContext: [],
+            },
+            memories: [{ type: "routine", content: "주말마다 현상한다" }],
+            recentPosts: [
+              {
+                premise: "노을 산책",
+                caption: "노을이 길었다",
+                hashtags: ["필름"],
+              },
+            ],
+          },
+          output: { status: "ready", intent: { premise: "월요일 라인 체크" } },
+        },
+      },
+      jobs: [],
+    } as never);
+
+    const item = await service.get("draft-1");
+
+    expect(item.pipelineV3?.artifacts.postPlan?.planningInput).toEqual({
+      // 내용이 빈 블록은 Agent에게 의미 있는 입력이 아니다.
+      persona: [
+        {
+          group: "characterContext",
+          title: "identity",
+          content: "필름 사진가",
+        },
+        { group: "contentStyle", title: "content_style", content: "일상 기록" },
+        { group: "voice", title: "voice", content: "짧게 끊어 쓴다" },
+      ],
+      memories: [{ type: "routine", content: "주말마다 현상한다" }],
+      recentPosts: [
+        { premise: "노을 산책", caption: "노을이 길었다", hashtags: ["필름"] },
+      ],
+    });
+  });
+
+  // 게시 트랜잭션(`selectedPublishedMemories`)은 selected이면서 현재 PostPlan
+  // 해시에서 나온 후보만 저장한다. read model이 다른 기준을 쓰면 화면이 저장되지
+  // 않은 기억을 저장됐다고 말하게 된다.
+  it("marks memory candidates from a superseded post plan as stale", async () => {
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v3",
+        source: "manual",
+        mode: "manual",
+        pipeline: { stage: "image_plan", state: "pending", imageCount: 1 },
+        postPlanning: { revision: 2, hash: "sha256:plan-2", output: {} },
+        memoryCandidates: [
+          {
+            type: "routine",
+            content: "월요일마다 라인 체크",
+            selected: true,
+            sourcePostPlanHash: "sha256:plan-2",
+          },
+          {
+            type: "fact",
+            content: "이전 기획의 잔여 후보",
+            selected: true,
+            sourcePostPlanHash: "sha256:plan-1",
+          },
+        ],
+      },
+      jobs: [],
+    } as never);
+
+    const item = await service.get("draft-1");
+
+    expect(item.pipelineV3?.memoryCandidates).toEqual([
+      {
+        type: "routine",
+        content: "월요일마다 라인 체크",
+        selected: true,
+        stale: false,
+      },
+      {
+        type: "fact",
+        content: "이전 기획의 잔여 후보",
+        selected: true,
+        stale: true,
+      },
+    ]);
+  });
 });

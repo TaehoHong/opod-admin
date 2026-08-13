@@ -21,13 +21,53 @@ function evaluation(overrides: Partial<DraftEvaluation>): DraftEvaluation {
   };
 }
 
-function renderChips(value: DraftEvaluation) {
+function renderChips(
+  value: DraftEvaluation,
+  props: { shotSortOrder?: number; candidateIndex?: number } = {},
+) {
   render(
     <AppProviders>
-      <EvaluationChips evaluation={value} />
+      <EvaluationChips evaluation={value} {...props} />
     </AppProviders>,
   );
 }
+
+// V3 생성 이미지 평가는 컷마다 선택된 한 장을 보고, 차원을
+// { applicable, score }로 저장한다 — 텍스트 평가 3종과도, V2 후보 평가와도
+// 모양이 다르다.
+const v3ImageEvaluation = evaluation({
+  kind: "image",
+  overallScore: 4,
+  scoresJson: {
+    _meta: { evaluatorVersion: "generated-image-evaluator-v1" },
+    result: {
+      status: "evaluated_generated_images",
+      verdict: "issues_found",
+      shots: [
+        {
+          sortOrder: 0,
+          dimensions: {
+            scene_fidelity: { applicable: true, score: 4 },
+            identity_and_appearance: { applicable: true, score: 2 },
+            text_fidelity: { applicable: false, score: null },
+          },
+          issues: [
+            {
+              dimension: "identity_and_appearance",
+              severity: "major",
+              detail: "턱선이 레퍼런스와 다르다",
+            },
+          ],
+        },
+      ],
+      setDimensions: {
+        set_continuity: { applicable: true, score: 5 },
+        set_distinctness: { applicable: false, score: null },
+      },
+      setIssues: [],
+    },
+  },
+});
 
 describe("EvaluationChips", () => {
   it("renders V3 scores, verdict and overall score", () => {
@@ -104,6 +144,38 @@ describe("EvaluationChips", () => {
     );
 
     expect(screen.getByText("LLM 심사 5.0/5")).toBeInTheDocument();
+  });
+
+  // 기획 평가에서 겪은 것과 같은 종류의 결함이다 — 저장 모양을 못 읽으면
+  // 검수 화면에서 이미지 평가가 통째로 사라진다.
+  it("renders V3 generated-image dimensions for one shot", () => {
+    renderChips(v3ImageEvaluation, { shotSortOrder: 0 });
+
+    expect(screen.getByText("장면 충실도 4/5")).toBeInTheDocument();
+    expect(screen.getByText("정체성·외모 2/5")).toBeInTheDocument();
+    // 계약이 없어 평가 대상이 아닌 차원과 낮은 점수를 받은 차원은 다르다.
+    expect(screen.queryByText(/텍스트 정확도/)).not.toBeInTheDocument();
+    // 심각도를 버리면 "지적 있음"과 "치명적 결함"이 같아 보인다.
+    expect(screen.getByText("중대 지적 1건")).toBeInTheDocument();
+  });
+
+  it("renders V3 set dimensions and the verdict at the set level", () => {
+    renderChips(v3ImageEvaluation);
+
+    expect(screen.getByText("이미지 심사 4.0/5")).toBeInTheDocument();
+    expect(screen.getByText("지적 있음")).toBeInTheDocument();
+    expect(screen.getByText("세트 연속성 5/5")).toBeInTheDocument();
+    expect(screen.queryByText(/세트 구별성/)).not.toBeInTheDocument();
+  });
+
+  // V3 evaluator는 컷마다 선택된 한 장만 본다. 후보마다 같은 점수를 반복하면
+  // 후보 간 품질 차이로 오독된다.
+  it("does not attach V3 image scores to individual candidates", () => {
+    renderChips(v3ImageEvaluation, { shotSortOrder: 0, candidateIndex: 1 });
+
+    expect(screen.queryByText(/장면 충실도/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/정체성·외모/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/중대 지적/)).not.toBeInTheDocument();
   });
 
   it("reports a pending evaluation instead of scores", () => {

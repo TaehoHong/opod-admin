@@ -12,7 +12,9 @@ const draftJobFields = {
   provider: true,
   costUsd: true,
   errorMessage: true,
+  attemptCount: true,
   createdAt: true,
+  updatedAt: true,
   outputs: {
     orderBy: { candidateIndex: "asc" as const },
     select: {

@@ -55,6 +55,7 @@ export type PostWorkItem = {
     imageCount: number | null;
     reasonCodes: string[];
     nextAction: string;
+    memoryCandidates?: V3MemoryCandidate[];
     artifacts: {
       postPlan?: V3Lineage & {
         status: string;
@@ -66,6 +67,7 @@ export type PostWorkItem = {
         captionLanguages?: string[];
         memoryCandidates?: { type: string; content: string }[];
         conflicts?: { left: string; right: string; reason: string }[];
+        planningInput?: V3PlanningInput;
       };
       imagePlan?: V3Lineage & {
         status: string;
@@ -104,6 +106,21 @@ export type V3Lineage = {
   revision: number;
   contractVersion?: string;
   hash?: string;
+};
+
+// 게시 시 실제로 저장되는 후보. "저장됨"은 draft 상태와 합쳐야 나오므로
+// 서버는 게시 로직이 거르는 두 조건만 내린다.
+export type V3MemoryCandidate = {
+  type: string;
+  content: string;
+  selected: boolean;
+  stale: boolean;
+};
+
+export type V3PlanningInput = {
+  persona: { group: string; title: string; content: string }[];
+  memories: { type: string; content: string }[];
+  recentPosts: { premise?: string; caption: string; hashtags: string[] }[];
 };
 
 export type V3ImagePlanShot = {

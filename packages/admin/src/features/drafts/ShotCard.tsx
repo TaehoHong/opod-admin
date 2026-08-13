@@ -6,12 +6,14 @@ import {
   Group,
   NumberInput,
   SimpleGrid,
+  Spoiler,
   Stack,
   Text,
   Textarea,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { ZoomableImage } from "../../shared/ui/ZoomableImage";
+import type { V3ImagePlanShot } from "../posts/api";
 import { CandidateCard } from "./CandidateCard";
 import { EvaluationChips } from "./EvaluationChips";
 import {
@@ -31,11 +33,15 @@ export function ShotCard({
   shot,
   evaluation,
   imageEvaluation,
+  planned,
 }: {
   draft: Draft;
   shot: DraftShot;
   evaluation?: DraftEvaluation;
   imageEvaluation?: DraftEvaluation;
+  // V3 이미지 기획의 컷 원문. 검수에서 "기획한 대로 나왔는가"를 화면을 떠나지
+  // 않고 대조하기 위한 것이라 생성 단계에서는 넘기지 않는다.
+  planned?: V3ImagePlanShot;
 }) {
   const canRegenerate =
     draft.status === "needs_review" || draft.status === "failed";
@@ -62,6 +68,11 @@ export function ShotCard({
               ${shot.costUsd}
             </Text>
           ) : null}
+          {/* 실행이 실제로 돌았는지 판단하는 가장 싼 신호. 시도 1회에 0초면
+              큐에 걸린 것이고, 여러 번 시도했으면 불안정한 컷이다. */}
+          <Text size="xs" c="dimmed">
+            {shotExecutionLabel(shot)}
+          </Text>
         </Group>
 
         {shot.scene ? (
@@ -70,8 +81,17 @@ export function ShotCard({
           </Text>
         ) : null}
 
+        {planned ? <PlannedShotPanel planned={planned} /> : null}
+
         <EvaluationChips
           evaluation={evaluation}
+          shotSortOrder={shot.sortOrder}
+        />
+        {/* V3 생성 이미지 평가는 컷의 선택된 한 장을 본다 — 후보가 아니라 컷
+            단위 자리에 붙인다. V2 이미지 평가는 컷 단위 점수가 없어 아무것도
+            렌더하지 않는다. */}
+        <EvaluationChips
+          evaluation={imageEvaluation}
           shotSortOrder={shot.sortOrder}
         />
 
@@ -123,6 +143,59 @@ export function ShotCard({
         ) : null}
       </Stack>
     </Card>
+  );
+}
+
+// 시도 횟수와 소요 시간. 종료되지 않은 잡의 "지금까지"는 소요 시간이 아니므로
+// 서버가 settledAt을 내리지 않고, 여기서도 표시하지 않는다.
+function shotExecutionLabel(shot: DraftShot): string {
+  const parts: string[] = [];
+  if (shot.attemptCount != null && shot.attemptCount > 0) {
+    parts.push(`시도 ${shot.attemptCount}`);
+  }
+  if (shot.startedAt && shot.settledAt) {
+    const seconds = Math.round(
+      (new Date(shot.settledAt).getTime() -
+        new Date(shot.startedAt).getTime()) /
+        1000,
+    );
+    if (seconds >= 0) parts.push(`${seconds}초`);
+  }
+  return parts.join(" · ");
+}
+
+// 기획 원문. 검수자가 픽셀과 계약을 나란히 놓고 볼 수 있어야 한다. 프레임 안
+// (scene)과 프레임 밖(captureSetup)은 여기서도 갈라 놓는다.
+function PlannedShotPanel({ planned }: { planned: V3ImagePlanShot }) {
+  return (
+    <Spoiler maxHeight={0} showLabel="기획 원문 보기" hideLabel="접기">
+      <Stack gap={4} mt={4}>
+        {planned.visualPurpose ? (
+          <Text size="xs" c="dimmed">
+            이 컷의 역할 · {planned.visualPurpose}
+          </Text>
+        ) : null}
+        {planned.scene ? (
+          <Text size="xs" c="dimmed">
+            기획 장면 · {planned.scene}
+          </Text>
+        ) : null}
+        {planned.captureSetup ? (
+          <Text size="xs" c="dimmed">
+            기획 촬영 · {planned.captureSetup}
+          </Text>
+        ) : null}
+        {planned.presentation ? (
+          <Text size="xs" c="dimmed">
+            인물 노출 · {planned.presentation.mode}
+            {planned.presentation.faceVisible ? " · 얼굴 노출" : ""}
+            {planned.presentation.visibleParts.length
+              ? ` · ${planned.presentation.visibleParts.join(", ")}`
+              : ""}
+          </Text>
+        ) : null}
+      </Stack>
+    </Spoiler>
   );
 }
 
@@ -263,7 +336,18 @@ function ShotBody({
   if (shot.status === "failed") {
     return (
       <Alert color="red" title="생성 실패">
-        {shot.errorMessage ?? "생성에 실패했습니다."}
+        <Stack gap={4}>
+          <Text size="sm">{shot.errorMessage ?? "생성에 실패했습니다."}</Text>
+          {/* 재생성은 needs_review·failed 초안에서만 허용된다
+              (drafts.service.ts). 버튼이 없는 이유를 쓰지 않으면 운영자가
+              막힌 채로 기다린다. */}
+          {draft.status !== "needs_review" && draft.status !== "failed" ? (
+            <Text size="xs" c="dimmed">
+              다른 컷이 끝나 초안이 검수 또는 실패 상태가 되면 이 컷을 다시
+              생성할 수 있습니다.
+            </Text>
+          ) : null}
+        </Stack>
       </Alert>
     );
   }

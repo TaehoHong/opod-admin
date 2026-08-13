@@ -71,7 +71,9 @@ const selectedJob = {
   provider: null,
   costUsd: null,
   errorMessage: null,
+  attemptCount: 1,
   createdAt: new Date("2026-07-12T02:00:00.000Z"),
+  updatedAt: new Date("2026-07-12T02:00:12.000Z"),
   outputs: [
     {
       mediaId: "media-1",

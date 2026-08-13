@@ -48,6 +48,9 @@ export type PostPipelineV3ReadModel = {
   imageCount: number | null;
   reasonCodes: string[];
   nextAction: string;
+  // 게시 시 실제로 읽는 후보 목록(concept 최상위). 산출물이 아니라 파이프라인이
+  // 소유하는 상태라 artifacts 밖에 둔다.
+  memoryCandidates?: V3MemoryCandidate[];
   artifacts: {
     postPlan?: {
       revision: number;
@@ -62,6 +65,7 @@ export type PostPipelineV3ReadModel = {
       captionLanguages?: string[];
       memoryCandidates?: { type: string; content: string }[];
       conflicts?: { left: string; right: string; reason: string }[];
+      planningInput?: V3PlanningInput;
     };
     imagePlan?: {
       revision: number;
@@ -99,6 +103,23 @@ export type PostPipelineV3ReadModel = {
       }[];
     };
   };
+};
+
+// 후보의 "저장됨" 여부는 draft 상태와 합쳐야 나오므로 여기서는 게시 로직
+// (`selectedPublishedMemories`)이 실제로 거르는 두 조건만 내린다.
+export type V3MemoryCandidate = {
+  type: string;
+  content: string;
+  selected: boolean;
+  stale: boolean;
+};
+
+// Context Assembler가 조립해 Agent에게 실제로 넘긴 입력. "왜 이런 캡션이
+// 나왔는가"를 프롬프트를 의심하기 전에 확인하는 유일한 경로다.
+export type V3PlanningInput = {
+  persona: { group: string; title: string; content: string }[];
+  memories: { type: string; content: string }[];
+  recentPosts: { premise?: string; caption: string; hashtags: string[] }[];
 };
 
 export type V3ImagePlanShot = {
@@ -485,6 +506,14 @@ function v3ReadModel(
     imageCount,
     reasonCodes,
     nextAction: v3StateCopy(state).nextAction,
+    ...(Array.isArray(concept.memoryCandidates)
+      ? {
+          memoryCandidates: v3MemoryCandidates(
+            concept.memoryCandidates,
+            postPlanning.hash,
+          ),
+        }
+      : {}),
     artifacts: {
       ...(Number.isInteger(postPlanning.revision)
         ? {
@@ -525,6 +554,10 @@ function v3ReadModel(
                       },
                     ),
                   }
+                : {}),
+              ...(record(postPlanning.input).persona ||
+              record(postPlanning.input).memories
+                ? { planningInput: v3PlanningInput(record(postPlanning.input)) }
                 : {}),
               ...(Array.isArray(postOutput.conflicts)
                 ? {
@@ -647,6 +680,80 @@ function lineage(artifact: Record<string, unknown>) {
     ...(typeof artifact.contractVersion === "string"
       ? { contractVersion: artifact.contractVersion }
       : {}),
+  };
+}
+
+// 후보가 무효(stale)인지는 게시 로직과 같은 기준으로 판단한다 — 기획을 다시
+// 돌리면 이전 후보는 남아 있어도 저장 대상이 아니다.
+function v3MemoryCandidates(
+  raw: unknown[],
+  postPlanHash: unknown,
+): V3MemoryCandidate[] {
+  const currentHash = typeof postPlanHash === "string" ? postPlanHash : null;
+  return raw.flatMap((value) => {
+    const candidate = record(value);
+    if (
+      typeof candidate.type !== "string" ||
+      typeof candidate.content !== "string"
+    )
+      return [];
+    return [
+      {
+        type: candidate.type,
+        content: candidate.content,
+        selected: candidate.selected === true,
+        stale:
+          currentHash === null || candidate.sourcePostPlanHash !== currentHash,
+      },
+    ];
+  });
+}
+
+function v3PlanningInput(input: Record<string, unknown>): V3PlanningInput {
+  const persona = record(input.persona);
+  const writingProfile = record(persona.writingProfile);
+  const group = (name: string, value: unknown) =>
+    (Array.isArray(value) ? value : []).flatMap((raw) => {
+      const block = record(raw);
+      return typeof block.content === "string" && block.content.trim()
+        ? [{ group: name, title: text(block.title), content: block.content }]
+        : [];
+    });
+  return {
+    persona: [
+      ...group("characterContext", persona.characterContext),
+      ...group("contentStyle", writingProfile.contentStyle),
+      ...group("voice", writingProfile.voice),
+      ...group("boundaries", persona.boundaries),
+      ...group("additionalContext", persona.additionalContext),
+    ],
+    memories: (Array.isArray(input.memories) ? input.memories : []).flatMap(
+      (raw) => {
+        const memory = record(raw);
+        return typeof memory.content === "string"
+          ? [{ type: text(memory.type), content: memory.content }]
+          : [];
+      },
+    ),
+    recentPosts: (Array.isArray(input.recentPosts)
+      ? input.recentPosts
+      : []
+    ).flatMap((raw) => {
+      const post = record(raw);
+      return typeof post.caption === "string"
+        ? [
+            {
+              ...(typeof post.premise === "string"
+                ? { premise: post.premise }
+                : {}),
+              caption: post.caption,
+              hashtags: Array.isArray(post.hashtags)
+                ? strings(post.hashtags)
+                : [],
+            },
+          ]
+        : [];
+    }),
   };
 }
 

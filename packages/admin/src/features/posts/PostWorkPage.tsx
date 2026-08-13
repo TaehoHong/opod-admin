@@ -47,6 +47,8 @@ import {
   type PostListItem,
   type PostWorkItem,
   type PostWorkStage,
+  type V3MemoryCandidate,
+  type V3PlanningInput,
 } from "./api";
 import styles from "./PostWorkPage.module.css";
 
@@ -61,15 +63,25 @@ const LEGACY_STAGES: { id: PostWorkStage; label: string }[] = [
   { id: "publish", label: "게시" },
   { id: "memory", label: "메모리" },
 ];
-const V3_STAGES: { id: PostWorkStage; label: string }[] = [
-  { id: "brief", label: "브리프" },
-  { id: "post_plan", label: "게시글 기획" },
-  { id: "image_plan", label: "이미지 기획" },
-  { id: "prompt", label: "프롬프트" },
-  { id: "generation", label: "이미지 생성" },
-  { id: "review", label: "검수" },
-  { id: "publish", label: "게시" },
-  { id: "memory", label: "메모리" },
+
+type V3PipelineStage = NonNullable<PostWorkItem["pipelineV3"]>["stage"];
+
+// 레일 단계 id와 파이프라인 stage 어휘는 프롬프트 한 곳에서 갈린다
+// (`prompt` ↔ `image_prompt`). 배열을 따로 두면 순서가 어긋나도 조용히
+// 통과하므로 한 테이블에 나란히 둔다. 브리프는 Agent 단계가 아니라 입력이다.
+const V3_STAGES: {
+  id: PostWorkStage;
+  label: string;
+  pipeline: V3PipelineStage | null;
+}[] = [
+  { id: "brief", label: "브리프", pipeline: null },
+  { id: "post_plan", label: "게시글 기획", pipeline: "post_plan" },
+  { id: "image_plan", label: "이미지 기획", pipeline: "image_plan" },
+  { id: "prompt", label: "프롬프트", pipeline: "image_prompt" },
+  { id: "generation", label: "이미지 생성", pipeline: "generation" },
+  { id: "review", label: "검수", pipeline: "review" },
+  { id: "publish", label: "게시", pipeline: "publish" },
+  { id: "memory", label: "메모리", pipeline: "memory" },
 ];
 const STAGE_NUMBER = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧"];
 
@@ -206,6 +218,13 @@ function PostWorkHeader({
             >
               {item.executionMode === "manual" ? "수동 진행" : "자동 진행"}
             </Badge>
+            {/* 어느 세대의 파이프라인을 보고 있는지가 화면 어디에도 없어서
+                "이미지 기획 단계가 없다"는 오해가 났다. */}
+            {item.kind === "draft" ? (
+              <Badge variant="outline" color={item.pipelineV3 ? "teal" : "ink"}>
+                {item.pipelineV3 ? "Agent V3" : "V2 legacy"}
+              </Badge>
+            ) : null}
           </Group>
           <Text size="xs" c="dimmed">
             {sourceLabel(item.source)} · 최근 변경{" "}
@@ -268,10 +287,11 @@ function StageRail({
         const active = stage.id === activeStage;
         const done = index + 1 < item.stageIndex;
         const skipped = item.kind === "post" && done;
+        const state = railStageState(item, stage.id, index);
         return (
           <Link
             key={stage.id}
-            className={`${styles.stageLink} ${active ? styles.active : ""} ${done && !skipped ? styles.done : ""}`}
+            className={`${styles.stageLink} ${active ? styles.active : ""} ${state === "done" && !skipped ? styles.done : ""}`}
             to={`/posts/${encodeURIComponent(item.id)}/${stage.id}`}
             aria-current={active ? "step" : undefined}
           >
@@ -279,14 +299,11 @@ function StageRail({
               <Text size="sm" fw={600}>
                 {STAGE_NUMBER[index]} {stage.label}
               </Text>
+              {/* 레일과 단계 본문이 같은 어휘를 쓴다. 단계를 옮길 때마다 읽는
+                  법을 새로 배우지 않아야 한다. "현재 화면"은 테두리와
+                  aria-current가 이미 말한다. */}
               <Text size="xs" c="dimmed">
-                {active
-                  ? "현재 화면"
-                  : skipped
-                    ? "건너뜀"
-                    : done
-                      ? "완료"
-                      : "대기"}
+                {skipped ? "건너뜀" : STAGE_STATE_COPY[state].label}
               </Text>
             </Stack>
           </Link>
@@ -294,6 +311,26 @@ function StageRail({
       })}
     </nav>
   );
+}
+
+// 레일 한 칸의 상태. V3는 파이프라인 상태를 그대로 쓰고, legacy는 단계 순서와
+// 대표 상태로 같은 5개 어휘에 맞춘다.
+function railStageState(
+  item: PostWorkItem,
+  stage: PostWorkStage,
+  index: number,
+): V3StageState {
+  const pipeline = V3_STAGES.find((entry) => entry.id === stage)?.pipeline;
+  if (item.pipelineV3 && pipeline) {
+    return v3StageState(item.pipelineV3, pipeline);
+  }
+  // 브리프는 Agent 단계가 아니라 입력이다. 초안이 있으면 이미 확정돼 있다.
+  if (stage === "brief") return "done";
+  if (index + 1 < item.stageIndex) return "done";
+  if (index + 1 > item.stageIndex) return "waiting";
+  if (item.operationalStatus === "failed") return "failed";
+  if (item.operationalStatus === "agent_running") return "running";
+  return item.operationalStatus === "completed" ? "done" : "waiting";
 }
 
 function StageBody({
@@ -312,7 +349,7 @@ function StageBody({
   if (!draft && stage !== "publish" && stage !== "memory") {
     return <UnavailableStage stage={stage} />;
   }
-  if (stage === "brief") return <BriefStage draft={draft!} />;
+  if (stage === "brief") return <BriefStage item={item} draft={draft!} />;
   if (stage === "post_plan") {
     return <V3PostPlanStage item={item} evaluations={evaluations} />;
   }
@@ -332,10 +369,12 @@ function StageBody({
     return <EvaluationStage draft={draft!} evaluations={evaluations} />;
   }
   if (stage === "generation") {
-    return <GenerationStage draft={draft!} evaluations={evaluations} />;
+    return (
+      <GenerationStage item={item} draft={draft!} evaluations={evaluations} />
+    );
   }
   if (stage === "review") {
-    return <ReviewStage draft={draft!} evaluations={evaluations} />;
+    return <ReviewStage item={item} draft={draft!} evaluations={evaluations} />;
   }
   if (stage === "publish") {
     return <PublishStage item={item} draft={draft} post={post} />;
@@ -420,7 +459,7 @@ function V3Stage({
 }: {
   item: PostWorkItem;
   evaluations: DraftEvaluation[];
-  stage: "post_plan" | "image_plan" | "image_prompt";
+  stage: V3PipelineStage;
   number: string;
   title: string;
   description: string;
@@ -531,12 +570,17 @@ function PostPlanArtifact({
             ) : (
               <Stack gap={2}>
                 {artifact.memoryCandidates.map((candidate, index) => (
-                  <Text key={`${candidate.type}:${index}`} size="sm">
-                    <Badge size="xs" variant="light" mr={6}>
+                  <Group
+                    key={`${candidate.type}:${index}`}
+                    gap={6}
+                    align="baseline"
+                    wrap="nowrap"
+                  >
+                    <Badge size="xs" variant="light">
                       {candidate.type}
                     </Badge>
-                    {candidate.content}
-                  </Text>
+                    <Text size="sm">{candidate.content}</Text>
+                  </Group>
                 ))}
               </Stack>
             )}
@@ -597,12 +641,12 @@ function ImagePlanArtifact({
         <Alert color="attention" title="시각화할 수 없습니다">
           <Stack gap={4}>
             {artifact.blockedReasons.map((reason) => (
-              <Text key={reason.code} size="sm">
-                <Badge size="xs" color="attention" mr={6}>
+              <Group key={reason.code} gap={6} align="baseline" wrap="nowrap">
+                <Badge size="xs" color="attention">
                   {reason.code}
                 </Badge>
-                {reason.detail}
-              </Text>
+                <Text size="sm">{reason.detail}</Text>
+              </Group>
             ))}
           </Stack>
         </Alert>
@@ -711,18 +755,12 @@ type V3StageState = "waiting" | "running" | "done" | "paused" | "failed";
 
 function v3StageState(
   pipeline: PostWorkItem["pipelineV3"],
-  stage: "post_plan" | "image_plan" | "image_prompt",
+  stage: V3PipelineStage,
 ): V3StageState {
   if (!pipeline) return "waiting";
-  const order = [
-    "post_plan",
-    "image_plan",
-    "image_prompt",
-    "generation",
-    "review",
-    "publish",
-    "memory",
-  ];
+  const order = V3_STAGES.flatMap((entry) =>
+    entry.pipeline ? [entry.pipeline] : [],
+  );
   const current = order.indexOf(pipeline.stage);
   const target = order.indexOf(stage);
   if (target < current) return "done";
@@ -843,12 +881,19 @@ function PromptSetArtifact({
                   슬롯 바인딩
                 </Text>
                 {shot.slots.map((slot) => (
-                  <Text key={slot.bindingId} size="xs">
-                    <Badge size="xs" variant="light" mr={6}>
+                  <Group
+                    key={slot.bindingId}
+                    gap={6}
+                    align="baseline"
+                    wrap="nowrap"
+                  >
+                    <Badge size="xs" variant="light">
                       {slot.slot}
                     </Badge>
-                    {slot.source} · {slot.referenceId}
-                  </Text>
+                    <Text size="xs">
+                      {slot.source} · {slot.referenceId}
+                    </Text>
+                  </Group>
                 ))}
               </Stack>
             ) : null}
@@ -890,12 +935,20 @@ function StagePaper({
   );
 }
 
-function BriefStage({ draft }: { draft: Draft }) {
+function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
   const concept = draft.conceptJson ?? {};
+  const v3 = item.pipelineV3;
+  const planningInput = v3?.artifacts.postPlan?.planningInput;
+  const nextStage = v3 ? "post_plan" : "plan";
   return (
     <StagePaper
       title="① 브리프"
       description="게시물 생성의 입력과 실행 출처를 확인합니다."
+      status={
+        <Badge variant="outline" color={v3 ? "teal" : "ink"}>
+          {v3 ? "Agent V3" : "V2 legacy"}
+        </Badge>
+      }
     >
       <Meta label="캐릭터">
         <CharacterName id={draft.characterId} />
@@ -913,12 +966,105 @@ function BriefStage({ draft }: { draft: Draft }) {
           ? "단계별 수동 진행"
           : "개입 전까지 자동 진행"}
       </Meta>
+      {planningInput ? <PlanningInputSnapshot input={planningInput} /> : null}
+      {v3 && !planningInput ? (
+        <Alert color="gray">
+          게시글 기획을 아직 실행하지 않아 Agent에게 넘긴 입력 스냅숏이
+          없습니다.
+        </Alert>
+      ) : null}
       <Group>
-        <Button component={Link} to={`/posts/${draft.id}/plan`}>
-          기획으로
+        <Button component={Link} to={`/posts/${item.id}/${nextStage}`}>
+          {v3 ? "게시글 기획으로" : "기획으로"}
         </Button>
       </Group>
     </StagePaper>
+  );
+}
+
+const PERSONA_GROUP_LABEL: Record<string, string> = {
+  characterContext: "캐릭터 맥락",
+  contentStyle: "콘텐츠 스타일",
+  voice: "말투",
+  boundaries: "경계",
+  additionalContext: "추가 맥락",
+};
+
+// Agent가 실제로 본 입력. 기획 결과가 이상할 때 프롬프트를 의심하기 전에
+// 입력을 확인할 수 있어야 한다 — 이게 유일한 추적 경로다.
+function PlanningInputSnapshot({ input }: { input: V3PlanningInput }) {
+  return (
+    <Paper p="md" component="section">
+      <Stack gap="xs">
+        <Text fw={600} size="sm">
+          Agent가 본 입력
+        </Text>
+        <Text size="xs" c="dimmed">
+          페르소나 블록 {input.persona.length}개 · 메모리{" "}
+          {input.memories.length}건 · 최근 게시물 {input.recentPosts.length}건
+        </Text>
+        <Spoiler maxHeight={0} showLabel="입력 펼치기" hideLabel="접기">
+          <Stack gap="sm" mt="xs">
+            {input.persona.map((block, index) => (
+              <Stack key={`${block.group}:${block.title}:${index}`} gap={2}>
+                <Group gap={6} align="baseline">
+                  <Badge size="xs" variant="light">
+                    {PERSONA_GROUP_LABEL[block.group] ?? block.group}
+                  </Badge>
+                  <Text size="xs" fw={600}>
+                    {block.title}
+                  </Text>
+                </Group>
+                <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
+                  {block.content}
+                </Text>
+              </Stack>
+            ))}
+            {input.memories.length ? (
+              <Stack gap={2}>
+                <Text size="xs" fw={600}>
+                  메모리
+                </Text>
+                {input.memories.map((memory, index) => (
+                  <Group key={`${memory.type}:${index}`} gap={6} wrap="nowrap">
+                    <Badge size="xs" variant="light">
+                      {memory.type}
+                    </Badge>
+                    <Text size="xs" c="dimmed">
+                      {memory.content}
+                    </Text>
+                  </Group>
+                ))}
+              </Stack>
+            ) : null}
+            {input.recentPosts.length ? (
+              <Stack gap={4}>
+                <Text size="xs" fw={600}>
+                  최근 게시물
+                </Text>
+                {input.recentPosts.map((post, index) => (
+                  <Stack key={index} gap={0}>
+                    {post.premise ? (
+                      <Text size="xs" c="dimmed">
+                        전제 · {post.premise}
+                      </Text>
+                    ) : null}
+                    <Text size="xs" c="dimmed">
+                      {post.caption}
+                    </Text>
+                    {post.hashtags.length ? (
+                      <Text size="xs" c="dimmed">
+                        {post.hashtags.map((tag) => `#${tag}`).join(" ")}
+                      </Text>
+                    ) : null}
+                  </Stack>
+                ))}
+              </Stack>
+            ) : null}
+          </Stack>
+        </Spoiler>
+      </Stack>
+    </Paper>
   );
 }
 
@@ -1267,9 +1413,11 @@ function EvaluationBlock({
 }
 
 function GenerationStage({
+  item,
   draft,
   evaluations,
 }: {
+  item: PostWorkItem;
   draft: Draft;
   evaluations: DraftEvaluation[];
 }) {
@@ -1280,16 +1428,39 @@ function GenerationStage({
   const aggregate = useDraftMutation(draft.id, () =>
     runDraftStage(draft.id, "aggregate"),
   );
-  const allCompleted =
-    shots.length > 0 && shots.every((shot) => shot.status === "completed");
+  const completed = shots.filter((shot) => shot.status === "completed").length;
+  const failed = shots.filter((shot) => shot.status === "failed").length;
+  const running = shots.filter(
+    (shot) => shot.status === "queued" || shot.status === "running",
+  ).length;
+  const allCompleted = shots.length > 0 && completed === shots.length;
   return (
     <StagePaper
       title="⑤ 이미지 생성"
       description="컷별 실행 상태, 모델 경로와 생성 후보를 확인합니다."
+      {...(item.pipelineV3
+        ? {
+            status: (
+              <StageStateBadge
+                state={v3StageState(item.pipelineV3, "generation")}
+              />
+            ),
+          }
+        : {})}
     >
       {shots.length === 0 ? (
         <Alert color="gray">프롬프트를 먼저 준비해 주세요.</Alert>
-      ) : null}
+      ) : (
+        // 이 단계는 유일하게 시간에 따라 변한다. 컷 카드를 다 훑지 않고도
+        // 어디까지 왔는지 한 줄로 알 수 있어야 한다.
+        <Group gap="xs" wrap="wrap" role="status">
+          <Badge color={allCompleted ? "teal" : "ink"}>
+            완료 {completed}/{shots.length}
+          </Badge>
+          {running > 0 ? <Badge color="accent">생성 중 {running}</Badge> : null}
+          {failed > 0 ? <Badge color="red">실패 {failed}</Badge> : null}
+        </Group>
+      )}
       {shots.map((shot) => (
         <ShotCard
           key={shot.jobId}
@@ -1320,9 +1491,11 @@ function GenerationStage({
 }
 
 function ReviewStage({
+  item,
   draft,
   evaluations,
 }: {
+  item: PostWorkItem;
   draft: Draft;
   evaluations: DraftEvaluation[];
 }) {
@@ -1336,10 +1509,20 @@ function ReviewStage({
     shot.outputs.some((output) => output.selected),
   ).length;
   const ready = shots.length > 0 && selected === shots.length;
+  const plannedShots = item.pipelineV3?.artifacts.imagePlan?.shots;
   return (
     <StagePaper
       title="⑥ 검수"
       description="게시 후보, 캡션과 일정을 확인하고 승인 또는 반려합니다."
+      {...(item.pipelineV3
+        ? {
+            status: (
+              <StageStateBadge
+                state={v3StageState(item.pipelineV3, "review")}
+              />
+            ),
+          }
+        : {})}
     >
       <EvaluationChips evaluation={promptEvaluation} />
       <EvaluationChips evaluation={imageEvaluation} />
@@ -1349,15 +1532,23 @@ function ReviewStage({
           주세요.
         </Alert>
       ) : null}
-      {shots.map((shot) => (
-        <ShotCard
-          key={shot.jobId}
-          draft={draft}
-          shot={shot}
-          evaluation={promptEvaluation}
-          imageEvaluation={imageEvaluation}
-        />
-      ))}
+      {shots.map((shot) => {
+        // 검수는 "기획한 대로 나왔는가"를 판단하는 자리다. 기획 원문이 없으면
+        // 화면을 떠나 ③으로 갔다 와야 한다.
+        const planned = plannedShots?.find(
+          (entry) => entry.sortOrder === shot.sortOrder,
+        );
+        return (
+          <ShotCard
+            key={shot.jobId}
+            draft={draft}
+            shot={shot}
+            evaluation={promptEvaluation}
+            imageEvaluation={imageEvaluation}
+            {...(planned ? { planned } : {})}
+          />
+        );
+      })}
       {draft.status === "needs_review" || draft.status === "approved" ? (
         <ReviewEditForm draft={draft} />
       ) : null}
@@ -1483,7 +1674,19 @@ function PublishStage({
     <StagePaper
       title="⑦ 게시"
       description="게시 대기 상태와 실제 게시 결과를 확인합니다."
+      {...(item.pipelineV3
+        ? {
+            status: (
+              <StageStateBadge
+                state={v3StageState(item.pipelineV3, "publish")}
+              />
+            ),
+          }
+        : {})}
     >
+      {/* 게시 전에도 실제로 나갈 모습을 봐야 결정할 수 있다. 게시 후에는
+          post가 정본이므로 미리보기를 대체한다. */}
+      {!post && draft ? <PublishPreview draft={draft} /> : null}
       {draft?.status === "approved" ? (
         <>
           <Alert color="blue">
@@ -1502,7 +1705,7 @@ function PublishStage({
       ) : null}
       {post ? (
         <>
-          <Text>{post.content}</Text>
+          <Text style={{ whiteSpace: "pre-wrap" }}>{post.content}</Text>
           <Group gap="xs">
             {post.hashtags.map((tag) => (
               <Badge key={tag} variant="light">
@@ -1521,6 +1724,13 @@ function PublishStage({
               />
             ))}
           </div>
+          {/* 영수증 — 무엇이 언제 어떤 id로 나갔는지. */}
+          <Text size="xs" c="dimmed">
+            게시 {formatDateTime(post.createdAt)} · post {post.id}
+            {item.scheduledAt
+              ? ` · 예약 ${formatDateTime(item.scheduledAt)}`
+              : " · 예약 없음"}
+          </Text>
           <Group>
             <Text size="sm">
               댓글 {post.commentCount} · 반응 {post.reactionCount}
@@ -1561,13 +1771,79 @@ function PublishStage({
   );
 }
 
+// 게시 전 미리보기. 검수에서 고른 컷과 편집한 캡션이 실제로 어떤 조합으로
+// 나가는지는 여기서만 한 번에 보인다.
+function PublishPreview({ draft }: { draft: Draft }) {
+  const selected = (draft.shots ?? []).flatMap((shot) =>
+    shot.outputs
+      .filter((output) => output.selected)
+      .map((output) => ({ ...output, sortOrder: shot.sortOrder })),
+  );
+  return (
+    <Paper p="md" component="section">
+      <Stack gap="sm">
+        <Text fw={600} size="sm">
+          게시 미리보기
+        </Text>
+        {selected.length === 0 ? (
+          <Alert color="gray">아직 선택된 게시 이미지가 없습니다.</Alert>
+        ) : (
+          <div className={styles.mediaGrid}>
+            {selected.map((output) => (
+              <ZoomableImage
+                key={output.mediaId}
+                src={output.url}
+                alt={`게시 예정 이미지 ${output.sortOrder + 1}`}
+                className={styles.media}
+                fit="contain"
+              />
+            ))}
+          </div>
+        )}
+        <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+          {draft.caption || "캡션 없음"}
+        </Text>
+        {draft.hashtags.length ? (
+          <Group gap="xs" wrap="wrap">
+            {draft.hashtags.map((tag) => (
+              <Badge key={tag} variant="light">
+                #{tag}
+              </Badge>
+            ))}
+          </Group>
+        ) : null}
+      </Stack>
+    </Paper>
+  );
+}
+
 function MemoryStage({ item, draft }: { item: PostWorkItem; draft?: Draft }) {
+  const candidates = item.pipelineV3?.memoryCandidates;
+  const published = draft?.status === "published";
   return (
     <StagePaper
       title="⑧ 메모리"
       description="게시 결과가 다음 기획에 어떤 기억으로 이어지는지 확인합니다."
+      {...(item.pipelineV3
+        ? {
+            status: (
+              <StageStateBadge
+                state={v3StageState(item.pipelineV3, "memory")}
+              />
+            ),
+          }
+        : {})}
     >
-      {draft?.status === "published" ? (
+      {candidates ? (
+        <MemoryCandidateList candidates={candidates} published={published} />
+      ) : null}
+      {published && candidates ? (
+        <Text size="xs" c="dimmed">
+          현재 스키마에는 메모리와 draft의 직접 FK가 없어 게시 시점의 후보
+          판정으로 표시합니다.
+        </Text>
+      ) : null}
+      {draft?.status === "published" && !candidates ? (
         <>
           <Alert color="teal">
             게시 트랜잭션에서 캐릭터 메모리에 반영되었습니다.
@@ -1585,12 +1861,85 @@ function MemoryStage({ item, draft }: { item: PostWorkItem; draft?: Draft }) {
           생성 파이프라인 밖에서 직접 작성된 게시물이라 연결된 메모리 기록이
           없습니다.
         </Alert>
-      ) : (
+      ) : candidates ? null : (
         <Alert color="gray">
           게시가 완료되면 메모리 반영 결과가 표시됩니다.
         </Alert>
       )}
     </StagePaper>
+  );
+}
+
+// 후보 판정은 게시 트랜잭션이 실제로 거르는 규칙과 같아야 한다
+// (`selectedPublishedMemories`: selected && sourcePostPlanHash === 현재 해시).
+// 화면이 저장되지 않은 기억을 저장됐다고 말하면 다음 기획 판단이 통째로
+// 어긋난다.
+function memoryCandidateVerdict(
+  candidate: V3MemoryCandidate,
+  published: boolean,
+): { label: string; color: string; detail?: string } {
+  if (candidate.stale) {
+    return {
+      label: "무효",
+      color: "ink",
+      detail: "기획을 다시 실행해 이 후보는 더 이상 저장 대상이 아닙니다.",
+    };
+  }
+  if (!candidate.selected) {
+    return {
+      label: "제외됨",
+      color: "ink",
+      detail: "게시해도 저장되지 않습니다.",
+    };
+  }
+  return published
+    ? { label: "저장됨", color: "teal" }
+    : { label: "선택됨", color: "accent", detail: "게시 시 저장됩니다." };
+}
+
+function MemoryCandidateList({
+  candidates,
+  published,
+}: {
+  candidates: V3MemoryCandidate[];
+  published: boolean;
+}) {
+  if (candidates.length === 0) {
+    return (
+      <Alert color="gray">
+        이 게시물은 캐릭터 세계관에 새 기억을 남기지 않습니다.
+      </Alert>
+    );
+  }
+  return (
+    <Paper p="md" component="section">
+      <Stack gap="sm">
+        <Text fw={600} size="sm">
+          기억 후보 {candidates.length}건
+        </Text>
+        {candidates.map((candidate, index) => {
+          const verdict = memoryCandidateVerdict(candidate, published);
+          return (
+            <Stack key={`${candidate.type}:${index}`} gap={2}>
+              <Group gap="xs" align="baseline" wrap="wrap">
+                <Badge size="xs" color={verdict.color}>
+                  {verdict.label}
+                </Badge>
+                <Badge size="xs" variant="light">
+                  {candidate.type}
+                </Badge>
+                <Text size="sm">{candidate.content}</Text>
+              </Group>
+              {verdict.detail ? (
+                <Text size="xs" c="dimmed">
+                  {verdict.detail}
+                </Text>
+              ) : null}
+            </Stack>
+          );
+        })}
+      </Stack>
+    </Paper>
   );
 }
 
