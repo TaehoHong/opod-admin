@@ -126,3 +126,47 @@
 - 다음: 다른 프로바이더(Anthropic·Gemini 호환 경로)를 붙일 때 이 부분집합이
   또 달라진다. 지금은 OpenAI 호환만 가정하므로, 프로바이더가 늘면
   `strict-schema.ts`를 프로바이더별 프로파일로 확장한다.
+
+## image-planner-v2 — 촬영 기하 일관성과 종횡비 범위 (2026-08-13)
+
+- 상태: 관측 중 (재실행 1회 전)
+- 대상: `prompts/image-planner.ts` 시스템 프롬프트. 스키마와 계약 버전
+  (`image-plan-v1`)은 바꾸지 않았다.
+- 발단: 실제 초안의 ImagePlan에서 `capture_plausibility` 3/5, `major` 지적이
+  나왔다. 평가자 진단이 정확했다.
+
+  ```
+  scene:        "전신거울에 비친 목 아래 전신 … 스마트폰이 얼굴을 완전히 가리고"
+  captureSetup: "스마트폰 전면 카메라를 든 인물이 … 미러 셀피를 촬영한다"
+  ```
+
+  거울 셀카는 화면이 나를 향하고 **후면** 카메라가 거울을 향한다. 전면
+  카메라는 나를 직접 찍으므로 "거울에 비친 전신"이 나올 수 없다. 폰을 뒤집어
+  전면 카메라를 거울로 향하게 하면 찍히긴 하지만 화면이 안 보이고 거울에
+  폰 화면이 비친다. 즉 scene과 captureSetup이 기하학적으로 양립하지 않는다.
+- 가설: 기존 프롬프트에는 "physically plausible … with an ordinary available
+  device"라는 일반 문장만 있어, **장치의 광학 방향**까지는 강제되지 않는다.
+  scene/captureSetup 분리 규칙도 "무엇을 어디에 쓰는가"만 말하고 "둘이
+  성립하는가"는 말하지 않는다. 원칙 한 줄 + 재발 사례(거울) 한 줄을 넣으면
+  같은 결함이 줄어든다.
+- 변경:
+  1. Responsibilities에 촬영 기하 규칙 추가 —
+     `captureSetup must be geometrically able to produce scene.` 반사 뷰는
+     렌즈가 반사면을 향해야 하므로 셀프 미러샷은 후면 카메라이고 거울에는
+     기기 뒷면이 보인다, 전면 카메라는 피사체를 직접 담고 반사 뷰를 만들지
+     않는다. 손·기기·팔다리·몸 방향이 한 사람에게 동시에 가능해야 한다.
+  2. Scope boundary의 `generation settings`에 `including aspect ratio and
+     resolution`을 명시. 같은 산출물이 `captureSetup`에 "세로 4:5"를 적었는데,
+     종횡비는 설정이 게시 형식에서 유도한다(`aspectRatioFeed` 등, `324899b`).
+     기획이 정할 값이 아니고, crop/framing이라면 애초에 `scene` 소관이다.
+- 결과: (재실행 후 기록)
+- 판정: (미정)
+- 방법 주의: **평가자 프롬프트는 이번에 건드리지 않는다.** 같은 산출물에서
+  평가자가 놓친 것이 하나 더 있다 — `captureSetup`의 "세로 4:5"는
+  `scope_compliance` 소관인데 5/5를 줬다. 측정 대상(기획자)과 측정 도구
+  (평가자)를 동시에 바꾸면 점수 변화가 어느 쪽 때문인지 알 수 없다. 기획자
+  변경의 효과를 먼저 관측하고, 평가자 보정은 별도 엔트리로 다룬다.
+- 관측 방법: 같은 초안에서 ③ 이미지 기획을 재실행하고
+  `capture_plausibility` 점수와 `captureSetup`의 종횡비 언급 유무를 본다.
+  artifact의 `promptVersion`이 `image-planner-v2`인지로 새 프롬프트가 실제로
+  쓰였는지 확인한다.
