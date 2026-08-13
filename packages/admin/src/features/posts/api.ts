@@ -56,15 +56,75 @@ export type PostWorkItem = {
     reasonCodes: string[];
     nextAction: string;
     artifacts: {
-      postPlan?: { revision: number; status: string; premise?: string };
-      imagePlan?: { revision: number; status: string; shotCount?: number };
-      promptBuild?: {
-        revision: number;
+      postPlan?: V3Lineage & {
+        status: string;
+        premise?: string;
+        primaryPurpose?: string;
+        secondaryPurpose?: string;
+        caption?: string;
+        hashtags?: string[];
+        captionLanguages?: string[];
+        memoryCandidates?: { type: string; content: string }[];
+        conflicts?: { left: string; right: string; reason: string }[];
+      };
+      imagePlan?: V3Lineage & {
+        status: string;
+        shotCount?: number;
+        locationId?: string;
+        shots?: V3ImagePlanShot[];
+        lockedElements?: {
+          category: string;
+          description: string;
+          appliesToShots: number[];
+        }[];
+        blockedReasons?: { code: string; detail: string }[];
+      };
+      promptBuild?: V3Lineage & {
         shotCount: number;
         targetModelId?: string;
+        policyVersion?: string;
+        usesNegativePrompt?: boolean;
+        shots?: {
+          sortOrder: number;
+          prompt: string;
+          negativePrompt?: string;
+          slots?: {
+            slot: string;
+            bindingId: string;
+            referenceId: string;
+            source: string;
+          }[];
+        }[];
       };
     };
   };
+};
+
+export type V3Lineage = {
+  revision: number;
+  contractVersion?: string;
+  hash?: string;
+};
+
+export type V3ImagePlanShot = {
+  sortOrder: number;
+  visualPurpose?: string;
+  scene?: string;
+  captureSetup?: string;
+  presentation?: {
+    mode: string;
+    visibleParts: string[];
+    faceVisible: boolean;
+    identityPreservationRequired: boolean;
+  };
+  referenceBindings?: {
+    bindingId: string;
+    referenceId: string;
+    source: string;
+    semanticPurposes: string[];
+    preserve: string[];
+    avoidCopying: string[];
+  }[];
 };
 
 export type PostListItem = {

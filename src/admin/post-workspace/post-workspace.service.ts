@@ -49,14 +49,77 @@ export type PostPipelineV3ReadModel = {
   reasonCodes: string[];
   nextAction: string;
   artifacts: {
-    postPlan?: { revision: number; status: string; premise?: string };
-    imagePlan?: { revision: number; status: string; shotCount?: number };
+    postPlan?: {
+      revision: number;
+      status: string;
+      contractVersion?: string;
+      hash?: string;
+      premise?: string;
+      primaryPurpose?: string;
+      secondaryPurpose?: string;
+      caption?: string;
+      hashtags?: string[];
+      captionLanguages?: string[];
+      memoryCandidates?: { type: string; content: string }[];
+      conflicts?: { left: string; right: string; reason: string }[];
+    };
+    imagePlan?: {
+      revision: number;
+      status: string;
+      contractVersion?: string;
+      hash?: string;
+      shotCount?: number;
+      locationId?: string;
+      shots?: V3ImagePlanShot[];
+      lockedElements?: {
+        category: string;
+        description: string;
+        appliesToShots: number[];
+      }[];
+      blockedReasons?: { code: string; detail: string }[];
+    };
     promptBuild?: {
       revision: number;
       shotCount: number;
+      contractVersion?: string;
+      hash?: string;
       targetModelId?: string;
+      policyVersion?: string;
+      usesNegativePrompt?: boolean;
+      shots?: {
+        sortOrder: number;
+        prompt: string;
+        negativePrompt?: string;
+        slots?: {
+          slot: string;
+          bindingId: string;
+          referenceId: string;
+          source: string;
+        }[];
+      }[];
     };
   };
+};
+
+export type V3ImagePlanShot = {
+  sortOrder: number;
+  visualPurpose?: string;
+  scene?: string;
+  captureSetup?: string;
+  presentation?: {
+    mode: string;
+    visibleParts: string[];
+    faceVisible: boolean;
+    identityPreservationRequired: boolean;
+  };
+  referenceBindings?: {
+    bindingId: string;
+    referenceId: string;
+    source: string;
+    semanticPurposes: string[];
+    preserve: string[];
+    avoidCopying: string[];
+  }[];
 };
 
 export type PostWorkItem = {
@@ -431,8 +494,55 @@ function v3ReadModel(
                 typeof postOutput.status === "string"
                   ? postOutput.status
                   : "unknown",
+              ...lineage(postPlanning),
               ...(typeof postIntent.premise === "string"
                 ? { premise: postIntent.premise }
+                : {}),
+              ...(typeof postIntent.primaryPurpose === "string"
+                ? { primaryPurpose: postIntent.primaryPurpose }
+                : {}),
+              ...(typeof postIntent.secondaryPurpose === "string"
+                ? { secondaryPurpose: postIntent.secondaryPurpose }
+                : {}),
+              ...(typeof postOutput.caption === "string"
+                ? { caption: postOutput.caption }
+                : {}),
+              ...(Array.isArray(postOutput.hashtags)
+                ? { hashtags: strings(postOutput.hashtags) }
+                : {}),
+              ...(Array.isArray(postOutput.captionLanguages)
+                ? { captionLanguages: strings(postOutput.captionLanguages) }
+                : {}),
+              ...(Array.isArray(postOutput.newMemoryCandidates)
+                ? {
+                    memoryCandidates: postOutput.newMemoryCandidates.flatMap(
+                      (candidate) => {
+                        const item = record(candidate);
+                        return typeof item.type === "string" &&
+                          typeof item.content === "string"
+                          ? [{ type: item.type, content: item.content }]
+                          : [];
+                      },
+                    ),
+                  }
+                : {}),
+              ...(Array.isArray(postOutput.conflicts)
+                ? {
+                    conflicts: postOutput.conflicts.flatMap((raw) => {
+                      const item = record(raw);
+                      const left = record(item.left);
+                      const right = record(item.right);
+                      return typeof item.reason === "string"
+                        ? [
+                            {
+                              left: text(left.text),
+                              right: text(right.text),
+                              reason: item.reason,
+                            },
+                          ]
+                        : [];
+                    }),
+                  }
                 : {}),
             },
           }
@@ -445,8 +555,45 @@ function v3ReadModel(
                 typeof imageOutput.status === "string"
                   ? imageOutput.status
                   : "unknown",
+              ...lineage(imagePlanning),
               ...(Array.isArray(imageOutput.shots)
-                ? { shotCount: imageOutput.shots.length }
+                ? {
+                    shotCount: imageOutput.shots.length,
+                    shots: imageOutput.shots.map(v3ImagePlanShot),
+                  }
+                : {}),
+              ...(typeof imageOutput.locationId === "string"
+                ? { locationId: imageOutput.locationId }
+                : {}),
+              ...(Array.isArray(record(imageOutput.continuity).lockedElements)
+                ? {
+                    lockedElements: (
+                      record(imageOutput.continuity).lockedElements as unknown[]
+                    ).map((raw) => {
+                      const lock = record(raw);
+                      return {
+                        category: text(lock.category),
+                        description: text(lock.description),
+                        appliesToShots: Array.isArray(lock.appliesToShots)
+                          ? lock.appliesToShots.filter(
+                              (value): value is number =>
+                                Number.isInteger(value),
+                            )
+                          : [],
+                      };
+                    }),
+                  }
+                : {}),
+              ...(Array.isArray(imageOutput.reasons)
+                ? {
+                    blockedReasons: imageOutput.reasons.map((raw) => {
+                      const reason = record(raw);
+                      return {
+                        code: text(reason.code),
+                        detail: text(reason.detail),
+                      };
+                    }),
+                  }
                 : {}),
             },
           }
@@ -458,14 +605,128 @@ function v3ReadModel(
               shotCount: Array.isArray(promptOutput.shots)
                 ? promptOutput.shots.length
                 : 0,
+              ...lineage(promptBuild),
               ...(typeof modelPolicy.modelId === "string"
                 ? { targetModelId: modelPolicy.modelId }
+                : {}),
+              ...(typeof modelPolicy.version === "string"
+                ? { policyVersion: modelPolicy.version }
+                : {}),
+              ...(typeof modelPolicy.usesNegativePrompt === "boolean"
+                ? { usesNegativePrompt: modelPolicy.usesNegativePrompt }
+                : {}),
+              ...(Array.isArray(promptOutput.shots)
+                ? {
+                    shots: promptOutput.shots.map((raw) => {
+                      const shot = record(raw);
+                      const sortOrder = Number.isInteger(shot.sortOrder)
+                        ? (shot.sortOrder as number)
+                        : 0;
+                      return {
+                        sortOrder,
+                        prompt: text(shot.prompt),
+                        ...(typeof shot.negativePrompt === "string"
+                          ? { negativePrompt: shot.negativePrompt }
+                          : {}),
+                        slots: promptSlots(promptInput, sortOrder),
+                      };
+                    }),
+                  }
                 : {}),
             },
           }
         : {}),
     },
   };
+}
+
+// 산출물 계보. artifact에는 실행 시각이 없으므로 revision/hash/계약 버전만 내린다.
+function lineage(artifact: Record<string, unknown>) {
+  return {
+    ...(typeof artifact.hash === "string" ? { hash: artifact.hash } : {}),
+    ...(typeof artifact.contractVersion === "string"
+      ? { contractVersion: artifact.contractVersion }
+      : {}),
+  };
+}
+
+function v3ImagePlanShot(raw: unknown): V3ImagePlanShot {
+  const shot = record(raw);
+  const presentation = record(shot.characterPresentation);
+  return {
+    sortOrder: Number.isInteger(shot.sortOrder)
+      ? (shot.sortOrder as number)
+      : 0,
+    ...(typeof shot.visualPurpose === "string"
+      ? { visualPurpose: shot.visualPurpose }
+      : {}),
+    ...(typeof shot.scene === "string" ? { scene: shot.scene } : {}),
+    ...(typeof shot.captureSetup === "string"
+      ? { captureSetup: shot.captureSetup }
+      : {}),
+    ...(typeof presentation.mode === "string"
+      ? {
+          presentation: {
+            mode: presentation.mode,
+            visibleParts: Array.isArray(presentation.visibleParts)
+              ? strings(presentation.visibleParts)
+              : [],
+            faceVisible: presentation.faceVisible === true,
+            identityPreservationRequired:
+              presentation.identityPreservationRequired === true,
+          },
+        }
+      : {}),
+    ...(Array.isArray(shot.referenceBindings)
+      ? {
+          referenceBindings: shot.referenceBindings.map((value) => {
+            const binding = record(value);
+            return {
+              bindingId: text(binding.bindingId),
+              referenceId: text(binding.id),
+              source: text(binding.source),
+              semanticPurposes: Array.isArray(binding.semanticPurposes)
+                ? strings(binding.semanticPurposes)
+                : [],
+              preserve: Array.isArray(binding.preserve)
+                ? strings(binding.preserve)
+                : [],
+              avoidCopying: Array.isArray(binding.avoidCopying)
+                ? strings(binding.avoidCopying)
+                : [],
+            };
+          }),
+        }
+      : {}),
+  };
+}
+
+// 컷별 슬롯 바인딩. provider 직전 검증이 보는 것과 같은 매핑이라 어긋남을
+// 실행 전에 눈으로 잡을 수 있다.
+function promptSlots(promptInput: Record<string, unknown>, sortOrder: number) {
+  const slots = Array.isArray(promptInput.referenceSlots)
+    ? promptInput.referenceSlots
+    : [];
+  return slots.flatMap((value) => {
+    const slot = record(value);
+    if (slot.shotSortOrder !== sortOrder) return [];
+    return [
+      {
+        slot: text(slot.slot),
+        bindingId: text(slot.bindingId),
+        referenceId: text(slot.referenceId),
+        source: text(slot.source),
+      },
+    ];
+  });
+}
+
+function strings(value: unknown[]): string[] {
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function v3StateCopy(state: string): { detail: string; nextAction: string } {

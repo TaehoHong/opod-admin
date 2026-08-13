@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { DraftEvaluation } from "./api";
 
 const LABELS: Record<string, string> = {
+  // V2 차원
   persona_fit: "페르소나",
   voice_tone_fit: "말투",
   ai_tell_free: "AI 티",
@@ -23,6 +24,53 @@ const LABELS: Record<string, string> = {
   environment_continuity: "공간 일관성",
   photorealism: "사진 현실감",
   artifact_free: "생성 결함",
+  // V3 게시글 기획 평가
+  status_validity: "상태 타당성",
+  character_grounding: "캐릭터 근거",
+  intent_quality: "의도 품질",
+  continuity_and_novelty: "연속성·새로움",
+  content_style_fit: "콘텐츠 스타일",
+  voice_fit: "말투",
+  hashtag_fit: "해시태그",
+  memory_discipline: "메모리 절제",
+  scope_compliance: "범위 준수",
+  conflict_qualification: "충돌 성립",
+  conflict_grounding: "충돌 근거",
+  conflict_completeness: "충돌 완전성",
+  // V3 이미지 기획 평가
+  post_intent_fidelity: "게시 의도 보존",
+  visual_story_coverage: "시각 서사 포괄",
+  shot_distinctness: "컷 구별성",
+  capture_plausibility: "촬영 개연성",
+  character_presentation: "인물 노출",
+  character_visual_grounding: "인물 시각 근거",
+  reference_contract: "레퍼런스 계약",
+  location_contract: "장소 계약",
+  continuity_contract: "연속성 계약",
+  block_qualification: "차단 성립",
+  block_grounding: "차단 근거",
+  block_completeness: "차단 완전성",
+  // V3 프롬프트 평가
+  shot_contract_fidelity: "컷 계약 충실도",
+  character_contract_fidelity: "인물 계약 충실도",
+  continuity_encoding: "연속성 반영",
+  reference_contract_fidelity: "레퍼런스 계약 충실도",
+  model_policy_compliance: "모델 정책 준수",
+  negative_prompt_safety: "네거티브 안전성",
+  data_boundary: "데이터 경계",
+};
+
+// 텍스트 평가 3종의 판정 어휘. V3는 kind마다 다른 verdict를 쓴다.
+const VERDICT_LABELS: Record<string, { label: string; ok: boolean }> = {
+  pass: { label: "통과", ok: true },
+  issues_found: { label: "지적 있음", ok: false },
+  valid_conflict: { label: "충돌 확인", ok: true },
+  incomplete_conflict: { label: "충돌 불완전", ok: false },
+  invalid_conflict: { label: "충돌 무효", ok: false },
+  valid_block: { label: "차단 타당", ok: true },
+  incomplete_block: { label: "차단 불완전", ok: false },
+  invalid_block: { label: "차단 무효", ok: false },
+  reject: { label: "반려", ok: false },
 };
 
 const HARD_FAILURE_LABELS: Record<string, string> = {
@@ -67,7 +115,17 @@ export function EvaluationChips({
     candidateIndex,
   );
   const verdict = candidateVerdict(evaluation, shotSortOrder, candidateIndex);
-  if (entries.length === 0 && lint.length === 0 && hardFailures.length === 0)
+  const overall =
+    shotSortOrder === undefined ? evaluation.overallScore : undefined;
+  // 총점·판정만 있고 차원 점수가 없는 평가도 있다. 점수 배열이 비었다고 해서
+  // 블록 전체를 지우면 완료된 평가가 화면에서 사라진다.
+  if (
+    entries.length === 0 &&
+    lint.length === 0 &&
+    hardFailures.length === 0 &&
+    overall == null &&
+    !verdict
+  )
     return null;
 
   const prefix =
@@ -77,15 +135,15 @@ export function EvaluationChips({
   return (
     <Stack gap={6}>
       <Group gap={6} wrap="wrap">
-        {shotSortOrder === undefined && evaluation.overallScore != null ? (
-          <Badge variant="filled" color={scoreColor(evaluation.overallScore)}>
+        {overall != null ? (
+          <Badge variant="filled" color={scoreColor(overall)}>
             {evaluation.kind === "image" ? "이미지 심사" : "LLM 심사"}{" "}
-            {evaluation.overallScore.toFixed(1)}/5
+            {overall.toFixed(1)}/5
           </Badge>
         ) : null}
         {verdict ? (
-          <Badge color={verdict === "pass" ? "teal" : "red"}>
-            {verdict === "pass" ? "통과" : "반려"}
+          <Badge color={VERDICT_LABELS[verdict]?.ok ? "teal" : "red"}>
+            {VERDICT_LABELS[verdict]?.label ?? verdict}
           </Badge>
         ) : null}
         {entries.map((entry) => {
@@ -168,6 +226,30 @@ export function EvaluationChips({
   );
 }
 
+// V3는 평가 본문을 scoresJson.result 아래에 두고 차원 점수를 숫자로 저장한다.
+// V2는 scoresJson 최상위에 두고 차원마다 { score, reason }을 저장한다.
+// 두 세대의 초안이 함께 살아 있으므로 양쪽을 모두 읽는다.
+function v3Result(
+  evaluation: DraftEvaluation,
+): Record<string, unknown> | undefined {
+  return asRecord(asRecord(evaluation.scoresJson)?.result);
+}
+
+// V3에는 차원별 reason이 없다. 사유는 issues[]에 dimension으로 붙어 온다.
+function v3Reasons(evaluation: DraftEvaluation): Map<string, string> {
+  const issues = array(v3Result(evaluation)?.issues);
+  const reasons = new Map<string, string>();
+  for (const issue of issues) {
+    const record = asRecord(issue);
+    const dimension = record?.dimension;
+    const detail = record?.detail;
+    if (typeof dimension !== "string" || typeof detail !== "string") continue;
+    const previous = reasons.get(dimension);
+    reasons.set(dimension, previous ? `${previous} · ${detail}` : detail);
+  }
+  return reasons;
+}
+
 function scoreEntries(
   evaluation: DraftEvaluation,
   shotSortOrder?: number,
@@ -175,6 +257,11 @@ function scoreEntries(
 ): ScoreEntry[] {
   const scores = asRecord(evaluation.scoresJson);
   if (!scores) return [];
+  const v3 = asRecord(v3Result(evaluation)?.scores);
+  if (v3) {
+    const reasons = v3Reasons(evaluation);
+    return entriesFromRecord(v3, reasons);
+  }
   if (evaluation.kind === "plan") {
     return entriesFromRecord(asRecord(scores.scores));
   }
@@ -229,12 +316,21 @@ function candidateVerdict(
   shotSortOrder?: number,
   candidateIndex?: number,
 ) {
-  const verdict = imageCandidate(
+  // 컷·후보 단위 판정(V2 이미지 평가).
+  const candidate = imageCandidate(
     evaluation,
     shotSortOrder,
     candidateIndex,
   )?.verdict;
-  return verdict === "pass" || verdict === "reject" ? verdict : undefined;
+  if (typeof candidate === "string" && candidate in VERDICT_LABELS) {
+    return candidate;
+  }
+  // 산출물 전체 판정(V3 텍스트 평가). 컷 단위 표시에는 붙이지 않는다.
+  if (shotSortOrder !== undefined) return undefined;
+  const overall = v3Result(evaluation)?.verdict;
+  return typeof overall === "string" && overall in VERDICT_LABELS
+    ? overall
+    : undefined;
 }
 
 function hardFailureEntries(
@@ -265,9 +361,17 @@ function lintEntries(evaluation: DraftEvaluation, shotSortOrder?: number) {
   });
 }
 
-function entriesFromRecord(value?: Record<string, unknown>): ScoreEntry[] {
+function entriesFromRecord(
+  value?: Record<string, unknown>,
+  reasons?: Map<string, string>,
+): ScoreEntry[] {
   if (!value) return [];
   return Object.entries(value).flatMap(([dimension, raw]) => {
+    // V3는 숫자, V2는 { score, reason } 레코드.
+    if (typeof raw === "number") {
+      const reason = reasons?.get(dimension);
+      return [{ dimension, score: raw, ...(reason ? { reason } : {}) }];
+    }
     const entry = asRecord(raw);
     return typeof entry?.score === "number"
       ? [

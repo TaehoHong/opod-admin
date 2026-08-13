@@ -1,165 +1,257 @@
-# 파이프라인 V3 운영 UX 개선 계획 — 버전 발견성과 이미지 기획 단계 노출
+# 파이프라인 V3 운영 화면 개선 계획 — 8단계 전체
 
-- 작성일: 2026-08-13
+- 작성일: 2026-08-13 (3차 개정 — 단계 전체로 확장)
 - 상태: 계획 확정 전 검토용
-- 범위: `게시물` 작업공간(큐·작업 화면·브리프 생성)과 설정 화면에서 V3
-  파이프라인의 발견성·산출물 노출·수동 조작 UX
+- 범위: `게시물` 작업공간의 V3 8단계 화면 전체. 단계마다 산출물의 성격이 다르므로
+  표현 방식도 단계마다 다르게 정한다.
 - 상위 문서: [post-creation-agent-architecture-v3.md](./post-creation-agent-architecture-v3.md),
   [draft-pipeline-ux.md](./draft-pipeline-ux.md)
+- 관련: [prompt-research-log.md](./prompt-research-log.md) `v3-schema-v2`
 
-## 1. 발단과 관측 사실
+## 1. 발단과 진단
 
-experiment/image-prompt-optimization 브랜치(= main에 squash 머지, PR #2)를
-개발 서버에 배포한 뒤 "이미지 기획 단계가 없다"는 관측이 나왔다. 조사 결과:
+세 번의 관측이 같은 뿌리를 가리켰다.
 
-1. **이미지 기획 단계는 구현되어 있다.** `PostWorkPage.tsx`의 `V3_STAGES`
-   레일은 `브리프 → 게시글 기획 → 이미지 기획 → 프롬프트 → 이미지 생성 →
-   검수 → 게시 → 메모리` 8단계다. 레일은 draft의
-   `conceptJson.pipelineVersion === "post-pipeline-v3"` 여부로
-   V3/legacy를 선택한다 (`StageRail`, `post-workspace.service.ts`의
-   `v3ReadModel`).
-2. **V3는 설정으로 게이트된다.** `pipeline.v3Enabled`(env 폴백
-   `POST_PIPELINE_V3_ENABLED`, 기본 꺼짐)가 켜져 있어야 **새로 만드는
-   초안부터** V3 concept으로 생성된다 (`drafts.service.ts#createDraft`).
-   켜는 순간 기획 LLM의 strict JSON schema capability probe를 통과해야
-   한다 (`admin-settings.controller.ts`).
-3. **개발 서버는 꺼져 있었다.** 2026-08-13 개발 서버 DB 확인 결과
-   `opod.admin_settings`에 `pipeline.v3Enabled` 키가 없고(= 기본 꺼짐),
-   `opod.post_drafts` 31건 전부 `pipelineVersion`이 없는 V2 draft였다.
-   따라서 화면은 legacy 레일(`브리프 → 기획 → 프롬프트 → 평가 → …`)을
-   렌더했고, 이 레일에는 이미지 기획이 기획 단계에 통합되어 있다.
+1. "이미지 기획 단계가 없다" → V3가 설정으로 게이트돼 V2 초안을 보고 있었고,
+   화면에 파이프라인 버전 표시가 없었다.
+2. 게시글 기획이 400으로 실패 → 스키마 버그. 수정 완료
+   ([prompt-research-log.md](./prompt-research-log.md) `v3-schema-v2`).
+3. "제대로 실행된 건지 눈으로 확인이 안 된다" → **데이터는 저장돼 있는데 화면이
+   읽지 못하거나 매핑하지 않는다.**
 
-즉 기능 누락이 아니라 **"켜는 곳·켜졌는지·어느 버전으로 도는지"가 화면에
-드러나지 않는 발견성 문제**다. 단, V3를 켰더라도 현재 이미지 기획 화면은
-산출물을 거의 보여 주지 않아(아래 3.B) 같은 인상을 받았을 가능성이 높다.
+3번이 이 문서의 대상이다. 실제 draft `019ff878…`의 DB를 확인한 결과, 화면에
+없는 것들이 생성되지 않은 것이 아니었다.
 
-## 2. 즉시 조치
+| 저장된 것 | 화면 |
+|---|---|
+| 캡션 전문, 해시태그 4개, 목적, 언어, 메모리 후보 | 전제 한 줄만 |
+| 평가 11개 차원 전부 5점, 총점 5.0, 판정 `pass`, 소요 3초, 평가 모델명 | `{"issues": [], "suggestions": null}` |
+| `pipeline.stage/state`, `imageCount: 1` | "다음 행동" 한 줄 |
+| 컷별 `_shot`(장면·촬영·레퍼런스·모델), `_v3`(리비전·해시·바인딩·네거티브) | 미노출 |
 
-> 2026-08-13 추가: 토글을 켠 뒤 게시글 기획이 400(`'oneOf' is not permitted`)으로
-> 전부 실패하는 별개 버그가 드러났다. 원인·수정은
-> [prompt-research-log.md](./prompt-research-log.md)의 `v3-schema-v2` 항목을
-> 보라. 아래 조치는 그 수정이 배포된 뒤에 유효하다.
+## 2. 확인된 표시 버그 2건
 
-설정 → 생성 워커 → "게시글 생성 Agent V3 신규 초안 적용" 스위치를 켠다.
-켜면 capability probe가 즉시 실행되어 실패 시 원인 메시지를 보여 준다.
-그 후 **새 게시물을 만들면** 레일에 ③ 이미지 기획이 나타난다. 기존 초안은
-설계대로 V2로 완주한다(소급 전환 없음). 개발 서버는 architecture 문서
-§12의 rollout gate 관찰 환경이므로 켜는 것이 의도된 다음 단계다.
+미구현이 아니라 **버그**다. 데이터가 이미 API로 내려오는데 화면이 잘못 읽는다.
 
-## 3. UI/UX 문제 분석
+### 2.1 평가 점수·판정·총점이 통째로 사라진다
 
-### A. 파이프라인 버전 발견성 (이번 혼란의 직접 원인)
+`EvaluationChips.tsx`에 모양 불일치가 두 겹 있다.
 
-| # | 문제 | 근거 |
+1. **경로**: V3는 `scoresJson = { _meta, result: { scores, verdict, … } }`로
+   저장하는데(`evaluation-worker.service.ts`의 `completeV3`), 코드는
+   `scoresJson.scores`를 읽는다.
+2. **값 모양**: `entriesFromRecord()`는 차원 값이 `{ score, reason }` 레코드라고
+   가정하는데(`typeof entry?.score === "number"`), V3는 `"voice_fit": 5`처럼
+   숫자를 바로 저장한다. 경로만 고쳐도 여전히 빈 배열이다.
+
+결과적으로 아래 조기 반환이 컴포넌트 전체를 지우고, **정상 계산된 총점 배지까지
+함께 삼킨다.**
+
+```
+if (entries.length === 0 && lint.length === 0 && hardFailures.length === 0)
+  return null;
+```
+
+`verdict` 표시도 `kind === "image"` 전용 경로에만 있어 기획 평가의 `pass`는
+애초에 표시 대상이 아니다. **평가 쪽은 API 변경이 전혀 필요 없다** —
+`DraftEvaluation` 타입이 `status`, `overallScore`, `evaluatorName`, `createdAt`,
+`completedAt`, `scoresJson`, `errorMessage`를 이미 모두 내려준다.
+
+### 2.2 브리프의 운영자 요청이 V3에서 항상 "지정 없음"
+
+V3 concept은 요청을 `operatorRequest`에 저장하는데
+(`createPostPipelineV3Concept`), `BriefStage`는 V2 필드인 `concept.sceneHint`를
+읽는다.
+
+```
+<Meta label="장면·주제 요청">{concept.sceneHint || "지정 없음"}</Meta>
+```
+
+브리프에서 장면 요청을 입력해도 작업 화면에서는 확인할 수 없다. 이후 단계에서
+"요청대로 나왔는지" 대조할 기준이 사라진다.
+
+## 3. 단계별 설계
+
+각 단계의 산출물은 성격이 다르다. **같은 카드 틀에 다른 내용을 끼워 넣는 방식이
+지금의 문제**이므로, 데이터 성격에 맞는 표현을 단계마다 따로 정한다.
+
+| 단계 | 데이터 성격 | 표현 |
 |---|---|---|
-| A1 | 작업 화면 어디에도 파이프라인 버전 표시가 없다. 레일이 조용히 다른 단계 집합을 렌더할 뿐, V2/V3 구분 배지·안내가 없다 | `PostWorkHeader`에 버전 정보 없음 |
-| A2 | V3의 존재와 켜는 위치를 작업 흐름 안에서 알 수 없다. 토글은 설정 화면 `WorkerCard`에만 있고, 브리프 생성 화면(①)은 이번 초안이 어떤 버전으로 생성될지 예고하지 않는다 | `PostBriefCreatePage`에 버전 언급 없음 |
-| A3 | 토글을 켠 뒤에는 큐에 V2/V3 초안이 섞이는데 목록에서 구분할 수 없다. 단계 라벨만 "기획" vs "게시글 기획"으로 미묘하게 다르다 | `PostQueuePage` 행에 버전 표시 없음 |
-| A4 | UX 정본 문서가 V3 이전(2026-08-10) 상태다. 8단계 IA가 legacy 기준(평가가 ④ 단계)으로 기록되어 있어 화면과 문서가 어긋난다 | `draft-pipeline-ux.md` §0·§2 |
+| ① 브리프 | 불변 입력 + 컨텍스트 스냅숏 | 영수증 + 접이식 입력 스냅숏 |
+| ② 게시글 기획 | 사람이 읽을 텍스트 | 캡션 본문 + 배지 + 메모리 후보 체크리스트 |
+| ③ 이미지 기획 | 컷 단위 구조체 + 교차 제약 | 컷 카드 + 연속성 잠금 + 레퍼런스 칩 |
+| ④ 프롬프트 | 긴 기계용 텍스트 + 모델 정책 | 컷 선택 + 전문(복사) + 슬롯 바인딩 표 |
+| ⑤ 이미지 생성 | 실행 상태 + 후보 이미지 | 컷별 실행 카드 + 후보 그리드 |
+| ⑥ 검수 | 사람의 결정 | 결정에 필요한 근거를 한 화면에 |
+| ⑦ 게시 | 영수증 | 실제 게시물 미리보기 |
+| ⑧ 메모리 | 계보(후보 → 확정) | 후보별 상태 목록 |
 
-### B. 이미지 기획 단계의 산출물 노출 부족 (수동 파이프라인 원칙 위반)
+### 횡단 규칙 (8단계 공통)
 
-수동 파이프라인 원칙: 수동 = 자동의 스텝 실행 모드, **단계마다 버튼 트리거 +
-중간 산출물 노출 필수**. 현재 V3 단계 화면은 이를 충족하지 못한다.
+단계마다 다르게 만들되, 아래 네 가지는 모든 단계에서 같은 자리·같은 어휘로 둔다.
+운영자가 단계를 옮길 때마다 읽는 법을 새로 배우지 않아야 한다.
 
-| # | 문제 | 근거 |
+1. **상태 칩** — 헤더에 `실행 전` / `실행 중` / `완료` / `일시정지(사유)` / `실패`.
+   `pipelineV3.state`와 현재 stage 비교로 유도한다. `state === "running"`이면
+   스피너와 "○○ Agent 실행 중…"(V2 관례 계승).
+2. **계보 푸터** — 산출물 카드 아래 `revision N · 상태 · sha256:앞8자 · 실행 시각`.
+   upstream이 바뀌어 stale이면 같은 자리에 경고 배너.
+3. **평가 블록 4상태** — 완료 / 대기(`pending`) / 실패(`errorMessage` + 재시도) /
+   워커 꺼짐(설정 링크). 지금처럼 `null`을 반환하지 않는다.
+4. **실행 버튼** — 카드 하단 왼쪽에 실행·재실행, 오른쪽에 다음 단계 이동.
+   완료 후에도 재실행이 가능해야 한다(현재는 최초 1회만 노출).
+
+### ① 브리프 — 불변 입력 영수증
+
+**성격**: 실행 전에 확정된 짧은 키-값. 이후 모든 단계가 이걸 기준으로 판단받는다.
+게다가 Context Assembler가 조립한 **입력 스냅숏**(페르소나·메모리·최근 게시물)이
+`postPlanning.input`에 통째로 저장돼 있는데 화면에 전혀 없다.
+
+- 기존 항목 유지: 캐릭터, 콘텐츠 형식, 게시 일정, 진행 정책
+- **버그 수정**: `operatorRequest`(V3) / `sceneHint`(V2)를 모두 읽는다
+- 파이프라인 버전 배지(`Agent V3` / `V2 legacy`)
+- **접이식 "Agent가 본 입력"** — 페르소나 블록 N개, 메모리 N건, 최근 게시물 N건을
+  요약하고 펼치면 실제 내용. "왜 이런 캡션이 나왔는가"를 추적하는 유일한 경로다.
+  기획 결과가 이상할 때 프롬프트를 의심하기 전에 입력을 확인할 수 있어야 한다.
+
+### ② 게시글 기획 — 사람이 읽을 텍스트
+
+**성격**: 최종 게시물의 본문. 운영자가 읽고 판단해야 하므로 원문 그대로.
+
+- 캡션을 **본문 서체로, 줄바꿈 보존**해서 표시(현재 미표시)
+- 해시태그를 배지로, 개수와 함께
+- 의도(전제 / 주 목적 / 부 목적)를 메타로
+- 언어(`captionLanguages`)
+- **메모리 후보를 체크리스트로** — `newMemoryCandidates`가 비어 있으면
+  "새 기억 없음"이라고 명시한다. 빈 배열은 "표시할 게 없음"이 아니라
+  "이 게시물은 세계관에 새 사실을 추가하지 않는다"는 유의미한 판정이다
+- 평가: 11개 차원 칩 + 총점 + 판정 + 소요 시간(P0 수정 후 자동 표시)
+
+### ③ 이미지 기획 — 컷 단위 구조체 + 교차 제약
+
+**성격**: 컷마다 독립적인 구조체이면서, 컷을 가로지르는 제약(continuity)이 따로
+있다. 목록으로 나열하면 교차 제약이 묻힌다.
+
+- **컷 카드 N개** — 각 카드에:
+  - 컷 번호와 `visualPurpose`(이 컷이 무슨 정보를 더하는가)
+  - `scene`(프레임 안)과 `captureSetup`(프레임 밖)을 **시각적으로 분리**해서 표시.
+    이 둘의 혼입이 기존 품질 결함의 핵심이므로 화면에서도 갈라 놔야 한다
+  - 인물 노출 배지 — `mode`(none/full/partial/reflection/silhouette),
+    `faceVisible`, `identityPreservationRequired`, `visibleParts`
+  - 레퍼런스 바인딩 칩 — 썸네일 + `source`(identity/environment) +
+    `semanticPurposes` + 펼치면 `preserve` / `avoidCopying`
+- **연속성 잠금**을 컷 카드 위에 별도 영역으로 — 각 잠금이 어느 컷에 적용되는지
+  (`appliesToShots`) 컷 번호 배지로 표시. 컷 카드 안에 넣으면 "공통 제약"이라는
+  성격이 사라진다
+- `locationId`(카탈로그 장소 또는 "미등록 단일 장소")
+- **`imageCount`는 오케스트레이터가 정한 값**임을 명시 — Agent가 고른 게 아니라
+  저장된 난수다. 이 구분이 없으면 컷 수가 이상할 때 엉뚱한 곳을 고치게 된다
+- `blocked`면 사유 코드별 카드(`visual_constraint_conflict` 등)와 해소 방법
+
+### ④ 프롬프트 — 긴 기계용 텍스트 + 모델 정책
+
+**성격**: 사람이 정독하기보다 대조·복사하는 텍스트. 그리고 "어느 레퍼런스가 어느
+슬롯에 들어가는가"라는 표 형태 데이터가 붙는다.
+
+- 좌측 컷 목록 + 우측 선택 컷(V2 `PromptStage` 레이아웃 계승)
+- **프롬프트 전문**을 monospace + 복사 버튼으로. 현재는 개수와 모델명만 보인다
+- **negativePrompt를 별도 블록**으로 — 성격이 반대인 텍스트를 한 덩어리로 붙이면
+  읽기 어렵다. 미사용(null)이면 "이 모델은 네거티브를 쓰지 않음"으로 표시
+- **슬롯 바인딩 표** — `bindingId → slot → 실제 asset(썸네일)` 1:1 매핑.
+  `_v3.referenceBindings`에 이미 저장돼 있다. 이 표가 provider 직전 검증과 같은
+  내용을 보여주므로, 실패 전에 어긋남을 눈으로 잡을 수 있다
+- 대상 모델(`targetModelId`)과 policy version
+
+### ⑤ 이미지 생성 — 실행 상태 + 후보 이미지
+
+**성격**: 유일하게 시간에 따라 변하는 단계. 이미지가 주인공이다.
+`ShotCard`가 이미 기획 레퍼런스/실제 사용 레퍼런스/최종 프롬프트/후보 수를
+보여주므로 다른 단계보다 상태가 낫다.
+
+- 컷별 실행 상태(queued/running/completed/failed)와 진행 표시
+- 후보 이미지 그리드(크게). 후보마다 생성 결함 평가 칩
+- **기획 레퍼런스 vs 실제 사용 레퍼런스 대조**(기존 기능 유지) — 어긋나면 강조
+- provider / model / route, 시도 횟수, 소요 시간
+- 실패 컷은 오류 메시지와 재생성 버튼을 카드 안에
+
+### ⑥ 검수 — 사람의 결정
+
+**성격**: 유일한 휴먼 게이트. 결정에 필요한 모든 근거가 한 화면에 있어야 하고,
+화면을 떠나 확인해야 하면 실패다.
+
+- 컷마다 후보 1장 선택(선택 진행률 `2/3` 표시, 기존 유지)
+- **생성 이미지 평가를 결정 옆에** — 컷별 차원 점수, 하드 실패
+  (`identity_or_body_proportion_drift` 등)를 후보 카드에 인라인
+- 캡션·해시태그·일정 최종 편집(기존 유지)
+- 승인 / 반려(사유)
+- **기획 대비 대조 링크** — 이 컷이 어떤 `scene`으로 기획됐는지 접이식으로
+
+### ⑦ 게시 — 영수증
+
+**성격**: 결과 확인. 실제 사용자에게 보이는 모습과 같아야 신뢰할 수 있다.
+
+- **실제 게시물 미리보기** — 캡션 + 미디어 + 해시태그를 서비스와 같은 배치로
+- 게시 시각, post ID, 예약 여부
+- 댓글·반응 수와 추가 진입(기존 유지)
+- 게시 전이면 "승인 후 게시 가능" 또는 "지금 게시" 버튼(기존 유지)
+
+### ⑧ 메모리 — 계보(후보 → 확정)
+
+**성격**: 이 파이프라인이 캐릭터의 세계관에 무엇을 추가했는가. 현재는 게시 캡션을
+그대로 에코할 뿐이라 사실상 빈 단계다.
+
+- **후보별 상태 목록** — `conceptJson.memoryCandidates`(게시 시 실제로 읽는
+  소스, `draft-worker.service.ts`)를 기준으로 후보마다
+  `선택됨 / 제외됨 / stale / 저장됨`을 표시
+- 후보의 `type`(fact/preference/relationship/event/routine/goal)과 내용
+- 저장된 경우 실제 `CharacterMemory` 연결 — 현재 schema에 draft FK가 없다는
+  제약은 그대로이므로, 우선 후보와 판정만 정확히 보여주고 FK는 별도 결정으로 둔다
+- 후보가 없으면 "이 게시물은 새 기억을 남기지 않았습니다"라고 명시
+
+## 4. 실행 순서
+
+| 우선순위 | 내용 | 범위 |
 |---|---|---|
-| B1 | ImagePlan 아티팩트는 컷별 `scene`·`captureSetup`·`presentation`·`referenceBindings`(≤5)와 `continuity.lockedElements`(≤30)를 갖는데, 화면에는 revision·status·**이미지 장수만** 보인다. 이미지 기획 단계에 들어가도 기획 내용을 볼 수 없다 | `image-planner.ts` 타입 vs `v3ReadModel`의 `imagePlan: { revision, status, shotCount }` |
-| B2 | PostPlan도 premise 한 줄만 노출된다. caption·hashtags·memory candidates가 화면에 없어 V2 기획 화면(`DraftPlanSummary` + 편집 폼)보다 **퇴행**이다 | `V3ArtifactStage`, `v3ReadModel`의 `postPlan: { revision, status, premise? }` |
-| B3 | V3 프롬프트 단계는 프롬프트 개수·대상 모델만 보이고 컷별 프롬프트 본문이 없다. V2는 컷별 전문 조회·편집·재생성을 제공한다 | `V3PromptStage` vs `PromptStage` |
-| B4 | PostPlan/ImagePlan/PromptSet의 수동 편집이 없다 (architecture §12 rollout gate에 명시된 미완 항목) | `V3ArtifactStage`에 편집 UI 없음 |
-| B5 | 재실행이 없다. V3 단계 버튼은 `state === "pending" && stage === 현재 단계`일 때만 렌더되어 최초 실행 전용이다. ready 이후 "다시 기획"(revision+1) 경로가 UI에 없다. V2는 "전체 프롬프트 다시 생성"이 있다 | `V3ArtifactStage.runnable` 조건 |
-| B6 | V3 인라인 평가는 결과가 없으면 아무것도 렌더하지 않는다. 평가 워커가 꺼져 있다는 사실·설정 링크 안내는 V2 평가 단계 화면에만 있다 | `EvaluationBlock`이 `evaluation` 없으면 `null` 반환 |
+| **P0** | 표시 버그 2건 (2.1 평가, 2.2 브리프 요청) | 프론트 전용, API 변경 0 |
+| **P1** | 횡단 규칙 4종 — 상태 칩, 계보 푸터, 평가 4상태, 실행/재실행 버튼 | 프론트 + read model 소폭 |
+| **P2** | 단계별 산출물 노출 — ②③④ (기획·이미지기획·프롬프트) | `v3ReadModel()` 확장 + 렌더링 |
+| **P3** | ①⑧ 보강 — 브리프 입력 스냅숏, 메모리 계보 | read model 확장 |
+| **P4** | ⑤⑥⑦ 다듬기 — 생성 상태·검수 근거·게시 미리보기 | 기존 컴포넌트 개선 |
+| **P5** | 버전 발견성·구조 정리 — 버전 배지, 단계 배열 단일화, 레일 오버플로 | 서버+프론트 |
 
-### C. 정보 구조·구현 일관성
+순서 근거: **보이게 → 조작하게**. P0는 데이터가 이미 도달해 있어 가장 싸고,
+P2 없이 편집(P6 이후)을 먼저 하면 보이지 않는 것을 편집하게 된다.
+⑤⑥⑦은 `ShotCard` 등 기존 자산이 있어 상대적으로 덜 급하다.
 
-| # | 문제 | 근거 |
+편집·재실행(PostPlan 편집, stale 표시, revision+1 재실행)은 architecture §12의
+rollout gate 항목이며 P2·P3 완료 후 별도로 다룬다.
+
+## 5. 데이터 확장 요약
+
+스키마 변경은 없다. `v3ReadModel()`이 이미 저장된 값을 더 내려주면 된다.
+
+| 산출물 | 현재 노출 | 추가 |
 |---|---|---|
-| C1 | 같은 앱에 두 IA가 공존한다. V2 레일은 평가를 별도 단계(④)로 승격해 "대기" 상태가 관문처럼 읽히고(문서 원칙은 "비차단 신호"), V3는 인라인이다. V2 폐기 전까지는 감수하되 문서에 명시가 필요하다 | `LEGACY_STAGES` vs `V3_STAGES` |
-| C2 | 단계 배열이 서버(`post-workspace.service.ts`)와 클라이언트(`PostWorkPage.tsx`)에 중복 정의되어 있고, 완료 표시가 1-based `stageIndex` 산술(`index + 1 < item.stageIndex`)에 의존한다. 한쪽만 바뀌면 완료 표시가 조용히 틀어진다 | 두 파일의 `V3_STAGES`/`STAGES` 중복 |
-| C3 | 레일이 `overflow-x: auto`라 좁은 화면에서 ⑧ 메모리가 잘려도 더 있다는 시각 힌트가 없다 (관측 스크린샷에서 실제로 잘림). 모바일 대응 계획과 연결됨 | `PostWorkPage.module.css` `.rail` |
-| C4 | V3 실행 버튼 3종(게시글 기획 실행/이미지 기획 실행/이미지 프롬프트 생성)이 모두 `POST /drafts/:id/plan`("다음 스텝 실행")을 호출한다. 현재는 stage 일치 시에만 버튼이 떠서 안전하지만, 단계별 의미가 API에 드러나지 않아 이후 재실행·부분 재기획을 넣을 때 모호해진다 | `runDraftStage(draftId, "plan")` 공용 호출 |
+| PostPlan | revision, status, premise | caption, hashtags, captionLanguages, primaryPurpose, secondaryPurpose, newMemoryCandidates |
+| ImagePlan | revision, status, shotCount | locationId, shots[] 전체, continuity.lockedElements, blocked reasons |
+| PromptSet | revision, shotCount, targetModelId | shots[].prompt, negativePrompt, referenceBindings(slot 매핑) |
+| concept 최상위 | — | operatorRequest, memoryCandidates, imageCount 출처 |
+| 평가 | (버그로 미표시) | 변경 없음 — 이미 전부 내려온다 |
 
-## 4. 개선 계획
+## 6. 수용 기준
 
-원칙: V2는 legacy(신규 투자 최소화), V3 화면을
-[draft-pipeline-ux.md](./draft-pipeline-ux.md)의 "스테이지별 타입 인지
-렌더링" 패턴으로 끌어올린다. 스키마 변경 없음 — 모든 데이터는 이미
-`conceptJson`에 있고 read model 확장만 필요하다.
+- 모든 단계에서 실행 전 / 실행 중 / 완료 / 실패를 칩 하나로 구분할 수 있다.
+- 평가가 완료되면 차원 점수·총점·판정·소요 시간이 보인다.
+- 브리프에서 입력한 장면 요청이 V3에서도 보인다.
+- 기획에서 캡션 전문과 해시태그를, 이미지 기획에서 컷별 장면·촬영·노출·레퍼런스를,
+  프롬프트에서 전문과 슬롯 매핑을 읽을 수 있다.
+- `scene`과 `captureSetup`이 화면에서 시각적으로 분리돼 있다.
+- 메모리 단계에서 후보별 판정(선택/제외/stale/저장)을 볼 수 있다.
+- 어느 화면에서든 현재 파이프라인 버전을 알 수 있다.
 
-### P1. 버전 투명성 (소규모, 혼란 재발 방지)
+## 7. 이번에 확정하지 않는 것
 
-1. `PostWorkHeader`에 파이프라인 버전 배지 추가 — V3면 `Agent V3`,
-   legacy면 `V2 (legacy)`. V2 배지에는 "V3는 설정에서 켠 뒤 새 초안부터
-   적용" 안내(설정 링크 포함)를 툴팁/알림으로 연결.
-2. `PostBriefCreatePage`에 적용 예정 버전 표시 — 설정 조회로 "이 초안은
-   V3(이미지 기획 분리 8단계)로 진행됩니다" 또는 "V2로 진행됩니다 +
-   설정 링크". 저장 전에 알 수 있어야 한다.
-3. `PostQueuePage` 행 단계 셀에 V3 소형 배지 (V2/V3 혼재 기간 한정).
-4. `draft-pipeline-ux.md`에 V3 IA(8단계 레일 교체, 평가 인라인화)를
-   2026-08-13자 결정으로 추기.
-
-- 대상: `packages/admin/src/features/posts/*`, `GET /post-work-items`
-  read model은 이미 `pipelineV3`를 내려주므로 API 변경 불필요
-  (브리프 화면만 설정 조회 1건 추가).
-
-### P2. 이미지 기획 단계를 실제로 보이게 (산출물 노출)
-
-1. `v3ReadModel` 확장 — UI 계약에 다음을 추가한다. 원본은 이미
-   `conceptJson.*.output`에 저장돼 있으므로 read model 매핑만 늘린다.
-   - PostPlan: caption, hashtags, memoryCandidates
-   - ImagePlan: 컷별 { role, scene, captureSetup, presentation 요약,
-     referenceBindings(대상 레퍼런스 id·의미) }, continuity.lockedElements
-   - PromptBuild: 컷별 positive/negative 프롬프트 본문
-2. `V3ArtifactStage`를 타입 인지 렌더링으로 교체 — 이미지 기획은 컷
-   카드(장면·촬영·노출), 레퍼런스 바인딩 칩, continuity 잠금 목록.
-   기존 `DraftPlanSummary`/`ShotCard` 관례 재사용.
-3. V3 프롬프트 단계에 V2 수준의 컷별 프롬프트 조회(복사 가능한 텍스트).
-4. 평가 결과 없음 상태 안내를 V3 인라인 블록에도 — 평가 워커 off면
-   "평가 워커가 꺼져 있습니다 → 설정" (V2 평가 화면과 같은 문구 재사용).
-
-- 대상: `src/admin/post-workspace/post-workspace.service.ts`,
-  `packages/admin/src/features/posts/PostWorkPage.tsx` 및 신규 표시
-  컴포넌트. 스키마·워커 변경 없음.
-
-### P3. 수동 편집·재실행 (architecture §12 rollout gate 완성)
-
-1. PostPlan 편집: caption·hashtags 수정, memory candidate 선택/제외.
-   편집 시 downstream stale 표시(레일·단계 화면에 "이후 단계 산출물은
-   오래됨 — 다시 실행 필요" 상태) — hash lineage는 이미 구현되어 있으므로
-   UX만 얹는다.
-2. ImagePlan·PromptSet 재실행: ready 상태에서도 "다시 기획/다시 생성"
-   버튼으로 revision+1 재생성. C4의 모호함을 없애기 위해 stage를
-   명시하는 실행 API(예: `POST /drafts/:id/v3/steps/:stage`) 신설을
-   검토하되, 오케스트레이터 단일 진입 원칙(자동=수동 동일 경로)은 유지.
-3. 우선순위 근거: P2 없이 P3만 하면 보이지 않는 것을 편집하게 되므로
-   P2 → P3 순서 고정.
-
-### P4. 구조 정리 (저위험, 드리프트 예방)
-
-1. 단계 배열 단일화 — read model이 `stages: PostWorkStage[]`를 내려주고
-   클라이언트는 렌더만 한다 (`stageIndex` 산술 의존 제거).
-2. 레일 오버플로 힌트 — 잘림 그라데이션 또는 스크롤 섀도.
-   admin 모바일 대응 계획(mobile-responsive-plan.md)과 함께 처리.
-3. V2 레일의 평가 단계 인라인화는 **하지 않는다** — V2는 폐기 예정
-   경로라 IA 변경 투자 대신 V3 전환 가속에 투자한다.
-
-## 5. 수용 기준
-
-- 운영자가 큐·작업 화면·브리프 화면 어디서든 현재/예정 파이프라인 버전을
-  한 번에 알 수 있다.
-- V3 이미지 기획 단계에서 컷별 장면·촬영·노출·레퍼런스·continuity를
-  화면에서 읽을 수 있다 (JSON 원문 펼침이 아니라 타입 인지 렌더링).
-- V3 각 단계에서 산출물 없음/평가 없음/워커 꺼짐이 구분되어 보이고,
-  다음 행동이 항상 한 문장으로 제시된다 (`nextAction` 유지).
-- P3 완료 시: PostPlan 편집 → downstream stale 표시 → 해당 단계 재실행이
-  화면만으로 가능하다.
-- 서버·클라이언트 단계 목록 정의가 한 곳이다.
-
-## 6. 이번에 확정하지 않는 것
-
-- V2 화면 개선(평가 단계 인라인화 포함) — legacy 동결.
-- generated-image fixture calibration 등 architecture §12의 나머지
-  품질 gate — 별도 트랙.
-- 자동 게시 조건·evaluator 점수 기반 자동 재실행 — architecture §17과 동일.
-- pgvector·메모리 후보 스키마 변경 — 필요 없음(모두 conceptJson 내 데이터).
+- V2 화면 개선 — legacy 동결.
+- evaluator 점수 기반 자동 재작성·재생성 (architecture §17과 동일).
+- `CharacterMemory` ↔ draft FK 추가 — 메모리 계보 표시가 안정된 뒤 별도 결정.
+- 스키마 변경 — 필요 없다. 모든 데이터가 이미 저장돼 있다.

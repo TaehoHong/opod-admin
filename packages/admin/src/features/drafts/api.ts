@@ -64,6 +64,8 @@ export type DraftConcept = {
   mode?: string;
   source?: string;
   sceneHint?: string;
+  // V3가 운영자 요청을 저장하는 필드. V2의 sceneHint에 대응한다.
+  operatorRequest?: string | null;
   plannerName?: string;
   builderName?: string;
   finish?: string;

@@ -314,18 +314,10 @@ function StageBody({
   }
   if (stage === "brief") return <BriefStage draft={draft!} />;
   if (stage === "post_plan") {
-    return (
-      <V3ArtifactStage item={item} evaluations={evaluations} kind="post_plan" />
-    );
+    return <V3PostPlanStage item={item} evaluations={evaluations} />;
   }
   if (stage === "image_plan") {
-    return (
-      <V3ArtifactStage
-        item={item}
-        evaluations={evaluations}
-        kind="image_plan"
-      />
-    );
+    return <V3ImagePlanStage item={item} evaluations={evaluations} />;
   }
   if (stage === "plan")
     return <PlanStage key={draft!.updatedAt} draft={draft!} />;
@@ -351,75 +343,426 @@ function StageBody({
   return <MemoryStage item={item} draft={draft} />;
 }
 
-function V3ArtifactStage({
+function V3PostPlanStage({
   item,
   evaluations,
-  kind,
 }: {
   item: PostWorkItem;
   evaluations: DraftEvaluation[];
-  kind: "post_plan" | "image_plan";
+}) {
+  const artifact = item.pipelineV3?.artifacts.postPlan;
+  return (
+    <V3Stage
+      item={item}
+      evaluations={evaluations}
+      stage="post_plan"
+      number="②"
+      title="게시글 기획"
+      description="캐릭터 맥락을 바탕으로 게시글 의도와 문안을 확정합니다."
+      evaluationKind="plan"
+      evaluationLabel="게시글 평가"
+      runLabel="게시글 기획"
+      lineage={artifact}
+      status={artifact?.status}
+    >
+      {artifact ? <PostPlanArtifact artifact={artifact} /> : null}
+    </V3Stage>
+  );
+}
+
+function V3ImagePlanStage({
+  item,
+  evaluations,
+}: {
+  item: PostWorkItem;
+  evaluations: DraftEvaluation[];
+}) {
+  const artifact = item.pipelineV3?.artifacts.imagePlan;
+  return (
+    <V3Stage
+      item={item}
+      evaluations={evaluations}
+      stage="image_plan"
+      number="③"
+      title="이미지 기획"
+      description="확정된 게시글을 몇 장의 이미지로 보여줄지 구성합니다."
+      evaluationKind="image_plan"
+      evaluationLabel="이미지 기획 평가"
+      runLabel="이미지 기획"
+      lineage={artifact}
+      status={artifact?.status}
+    >
+      {artifact ? (
+        <ImagePlanArtifact
+          artifact={artifact}
+          imageCount={item.pipelineV3?.imageCount ?? null}
+        />
+      ) : null}
+    </V3Stage>
+  );
+}
+
+// V3 단계 공통 틀 — 상태 칩, 산출물 슬롯, 계보 푸터, 평가 블록, 실행/재실행을
+// 모든 단계가 같은 자리에 둔다. 단계를 옮길 때마다 읽는 법이 달라지지 않게 한다.
+function V3Stage({
+  item,
+  evaluations,
+  stage,
+  number,
+  title,
+  description,
+  evaluationKind,
+  evaluationLabel,
+  runLabel,
+  lineage,
+  status,
+  children,
+}: {
+  item: PostWorkItem;
+  evaluations: DraftEvaluation[];
+  stage: "post_plan" | "image_plan" | "image_prompt";
+  number: string;
+  title: string;
+  description: string;
+  evaluationKind: DraftEvaluation["kind"];
+  evaluationLabel: string;
+  runLabel: string;
+  lineage?: { revision: number; hash?: string; contractVersion?: string };
+  status?: string;
+  children?: React.ReactNode;
 }) {
   const pipeline = item.pipelineV3;
-  const isPostPlan = kind === "post_plan";
-  const artifact = isPostPlan
-    ? pipeline?.artifacts.postPlan
-    : pipeline?.artifacts.imagePlan;
-  const evaluation = latestEvaluation(
-    evaluations,
-    isPostPlan ? "plan" : "image_plan",
-  );
+  const evaluation = latestEvaluation(evaluations, evaluationKind);
   const run = useDraftMutation(item.draftId ?? "", () =>
     runDraftStage(item.draftId!, "plan"),
   );
+  const stageState = v3StageState(pipeline, stage);
+  const current = pipeline?.stage === stage;
+  // 완료된 단계도 다시 돌릴 수 있어야 한다. 현재 단계가 아닌 뒤 단계는 이 화면에서
+  // 실행하지 않는다 — 오케스트레이터가 순서를 소유한다.
   const runnable =
     Boolean(item.draftId) &&
-    pipeline?.state === "pending" &&
-    pipeline.stage === kind;
+    stageState !== "running" &&
+    (current || stageState === "done");
   return (
     <StagePaper
-      title={`${isPostPlan ? "②" : "③"} ${isPostPlan ? "게시글 기획" : "이미지 기획"}`}
-      description={
-        isPostPlan
-          ? "캐릭터 맥락을 바탕으로 게시글 의도와 문안을 확정합니다."
-          : "확정된 게시글을 몇 장의 이미지로 보여줄지 구성합니다."
-      }
+      title={`${number} ${title}`}
+      description={description}
+      status={<StageStateBadge state={stageState} />}
     >
-      {artifact ? (
-        <Paper p="md">
-          <Stack gap="xs">
-            <Meta label="산출물">
-              revision {artifact.revision} · {artifact.status}
-            </Meta>
-            {isPostPlan && "premise" in artifact && artifact.premise ? (
-              <Meta label="전제">{artifact.premise}</Meta>
-            ) : null}
-            {!isPostPlan && "shotCount" in artifact ? (
-              <Meta label="이미지 장수">
-                {artifact.shotCount ?? pipeline?.imageCount ?? "—"}장
-              </Meta>
-            ) : null}
-          </Stack>
-        </Paper>
-      ) : (
+      {stageState === "running" ? (
+        <Group gap="xs" role="status">
+          <Loader size="sm" />
+          <Text size="sm">{runLabel} Agent 실행 중…</Text>
+        </Group>
+      ) : null}
+      {children ?? (
         <Alert color="gray">아직 이 단계의 산출물이 없습니다.</Alert>
       )}
-      <EvaluationBlock
-        label={`${isPostPlan ? "게시글" : "이미지 기획"} 평가`}
-        evaluation={evaluation}
-      />
-      {pipeline ? (
+      {lineage ? <Lineage lineage={lineage} status={status} /> : null}
+      <EvaluationBlock label={evaluationLabel} evaluation={evaluation} />
+      {current && pipeline ? (
         <Alert color="blue">다음 행동 · {pipeline.nextAction}</Alert>
       ) : null}
       {run.isError ? <MutationError error={run.error} /> : null}
       {runnable ? (
         <Group>
-          <Button loading={run.isPending} onClick={() => run.mutate(undefined)}>
-            {isPostPlan ? "게시글 기획 실행" : "이미지 기획 실행"}
+          <Button
+            loading={run.isPending}
+            variant={stageState === "done" ? "default" : "filled"}
+            onClick={() => run.mutate(undefined)}
+          >
+            {stageState === "done"
+              ? `${runLabel} 다시 실행`
+              : `${runLabel} 실행`}
           </Button>
         </Group>
       ) : null}
     </StagePaper>
+  );
+}
+
+function PostPlanArtifact({
+  artifact,
+}: {
+  artifact: NonNullable<
+    NonNullable<PostWorkItem["pipelineV3"]>["artifacts"]["postPlan"]
+  >;
+}) {
+  return (
+    <Paper p="md">
+      <Stack gap="sm">
+        {artifact.caption ? (
+          <Stack gap={4}>
+            <Text size="xs" c="dimmed">
+              캡션
+            </Text>
+            {/* 캡션은 최종 게시 본문이다. 줄바꿈을 보존해 그대로 읽게 한다. */}
+            <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+              {artifact.caption}
+            </Text>
+          </Stack>
+        ) : null}
+        {artifact.hashtags?.length ? (
+          <Group gap="xs" wrap="wrap">
+            {artifact.hashtags.map((tag) => (
+              <Badge key={tag} variant="light">
+                #{tag}
+              </Badge>
+            ))}
+          </Group>
+        ) : null}
+        {artifact.premise ? <Meta label="전제">{artifact.premise}</Meta> : null}
+        {artifact.primaryPurpose ? (
+          <Meta label="주 목적">{artifact.primaryPurpose}</Meta>
+        ) : null}
+        {artifact.secondaryPurpose ? (
+          <Meta label="부 목적">{artifact.secondaryPurpose}</Meta>
+        ) : null}
+        {artifact.captionLanguages?.length ? (
+          <Meta label="언어">{artifact.captionLanguages.join(", ")}</Meta>
+        ) : null}
+        {artifact.memoryCandidates ? (
+          <Meta label="새 기억">
+            {artifact.memoryCandidates.length === 0 ? (
+              // 빈 배열은 "표시할 게 없음"이 아니라 "세계관에 새 사실을 더하지
+              // 않는다"는 판정이다.
+              "없음"
+            ) : (
+              <Stack gap={2}>
+                {artifact.memoryCandidates.map((candidate, index) => (
+                  <Text key={`${candidate.type}:${index}`} size="sm">
+                    <Badge size="xs" variant="light" mr={6}>
+                      {candidate.type}
+                    </Badge>
+                    {candidate.content}
+                  </Text>
+                ))}
+              </Stack>
+            )}
+          </Meta>
+        ) : null}
+        {artifact.conflicts?.length ? (
+          <Alert color="attention" title="확정 사실과 충돌">
+            <Stack gap={4}>
+              {artifact.conflicts.map((conflict, index) => (
+                <Text key={index} size="sm">
+                  {conflict.left} ↔ {conflict.right} · {conflict.reason}
+                </Text>
+              ))}
+            </Stack>
+          </Alert>
+        ) : null}
+      </Stack>
+    </Paper>
+  );
+}
+
+const PRESENTATION_MODE: Record<string, string> = {
+  none: "인물 없음",
+  full: "전신",
+  partial: "부분",
+  reflection: "반사",
+  silhouette: "실루엣",
+};
+
+function ImagePlanArtifact({
+  artifact,
+  imageCount,
+}: {
+  artifact: NonNullable<
+    NonNullable<PostWorkItem["pipelineV3"]>["artifacts"]["imagePlan"]
+  >;
+  imageCount: number | null;
+}) {
+  return (
+    <Stack gap="sm">
+      <Paper p="md">
+        <Stack gap="xs">
+          <Meta label="이미지 장수">
+            {artifact.shotCount ?? imageCount ?? "—"}장
+            <Text span size="xs" c="dimmed">
+              {" "}
+              (오케스트레이터가 정한 값)
+            </Text>
+          </Meta>
+          {artifact.locationId ? (
+            <Meta label="장소">{artifact.locationId}</Meta>
+          ) : (
+            <Meta label="장소">카탈로그 미등록 단일 장소</Meta>
+          )}
+        </Stack>
+      </Paper>
+      {artifact.blockedReasons?.length ? (
+        <Alert color="attention" title="시각화할 수 없습니다">
+          <Stack gap={4}>
+            {artifact.blockedReasons.map((reason) => (
+              <Text key={reason.code} size="sm">
+                <Badge size="xs" color="attention" mr={6}>
+                  {reason.code}
+                </Badge>
+                {reason.detail}
+              </Text>
+            ))}
+          </Stack>
+        </Alert>
+      ) : null}
+      {/* 연속성 잠금은 컷을 가로지르는 제약이라 컷 카드 밖에 둔다. */}
+      {artifact.lockedElements?.length ? (
+        <Paper p="md">
+          <Stack gap="xs">
+            <Text size="sm" fw={600}>
+              연속성 잠금
+            </Text>
+            {artifact.lockedElements.map((lock, index) => (
+              <Group key={index} gap="xs" align="baseline" wrap="nowrap">
+                <Badge size="xs" variant="light">
+                  {lock.category}
+                </Badge>
+                <Text size="sm">{lock.description}</Text>
+                <Text size="xs" c="dimmed">
+                  컷 {lock.appliesToShots.map((shot) => shot + 1).join(", ")}
+                </Text>
+              </Group>
+            ))}
+          </Stack>
+        </Paper>
+      ) : null}
+      {artifact.shots?.map((shot) => (
+        <Paper key={shot.sortOrder} p="md">
+          <Stack gap="xs">
+            <Group gap="xs" wrap="wrap">
+              <Text size="sm" fw={600}>
+                컷 {shot.sortOrder + 1}
+              </Text>
+              {shot.presentation ? (
+                <>
+                  <Badge size="xs" variant="light">
+                    {PRESENTATION_MODE[shot.presentation.mode] ??
+                      shot.presentation.mode}
+                  </Badge>
+                  {shot.presentation.faceVisible ? (
+                    <Badge size="xs" color="attention">
+                      얼굴 노출
+                    </Badge>
+                  ) : null}
+                  {shot.presentation.identityPreservationRequired ? (
+                    <Badge size="xs" color="accent">
+                      정체성 보존 필요
+                    </Badge>
+                  ) : null}
+                </>
+              ) : null}
+            </Group>
+            {shot.visualPurpose ? (
+              <Text size="xs" c="dimmed">
+                {shot.visualPurpose}
+              </Text>
+            ) : null}
+            {/* scene(프레임 안)과 captureSetup(프레임 밖)의 혼입이 기존 품질
+                결함의 핵심이라 화면에서도 갈라 놓는다. */}
+            {shot.scene ? <Meta label="장면">{shot.scene}</Meta> : null}
+            {shot.captureSetup ? (
+              <Meta label="촬영">{shot.captureSetup}</Meta>
+            ) : null}
+            {shot.presentation?.visibleParts.length ? (
+              <Meta label="보이는 부위">
+                {shot.presentation.visibleParts.join(", ")}
+              </Meta>
+            ) : null}
+            {shot.referenceBindings?.length ? (
+              <Stack gap={4}>
+                <Text size="xs" c="dimmed">
+                  레퍼런스
+                </Text>
+                {shot.referenceBindings.map((binding) => (
+                  <Group key={binding.bindingId} gap="xs" wrap="wrap">
+                    <Badge
+                      size="xs"
+                      color={binding.source === "identity" ? "accent" : "ink"}
+                    >
+                      {binding.source}
+                    </Badge>
+                    <Text size="xs">{binding.semanticPurposes.join(", ")}</Text>
+                    <Spoiler
+                      maxHeight={0}
+                      showLabel="보존·복제금지"
+                      hideLabel="접기"
+                    >
+                      <Text size="xs" c="dimmed">
+                        보존 · {binding.preserve.join(" / ") || "없음"}
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        복제 금지 · {binding.avoidCopying.join(" / ") || "없음"}
+                      </Text>
+                    </Spoiler>
+                  </Group>
+                ))}
+              </Stack>
+            ) : null}
+          </Stack>
+        </Paper>
+      ))}
+    </Stack>
+  );
+}
+
+type V3StageState = "waiting" | "running" | "done" | "paused" | "failed";
+
+function v3StageState(
+  pipeline: PostWorkItem["pipelineV3"],
+  stage: "post_plan" | "image_plan" | "image_prompt",
+): V3StageState {
+  if (!pipeline) return "waiting";
+  const order = [
+    "post_plan",
+    "image_plan",
+    "image_prompt",
+    "generation",
+    "review",
+    "publish",
+    "memory",
+  ];
+  const current = order.indexOf(pipeline.stage);
+  const target = order.indexOf(stage);
+  if (target < current) return "done";
+  if (target > current) return "waiting";
+  if (pipeline.state === "running") return "running";
+  if (pipeline.state === "failed") return "failed";
+  if (pipeline.state === "ready") return "done";
+  if (pipeline.state === "pending") return "waiting";
+  return "paused";
+}
+
+const STAGE_STATE_COPY: Record<V3StageState, { label: string; color: string }> =
+  {
+    waiting: { label: "실행 전", color: "ink" },
+    running: { label: "실행 중", color: "accent" },
+    done: { label: "완료", color: "teal" },
+    paused: { label: "일시정지", color: "attention" },
+    failed: { label: "실패", color: "red" },
+  };
+
+function StageStateBadge({ state }: { state: V3StageState }) {
+  const copy = STAGE_STATE_COPY[state];
+  return <Badge color={copy.color}>{copy.label}</Badge>;
+}
+
+// 산출물 계보. artifact에 실행 시각이 없으므로 리비전·계약·해시만 보여준다.
+function Lineage({
+  lineage,
+  status,
+}: {
+  lineage: { revision: number; hash?: string; contractVersion?: string };
+  status?: string;
+}) {
+  return (
+    <Text size="xs" c="dimmed">
+      revision {lineage.revision}
+      {status ? ` · ${status}` : ""}
+      {lineage.contractVersion ? ` · ${lineage.contractVersion}` : ""}
+      {lineage.hash ? ` · ${lineage.hash.slice(0, 15)}…` : ""}
+    </Text>
   );
 }
 
@@ -431,64 +774,112 @@ function V3PromptStage({
   evaluations: DraftEvaluation[];
 }) {
   const artifact = item.pipelineV3?.artifacts.promptBuild;
-  const evaluation = latestEvaluation(evaluations, "prompt");
-  const run = useDraftMutation(item.draftId ?? "", () =>
-    runDraftStage(item.draftId!, "plan"),
-  );
-  const runnable =
-    Boolean(item.draftId) &&
-    item.pipelineV3?.state === "pending" &&
-    item.pipelineV3.stage === "image_prompt";
   return (
-    <StagePaper
-      title="④ 프롬프트"
+    <V3Stage
+      item={item}
+      evaluations={evaluations}
+      stage="image_prompt"
+      number="④"
+      title="프롬프트"
       description="확정된 이미지 기획과 모델 정책을 컷별 이미지 프롬프트로 변환합니다."
+      evaluationKind="prompt"
+      evaluationLabel="프롬프트 평가"
+      runLabel="이미지 프롬프트"
+      lineage={artifact}
     >
-      {artifact ? (
-        <Paper p="md">
+      {artifact ? <PromptSetArtifact artifact={artifact} /> : null}
+    </V3Stage>
+  );
+}
+
+function PromptSetArtifact({
+  artifact,
+}: {
+  artifact: NonNullable<
+    NonNullable<PostWorkItem["pipelineV3"]>["artifacts"]["promptBuild"]
+  >;
+}) {
+  return (
+    <Stack gap="sm">
+      <Paper p="md">
+        <Stack gap="xs">
+          <Meta label="프롬프트">{artifact.shotCount}개</Meta>
+          {artifact.targetModelId ? (
+            <Meta label="대상 모델">
+              {artifact.targetModelId}
+              {artifact.policyVersion ? (
+                <Text span size="xs" c="dimmed">
+                  {" "}
+                  · {artifact.policyVersion}
+                </Text>
+              ) : null}
+            </Meta>
+          ) : null}
+        </Stack>
+      </Paper>
+      {artifact.shots?.map((shot) => (
+        <Paper key={shot.sortOrder} p="md">
           <Stack gap="xs">
-            <Meta label="산출물">revision {artifact.revision}</Meta>
-            <Meta label="프롬프트">{artifact.shotCount}개</Meta>
-            {artifact.targetModelId ? (
-              <Meta label="대상 모델">{artifact.targetModelId}</Meta>
+            <Text size="sm" fw={600}>
+              컷 {shot.sortOrder + 1}
+            </Text>
+            <Code block>{shot.prompt || "프롬프트 없음"}</Code>
+            {/* 네거티브는 성격이 반대인 텍스트라 한 덩어리로 붙이지 않는다. */}
+            <Text size="xs" c="dimmed">
+              네거티브 프롬프트
+            </Text>
+            {shot.negativePrompt ? (
+              <Code block>{shot.negativePrompt}</Code>
+            ) : (
+              <Text size="xs" c="dimmed">
+                {artifact.usesNegativePrompt === false
+                  ? "이 모델은 네거티브를 사용하지 않습니다"
+                  : "없음"}
+              </Text>
+            )}
+            {shot.slots?.length ? (
+              <Stack gap={2}>
+                <Text size="xs" c="dimmed">
+                  슬롯 바인딩
+                </Text>
+                {shot.slots.map((slot) => (
+                  <Text key={slot.bindingId} size="xs">
+                    <Badge size="xs" variant="light" mr={6}>
+                      {slot.slot}
+                    </Badge>
+                    {slot.source} · {slot.referenceId}
+                  </Text>
+                ))}
+              </Stack>
             ) : null}
           </Stack>
         </Paper>
-      ) : (
-        <Alert color="gray">아직 프롬프트 산출물이 없습니다.</Alert>
-      )}
-      <EvaluationBlock label="프롬프트 평가" evaluation={evaluation} />
-      {item.pipelineV3 ? (
-        <Alert color="blue">다음 행동 · {item.pipelineV3.nextAction}</Alert>
-      ) : null}
-      {run.isError ? <MutationError error={run.error} /> : null}
-      {runnable ? (
-        <Group>
-          <Button loading={run.isPending} onClick={() => run.mutate(undefined)}>
-            이미지 프롬프트 생성
-          </Button>
-        </Group>
-      ) : null}
-    </StagePaper>
+      ))}
+    </Stack>
   );
 }
 
 function StagePaper({
   title,
   description,
+  status,
   children,
 }: {
   title: string;
   description: string;
+  status?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <Paper p="lg" component="section" aria-labelledby="stage-title">
       <Stack>
         <Stack gap={2}>
-          <Title order={4} id="stage-title">
-            {title}
-          </Title>
+          <Group gap="sm" align="center" wrap="wrap">
+            <Title order={4} id="stage-title">
+              {title}
+            </Title>
+            {status}
+          </Group>
           <Text size="sm" c="dimmed">
             {description}
           </Text>
@@ -510,7 +901,10 @@ function BriefStage({ draft }: { draft: Draft }) {
         <CharacterName id={draft.characterId} />
       </Meta>
       <Meta label="콘텐츠 형식">{draft.contentType}</Meta>
-      <Meta label="장면·주제 요청">{concept.sceneHint || "지정 없음"}</Meta>
+      {/* V3는 operatorRequest, V2는 sceneHint에 저장한다. */}
+      <Meta label="장면·주제 요청">
+        {concept.operatorRequest || concept.sceneHint || "지정 없음"}
+      </Meta>
       <Meta label="게시 일정">
         {draft.scheduledAt ? formatDateTime(draft.scheduledAt) : "승인 후 즉시"}
       </Meta>
@@ -807,7 +1201,25 @@ function EvaluationBlock({
   label: string;
   evaluation?: DraftEvaluation;
 }) {
-  if (!evaluation) return null;
+  // 평가 행이 없는 것과 대기 중인 것과 실패한 것은 운영자에게 서로 다른 상황이다.
+  // 아무것도 렌더하지 않으면 셋을 구분할 수 없다.
+  if (!evaluation) {
+    return (
+      <Paper p="md" component="section">
+        <Stack gap="xs">
+          <Text fw={600}>{label}</Text>
+          <Text size="sm" c="dimmed">
+            아직 평가 결과가 없습니다. 평가는 비차단 신호라 꺼져 있어도 다음
+            단계를 진행할 수 있습니다. 켜거나 지금 한 건만 돌리려면{" "}
+            <Anchor component={Link} to="/settings">
+              설정 &gt; 평가 워커
+            </Anchor>
+            로 가세요.
+          </Text>
+        </Stack>
+      </Paper>
+    );
+  }
   return (
     <Paper p="md" component="section">
       <Stack gap="xs">
@@ -815,11 +1227,21 @@ function EvaluationBlock({
           <Text fw={600}>{label}</Text>
           <Text size="xs" c="dimmed">
             시도 {evaluation.attempt}
+            {evaluationDuration(evaluation)}
+            {evaluation.evaluatorName ? ` · ${evaluation.evaluatorName}` : ""}
           </Text>
         </Group>
+        {evaluation.status === "pending" ? (
+          <Group gap="xs" role="status">
+            <Loader size="xs" />
+            <Text size="sm">평가 대기 중…</Text>
+          </Group>
+        ) : null}
         <EvaluationChips evaluation={evaluation} />
         {evaluation.errorMessage ? (
-          <Alert color="red">{evaluation.errorMessage}</Alert>
+          <Alert color="red" title="평가 실패">
+            {evaluation.errorMessage}
+          </Alert>
         ) : null}
         {evaluation.issuesJson || evaluation.suggestionsJson ? (
           <Spoiler
@@ -1213,6 +1635,18 @@ function MutationError({ error }: { error: Error }) {
       {error.message}
     </Alert>
   );
+}
+
+// 평가에는 artifact와 달리 실제 시각이 있다. 얼마나 걸렸는지가 "돌긴 돌았나"를
+// 판단하는 가장 싼 신호다.
+function evaluationDuration(evaluation: DraftEvaluation) {
+  if (!evaluation.completedAt) return "";
+  const seconds = Math.round(
+    (new Date(evaluation.completedAt).getTime() -
+      new Date(evaluation.createdAt).getTime()) /
+      1000,
+  );
+  return seconds >= 0 ? ` · ${seconds}초` : "";
 }
 
 function latestEvaluation(
