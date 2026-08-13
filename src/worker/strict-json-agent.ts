@@ -1,4 +1,8 @@
 import {
+  UNION_ENVELOPE_KEY,
+  isRootUnionSchema,
+} from "../../prompts/strict-schema";
+import {
   LlmLogContext,
   LlmLogService,
   LlmLogType,
@@ -104,13 +108,29 @@ export class StrictJsonAgentClient {
     }
     const content = contentFromChatCompletion(await result.response.json());
     if (!content) throw new Error("structured agent returned no content");
+    let parsed: unknown;
     try {
-      return {
-        value: JSON.parse(content),
-        producerLogId: result.producerLogId,
-      };
+      parsed = JSON.parse(content);
     } catch {
       throw new Error("structured agent returned invalid JSON content");
     }
+    return {
+      value: unwrapUnionEnvelope(parsed, request.schema),
+      producerLogId: result.producerLogId,
+    };
   }
+}
+
+// 판별 union 스키마는 프로바이더 제약 때문에 루트 object 한 겹으로 감싸 보낸다
+// (prompts/strict-schema.ts). 감싼 사실이 Agent 파서로 새지 않게 여기서 벗긴다.
+function unwrapUnionEnvelope(value: unknown, schema: unknown): unknown {
+  if (!isRootUnionSchema(schema)) return value;
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !(UNION_ENVELOPE_KEY in value)
+  ) {
+    throw new Error("structured agent returned no union result");
+  }
+  return (value as Record<string, unknown>)[UNION_ENVELOPE_KEY];
 }

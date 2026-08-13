@@ -205,7 +205,14 @@ describe("GenerationSettingsService", () => {
       ok: true,
       status: 200,
       json: async () => ({
-        choices: [{ message: { content: '{"ok":true}' } }],
+        choices: [
+          {
+            message: {
+              content:
+                '{"result":{"status":"ready","items":["ok"],"score":5,"note":null}}',
+            },
+          },
+        ],
       }),
     });
 
@@ -221,9 +228,14 @@ describe("GenerationSettingsService", () => {
       json_schema: {
         name: "opod_pipeline_v3_probe",
         strict: true,
-        schema: { additionalProperties: false },
+        schema: { type: "object", additionalProperties: false },
       },
     });
+    // probe가 실제 V3 스키마와 같은 문법(루트 union envelope)을 확인해야 한다 —
+    // 사소한 스키마만 보던 이전 probe는 V3가 깨진 상태에서도 통과했다.
+    expect(
+      body.response_format.json_schema.schema.properties.result.anyOf,
+    ).toHaveLength(2);
   });
 
   it("retries the V3 capability probe with max_completion_tokens when required", async () => {
@@ -243,7 +255,14 @@ describe("GenerationSettingsService", () => {
         ok: true,
         status: 200,
         json: async () => ({
-          choices: [{ message: { content: '{"ok":true}' } }],
+          choices: [
+            {
+              message: {
+                content:
+                  '{"result":{"status":"ready","items":["ok"],"score":5,"note":null}}',
+              },
+            },
+          ],
         }),
       });
 

@@ -49,7 +49,6 @@ const issueSchema = (dimensions: readonly string[], withShots = false) => ({
       ? {
           shotSortOrders: {
             type: "array",
-            uniqueItems: true,
             items: { type: "integer", minimum: 0, maximum: 2 },
           },
         }
@@ -140,10 +139,12 @@ export class PostEvaluationAgentV3 {
       type: "object",
       properties: {
         status: {
-          const:
+          type: "string",
+          enum: [
             evaluatedStatus === "conflict"
               ? "evaluated_conflict"
               : "evaluated_ready",
+          ],
         },
         operatorRequestEvaluation: operatorSchema(false),
         scores: scoreSchema(dimensions),
@@ -199,7 +200,10 @@ export class ImagePlanEvaluationAgentV3 {
     const schema = {
       type: "object",
       properties: {
-        status: { const: blocked ? "evaluated_blocked" : "evaluated_ready" },
+        status: {
+          type: "string",
+          enum: [blocked ? "evaluated_blocked" : "evaluated_ready"],
+        },
         operatorVisualRequestEvaluation: operatorSchema(true),
         scores: scoreSchema(dimensions),
         issues: { type: "array", items: issueSchema(dimensions) },
@@ -250,7 +254,7 @@ export class ImagePromptEvaluationAgentV3 {
     const schema = {
       type: "object",
       properties: {
-        status: { const: "evaluated_prompt_result" },
+        status: { type: "string", enum: ["evaluated_prompt_result"] },
         scores: scoreSchema(IMAGE_PROMPT_DIMENSIONS),
         issues: {
           type: "array",
@@ -341,7 +345,6 @@ export class GeneratedImageEvaluationAgentV3 {
         sortOrders: {
           type: "array",
           minItems: 2,
-          uniqueItems: true,
           items: { type: "integer", minimum: 0, maximum: 2 },
         },
         generatedEvidence: { type: "string", minLength: 1, maxLength: 2_000 },
@@ -361,7 +364,7 @@ export class GeneratedImageEvaluationAgentV3 {
     const schema = {
       type: "object",
       properties: {
-        status: { const: "evaluated_generated_images" },
+        status: { type: "string", enum: ["evaluated_generated_images"] },
         shots: {
           type: "array",
           minItems: 1,

@@ -1,3 +1,5 @@
+import { rootUnionSchema } from "./strict-schema";
+
 export const IMAGE_PLANNER_PROMPT_VERSION = "image-planner-v1";
 export const IMAGE_PLAN_CONTRACT_VERSION = "image-plan-v1";
 
@@ -46,19 +48,13 @@ const binding = {
     semanticPurposes: {
       type: "array",
       minItems: 1,
-      uniqueItems: true,
       items: {
         type: "string",
         enum: ["identity", "wardrobe", "framing", "environment"],
       },
     },
-    preserve: {
-      type: "array",
-      minItems: 1,
-      uniqueItems: true,
-      items: text(2_000),
-    },
-    avoidCopying: { type: "array", uniqueItems: true, items: text(2_000) },
+    preserve: { type: "array", minItems: 1, items: text(2_000) },
+    avoidCopying: { type: "array", items: text(2_000) },
   },
   required: [
     "bindingId",
@@ -71,135 +67,125 @@ const binding = {
   additionalProperties: false,
 };
 
-export const IMAGE_PLAN_JSON_SCHEMA = {
-  oneOf: [
-    {
-      type: "object",
-      properties: {
-        status: { const: "ready" },
-        locationId: { anyOf: [text(200), { type: "null" }] },
-        continuity: {
+// 배열 중복 금지(semanticPurposes·preserve·avoidCopying·visibleParts·
+// appliesToShots)는 스키마가 아니라 parseImagePlan이 강제한다 — structured
+// outputs가 uniqueItems를 받지 않는다.
+export const IMAGE_PLAN_JSON_SCHEMA = rootUnionSchema([
+  {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["ready"] },
+      locationId: { anyOf: [text(200), { type: "null" }] },
+      continuity: {
+        type: "object",
+        properties: {
+          lockedElements: {
+            type: "array",
+            maxItems: 30,
+            items: {
+              type: "object",
+              properties: {
+                category: {
+                  type: "string",
+                  enum: [
+                    "identity",
+                    "wardrobe",
+                    "environment",
+                    "prop",
+                    "lighting",
+                  ],
+                },
+                description: text(2_000),
+                appliesToShots: {
+                  type: "array",
+                  minItems: 2,
+                  items: { type: "integer", minimum: 0, maximum: 2 },
+                },
+              },
+              required: ["category", "description", "appliesToShots"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["lockedElements"],
+        additionalProperties: false,
+      },
+      shots: {
+        type: "array",
+        minItems: 1,
+        maxItems: 3,
+        items: {
           type: "object",
           properties: {
-            lockedElements: {
-              type: "array",
-              maxItems: 30,
-              items: {
-                type: "object",
-                properties: {
-                  category: {
-                    type: "string",
-                    enum: [
-                      "identity",
-                      "wardrobe",
-                      "environment",
-                      "prop",
-                      "lighting",
-                    ],
-                  },
-                  description: text(2_000),
-                  appliesToShots: {
-                    type: "array",
-                    minItems: 2,
-                    uniqueItems: true,
-                    items: { type: "integer", minimum: 0, maximum: 2 },
-                  },
+            sortOrder: { type: "integer", minimum: 0, maximum: 2 },
+            visualPurpose: text(1_000),
+            scene: text(4_000),
+            captureSetup: text(2_000),
+            characterPresentation: {
+              type: "object",
+              properties: {
+                mode: {
+                  type: "string",
+                  enum: ["none", "full", "partial", "reflection", "silhouette"],
                 },
-                required: ["category", "description", "appliesToShots"],
-                additionalProperties: false,
+                visibleParts: { type: "array", items: text(200) },
+                faceVisible: { type: "boolean" },
+                identityPreservationRequired: { type: "boolean" },
               },
+              required: [
+                "mode",
+                "visibleParts",
+                "faceVisible",
+                "identityPreservationRequired",
+              ],
+              additionalProperties: false,
             },
+            referenceBindings: { type: "array", maxItems: 5, items: binding },
           },
-          required: ["lockedElements"],
+          required: [
+            "sortOrder",
+            "visualPurpose",
+            "scene",
+            "captureSetup",
+            "characterPresentation",
+            "referenceBindings",
+          ],
           additionalProperties: false,
         },
-        shots: {
-          type: "array",
-          minItems: 1,
-          maxItems: 3,
-          items: {
-            type: "object",
-            properties: {
-              sortOrder: { type: "integer", minimum: 0, maximum: 2 },
-              visualPurpose: text(1_000),
-              scene: text(4_000),
-              captureSetup: text(2_000),
-              characterPresentation: {
-                type: "object",
-                properties: {
-                  mode: {
-                    type: "string",
-                    enum: [
-                      "none",
-                      "full",
-                      "partial",
-                      "reflection",
-                      "silhouette",
-                    ],
-                  },
-                  visibleParts: {
-                    type: "array",
-                    uniqueItems: true,
-                    items: text(200),
-                  },
-                  faceVisible: { type: "boolean" },
-                  identityPreservationRequired: { type: "boolean" },
-                },
-                required: [
-                  "mode",
-                  "visibleParts",
-                  "faceVisible",
-                  "identityPreservationRequired",
-                ],
-                additionalProperties: false,
-              },
-              referenceBindings: { type: "array", maxItems: 5, items: binding },
+      },
+    },
+    required: ["status", "locationId", "continuity", "shots"],
+    additionalProperties: false,
+  },
+  {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["blocked"] },
+      reasons: {
+        type: "array",
+        minItems: 1,
+        maxItems: 10,
+        items: {
+          type: "object",
+          properties: {
+            code: {
+              type: "string",
+              enum: [
+                "visual_constraint_conflict",
+                "unsupported_multi_location",
+                "unsupported_secondary_identity",
+                "missing_identity_reference",
+                "insufficient_distinct_shots",
+              ],
             },
-            required: [
-              "sortOrder",
-              "visualPurpose",
-              "scene",
-              "captureSetup",
-              "characterPresentation",
-              "referenceBindings",
-            ],
-            additionalProperties: false,
+            detail: text(2_000),
           },
+          required: ["code", "detail"],
+          additionalProperties: false,
         },
       },
-      required: ["status", "locationId", "continuity", "shots"],
-      additionalProperties: false,
     },
-    {
-      type: "object",
-      properties: {
-        status: { const: "blocked" },
-        reasons: {
-          type: "array",
-          minItems: 1,
-          maxItems: 10,
-          items: {
-            type: "object",
-            properties: {
-              code: {
-                type: "string",
-                enum: [
-                  "visual_constraint_conflict",
-                  "unsupported_multi_location",
-                  "unsupported_secondary_identity",
-                  "missing_identity_reference",
-                  "insufficient_distinct_shots",
-                ],
-              },
-              detail: text(2_000),
-            },
-            required: ["code", "detail"],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ["status", "reasons"],
-      additionalProperties: false,
-    },
-  ],
-} as const;
+    required: ["status", "reasons"],
+    additionalProperties: false,
+  },
+]);

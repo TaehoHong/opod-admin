@@ -1,3 +1,4 @@
+import { UNION_ENVELOPE_KEY } from "../../prompts/strict-schema";
 import { PostPipelineV3Runner } from "./post-pipeline-v3.runner";
 
 function draft(
@@ -52,9 +53,17 @@ function setup(currentDraft: Record<string, unknown>, fetchResult?: unknown) {
       t2iModel: "fal-ai/nano-banana-pro",
     }),
   };
+  // PostPlan·ImagePlan은 판별 union이라 프로바이더가 envelope로 감싼 JSON을
+  // 돌려준다 (prompts/strict-schema.ts). 스텁도 같은 와이어 포맷을 쓴다.
   const fetchMock = jest.fn().mockResolvedValue(
     Response.json({
-      choices: [{ message: { content: JSON.stringify(fetchResult) } }],
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({ [UNION_ENVELOPE_KEY]: fetchResult }),
+          },
+        },
+      ],
     }),
   );
   const llmLogs = {

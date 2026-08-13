@@ -1,4 +1,12 @@
 import { Injectable, Optional } from "@nestjs/common";
+import { IMAGE_PLAN_JSON_SCHEMA } from "../../../prompts/image-planner";
+import { PROMPT_SET_JSON_SCHEMA } from "../../../prompts/image-prompt-generator";
+import { POST_PLAN_JSON_SCHEMA } from "../../../prompts/post-planner";
+import {
+  UNION_ENVELOPE_KEY,
+  assertStrictSchemaCompatible,
+  rootUnionSchema,
+} from "../../../prompts/strict-schema";
 import { LLM_LOG_TYPE, LlmLogService } from "../llm-logs/llm-log.service";
 import { GenerationSettingsRepository } from "./generation-settings.repository";
 import {
@@ -303,13 +311,28 @@ export class GenerationSettingsService {
           message: "V3에는 기획 LLM URL·키·모델이 모두 필요합니다",
         };
       }
+      // 배포된 스키마 자체가 프로바이더 문법을 어기면 네트워크를 쓰지 않고 막는다.
+      // 이전 probe는 사소한 스키마 하나만 확인해서, 실제 V3 스키마가 400으로
+      // 거절되는 상태에서도 통과했다 (2026-08-13).
+      for (const [label, schema] of V3_SHIPPED_SCHEMAS) {
+        try {
+          assertStrictSchemaCompatible(schema, label);
+        } catch (error) {
+          return {
+            ok: false,
+            message: `V3 스키마가 strict 계약을 어깁니다 — ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          };
+        }
+      }
       const probe = async (tokenLimitParam: TokenLimitParam) => {
         const requestJson = {
           model,
           messages: [
             {
               role: "user",
-              content: 'Return exactly {"ok":true}.',
+              content: `Return exactly ${JSON.stringify(V3_PROBE_EXPECTED)}.`,
             },
           ],
           response_format: {
@@ -317,12 +340,7 @@ export class GenerationSettingsService {
             json_schema: {
               name: "opod_pipeline_v3_probe",
               strict: true,
-              schema: {
-                type: "object",
-                properties: { ok: { type: "boolean", const: true } },
-                required: ["ok"],
-                additionalProperties: false,
-              },
+              schema: V3_PROBE_SCHEMA,
             },
           },
           [tokenLimitParam]: 64,
@@ -665,12 +683,67 @@ function pick(
   return { value: undefined, source: "none" };
 }
 
-function isStrictProbeResult(value: unknown): value is { ok: true } {
+// probe는 V3 스키마가 실제로 쓰는 문법만 골라 확인한다: 루트 union envelope,
+// 중첩 anyOf(널 허용), enum, 문자열 길이 제한, 배열 개수 제한, 정수 범위.
+// 하나라도 거부하는 프로바이더에서는 V3를 켤 수 없다.
+const V3_PROBE_SCHEMA = rootUnionSchema([
+  {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["ready"] },
+      items: {
+        type: "array",
+        minItems: 1,
+        maxItems: 2,
+        items: { type: "string", minLength: 1, maxLength: 40 },
+      },
+      score: { type: "integer", minimum: 1, maximum: 5 },
+      note: {
+        anyOf: [
+          { type: "string", minLength: 1, maxLength: 40 },
+          { type: "null" },
+        ],
+      },
+    },
+    required: ["status", "items", "score", "note"],
+    additionalProperties: false,
+  },
+  {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["blocked"] },
+      reason: { type: "string", minLength: 1, maxLength: 40 },
+    },
+    required: ["status", "reason"],
+    additionalProperties: false,
+  },
+]);
+
+const V3_PROBE_EXPECTED = {
+  [UNION_ENVELOPE_KEY]: {
+    status: "ready",
+    items: ["ok"],
+    score: 5,
+    note: null,
+  },
+};
+
+// 켜기 전에 문법 호환성을 확인할 정적 스키마. 평가 Agent 스키마는 호출 시점에
+// 조립되므로 단위 테스트가 같은 규칙으로 검사한다.
+const V3_SHIPPED_SCHEMAS: [string, unknown][] = [
+  ["post plan", POST_PLAN_JSON_SCHEMA],
+  ["image plan", IMAGE_PLAN_JSON_SCHEMA],
+  ["prompt set", PROMPT_SET_JSON_SCHEMA],
+];
+
+function isStrictProbeResult(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const result = (value as Record<string, unknown>)[UNION_ENVELOPE_KEY];
   return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.keys(value).length === 1 &&
-    (value as { ok?: unknown }).ok === true
+    typeof result === "object" &&
+    result !== null &&
+    (result as Record<string, unknown>).status === "ready"
   );
 }
