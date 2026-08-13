@@ -32,6 +32,7 @@ import {
   updateDraft,
   updateDraftPlan,
   updateDraftPrompts,
+  updateOperatorRequest,
   type Draft,
   type DraftEvaluation,
 } from "../drafts/api";
@@ -955,9 +956,11 @@ function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
       </Meta>
       <Meta label="콘텐츠 형식">{draft.contentType}</Meta>
       {/* V3는 operatorRequest, V2는 sceneHint에 저장한다. */}
-      <Meta label="장면·주제 요청">
-        {concept.operatorRequest || concept.sceneHint || "지정 없음"}
-      </Meta>
+      {v3 ? (
+        <OperatorRequestForm draft={draft} />
+      ) : (
+        <Meta label="장면·주제 요청">{concept.sceneHint || "지정 없음"}</Meta>
+      )}
       <Meta label="게시 일정">
         {draft.scheduledAt ? formatDateTime(draft.scheduledAt) : "승인 후 즉시"}
       </Meta>
@@ -979,6 +982,55 @@ function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
         </Button>
       </Group>
     </StagePaper>
+  );
+}
+
+// 평가 Agent의 지적은 재실행에 전달되지 않는다 — 러너가 평가를 읽지 않고 Agent
+// 입력 계약에도 자리가 없다. 그래서 운영자가 무언가를 반영하려면 이 값을 고치고
+// 해당 단계를 다시 실행하는 수밖에 없다. 저장과 재실행을 묶지 않는 이유는
+// 어느 단계를 다시 돌릴지는 단계 화면이 소유하기 때문이다.
+function OperatorRequestForm({ draft }: { draft: Draft }) {
+  const current = draft.conceptJson?.operatorRequest ?? "";
+  const editable = draft.status === "planned" || draft.status === "failed";
+  const form = useForm({
+    mode: "uncontrolled",
+    initialValues: { operatorRequest: current },
+  });
+  const save = useDraftMutation(
+    draft.id,
+    (values: { operatorRequest: string }) =>
+      updateOperatorRequest(draft.id, values.operatorRequest.trim() || null),
+  );
+  if (!editable) {
+    return (
+      <>
+        <Meta label="장면·주제 요청">{current || "지정 없음"}</Meta>
+        <Text size="xs" c="dimmed">
+          Agent 실행 중이거나 이미 검수 단계로 넘어가 요청을 바꿀 수 없습니다.
+        </Text>
+      </>
+    );
+  }
+  return (
+    <form onSubmit={form.onSubmit((values) => save.mutate(values))}>
+      <Stack gap="xs">
+        <Textarea
+          label="장면·주제 요청"
+          description="비우면 지정 없음으로 되돌립니다. 저장한 뒤 해당 단계를 다시 실행해야 반영됩니다."
+          placeholder="지정 없음"
+          autosize
+          minRows={2}
+          key={form.key("operatorRequest")}
+          {...form.getInputProps("operatorRequest")}
+        />
+        {save.isError ? <MutationError error={save.error} /> : null}
+        <Group>
+          <Button type="submit" variant="default" loading={save.isPending}>
+            요청 저장
+          </Button>
+        </Group>
+      </Stack>
+    </form>
   );
 }
 

@@ -194,6 +194,18 @@ export function updateDraft(
   });
 }
 
+// 운영자가 파이프라인에 의도를 전달하는 유일한 통로. 평가 지적은 Agent 입력에
+// 들어가지 않으므로, 재실행에 무언가를 반영하려면 이 값을 바꿔야 한다.
+export function updateOperatorRequest(
+  draftId: string,
+  operatorRequest: string | null,
+): Promise<Draft> {
+  return apiRequest(`/drafts/${encodeURIComponent(draftId)}/operator-request`, {
+    method: "PATCH",
+    body: { operatorRequest },
+  });
+}
+
 // 단계 실행 — 전부 갱신된 draft를 돌려주므로 호출부는 결과를 캐시에 그대로
 // 넣으면 된다.
 function draftAction(draftId: string, path: string, body?: unknown) {

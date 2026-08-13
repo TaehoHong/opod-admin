@@ -20,6 +20,7 @@ import { RegenerateShotDto } from "./dto/regenerate-shot.dto";
 import { RejectDraftDto } from "./dto/reject-draft.dto";
 import { SelectShotOutputDto } from "./dto/select-shot-output.dto";
 import { UpdateDraftDto } from "./dto/update-draft.dto";
+import { UpdateOperatorRequestDto } from "./dto/update-operator-request.dto";
 import { UpdateShotOutputFilterDto } from "./dto/update-shot-output-filter.dto";
 import { UpdateDraftPlanDto } from "./dto/update-draft-plan.dto";
 import { UpdateDraftPromptsDto } from "./dto/update-draft-prompts.dto";
@@ -74,6 +75,16 @@ export class DraftsController {
   @Patch(":id")
   updateDraft(@Param("id") draftId: string, @Body() body: UpdateDraftDto) {
     return this.draftsService.updateDraft({ draftId, ...body });
+  }
+
+  // 운영자 요청 수정. 검수 편집(PATCH :id)과 상태 조건이 정반대다 — 이건 아직
+  // Agent가 돌기 전(planned)이나 실패 후(failed)에 입력을 보완하는 경로다.
+  @Patch(":id/operator-request")
+  updateOperatorRequest(
+    @Param("id") draftId: string,
+    @Body() body: UpdateOperatorRequestDto,
+  ) {
+    return this.draftsService.updateOperatorRequest({ draftId, ...body });
   }
 
   @Patch(":id/plan")

@@ -8,7 +8,10 @@ import {
 } from "../../domain/database/page";
 import { parseFinishPreset } from "../../worker/film-finish";
 import { GenerationSettingsService } from "../../domain/settings/generation-settings.service";
-import { createPostPipelineV3Concept } from "../../worker/post-pipeline-v3";
+import {
+  createPostPipelineV3Concept,
+  POST_PIPELINE_V3,
+} from "../../worker/post-pipeline-v3";
 import { DraftJobRow, DraftRow, DraftsRepository } from "./drafts.repository";
 
 type DraftStatus =
@@ -34,6 +37,10 @@ const DRAFT_STATUSES: DraftStatus[] = [
 
 // 검수에서 캡션/일정을 고칠 수 있는 상태. planned/generating은 플래너가 덮어쓴다.
 const EDITABLE_STATUSES: DraftStatus[] = ["needs_review", "approved"];
+// 검수 편집과 정반대 구간이다. 워커 claim이 planned → generating을 원자적으로
+// 옮기므로, planned 조건부 갱신이면 실행 중인 단계와 충돌할 수 없다.
+const OPERATOR_REQUEST_EDITABLE_STATUSES: DraftStatus[] = ["planned", "failed"];
+const OPERATOR_REQUEST_MAX_LENGTH = 2000;
 const FILTER_EDITABLE_STATUSES: DraftStatus[] = [
   "generating",
   "regenerating",
@@ -617,6 +624,57 @@ export class DraftsService {
     ) {
       await this.repository.markManual(input.draftId);
     }
+    return this.getDraft(input.draftId);
+  }
+
+  // 운영자가 파이프라인에 의도를 전달하는 유일한 통로다. 평가 Agent의 지적은
+  // 러너가 읽지 않고 Agent 입력 계약에도 자리가 없으므로, 재실행에 무언가를
+  // 반영하려면 이 값을 바꾸는 수밖에 없다.
+  async updateOperatorRequest(input: {
+    draftId: string;
+    operatorRequest?: string | null;
+  }): Promise<AdminDraft> {
+    const trimmed = input.operatorRequest?.trim() ?? "";
+    if (trimmed.length > OPERATOR_REQUEST_MAX_LENGTH) {
+      throw new BadRequestException(
+        `Operator request must be at most ${OPERATOR_REQUEST_MAX_LENGTH} characters`,
+      );
+    }
+    const existing = await this.repository.findDraftConcept(input.draftId);
+    if (!existing) {
+      throw new BadRequestException("Draft not found");
+    }
+    const concept =
+      existing.conceptJson &&
+      typeof existing.conceptJson === "object" &&
+      !Array.isArray(existing.conceptJson)
+        ? { ...(existing.conceptJson as Record<string, unknown>) }
+        : {};
+    // V2 플래너는 sceneHint를 읽는다. V2 draft에 operatorRequest를 써봐야 아무도
+    // 읽지 않으므로, 저장을 성공으로 보고하지 않는다.
+    if (concept.pipelineVersion !== POST_PIPELINE_V3) {
+      throw new BadRequestException(
+        "Only post-pipeline-v3 drafts have an operator request",
+      );
+    }
+    // 빈 값은 "지정 없음"으로 되돌리는 것이다. 런타임도 공백을 요청 없음으로
+    // 본다(`operatorRequest()` in post-pipeline-v3.runner.ts).
+    if (trimmed) {
+      concept.operatorRequest = trimmed;
+    } else {
+      delete concept.operatorRequest;
+    }
+    const transitioned = await this.repository.updateEditableDraft(
+      input.draftId,
+      OPERATOR_REQUEST_EDITABLE_STATUSES,
+      { conceptJson: concept },
+    );
+    if (!transitioned) {
+      throw new BadRequestException(
+        "Only drafts waiting for a stage run can change the operator request",
+      );
+    }
+    await this.repository.markManual(input.draftId);
     return this.getDraft(input.draftId);
   }
 

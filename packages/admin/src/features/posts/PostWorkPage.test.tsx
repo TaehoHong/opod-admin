@@ -120,13 +120,67 @@ describe("post work stage screens", () => {
   });
 
   it("still shows the legacy scene hint on the brief stage", async () => {
-    renderStage("brief", {
-      source: "manual",
-      mode: "manual",
-      sceneHint: "노을 지는 골목",
-    });
+    renderStage(
+      "brief",
+      { source: "manual", mode: "manual", sceneHint: "노을 지는 골목" },
+      // V2 초안에는 pipelineV3가 없다.
+      { item: { ...v3Item, pipelineV3: undefined } },
+    );
 
     expect(await screen.findByText("노을 지는 골목")).toBeInTheDocument();
+  });
+
+  // 백엔드가 V2 초안의 operatorRequest 수정을 거부한다. 입력란을 띄우면 운영자가
+  // 고칠 수 있다고 믿고 저장을 눌러 400을 받는다.
+  it("offers the operator request editor on V3 only", async () => {
+    renderStage(
+      "brief",
+      { source: "manual", mode: "manual", sceneHint: "노을 지는 골목" },
+      { item: { ...v3Item, pipelineV3: undefined } },
+    );
+
+    expect(await screen.findByText("노을 지는 골목")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "요청 저장" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("lets the operator rewrite the request while a stage is waiting", async () => {
+    renderStage(
+      "brief",
+      {
+        pipelineVersion: "post-pipeline-v3",
+        source: "manual",
+        mode: "manual",
+        operatorRequest: "비 오는 날 창가",
+      },
+      { draft: { status: "planned" } },
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "요청 저장" }),
+    ).toBeInTheDocument();
+    expect(screen.getByDisplayValue("비 오는 날 창가")).toBeInTheDocument();
+  });
+
+  // 실행 중에 바꾸면 저장된 요청과 실제 사용된 입력이 어긋난다. 백엔드도
+  // 거부하므로 화면이 먼저 이유를 말한다.
+  it("explains why the request is locked while the agent runs", async () => {
+    renderStage(
+      "brief",
+      {
+        pipelineVersion: "post-pipeline-v3",
+        source: "manual",
+        mode: "manual",
+        operatorRequest: "비 오는 날 창가",
+      },
+      { draft: { status: "generating" } },
+    );
+
+    expect(await screen.findByText("비 오는 날 창가")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "요청 저장" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows the post plan caption, hashtags and memory verdict", async () => {

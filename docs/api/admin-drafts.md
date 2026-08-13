@@ -144,6 +144,27 @@ on the next tick. `sceneHint` is passed to the planner as a mandatory hint.
 `mode: "manual"` opts out of the automatic pipeline — the operator drives each
 step with the endpoints below.
 
+## Operator request (post-pipeline-v3 only)
+
+```http
+PATCH /api/drafts/:id/operator-request   { "operatorRequest": "거울 셀카는 후면 카메라로" }
+```
+
+Rewrites `conceptJson.operatorRequest`, which both the Post Planning and Image
+Planning agents receive. This is the **only** channel for feeding operator
+intent into a re-run: the V3 runner never reads evaluations and the agent input
+contracts have no slot for prior issues, scores, or the previous artifact, so a
+plain re-run repeats the same input.
+
+- V3 drafts only (400 otherwise). V2 planners read `sceneHint`, so storing this
+  on a V2 draft would be a no-op reported as success.
+- Allowed only in `planned` or `failed` status (400 otherwise). The worker claim
+  moves `planned → generating` atomically, so this guard alone rules out a write
+  landing mid-stage.
+- Blank or omitted clears the request back to "none".
+- Marks the draft manual, like other operator edits.
+- Saving does **not** re-run anything; use the stage endpoints below.
+
 ## Manual pipeline steps
 
 ```http

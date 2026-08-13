@@ -86,6 +86,99 @@ const selectedJob = {
 } as const;
 
 describe("DraftsService", () => {
+  // 운영자 요청은 평가 지적을 재실행에 되먹이는 유일한 통로다(러너는 평가를
+  // 읽지 않는다). 그래서 "언제 바꿀 수 있는가"가 계약의 핵심이다.
+  describe("updateOperatorRequest", () => {
+    const v3Concept = {
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v3",
+        mode: "manual",
+        operatorRequest: "이전 요청",
+      },
+    };
+
+    // 워커가 옛 입력으로 산출물을 만드는 중에 요청이 바뀌면, 저장된 요청과 실제
+    // 사용된 입력이 어긋난다. 운영자는 "요청대로 안 나왔다"고 오판하게 된다.
+    it("refuses to change the request while a stage is running", async () => {
+      const repository = repositoryFake({
+        findDraftConcept: jest.fn().mockResolvedValue(v3Concept),
+        // status 조건에 걸리지 않으면 updateMany가 0건을 반환한다.
+        updateEditableDraft: jest.fn().mockResolvedValue(false),
+      });
+      const service = makeService(repository);
+
+      await expect(
+        service.updateOperatorRequest({
+          draftId: "draft-1",
+          operatorRequest: "거울 셀카는 후면 카메라로",
+        }),
+      ).rejects.toThrow("Only drafts waiting for a stage run");
+      expect(repository.markManual).not.toHaveBeenCalled();
+    });
+
+    it("only allows planned or failed drafts to be edited", async () => {
+      const repository = repositoryFake({
+        findDraftConcept: jest.fn().mockResolvedValue(v3Concept),
+        findDraft: jest.fn().mockResolvedValue(draftRow),
+      });
+      const service = makeService(repository);
+
+      await service.updateOperatorRequest({
+        draftId: "draft-1",
+        operatorRequest: "거울 셀카는 후면 카메라로",
+      });
+
+      expect(repository.updateEditableDraft).toHaveBeenCalledWith(
+        "draft-1",
+        ["planned", "failed"],
+        {
+          conceptJson: expect.objectContaining({
+            operatorRequest: "거울 셀카는 후면 카메라로",
+          }),
+        },
+      );
+    });
+
+    // V2 플래너는 sceneHint를 읽는다. operatorRequest를 저장하고 성공을 보고하면
+    // 운영자는 반영됐다고 믿고 재실행하지만 아무것도 달라지지 않는다.
+    it("refuses V2 drafts instead of storing a value nothing reads", async () => {
+      const repository = repositoryFake({
+        findDraftConcept: jest
+          .fn()
+          .mockResolvedValue({ conceptJson: { sceneHint: "노을 지는 골목" } }),
+      });
+      const service = makeService(repository);
+
+      await expect(
+        service.updateOperatorRequest({
+          draftId: "draft-1",
+          operatorRequest: "무언가",
+        }),
+      ).rejects.toThrow("post-pipeline-v3");
+      expect(repository.updateEditableDraft).not.toHaveBeenCalled();
+    });
+
+    // 비우면 "지정 없음"으로 되돌아가야 한다. 빈 문자열을 남기면 런타임이
+    // 요청 없음으로 보는 것과 저장 모양이 어긋난다.
+    it("clears the request when the new value is blank", async () => {
+      const repository = repositoryFake({
+        findDraftConcept: jest.fn().mockResolvedValue(v3Concept),
+        findDraft: jest.fn().mockResolvedValue(draftRow),
+      });
+      const service = makeService(repository);
+
+      await service.updateOperatorRequest({
+        draftId: "draft-1",
+        operatorRequest: "   ",
+      });
+
+      const [, , data] = (repository.updateEditableDraft as jest.Mock).mock
+        .calls[0];
+      expect(data.conceptJson).not.toHaveProperty("operatorRequest");
+      expect(data.conceptJson).toHaveProperty("pipelineVersion");
+    });
+  });
+
   it("rejects an unknown status filter before querying", async () => {
     const repository = repositoryFake();
     const service = makeService(repository);
