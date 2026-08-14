@@ -4,9 +4,9 @@
 방식으로 남긴다. 포트폴리오 정리의 원자료이므로 결과와 실사례를 구체적으로
 적는다.
 
-개선 과정 전체의 색인은
-[post-creation-agent-research-index.md](./post-creation-agent-research-index.md)에 있다.
-이 문서는 그중 **프롬프트·루브릭 실험**만 소유한다.
+개선 과정 전체의 연대기는
+[post-creation-agent-architecture-v3.md](./post-creation-agent-architecture-v3.md) §19에
+있다. 이 문서는 그중 **프롬프트·루브릭 실험**만 소유한다.
 
 ## 기록 규칙
 

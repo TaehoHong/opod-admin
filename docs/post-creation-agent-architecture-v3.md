@@ -36,6 +36,23 @@ V3의 목표는 Agent 수를 늘리는 것이 아니다. 한 구성요소가 글
 - [이미지 프롬프트 평가 Agent](../.codex/pave/plans/2026-08-12-image-prompt-evaluation-agent.md)
 - [생성 이미지 평가 Agent](../.codex/pave/plans/2026-08-12-generated-image-evaluation-agent.md)
 
+문서마다 소유하는 것이 다르다. 같은 사실을 두 곳에 쓰지 않는다.
+
+| 문서 | 소유 |
+|---|---|
+| [post-creation-agent-workflow.md](./post-creation-agent-workflow.md) | V2 워크플로우와 UML. V2가 legacy로 동결됐으므로 **역사 기록**으로 읽는다 |
+| 이 문서 | V3 설계 정본 — 계약, 상태 경계, 검증 아키텍처, 유보(§17), V4 백로그(§18), 개선 연대기(§19) |
+| [prompt-research-log.md](./prompt-research-log.md) | 프롬프트·루브릭 실험. 가설 → 변경 → 결과 → 판정 |
+| [pipeline-v3-ux-plan.md](./pipeline-v3-ux-plan.md) | V3 운영 화면 설계 — 8단계 데이터 성격별 표현 |
+| [media-generation-quality-improvements.md](./media-generation-quality-improvements.md) | 품질 결함과 1차 보강 누적 기록 |
+| [media-generation-pipeline.md](./media-generation-pipeline.md) | 미디어 생성 파이프라인 |
+| [image-prompt-optimization-report.md](./image-prompt-optimization-report.md) | 프롬프트 최적화 실측 보고 |
+| [plan-prompt-evaluation-agent.md](./plan-prompt-evaluation-agent.md), [image-prompt-evaluation-agent.md](./image-prompt-evaluation-agent.md), [generated-image-evaluation-agent.md](./generated-image-evaluation-agent.md) | 평가 Agent 3종 설계 |
+| [api/admin-drafts.md](./api/admin-drafts.md) | draft API 계약 |
+
+작업 단위 기록은 `.codex/pave/plans/`(착수 시점 판단)와 `.codex/pave/reports/`
+(완료 시점 실측과 정정)에 있다. 둘이 다르면 **정정 자체가 자료다**.
+
 현재 코드의 주요 소유자:
 
 | 책임 | 현재 코드 |
@@ -62,9 +79,6 @@ V3 신규 draft는 `pipelineVersion="post-pipeline-v3"`로 고정한다. 이 값
 V2 draft는 생성 도중 V3로 변환하지 않고 기존 코드로 완주한다.
 
 V4 후보 항목은 §18에 모은다. 현재는 캡션 Agent 후치가 유일한 확정 백로그다.
-
-개선 과정 전체의 색인과 되풀이된 실패 유형은
-[post-creation-agent-research-index.md](./post-creation-agent-research-index.md)에 있다.
 
 ## 4. V2에서 해결되지 않은 구조적 문제
 
@@ -525,3 +539,71 @@ capability probe와 같은 가짜 통과를 만들 위험이 크다 — 모델�
 
 측정 대상과 측정 도구를 동시에 바꾸면 원인을 가릴 수 없으므로, `image-planner-v2`
 효과를 먼저 관측한 뒤 평가 프롬프트를 다룬다.
+
+## 19. 개선 연대기와 되풀이된 실패 유형
+
+나중에 문서·연구로 정리할 때 쓰는 뼈대다. 결론이 아니라 인과 사슬과 1차 증거의
+위치를 담는다.
+
+### 19.1 관측 → 변경 → 결과
+
+| # | 관측 | 변경 | 결과 | 1차 증거 |
+|---|---|---|---|---|
+| 1 | V2 ContentPlanner가 글·장면·촬영·레퍼런스를 한 자연어 입력에 섞어 결정한다 | 역할별 Agent 분리(V3) — 생성 3 + 검증 4 + 결정적 오케스트레이터 | 구현 완료, 설정 게이트로 신규 초안만 적용 | §4~§12, `902b459` |
+| 2 | V3를 켜니 게시글 기획이 전부 400 — `'oneOf' is not permitted` | 판별 union을 루트 object 한 겹으로, `const`→`enum`, `uniqueItems` 제거 | 세 스키마 전부 SCHEMA ACCEPTED | research-log `v3-schema-v2`, `8f13aeb` |
+| 3 | (2를 조사하다 발견) capability probe가 `{ok:true}` 하나로 "지원 확인"을 반환해 **가짜 초록불**을 냈다 | probe를 실제 스키마 문법으로 교체 + 네트워크 전 정적 검사 | 회귀 테스트로 고정 | `src/worker/strict-schema.spec.ts` |
+| 4 | "이미지 기획 단계가 없다" | 진단: 기능 누락이 아니라 **버전 발견성** 문제(게이트 off, 초안 31건 전부 V2, 화면에 버전 표시 없음) | 파이프라인 버전 배지 | ux-plan §1 |
+| 5 | 평가가 만점인데 화면엔 `{"issues": [], "suggestions": null}`만 | 표시 버그 2건 — 화면이 V2 모양만 읽고, 조기 반환이 총점까지 삼켰다 | 수정 | ux-plan §2, report `v3-stage-screen-visibility` |
+| 6 | 단계 상태·산출물이 화면에 없어 실행 여부를 눈으로 확인 못 한다 | 8단계 횡단 규칙 + 단계별 산출물 노출 | 완료 | ux-plan §3, reports `v3-stage-screen-*` |
+| 7 | 평가 "원문 보기"가 빈 껍데기 | V3는 `suggestionsJson`이 항상 null이고 지적 0건이면 `issuesJson`도 `[]`. 실제 산출물은 `scoresJson`에 있다 | 원문을 `scoresJson`으로 교체 | `6c6eae4` |
+| 8 | ImagePlan이 "전면 카메라로 미러 셀피" — 기하학적으로 불가능 | `image-planner-v2` — 촬영 기하 원칙 + 거울 사례 | **부분 성공.** 거울 결함은 사라졌고 같은 차원에서 새 유형(카메라를 올려둔 물체가 배경에 보인다)이 났다 | research-log `image-planner-v2`, `c8c9c73` |
+| 9 | 평가가 정확한 진단을 내놔도 재실행에 반영할 방법이 없다 | 운영자 요청 수정 API + 브리프 편집 폼 | 사람을 통한 우회로 확보. 자동 되먹임은 §17 유보 | report `operator-request-edit`, `52620fb` |
+| 10 | 캡션 "자세가 정리된 느낌" — 한국어 연어가 아니다 | (미적용) 캡션 Agent 후치를 §18에 기록 | 관측만 | §18 |
+
+### 19.2 되풀이된 실패 유형
+
+개별 사건보다 이 분류가 오래 간다.
+
+**가짜 초록불.** 측정 도구가 자기 대상보다 약해서 통과를 반환한 사례가 둘이다 —
+capability probe(#3)와, 한국어 연어 부자연스러움에 만점을 준 평가 Agent(#10,
+§18.8). 공통 구조는 하나다: **검증자에게 "이게 괜찮은가?"를 묻고 답을 믿었다.
+검증자가 그 판단을 실제로 수행할 능력이 있는지는 확인하지 않았다.** §18.7의
+판단이 여기서 나온다 — 평가 프롬프트에 "자연스러운지 보라"를 추가하는 접근은
+같은 실패를 재생산할 가능성이 크다.
+
+**저장돼 있는데 화면이 못 읽는다.** #5, #7. 데이터는 전부 도착해 있는데 화면이
+다른 세대의 모양을 읽는다. 미구현으로 오인되어 "기능이 없다"는 요청으로 들어왔다.
+징후는 DB에 값이 있는데 화면에 빈 배열·null·"없음"이 뜨는 것이다.
+
+**사례는 고쳐지고 원칙은 일반화되지 않는다.** #8. 프롬프트에 원칙 한 문장과 재발
+사례 한 문장을 함께 넣었더니 사례만 지켜졌다. 사례를 계속 추가하면 프롬프트가
+결함 목록으로 자라고, 목록에 없는 결함은 계속 난다.
+
+**진단은 정확한데 처방 경로가 없다.** #9. 평가자는 설계상 진단 전용
+(`Diagnose only`)이고 러너는 평가를 읽지 않는다. 정확한 지적이 나와도 되먹일 수
+없어 프롬프트를 전역으로 바꾸고 주사위를 다시 굴리는 것 외에 할 게 없었다.
+
+### 19.3 측정 방법
+
+- **측정 대상과 측정 도구를 동시에 바꾸지 않는다.** #8을 관측하는 동안 이미지
+  기획 평가자를 건드리지 않았다. 함께 바꾸면 점수 변화의 원인을 가릴 수 없다.
+- **총점은 약한 신호다.** #8에서 major 하나가 11차원 평균을 5.0 → 4.818로 깎아
+  "거의 만점"으로 읽힌다. 판정과 최저 차원을 본다.
+- **표본 1건으로 판정하지 않는다.** LLM이 비결정적이라 규칙 없이도 우연히 맞는다.
+  research-log의 판정에는 표본 수를 명시한다.
+- **1차 증거는 DB에 있다.** artifact의 `promptVersion`으로 어느 프롬프트가 실제로
+  쓰였는지, `draft_evaluations.scores_json._meta.targetHash`로 평가가 어느
+  리비전을 봤는지, `generation_jobs.prompt`와 `params_json`으로 provider에 실제로
+  간 것을 확인한다.
+
+### 19.4 아직 검증되지 않은 것
+
+여기 있는 것을 성과로 적으면 안 된다.
+
+| 항목 | 상태 |
+|---|---|
+| V3 생성 이미지 평가 표시 | **실데이터 검증 0회.** `kind='image'` 평가 행이 0건 — 게이트가 "컷마다 선택된 이미지 1장"을 요구하는데 아직 검수 선택까지 간 초안이 없다 |
+| `image-planner-v2` 효과 | 관측 1건, 부분 성공 판정 |
+| 캡션 자연스러움 개선 | 관측만, 변경 없음(§18) |
+| 평가자 사각지대 3건 | 기록만(§18.8), 보정 미적용 |
+| V3 파이프라인 완주 | ⑤ 이미지 생성 이후로 간 초안이 아직 없다 |
