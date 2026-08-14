@@ -63,6 +63,9 @@ V2 draft는 생성 도중 V3로 변환하지 않고 기존 코드로 완주한�
 
 V4 후보 항목은 §18에 모은다. 현재는 캡션 Agent 후치가 유일한 확정 백로그다.
 
+개선 과정 전체의 색인과 되풀이된 실패 유형은
+[post-creation-agent-research-index.md](./post-creation-agent-research-index.md)에 있다.
+
 ## 4. V2에서 해결되지 않은 구조적 문제
 
 ### 4.1 게시물 의미와 시각화가 한 Agent에 섞여 있다

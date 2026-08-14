@@ -4,6 +4,10 @@
 방식으로 남긴다. 포트폴리오 정리의 원자료이므로 결과와 실사례를 구체적으로
 적는다.
 
+개선 과정 전체의 색인은
+[post-creation-agent-research-index.md](./post-creation-agent-research-index.md)에 있다.
+이 문서는 그중 **프롬프트·루브릭 실험**만 소유한다.
+
 ## 기록 규칙
 
 - 프롬프트·루브릭 변경마다 버전을 올리고 아래 템플릿으로 엔트리를 추가한다.
@@ -159,8 +163,39 @@
      resolution`을 명시. 같은 산출물이 `captureSetup`에 "세로 4:5"를 적었는데,
      종횡비는 설정이 게시 형식에서 유도한다(`aspectRatioFeed` 등, `324899b`).
      기획이 정할 값이 아니고, crop/framing이라면 애초에 `scene` 소관이다.
-- 결과: (재실행 후 기록)
-- 판정: (미정)
+- 결과 (2026-08-14, draft `019ffa17…`, artifact `promptVersion: image-planner-v2`,
+  imagePlanning revision 1):
+
+  | 컷 | 기획한 촬영 | 결과 |
+  |---|---|---|
+  | 0 미러 셀카 | `rear camera … aiming the lens squarely at its reflective surface` | **규칙이 겨냥한 결함 재발 없음** |
+  | 1 거치 촬영 | `propped upright on the cream shoe cabinet … aimed directly toward her` | 같은 차원에서 **새 유형** 결함 |
+
+  컷 1의 scene은 "그 신발장이 그녀 뒤에 보인다"고 썼다. 카메라를 올려둔 물체는
+  카메라 위치, 즉 프레임 밖에 있으므로 배경에 나올 수 없다. 평가자가 major로
+  잡았다.
+
+  ```
+  capture_plausibility 3/5 · issues_found · 총점 4.818 (= 53/11, 한 차원만 3점)
+  ```
+
+  **v1 때와 수치가 동일하다.** 결함의 종류만 바뀌었다.
+
+- 판정: **부분 유지.** 사례(거울)는 해결됐고 원칙 일반화는 미달이다. 규칙을
+  "원칙 한 문장 + 재발 사례 한 문장"으로 썼는데, 모델이 사례는 따르고 원칙은
+  일반화하지 못했다. "카메라를 지지하는 면·물체는 프레임 밖"은 원칙
+  (`captureSetup must be geometrically able to produce scene`)의 직접 귀결인데
+  지켜지지 않았다. 롤백하지 않는다 — 되돌리면 거울 결함이 돌아온다.
+- 표본 주의: **관측 1건이다.** 거울 결함이 나지 않은 것이 규칙 덕인지 우연인지
+  1건으로는 가릴 수 없다. 다만 같은 차원에서 다른 결함이 났다는 사실은
+  "`capture_plausibility`가 이 파이프라인의 구조적 약점"이라는, 표본 1건보다
+  강한 신호다.
+- 부수 관측: 평가자는 두 번 다 정확했다. `docs/post-creation-agent-architecture-v3.md`
+  §18.8에 기록한 평가자 사각지대 3건과 대조된다 — `capture_plausibility`는
+  작동하고 `scope_compliance`·`ai_tell_free`는 놓친다.
+- 다음 후보 (미적용): v3에서 원칙에 귀결을 하나 명시한다 — 촬영자와 카메라를
+  지지하는 면·물체는 프레임 밖이며 scene에 등장할 수 없다. 적용 전에 관측을
+  더 모아 사례 나열이 아니라 원칙 강화로 가는지 확인한다.
 - 방법 주의: **평가자 프롬프트는 이번에 건드리지 않는다.** 같은 산출물에서
   평가자가 놓친 것이 하나 더 있다 — `captureSetup`의 "세로 4:5"는
   `scope_compliance` 소관인데 5/5를 줬다. 측정 대상(기획자)과 측정 도구
