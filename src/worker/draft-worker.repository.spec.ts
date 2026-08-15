@@ -42,9 +42,6 @@ describe("DraftWorkerRepository", () => {
         expect(strings.join("?")).toContain(
           "(d.concept_json->>'mode') IS DISTINCT FROM 'manual'",
         );
-        expect(strings.join("?")).toContain(
-          "(d.concept_json->>'pipelineVersion') IS DISTINCT FROM ?",
-        );
         expect(leaseSeconds).toBe(120);
         return Promise.resolve([{ id: "draft-1" }]);
       },
@@ -52,6 +49,85 @@ describe("DraftWorkerRepository", () => {
     const repository = new DraftWorkerRepository(prisma as never);
 
     await expect(repository.claimPlannedDraft(120)).resolves.toBe("draft-1");
+  });
+
+  // claim·sweep은 버전을 **문자열로** 비교한다 — 타입 검사가 못 잡는 층이다.
+  // 한쪽만 v4를 빠뜨리면 V4 초안이 V3 경로에서 안 잡히고(파이프라인 정지)
+  // V2 경로로 새어 V2 플래너가 덮어쓴다. 배포 직후 실제로 이 결함이 났다.
+  it.each([
+    [
+      "claimV3DraftNow",
+      (r: DraftWorkerRepository) => r.claimV3DraftNow("d", 1),
+    ],
+    ["claimV3Draft", (r: DraftWorkerRepository) => r.claimV3Draft(1)],
+    [
+      "sweepExpiredV3Leases",
+      (r: DraftWorkerRepository) => r.sweepExpiredV3Leases(3),
+    ],
+  ])("%s claims both V3 and V4 drafts", async (_label, run) => {
+    const { prisma } = prismaMock();
+    const seen: string[] = [];
+    prisma.$queryRaw.mockImplementation(
+      (_strings: TemplateStringsArray, ...values: unknown[]) => {
+        for (const value of values) {
+          const fragment = value as { strings?: string[]; values?: unknown[] };
+          if (Array.isArray(fragment?.values)) {
+            seen.push(...fragment.values.map(String));
+          }
+        }
+        return Promise.resolve([]);
+      },
+    );
+
+    await run(new DraftWorkerRepository(prisma as never));
+
+    expect(seen).toContain("post-pipeline-v3");
+    expect(seen).toContain("post-pipeline-v4");
+  });
+
+  // 반대 방향: V2 전용 경로는 v3·v4 **둘 다** 제외해야 한다. pipelineVersion이
+  // 없는 legacy draft(NULL)는 계속 잡혀야 하므로 IS NULL을 함께 본다.
+  it("keeps both V3 and V4 drafts out of the V2 claim path", async () => {
+    const { prisma } = prismaMock();
+    let fragmentSql = "";
+    const seen: string[] = [];
+    prisma.$queryRaw.mockImplementation(
+      (_strings: TemplateStringsArray, ...values: unknown[]) => {
+        for (const value of values) {
+          const fragment = value as { strings?: string[]; values?: unknown[] };
+          if (
+            Array.isArray(fragment?.values) &&
+            Array.isArray(fragment.strings)
+          ) {
+            fragmentSql += fragment.strings.join("?");
+            seen.push(...fragment.values.map(String));
+          }
+        }
+        return Promise.resolve([]);
+      },
+    );
+
+    await new DraftWorkerRepository(prisma as never).claimPlannedDraft(120);
+
+    expect(fragmentSql).toContain("IS NULL");
+    expect(fragmentSql).toContain("NOT IN");
+    expect(seen).toEqual(["post-pipeline-v3", "post-pipeline-v4"]);
+  });
+
+  it("excludes the whole V3 family from the V2 manual claim and lease sweep", async () => {
+    const updateMany = jest.fn().mockResolvedValue({ count: 0 });
+    const repository = new DraftWorkerRepository({
+      postDraft: { updateMany },
+    } as never);
+
+    await repository.claimDraftNow("draft-1", 120);
+    await repository.sweepExpiredPlanLeases(new Date(), 3);
+
+    for (const call of updateMany.mock.calls) {
+      expect(JSON.stringify(call[0].where.NOT)).toContain("post-pipeline-v4");
+      expect(JSON.stringify(call[0].where.NOT)).toContain("post-pipeline-v3");
+    }
+    expect(updateMany).toHaveBeenCalledTimes(3);
   });
 
   it("keeps manual drafts out of automatic generation aggregation", async () => {

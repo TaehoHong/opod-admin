@@ -156,7 +156,7 @@ export class PostPipelineV3Runner {
       requestId: draft.id,
       characterId: draft.characterId,
       metadata: {
-        pipelineVersion: "post-pipeline-v3",
+        pipelineVersion: concept.pipelineVersion,
         stage: "post_plan",
         promptVersion: POST_PLANNER_PROMPT_VERSION,
       },
@@ -292,7 +292,7 @@ export class PostPipelineV3Runner {
       requestId: draft.id,
       characterId: draft.characterId,
       metadata: {
-        pipelineVersion: "post-pipeline-v3",
+        pipelineVersion: concept.pipelineVersion,
         stage: "image_plan",
         promptVersion: IMAGE_PLANNER_PROMPT_VERSION,
       },
@@ -432,7 +432,7 @@ export class PostPipelineV3Runner {
         requestId: draft.id,
         characterId: draft.characterId,
         metadata: {
-          pipelineVersion: "post-pipeline-v3",
+          pipelineVersion: concept.pipelineVersion,
           stage: "image_prompt",
           promptVersion: IMAGE_PROMPT_GENERATOR_VERSION,
           modelPolicyVersion: promptPackage.modelPolicy.version,

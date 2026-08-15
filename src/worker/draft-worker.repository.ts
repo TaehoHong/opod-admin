@@ -4,6 +4,7 @@ import { PrismaService } from "../domain/database/prisma.service";
 import {
   createPostPipelineV3Concept,
   POST_PIPELINE_V3,
+  POST_PIPELINE_V4,
   PostPipelineV3ArtifactKey,
 } from "./post-pipeline-v3";
 
@@ -89,6 +90,24 @@ export type PlannedDraft = Prisma.PostDraftGetPayload<{
 export type PublishDraft = Prisma.PostDraftGetPayload<{
   select: typeof publishDraftSelect;
 }>;
+
+// v3와 v4는 같은 오케스트레이터가 돌린다. claim·sweep은 **버전 문자열 비교**라
+// 타입 검사가 못 잡는다 — 한쪽만 v4를 빠뜨리면 V4 초안이 V3 경로에서 안 잡히고
+// V2 경로로 새어 V2 플래너가 덮어쓴다. 그래서 술어를 이 상수로만 만든다.
+const V3_FAMILY: Prisma.PostDraftWhereInput = {
+  OR: [
+    { conceptJson: { path: ["pipelineVersion"], equals: POST_PIPELINE_V3 } },
+    { conceptJson: { path: ["pipelineVersion"], equals: POST_PIPELINE_V4 } },
+  ],
+};
+// raw SQL 쪽. pipelineVersion이 없는 legacy V2 draft는 NULL이라 NOT IN이 NULL을
+// 내므로 제외 술어는 IS NULL을 함께 본다.
+function v3FamilySql(alias: string) {
+  return Prisma.sql`${Prisma.raw(alias)}concept_json->>'pipelineVersion' IN (${POST_PIPELINE_V3}, ${POST_PIPELINE_V4})`;
+}
+function notV3FamilySql(alias: string) {
+  return Prisma.sql`(${Prisma.raw(alias)}concept_json->>'pipelineVersion' IS NULL OR ${Prisma.raw(alias)}concept_json->>'pipelineVersion' NOT IN (${POST_PIPELINE_V3}, ${POST_PIPELINE_V4}))`;
+}
 
 // 게시 가능 = V2/v3의 approved, 또는 V4의 planned + pipeline.stage=publish +
 // state=pending(⑥ 캡션 완료 직후). 게시 경로 4곳(due 조회·수동 조회·오류 기록·
@@ -192,12 +211,7 @@ export class DraftWorkerRepository {
         status: "planned",
         draftType: "post",
         character: { status: "active" },
-        NOT: {
-          conceptJson: {
-            path: ["pipelineVersion"],
-            equals: POST_PIPELINE_V3,
-          },
-        },
+        NOT: V3_FAMILY,
       },
       data: {
         status: "generating",
@@ -430,12 +444,7 @@ export class DraftWorkerRepository {
         status: "generating",
         leaseExpiresAt: { lt: now },
         attemptCount: { lt: maxAttempts },
-        NOT: {
-          conceptJson: {
-            path: ["pipelineVersion"],
-            equals: POST_PIPELINE_V3,
-          },
-        },
+        NOT: V3_FAMILY,
       },
       data: { status: "planned", leaseExpiresAt: null },
     });
@@ -444,12 +453,7 @@ export class DraftWorkerRepository {
         status: "generating",
         leaseExpiresAt: { lt: now },
         attemptCount: { gte: maxAttempts },
-        NOT: {
-          conceptJson: {
-            path: ["pipelineVersion"],
-            equals: POST_PIPELINE_V3,
-          },
-        },
+        NOT: V3_FAMILY,
       },
       data: {
         status: "failed",
@@ -472,7 +476,7 @@ export class DraftWorkerRepository {
       WHERE status = 'generating'
         AND lease_expires_at < now()
         AND attempt_count < ${maxAttempts}
-        AND concept_json->>'pipelineVersion' = ${POST_PIPELINE_V3}
+        AND ${v3FamilySql("")}
       RETURNING id
     `;
     const failed = await this.prisma.$queryRaw<{ id: string }[]>`
@@ -488,7 +492,7 @@ export class DraftWorkerRepository {
       WHERE status = 'generating'
         AND lease_expires_at < now()
         AND attempt_count >= ${maxAttempts}
-        AND concept_json->>'pipelineVersion' = ${POST_PIPELINE_V3}
+        AND ${v3FamilySql("")}
       RETURNING id
     `;
     return { requeued: requeued.length, failed: failed.length };
@@ -508,7 +512,7 @@ export class DraftWorkerRepository {
         JOIN opod.characters c ON c.id = d.character_id AND c.status = 'active'
         WHERE d.status = 'planned' AND d.draft_type = 'post'
           AND (d.concept_json->>'mode') IS DISTINCT FROM 'manual'
-          AND (d.concept_json->>'pipelineVersion') IS DISTINCT FROM ${POST_PIPELINE_V3}
+          AND ${notV3FamilySql("d.")}
         ORDER BY d.created_at, d.id
         LIMIT 1
         FOR UPDATE OF d SKIP LOCKED
@@ -530,7 +534,7 @@ export class DraftWorkerRepository {
         SELECT d.id FROM opod.post_drafts d
         JOIN opod.characters c ON c.id = d.character_id AND c.status = 'active'
         WHERE d.status = 'planned' AND d.draft_type = 'post'
-          AND d.concept_json->>'pipelineVersion' = ${POST_PIPELINE_V3}
+          AND ${v3FamilySql("d.")}
           AND d.concept_json#>>'{pipeline,state}' = 'pending'
           AND (d.concept_json->>'mode') IS DISTINCT FROM 'manual'
         ORDER BY d.created_at, d.id
@@ -556,7 +560,7 @@ export class DraftWorkerRepository {
       WHERE id = ${draftId}::uuid
         AND status = 'planned'
         AND draft_type = 'post'
-        AND concept_json->>'pipelineVersion' = ${POST_PIPELINE_V3}
+        AND ${v3FamilySql("")}
         AND concept_json#>>'{pipeline,state}' = 'pending'
       RETURNING id
     `;

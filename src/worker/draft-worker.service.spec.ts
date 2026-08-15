@@ -1052,4 +1052,33 @@ describe("selectedPublishedMemories", () => {
       expect.objectContaining({ type: "routine", content: "매주 산책한다" }),
     ]);
   });
+
+  // 버전을 직접 비교하면 V4 초안이 게시돼도 기억이 하나도 저장되지 않는다 —
+  // ⑧ 메모리 단계가 조용히 빈손이 되고, 다음 기획이 세계관을 잃는다.
+  it("commits memories for V4 drafts too", () => {
+    const concept = {
+      postPlanning: { hash: "sha256:current" },
+      memoryCandidates: [
+        {
+          type: "routine",
+          content: "월요일마다 필라테스",
+          selected: true,
+          sourcePostPlanHash: "sha256:current",
+        },
+      ],
+    };
+    expect(
+      selectedPublishedMemories({
+        ...concept,
+        pipelineVersion: "post-pipeline-v4",
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        content: "월요일마다 필라테스",
+        reason: expect.stringContaining("post-pipeline-v4"),
+      }),
+    ]);
+    // V2 draft는 여전히 이 경로를 쓰지 않는다(게시 요약 메모리가 따로 있다).
+    expect(selectedPublishedMemories(concept)).toEqual([]);
+  });
 });

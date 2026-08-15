@@ -1058,11 +1058,9 @@ export function publishedMemoryContent(
 export function selectedPublishedMemories(
   conceptJson: unknown,
 ): { type: string; content: string; reason: string }[] {
-  if (
-    !isRecord(conceptJson) ||
-    conceptJson.pipelineVersion !== "post-pipeline-v3"
-  )
-    return [];
+  // v3·v4 공통 — 버전을 직접 비교하면 v4 초안이 게시돼도 기억이 하나도
+  // 저장되지 않는다(⑧ 단계가 조용히 빈손).
+  if (!isRecord(conceptJson) || !isPostPipelineV3(conceptJson)) return [];
   const postPlanning = isRecord(conceptJson.postPlanning)
     ? conceptJson.postPlanning
     : {};
@@ -1089,7 +1087,7 @@ export function selectedPublishedMemories(
     result.push({
       type,
       content,
-      reason: `post-pipeline-v3: selected candidate from ${currentHash}`,
+      reason: `${String(conceptJson.pipelineVersion)}: selected candidate from ${currentHash}`,
     });
   }
   return result;
