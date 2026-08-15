@@ -144,7 +144,7 @@ on the next tick. `sceneHint` is passed to the planner as a mandatory hint.
 `mode: "manual"` opts out of the automatic pipeline — the operator drives each
 step with the endpoints below.
 
-## Operator request (post-pipeline-v3 only)
+## Operator request (post-pipeline-v3/v4 only)
 
 ```http
 PATCH /api/drafts/:id/operator-request   { "operatorRequest": "거울 셀카는 후면 카메라로" }
@@ -156,8 +156,9 @@ intent into a re-run: the V3 runner never reads evaluations and the agent input
 contracts have no slot for prior issues, scores, or the previous artifact, so a
 plain re-run repeats the same input.
 
-- V3 drafts only (400 otherwise). V2 planners read `sceneHint`, so storing this
-  on a V2 draft would be a no-op reported as success.
+- V3/V4 drafts only (400 otherwise). V2 planners read `sceneHint`, so storing
+  this on a V2 draft would be a no-op reported as success. In V4 the request
+  also reaches the Caption Agent (writing parts), which owns the caption.
 - Allowed only in `planned` or `failed` status (400 otherwise). The worker claim
   moves `planned → generating` atomically, so this guard alone rules out a write
   landing mid-stage.
@@ -168,7 +169,7 @@ plain re-run repeats the same input.
 ## Manual pipeline steps
 
 ```http
-POST /api/drafts/:id/plan
+POST /api/drafts/:id/plan                   { "note": "이모지 빼고" }   // note optional
 POST /api/drafts/:id/build-prompts
 POST /api/drafts/:id/jobs/:jobId/generate   { "prompt": "...", "candidateCount": 2 }
 POST /api/drafts/:id/aggregate
@@ -179,8 +180,12 @@ Each mirrors one automatic step (manual = step-execution mode of the automatic
 pipeline) and returns the updated draft; failures are HTTP 400 with a reason
 (404 when the draft does not exist).
 
-- `plan` claims a `planned` draft and runs the planner. In manual mode the shot
-  jobs are created in `draft` status with an **empty prompt**.
+- `plan` claims a `planned` draft and runs **the stage the draft is currently
+  at** (the orchestrator owns the order, not the caller). In V2 it runs the
+  planner and creates shot jobs in `draft` status with an **empty prompt**.
+  The optional `note` is a one-shot operator instruction for this run only; V4's
+  caption stage stores it in `captionBuild.input.operatorNote` and it is not
+  persisted as the draft's operator request.
 - `build-prompts` converts the planned Korean scenes (`paramsJson._shot.scene`)
   of all `draft`-state shots into image-model prompts in one batched builder
   call (planner LLM settings reused; deterministic fallback without them).
@@ -190,10 +195,13 @@ pipeline) and returns the updated draft; failures are HTTP 400 with a reason
   shot and runs it immediately. Queuing a shot whose stored prompt is empty
   without providing one is rejected (400) — build prompts first.
 - `aggregate` runs the shot aggregation now for a `generating`/`regenerating`
-  draft: all latest shot jobs `completed` → `needs_review`; any `failed` →
+  draft: all latest shot jobs `completed` → `needs_review` (V2/V3) or the
+  **caption stage** (V4: `planned` + `pipeline.stage=caption`); any `failed` →
   `failed`. Rejected (400) while shots are still generating. Same operation the
   worker loop runs automatically.
-- `publish` publishes an `approved` draft regardless of `scheduledAt`.
+- `publish` publishes an `approved` draft (V2/V3) or a V4 draft parked at
+  `pipeline.stage=publish`, regardless of `scheduledAt`. A draft with an empty
+  caption is rejected — the body of a published post cannot be undone.
 
 ## Edit a draft
 
@@ -201,13 +209,22 @@ pipeline) and returns the updated draft; failures are HTTP 400 with a reason
 PATCH /api/drafts/:id
 Content-Type: application/json
 
-{ "caption": "...", "hashtags": ["필름사진"], "scheduledAt": null }
+{ "caption": "...", "hashtags": ["필름사진"], "scheduledAt": null, "reason": "연어가 어색해서" }
 ```
 
-Only `needs_review` or `approved` drafts can be edited (earlier statuses are
-overwritten by the planner). `scheduledAt: null` clears the schedule
-(publish immediately after approval). Hashtags are cleaned (leading `#`
-stripped, deduplicated, max 5).
+Editable states:
+
+- V2/V3: `needs_review` or `approved` (earlier statuses are overwritten by the
+  planner).
+- V4 (no review stage): caption/hashtags/schedule only while the draft waits at
+  `pipeline.stage=publish` — i.e. after the caption stage produced one. During
+  `stage=caption` a re-run would overwrite the edit, so only `finish` is
+  editable there.
+
+`scheduledAt: null` clears the schedule (publish immediately). Hashtags are
+cleaned (leading `#` stripped, deduplicated, max 5). The optional `reason` is
+recorded in the action log (`DRAFT_CAPTION_EDITED`) as source data for caption
+improvement — it changes nothing else.
 
 ## Approve / reject
 
@@ -216,8 +233,9 @@ POST /api/drafts/:id/approve
 POST /api/drafts/:id/reject   { "reason": "구도가 어색함" }
 ```
 
-Both require `needs_review` (atomic transition, HTTP 400 otherwise). Approval
-also requires one selected image for every cut. A generation plan/execution
+V2/V3 only — V4 has no approval step (the caption stage hands off straight to
+publish). Both require `needs_review` (atomic transition, HTTP 400 otherwise).
+Approval also requires one selected image for every cut. A generation plan/execution
 mismatch is shown for review but does not block approval. Approved drafts are
 published by the worker at `scheduledAt` (or immediately).
 
@@ -230,9 +248,12 @@ Content-Type: application/json
 { "prompt": "다른 구도의 해변 장면 ..." }
 ```
 
-Allowed from `needs_review` or `failed`. Creates a new generation job for the
-same cut (`originJobId` lineage, prompt override optional) and moves the draft
-to `regenerating`; it returns to `needs_review` when the new job completes.
+Allowed from `needs_review` or `failed`, and in V4 from the caption/publish
+wait as well. Creates a new generation job for the same cut (`originJobId`
+lineage, prompt override optional) and moves the draft to `regenerating`; it
+returns to `needs_review` (V2/V3) or the caption stage (V4) when the new job
+completes. In V4 the existing `captionBuild` then reads as **stale** because the
+generation set hash changed — a warning, not a block.
 
 ## Select a shot output
 
@@ -245,6 +266,9 @@ Content-Type: application/json
 
 Switches the selected best-of-N candidate for a completed shot job. The
 selected media per cut is what gets published.
+
+**V4 drafts reject this (400).** Each prompt generates exactly one image, so
+there is nothing to choose; the sole output is selected when the job completes.
 
 ## Set a candidate filter
 

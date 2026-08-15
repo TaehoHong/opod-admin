@@ -679,3 +679,84 @@ $1.20 (12장). 실험 누적 $3.00.
   "caption is supporting tone only" 문장은 입력 부재 시 무해한 죽은 문장이 된다.
   V4-1 이후 v3 관측은 "톤 힌트 없는 입력" 조건임을 기록과 함께 읽을 것 —
   결함이 나면 프롬프트 탓인지 입력 변경 탓인지 이 줄로 구분한다.
+
+## post-planner-v2 / caption-writer-v1 / post-evaluator-v2 — 캡션 소유권 이동 (2026-08-15)
+
+- 상태: 적용 중 (개발 서버 배포 대기, 관측 전)
+- 대상: `prompts/post-planner.ts`(v2), `prompts/caption-writer.ts`(신규),
+  `prompts/v3-evaluators.ts`(post-evaluator-v2). `image-planner-v3` 문장은
+  **불변** — 입력에서 caption이 빠질 뿐이다(아래 "입력 계약 변경" 항목 참조).
+- 설계 정본: `post-creation-agent-architecture-v3.md` §20 (운영자 결정 3건:
+  검수 단계 삭제 · 캡션 평가 없음 · 프롬프트당 1장).
+
+### 가설
+
+캡션이 부자연스러운 원인 중 **구조적인 것**은 두 가지다.
+
+1. 캡션이 이미지보다 먼저 쓰인다. 사람은 찍고, 보고, 쓴다. 먼저 쓰면 사진과
+   어긋나도(§18.3의 "거울 앞에 한 번 더 서게 돼요" ↔ 성립하지 않는 거울 시점)
+   사람 눈에 걸릴 때까지 살아남는다.
+2. 게시글 기획 프롬프트가 11개 차원어치 책임을 지느라 캡션 예시에 쓸 지면이
+   없다. 전용 Agent라야 페르소나 예시와 운영자 정정 사례를 few-shot으로 넣을
+   자리가 생긴다(§18.7).
+
+한국어 연어 자연스러움 자체를 LLM이 판정하게 만들지는 **않는다** — 그 축에서
+평가자가 무능한 것은 관측된 사실이다(§18.8, 캡션에 `ai_tell_free 5/5`).
+
+### 변경
+
+**post-planner-v2** (`post-plan-v2`): 출력에서 `caption`·`captionLanguages`·
+`hashtags` 삭제. 남는 것은 `intent`(premise/purpose)·`newMemoryCandidates`·
+`conflicts`. Mission 문장을 "캡션은 뒤에서 다른 Agent가 이미지를 보고 쓴다"로
+바꾸고, premise에 다음 요구를 추가했다:
+
+```
+State the premise concretely enough that a caption written later from it alone
+cannot invent a new event, place, or relationship.
+```
+
+**caption-writer-v1** (`caption-set-v1`, 신규): 입력은 intent + writing profile
++ recentPosts + operatorRequest + **컷별 ImagePlan 원문**(visualPurpose/scene/
+lockedElements) + **생성 이미지**(vision) + 선택적 operatorNote. 핵심 규칙:
+
+```
+Mention a visible element only if it appears in the generated image AND in that
+shot's image plan text. An element visible only in the image (an unplanned
+object) may be a generation defect — do not promote it into the post. An element
+present only in the plan (a generation omission) is not in the photo — do not
+describe it.
+```
+
+양방향인 이유: 이미지에만 있는 것을 쓰면 **생성 결함이 게시물의 사실로 승격**
+되고(R1의 "신발장 위 폰"이 그대로 캡션이 될 수 있었다), 계획에만 있는 것을 쓰면
+**사진에 없는 것을 말하는 캡션**이 된다. 해시태그 규칙(프로필·반복 사용·호환
+요청만, 새 장소·루틴·브랜드 태그 금지)은 post-planner-v1에서 그대로 이관했다.
+
+**post-evaluator-v2**: 글 4차원(`voice_fit`·`ai_tell_free`·`caption_quality`·
+`hashtag_fit`)을 **삭제**했다. 이동이 아니라 삭제다 — 평가 대상(캡션)이 이
+Agent의 입력에서 사라졌고, 캡션 평가 Agent는 만들지 않는다. `memory_discipline`
+과 `scope_compliance` 문구에서도 caption 참조를 걷어냈다. 11차원 → 7차원.
+
+### 관측 방법 (배포 후)
+
+지표는 인프라 신설 없이 기존 데이터에서 유도한다(아키텍처 §20.8).
+
+- **개입률 3분리**: 편집(`captionBuild.output.caption` ≠ `Post.content`) /
+  `operatorNote` 사용 / ⑥ 재실행 >1회. 셋을 합치면 "note로 3번 조종한 뒤 무편집
+  승인"이 개선으로 보인다.
+- **편집 유형 라벨**: 연어 / 이미지-픽셀 어긋남 / 계획 밖 요소 / 페르소나 /
+  반복 / 기타. 라벨 규칙은 첫 쌍을 열기 **전에** 여기 등록하고, 1차 라벨은 편집
+  당사자가 `DRAFT_CAPTION_EDITED` reason에 남긴다(라벨러 = 프롬프트 변경 결정자
+  편향 완화 — `detail-budget-ablation`에서 사후 범위 축소 전례).
+- 표본 수를 항상 함께 적는다. n=1로 판정하지 않는다.
+
+### 위험
+
+- **V4-1 단독으로 연어가 개선된다는 근거는 없다.** 여는 것은 (a) 이미지 근거,
+  (b) few-shot 지면 두 가지이고, few-shot 주입은 정정 쌍이 쌓인 뒤(V4-3)다.
+  이 단계에서 캡션이 나아지지 않아도 기각이 아니라 "아직 관측 전"이다.
+- 자동 모드는 사람이 보지 않고 게시된다(검수 삭제). 자동 게시물의 사후 수정·
+  삭제 건수를 함께 세지 않으면 품질 저하가 지표에 안 잡힌다.
+- ③ 입력에서 caption이 빠지므로 `image-planner-v3` 관측 조건이 바뀐다. 프롬프트
+  문장·버전은 불변이므로, 이후 v3 결함은 "톤 힌트 없는 입력" 조건에서 난 것으로
+  읽어야 한다(위 예고 항목).
