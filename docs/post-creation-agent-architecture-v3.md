@@ -314,6 +314,28 @@ executor의 운영 정책이며 Agent 시스템 프롬프트의 책임이 아니
 7. **Publish/memory**: current PostPlan hash와 일치하는 selected candidate만 기존 게시
    transaction에서 dedupe 저장한다. V2의 게시 요약 memory 동작은 유지한다.
 
+**V4 (2026-08-15 구현 완료)** — 같은 실행 기계 위에서 검수 단계를 캡션 단계로
+바꿨다. 새 초안은 `pipelineVersion="post-pipeline-v4"`로 핀하고, 배포 전 v3
+초안은 검수 경로로 그대로 완주한다(`isPostPipelineV3`가 v3|v4 모두 참,
+분기는 `isPostPipelineV4`로만).
+
+1. `post-planner-v2`(캡션 3필드 제거) + `caption-writer-v1`(생성 이미지 vision +
+   ImagePlan 원문 + operatorRequest) + `post-evaluator-v2`(글 4차원 삭제).
+2. stage `caption` — 표준 claim/CAS/pause/requeue를 그대로 쓴다. ⑤ 완료 시
+   `needs_review` 대신 `planned + stage=caption`, ⑥ 완료 시 artifact 저장과 게시
+   컬럼 갱신이 한 트랜잭션(`DRAFT_V3_CAPTION_READY`).
+3. 프롬프트당 1장(`candidateCount: 1`) + 유일 출력 자동 선택. 후보·선택·승인 없음.
+4. 게시 술어 `PUBLISHABLE_WHERE` = approved(V2/V3) ∪ v4 publish 대기. 빈 캡션은
+   게시 직전 preflight로 차단(`caption_missing`).
+5. read model: `caption` stage·V4 레일·`captionBuild`(stale·matchesColumn 서버
+   계산, 해시 함수는 평가 워커와 공유). UI는 ⑥ 캡션 화면(Agent 원본 카드 +
+   게시 캡션 편집 폼), ⑦ 미리보기 폴백 제거, 제목 전제 폴백 3곳.
+6. 동반 수리: prompt 평가 재트리거에 `DRAFT_V3_PROMPTS_READY` 추가(V3에서 ④
+   재실행이 재평가를 못 돌리던 버그).
+
+검증: backend 51 suites/424 tests, admin 17 files/62 tests, lint·typecheck·
+build·schema:check 통과. `overallScore=0` 버그는 이번 범위 밖으로 남았다.
+
 아직 rollout gate로 남은 항목:
 
 - 수동 초안의 memory candidate 선택·편집 UI와 PostPlan 편집 후 downstream stale UX
@@ -594,7 +616,7 @@ capability probe와 같은 가짜 통과를 만들 위험이 크다 — 모델�
 | 13 | 운영자 재리뷰: 실험 12장 중 게시 가능 2~3장. 공통 탈락은 배경 비현실성과 마루 위 운동화 | (미적용) 위반은 프롬프트가 상류에서 지시했다 — "stands on the oak floor … gray running shoes, all fully visible". 주거 문화 규범을 소유하는 평가 차원이 없다 | 관측만. planner-v3 후보 2건 추가 | research-log `negative-block-ablation` 재리뷰 |
 | 14 | (13의 후속 가설) 결함은 디테일 간 상호작용에서 난다 — 플래너가 과잉 단언한다 | "없어도 되는" 단언 11건(마루·신발·거리·정체성 재서술 등, 727자)을 뺀 조건 C를 사전 등록 후 시드 페어 6쌍으로 검증 | **기각.** 통과 A 2/6 : C 2/6 동률, 둘 다 통과한 쌍 0. B(악화)·C(무효과)로 과제약 가설 양 절반이 닫혔다 — 프롬프트 길이 층은 통과율의 지렛대가 아니다 | research-log `detail-budget-ablation` |
 | 15 | 계약 모순 2유형이 픽셀까지 내려간다 — 지지물 프레임 침입, layout↔반사 시점 | `image-planner-v3` — 지지물은 카메라 위치(직촬에서 프레임 밖), preserve는 요소만(layout·composition·시점 금지, 시점은 captureSetup 소유) | **유지 확정** (관측 1: 두 모순 미발생 + 운영자 게이트 통과, 2026-08-15). n=1 위험 항목은 유지 | research-log `image-planner-v3` |
-| 16 | 이미지 트랙 안정 — 다음 병목은 글 트랙(#10) | V4 설계 — 캡션 Agent를 ⑤ 생성 뒤 정규 단계로 후치. 리뷰 2라운드 후 운영자 결정으로 **검수 단계 삭제·캡션 평가 없음·후보 없음**으로 재설계 | 재설계 완료, 구현 승인 대기 | §20 (§20.0 결정, §20.15 리뷰 생사) |
+| 16 | 이미지 트랙 안정 — 다음 병목은 글 트랙(#10) | V4 설계 — 캡션 Agent를 ⑤ 생성 뒤 정규 단계로 후치. 리뷰 2라운드 후 운영자 결정으로 **검수 단계 삭제·캡션 평가 없음·후보 없음**으로 재설계 | 구현 완료(2026-08-15), 관측 전 | §20 (§20.0 결정, §20.15 리뷰 생사) |
 
 ### 19.2 되풀이된 실패 유형
 
@@ -669,7 +691,7 @@ capability probe(#3)와, 한국어 연어 부자연스러움에 만점을 준 �
 ## 20. V4 설계 — 캡션 Agent 후치 (2026-08-15)
 
 - 설계일: 2026-08-15 (오전 초안 → 리뷰 2라운드 → **오후 운영자 결정으로 재설계**)
-- 상태: 재설계 완료 — 구현 승인 대기
+- 상태: **구현 완료** (2026-08-15, 커밋 `81a9dc4`+`1d518e3`) — 개발 서버 관측 대기
 - 발단: §18 (2026-08-13, 캡션 "자세가 정리된 느낌" 비자연 연어)
 - 진입 조건: `image-planner-v3` 유지 확정(research-log, 2026-08-15)
 
