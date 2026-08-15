@@ -27,9 +27,11 @@ import { ShotCard } from "../drafts/ShotCard";
 import {
   fetchDraft,
   fetchDraftEvaluations,
+  isPipelineV4,
   rejectDraft,
   runDraftStage,
   updateDraft,
+  v4PausedAt,
   updateDraftPlan,
   updateDraftPrompts,
   updateOperatorRequest,
@@ -70,11 +72,12 @@ type V3PipelineStage = NonNullable<PostWorkItem["pipelineV3"]>["stage"];
 // 레일 단계 id와 파이프라인 stage 어휘는 프롬프트 한 곳에서 갈린다
 // (`prompt` ↔ `image_prompt`). 배열을 따로 두면 순서가 어긋나도 조용히
 // 통과하므로 한 테이블에 나란히 둔다. 브리프는 Agent 단계가 아니라 입력이다.
-const V3_STAGES: {
+type StageTable = {
   id: PostWorkStage;
   label: string;
   pipeline: V3PipelineStage | null;
-}[] = [
+}[];
+const V3_STAGES: StageTable = [
   { id: "brief", label: "브리프", pipeline: null },
   { id: "post_plan", label: "게시글 기획", pipeline: "post_plan" },
   { id: "image_plan", label: "이미지 기획", pipeline: "image_plan" },
@@ -84,6 +87,18 @@ const V3_STAGES: {
   { id: "publish", label: "게시", pipeline: "publish" },
   { id: "memory", label: "메모리", pipeline: "memory" },
 ];
+// V4: 검수 대신 ⑥ 캡션 — 캡션 Agent가 생성 이미지를 보고 쓴다. 후보·선택·승인
+// 없음. 같은 8칸이라 번호와 stageIndex 의미가 유지된다.
+const V4_STAGES: StageTable = V3_STAGES.map((stage) =>
+  stage.id === "review"
+    ? { id: "caption", label: "캡션", pipeline: "caption" }
+    : stage,
+);
+function pipelineStages(item: PostWorkItem): StageTable {
+  return item.pipelineV3?.version === "post-pipeline-v4"
+    ? V4_STAGES
+    : V3_STAGES;
+}
 const STAGE_NUMBER = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧"];
 
 export function PostWorkPage({
@@ -165,7 +180,7 @@ export function PostWorkPage({
 
   return (
     <DataPage
-      title={work.data.caption || "기획 전 게시물"}
+      title={workTitle(work.data)}
       isPending={false}
       actions={
         <Button component={Link} to="/posts" variant="default">
@@ -281,7 +296,7 @@ function StageRail({
   item: PostWorkItem;
   activeStage: PostWorkStage;
 }) {
-  const stages = item.pipelineV3 ? V3_STAGES : LEGACY_STAGES;
+  const stages = item.pipelineV3 ? pipelineStages(item) : LEGACY_STAGES;
   return (
     <nav className={styles.rail} aria-label="게시물 생성 단계">
       {stages.map((stage, index) => {
@@ -321,7 +336,9 @@ function railStageState(
   stage: PostWorkStage,
   index: number,
 ): V3StageState {
-  const pipeline = V3_STAGES.find((entry) => entry.id === stage)?.pipeline;
+  const pipeline = pipelineStages(item).find(
+    (entry) => entry.id === stage,
+  )?.pipeline;
   if (item.pipelineV3 && pipeline) {
     return v3StageState(item.pipelineV3, pipeline);
   }
@@ -377,6 +394,11 @@ function StageBody({
   if (stage === "review") {
     return <ReviewStage item={item} draft={draft!} evaluations={evaluations} />;
   }
+  if (stage === "caption") {
+    return (
+      <V3CaptionStage item={item} draft={draft!} evaluations={evaluations} />
+    );
+  }
   if (stage === "publish") {
     return <PublishStage item={item} draft={draft} post={post} />;
   }
@@ -398,7 +420,11 @@ function V3PostPlanStage({
       stage="post_plan"
       number="②"
       title="게시글 기획"
-      description="캐릭터 맥락을 바탕으로 게시글 의도와 문안을 확정합니다."
+      description={
+        item.pipelineV3?.version === "post-pipeline-v4"
+          ? "캐릭터 맥락을 바탕으로 게시글 의도와 새 기억 후보를 확정합니다. 캡션은 ⑥에서 이미지를 보고 씁니다."
+          : "캐릭터 맥락을 바탕으로 게시글 의도와 문안을 확정합니다."
+      }
       evaluationKind="plan"
       evaluationLabel="게시글 평가"
       runLabel="게시글 기획"
@@ -557,7 +583,21 @@ function PostPlanArtifact({
             ))}
           </Group>
         ) : null}
-        {artifact.premise ? <Meta label="전제">{artifact.premise}</Meta> : null}
+        {artifact.premise ? (
+          artifact.caption ? (
+            <Meta label="전제">{artifact.premise}</Meta>
+          ) : (
+            // 계약 v2(V4)는 캡션이 없다 — 전제가 이 카드의 리드다.
+            <Stack gap={4}>
+              <Text size="xs" c="dimmed">
+                전제
+              </Text>
+              <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                {artifact.premise}
+              </Text>
+            </Stack>
+          )
+        ) : null}
         {artifact.primaryPurpose ? (
           <Meta label="주 목적">{artifact.primaryPurpose}</Meta>
         ) : null}
@@ -764,9 +804,9 @@ function v3StageState(
   stage: V3PipelineStage,
 ): V3StageState {
   if (!pipeline) return "waiting";
-  const order = V3_STAGES.flatMap((entry) =>
-    entry.pipeline ? [entry.pipeline] : [],
-  );
+  const order = (
+    pipeline.version === "post-pipeline-v4" ? V4_STAGES : V3_STAGES
+  ).flatMap((entry) => (entry.pipeline ? [entry.pipeline] : []));
   const current = order.indexOf(pipeline.stage);
   const target = order.indexOf(stage);
   if (target < current) return "done";
@@ -1532,11 +1572,14 @@ function GenerationStage({
             loading={aggregate.isPending}
             onClick={() =>
               aggregate.mutate(undefined, {
-                onSuccess: () => void navigate(`/posts/${draft.id}/review`),
+                onSuccess: () =>
+                  void navigate(
+                    `/posts/${draft.id}/${isPipelineV4(draft) ? "caption" : "review"}`,
+                  ),
               })
             }
           >
-            검수로 보내기
+            {isPipelineV4(draft) ? "캡션 단계로 보내기" : "검수로 보내기"}
           </Button>
         </Group>
       ) : null}
@@ -1741,15 +1784,28 @@ function PublishStage({
       {/* 게시 전에도 실제로 나갈 모습을 봐야 결정할 수 있다. 게시 후에는
           post가 정본이므로 미리보기를 대체한다. */}
       {!post && draft ? <PublishPreview draft={draft} /> : null}
-      {draft?.status === "approved" ? (
+      {!post && draft && item.pipelineV3?.artifacts.captionBuild?.stale ? (
+        <Alert color="attention" title="캡션 원본이 이전 이미지 기준입니다">
+          컷을 다시 만든 뒤 캡션을 다시 쓰지 않았습니다. 게시 캡션은 그대로이며
+          이대로 게시할 수 있습니다. 새 이미지 기준으로 다시 쓰려면 ⑥ 캡션에서
+          다시 실행하세요.
+        </Alert>
+      ) : null}
+      {draft?.status === "approved" ||
+      (draft && v4PausedAt(draft, ["publish"])) ? (
         <>
           <Alert color="blue">
-            예정 시각과 무관하게 지금 게시할 수 있습니다.
+            {draft.status === "approved"
+              ? "예정 시각과 무관하게 지금 게시할 수 있습니다."
+              : draft.caption.trim()
+                ? "예정 시각과 무관하게 지금 게시할 수 있습니다. 예약 시각을 두면 자동 모드가 그때 게시합니다."
+                : "게시 캡션이 없습니다 — ⑥ 캡션에서 생성하거나 입력하세요."}
           </Alert>
           {publish.isError ? <MutationError error={publish.error} /> : null}
           <Group>
             <Button
               loading={publish.isPending}
+              disabled={!draft.caption.trim()}
               onClick={() => publish.mutate(undefined)}
             >
               지금 게시
@@ -1854,9 +1910,20 @@ function PublishPreview({ draft }: { draft: Draft }) {
             ))}
           </div>
         )}
-        <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-          {draft.caption || "캡션 없음"}
-        </Text>
+        {/* 미리보기는 실제로 나갈 모습이다 — 캡션이 없으면 가제로 채우지 않고
+            없다고 말한다(제목 폴백은 목록·헤더에만). */}
+        {draft.caption ? (
+          <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+            {draft.caption}
+          </Text>
+        ) : (
+          <Alert color="attention">
+            게시 캡션 없음 —{" "}
+            {isPipelineV4(draft)
+              ? "⑥ 캡션에서 생성하거나 입력하세요."
+              : "⑥ 검수에서 입력하세요."}
+          </Alert>
+        )}
         {draft.hashtags.length ? (
           <Group gap="xs" wrap="wrap">
             {draft.hashtags.map((tag) => (
@@ -1867,6 +1934,258 @@ function PublishPreview({ draft }: { draft: Draft }) {
           </Group>
         ) : null}
       </Stack>
+    </Paper>
+  );
+}
+
+// 제목: 캡션 → 기획 전제(가제) → 없음. V4는 ⑥ 전까지 캡션이 비어 있다.
+function workTitle(item: PostWorkItem): string {
+  if (item.caption.trim()) return item.caption;
+  const premise = item.pipelineV3?.artifacts.postPlan?.premise;
+  return premise?.trim() ? `${premise} (가제)` : "(제목 없음)";
+}
+
+// ⑥ 캡션 (V4) — 캡션 Agent가 생성 이미지를 보고 쓴 원본(참고용)과 실제로
+// 게시되는 캡션(컬럼, 편집 가능)을 한 화면에 둔다. 어느 것이 게시되는지가
+// 흐려지지 않게 라벨을 나누고, 재실행이 수정본을 덮는 것은 확인을 받는다.
+function V3CaptionStage({
+  item,
+  draft,
+  evaluations,
+}: {
+  item: PostWorkItem;
+  draft: Draft;
+  evaluations: DraftEvaluation[];
+}) {
+  const pipeline = item.pipelineV3;
+  const artifact = pipeline?.artifacts.captionBuild;
+  const stageState = v3StageState(pipeline, "caption");
+  const current = pipeline?.stage === "caption";
+  const [note, setNote] = useState(artifact?.operatorNote ?? "");
+  const run = useDraftMutation(draft.id, () =>
+    runDraftStage(draft.id, "plan", note.trim() ? { note: note.trim() } : {}),
+  );
+  const runnable =
+    stageState !== "running" && (current || stageState === "done");
+  const shots = draft.shots ?? [];
+  const missing = shots.filter(
+    (shot) => !shot.outputs.some((output) => output.selected),
+  ).length;
+  // 다시 실행은 운영자 수정본을 새 원본으로 덮는다 — 되돌릴 수 없다.
+  const overwritesEdit = artifact ? !artifact.matchesColumn : false;
+  const onRun = () => {
+    if (
+      overwritesEdit &&
+      !window.confirm(
+        "현재 게시 캡션은 운영자 수정본입니다. 다시 생성하면 게시 캡션과 해시태그가 새 원본으로 바뀌고 수정본은 복구할 수 없습니다. 계속할까요?",
+      )
+    ) {
+      return;
+    }
+    run.mutate(undefined);
+  };
+  const evaluation = latestEvaluation(evaluations, "image");
+  return (
+    <StagePaper
+      title="⑥ 캡션"
+      description="캡션 Agent가 생성된 이미지를 보고 캡션과 해시태그를 씁니다. 게시되는 것은 아래 게시 캡션입니다."
+      status={<StageStateBadge state={stageState} />}
+    >
+      {stageState === "running" ? (
+        <Group gap="xs" role="status">
+          <Loader size="sm" />
+          <Text size="sm">캡션 Agent 실행 중…</Text>
+        </Group>
+      ) : null}
+      {artifact ? (
+        <Paper p="md">
+          <Stack gap="sm">
+            <Group gap="xs" align="baseline">
+              <Text fw={600} size="sm">
+                Agent 원본
+              </Text>
+              <Text size="xs" c="dimmed">
+                참고용 — 이 텍스트가 그대로 게시되지는 않습니다
+              </Text>
+            </Group>
+            <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+              {artifact.caption}
+            </Text>
+            {artifact.hashtags.length ? (
+              <Group gap="xs" wrap="wrap">
+                {artifact.hashtags.map((tag) => (
+                  <Badge key={tag} variant="light">
+                    #{tag}
+                  </Badge>
+                ))}
+              </Group>
+            ) : null}
+            {artifact.captionLanguages.length ? (
+              <Meta label="언어">{artifact.captionLanguages.join(", ")}</Meta>
+            ) : null}
+            {artifact.operatorNote ? (
+              <Meta label="지시">{artifact.operatorNote}</Meta>
+            ) : null}
+            <Lineage lineage={artifact} status="ready" />
+            {artifact.stale ? (
+              <Alert
+                color="attention"
+                title="이전 이미지 기준으로 작성됐습니다"
+              >
+                컷을 다시 만든 뒤 캡션을 다시 쓰지 않았습니다. 게시 캡션은
+                그대로이며 이대로 게시할 수 있습니다. 새 이미지 기준으로 다시
+                쓰려면 아래에서 다시 실행하세요.
+              </Alert>
+            ) : null}
+          </Stack>
+        </Paper>
+      ) : (
+        <Alert color="gray">
+          아직 캡션 산출물이 없습니다.
+          {missing > 0
+            ? ` 게시 이미지 ${shots.length - missing}/${shots.length} — 모든 컷이 완료되면 실행할 수 있습니다.`
+            : ""}
+        </Alert>
+      )}
+      <EvaluationBlock label="생성 이미지 평가" evaluation={evaluation} />
+      {current && pipeline ? (
+        <Alert color="blue">다음 행동 · {pipeline.nextAction}</Alert>
+      ) : null}
+      {run.isError ? <MutationError error={run.error} /> : null}
+      {runnable ? (
+        <Stack gap="xs">
+          {artifact ? (
+            <Textarea
+              label="이번 재생성 지시 (선택)"
+              description="이번 실행에만 전달됩니다. 브리프의 운영자 요청은 그대로 함께 전달됩니다."
+              autosize
+              minRows={2}
+              value={note}
+              onChange={(event) => setNote(event.currentTarget.value)}
+            />
+          ) : null}
+          <Group>
+            <Button
+              loading={run.isPending}
+              variant={stageState === "done" ? "default" : "filled"}
+              disabled={missing > 0}
+              onClick={onRun}
+            >
+              {stageState === "done" ? "캡션 다시 생성" : "캡션 생성"}
+            </Button>
+            {missing > 0 ? (
+              <Text size="xs" c="dimmed">
+                게시 이미지 {shots.length - missing}/{shots.length} — 모든 컷이
+                완료되면 생성할 수 있습니다.
+              </Text>
+            ) : null}
+          </Group>
+        </Stack>
+      ) : null}
+      {v4PausedAt(draft, ["publish"]) ? (
+        <PublishCaptionForm
+          key={artifact?.hash ?? "no-artifact"}
+          draft={draft}
+          artifact={artifact}
+        />
+      ) : null}
+    </StagePaper>
+  );
+}
+
+// 게시 캡션(컬럼) 편집 폼. artifact.hash를 key로 받아 캡션 생성/재생성 성공 시
+// 새 값으로 리셋된다 — uncontrolled 초기값 1회 읽기로 두면 "저장"이 옛 글을
+// 되돌린다. 그 외 draft 갱신에는 리셋되지 않는다(입력 중 텍스트 보존).
+function PublishCaptionForm({
+  draft,
+  artifact,
+}: {
+  draft: Draft;
+  artifact?: NonNullable<
+    PostWorkItem["pipelineV3"]
+  >["artifacts"]["captionBuild"];
+}) {
+  const form = useForm({
+    mode: "uncontrolled",
+    initialValues: {
+      caption: draft.caption,
+      hashtags: draft.hashtags.join(", "),
+      scheduledAt: draft.scheduledAt
+        ? new Date(draft.scheduledAt).toISOString().slice(0, 16)
+        : "",
+      reason: "",
+    },
+  });
+  const save = useDraftMutation(draft.id, (values: typeof form.values) =>
+    updateDraft(draft.id, {
+      caption: values.caption.trim(),
+      hashtags: values.hashtags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      scheduledAt: values.scheduledAt
+        ? new Date(values.scheduledAt).toISOString()
+        : null,
+      ...(values.reason.trim() ? { reason: values.reason.trim() } : {}),
+    }),
+  );
+  const relation = !artifact
+    ? draft.caption.trim()
+      ? "직접 입력"
+      : "없음"
+    : artifact.matchesColumn
+      ? "Agent 원본 그대로"
+      : "운영자 수정본";
+  return (
+    <Paper p="md" component="section">
+      <form onSubmit={form.onSubmit((values) => save.mutate(values))}>
+        <Stack gap="sm">
+          <Group gap="xs" align="baseline">
+            <Text fw={600} size="sm">
+              게시 캡션
+            </Text>
+            <Text size="xs" c="dimmed">
+              이 내용이 게시됩니다
+            </Text>
+            <Badge
+              variant="light"
+              color={relation === "없음" ? "attention" : "ink"}
+            >
+              {relation}
+            </Badge>
+          </Group>
+          <Textarea
+            label="캡션"
+            autosize
+            minRows={3}
+            key={form.key("caption")}
+            {...form.getInputProps("caption")}
+          />
+          <TextInput
+            label="해시태그 (쉼표 구분)"
+            key={form.key("hashtags")}
+            {...form.getInputProps("hashtags")}
+          />
+          <TextInput
+            label="게시 예약 (비우면 즉시)"
+            type="datetime-local"
+            key={form.key("scheduledAt")}
+            {...form.getInputProps("scheduledAt")}
+          />
+          <TextInput
+            label="왜 고쳤나요? (선택)"
+            description="기록에만 남습니다 — 캡션 Agent 개선의 원자료입니다."
+            key={form.key("reason")}
+            {...form.getInputProps("reason")}
+          />
+          {save.isError ? <MutationError error={save.error} /> : null}
+          <Group>
+            <Button type="submit" loading={save.isPending}>
+              게시 캡션 저장
+            </Button>
+          </Group>
+        </Stack>
+      </form>
     </Paper>
   );
 }
@@ -2084,7 +2403,9 @@ function latestEvaluation(
 }
 
 function isStage(value: string): value is PostWorkStage {
-  return [...V3_STAGES, ...LEGACY_STAGES].some((stage) => stage.id === value);
+  return [...V3_STAGES, ...V4_STAGES, ...LEGACY_STAGES].some(
+    (stage) => stage.id === value,
+  );
 }
 
 function sourceLabel(source: PostWorkItem["source"]) {

@@ -345,4 +345,156 @@ describe("post work stage screens", () => {
       screen.getByText("짧게 끊어 쓰고 이모지를 쓰지 않는다"),
     ).toBeInTheDocument();
   });
+
+  // V4(검수 없음): 레일 ⑥이 검수가 아니라 캡션이다. v3 초안(배포 전 것)은 그대로
+  // 검수 레일이어야 한다 — 두 초안이 같은 화면에서 다른 레일을 보인다.
+  it("shows the caption stage instead of review on the V4 rail only", async () => {
+    renderStage(
+      "caption",
+      {
+        pipelineVersion: "post-pipeline-v4",
+        source: "manual",
+        mode: "manual",
+        pipeline: { stage: "caption", state: "pending" },
+      },
+      {
+        item: {
+          ...v3Item,
+          currentStage: "caption",
+          stageIndex: 6,
+          statusDetail: "캡션 생성 필요",
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            version: "post-pipeline-v4",
+            stage: "caption",
+            artifacts: {},
+          },
+        },
+        draft: { status: "planned", caption: "" },
+      },
+    );
+
+    const rail = within(
+      await screen.findByRole("navigation", { name: "게시물 생성 단계" }),
+    );
+    expect(rail.getByText("⑥ 캡션")).toBeInTheDocument();
+    expect(rail.queryByText(/검수/)).not.toBeInTheDocument();
+    // 컷이 없으니 실행 조건은 알려주되, 산출물 없음도 함께 말한다.
+    expect(
+      screen.getByRole("button", { name: "캡션 생성" }),
+    ).toBeInTheDocument();
+  });
+
+  // ⑥ 캡션 화면: Agent 원본(참고)과 게시 캡션(컬럼, 편집)이 함께 있고 어느 쪽이
+  // 게시되는지 라벨로 갈린다. stale이면 계보 자리에 경고가 뜨되 "무효"라고
+  // 말하지 않는다 — 게시는 막히지 않는다.
+  it("shows the caption artifact next to the editable publish caption", async () => {
+    renderStage(
+      "caption",
+      {
+        pipelineVersion: "post-pipeline-v4",
+        source: "manual",
+        mode: "manual",
+        pipeline: { stage: "publish", state: "pending" },
+      },
+      {
+        item: {
+          ...v3Item,
+          caption: "필라테스 끝나고 한 컷,, 오늘도 완룟",
+          currentStage: "publish",
+          stageIndex: 7,
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            version: "post-pipeline-v4",
+            stage: "publish",
+            artifacts: {
+              captionBuild: {
+                revision: 2,
+                hash: "sha256:caption",
+                contractVersion: "caption-set-v1",
+                promptVersion: "caption-writer-v1",
+                caption: "필라테스 끝나고 한 컷,, 오늘도 완룟",
+                hashtags: ["필라테스"],
+                captionLanguages: ["ko"],
+                operatorNote: "이모지 빼고",
+                stale: true,
+                matchesColumn: false,
+              },
+            },
+          },
+        },
+        draft: {
+          status: "planned",
+          caption: "필라테스 끝나고 한 컷 — 오늘도 완료",
+          hashtags: ["필라테스"],
+        },
+      },
+    );
+
+    expect(await screen.findByText("Agent 원본")).toBeInTheDocument();
+    expect(screen.getByText("게시 캡션")).toBeInTheDocument();
+    expect(screen.getByText("운영자 수정본")).toBeInTheDocument();
+    expect(screen.getByText(/프롬프트 caption-writer-v1/)).toBeInTheDocument();
+    expect(
+      screen.getByText("이전 이미지 기준으로 작성됐습니다"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("무효")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "캡션 다시 생성" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "게시 캡션 저장" }),
+    ).toBeInTheDocument();
+    // 편집 폼은 게시 컬럼 값으로 채워진다(원본이 아니라).
+    expect(
+      screen.getByDisplayValue("필라테스 끝나고 한 컷 — 오늘도 완료"),
+    ).toBeInTheDocument();
+  });
+
+  // 계약 v2 PostPlan에는 캡션이 없다 — ② 카드는 전제를 리드로 보이고 캡션 줄이
+  // 없어야 한다. v1 artifact(위 테스트)는 계속 캡션을 보인다.
+  it("renders a v2 post plan without a caption line", async () => {
+    renderStage(
+      "post_plan",
+      {
+        pipelineVersion: "post-pipeline-v4",
+        source: "manual",
+        mode: "manual",
+      },
+      {
+        item: {
+          ...v3Item,
+          caption: "",
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            version: "post-pipeline-v4",
+            artifacts: {
+              postPlan: {
+                revision: 1,
+                status: "ready",
+                hash: "sha256:v2",
+                contractVersion: "post-plan-v2",
+                promptVersion: "post-planner-v2",
+                premise: "필라테스 다녀와 현관 거울 앞에 섰다.",
+                primaryPurpose: "운동 후 기록",
+                memoryCandidates: [],
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const body = within(await screen.findByRole("region"));
+    expect(
+      body.getByText("필라테스 다녀와 현관 거울 앞에 섰다."),
+    ).toBeInTheDocument();
+    expect(body.queryByText("캡션")).not.toBeInTheDocument();
+    // 제목은 캡션이 없으니 전제(가제)로.
+    expect(
+      screen.getByRole("heading", {
+        name: /필라테스 다녀와 현관 거울 앞에 섰다\. \(가제\)/,
+      }),
+    ).toBeInTheDocument();
+  });
 });

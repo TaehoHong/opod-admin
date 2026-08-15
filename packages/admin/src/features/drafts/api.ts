@@ -69,6 +69,12 @@ export type DraftConcept = {
   mode?: string;
   source?: string;
   sceneHint?: string;
+  // V3/V4 파이프라인 판별과 정지 지점. V4(검수 없음)는 stage caption/publish에서
+  // 사람이 개입한다.
+  pipelineVersion?: string;
+  pipeline?: { stage?: string; state?: string };
+  // V4 ⑥ 전에는 draft.caption이 비어 있다 — 제목 폴백은 기획 전제(premise)다.
+  postPlanning?: { output?: { intent?: { premise?: string } } };
   // V3가 운영자 요청을 저장하는 필드. V2의 sceneHint에 대응한다.
   operatorRequest?: string | null;
   plannerName?: string;
@@ -186,6 +192,8 @@ export function updateDraft(
     hashtags?: string[];
     scheduledAt?: string | null;
     finish?: string | null;
+    // 캡션을 왜 고쳤는지 — 액션 로그에만 남는 측정 원자료.
+    reason?: string;
   },
 ): Promise<Draft> {
   return apiRequest(`/drafts/${encodeURIComponent(draftId)}`, {
@@ -221,8 +229,39 @@ export type DraftStageAction =
 export function runDraftStage(
   draftId: string,
   action: DraftStageAction,
+  // V4 ⑥ 캡션 재실행의 일회성 운영자 지시(이번 실행에만 전달).
+  body?: { note?: string },
 ): Promise<Draft> {
-  return draftAction(draftId, action);
+  return draftAction(draftId, action, body);
+}
+
+// V4(검수 없음): 정지 지점 판별. 컷 재생성·캡션 편집·마감 프리셋이 여기서 갈린다.
+export function isPipelineV4(draft: Pick<Draft, "conceptJson">): boolean {
+  return draft.conceptJson?.pipelineVersion === "post-pipeline-v4";
+}
+export function v4PausedAt(
+  draft: Pick<Draft, "conceptJson" | "status">,
+  stages: ("caption" | "publish")[],
+): boolean {
+  const pipeline = draft.conceptJson?.pipeline;
+  return (
+    isPipelineV4(draft) &&
+    draft.status === "planned" &&
+    pipeline?.state === "pending" &&
+    stages.includes(pipeline.stage as "caption" | "publish")
+  );
+}
+
+// 제목 폴백: 캡션 → 기획 전제(가제) → 없음. V4는 ⑥ 전까지 캡션이 비어 있다.
+export function draftTitle(draft: Pick<Draft, "caption" | "conceptJson">): {
+  text: string;
+  provisional: boolean;
+} {
+  if (draft.caption.trim()) return { text: draft.caption, provisional: false };
+  const premise = draft.conceptJson?.postPlanning?.output?.intent?.premise;
+  return premise?.trim()
+    ? { text: premise, provisional: true }
+    : { text: "(제목 없음)", provisional: true };
 }
 
 export function rejectDraft(draftId: string, reason?: string): Promise<Draft> {

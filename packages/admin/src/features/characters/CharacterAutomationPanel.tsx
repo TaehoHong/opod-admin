@@ -15,7 +15,15 @@ import {
 import { useForm } from "@mantine/form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { fetchDrafts } from "../drafts/api";
+import { draftTitle, fetchDrafts, type Draft } from "../drafts/api";
+
+// V4는 ⑥ 캡션 전까지 캡션이 비어 있다 — 기획 전제를 가제로 보인다.
+function draftTitleText(draft: Pick<Draft, "caption" | "conceptJson">) {
+  const title = draftTitle(draft);
+  return title.provisional && title.text !== "(제목 없음)"
+    ? `${title.text} (가제)`
+    : title.text;
+}
 import { DRAFT_STATUS_COLOR, DRAFT_STATUS_LABEL } from "../drafts/labels";
 import {
   fetchPostingPolicy,
@@ -94,7 +102,7 @@ function CharacterDraftQueue({ characterId }: { characterId: string }) {
             >
               <Group gap="sm" wrap="nowrap" align="baseline">
                 <Text size="sm" lineClamp={1} style={{ flex: 1, minWidth: 0 }}>
-                  {draft.caption || "(기획 전)"}
+                  {draftTitleText(draft)}
                 </Text>
                 <Badge color={DRAFT_STATUS_COLOR[draft.status]}>
                   {DRAFT_STATUS_LABEL[draft.status]}

@@ -32,7 +32,9 @@ describe("post pipeline V3 contract", () => {
     expect(a).toBe(b);
     expect(
       generationSetHash([{ sortOrder: 0, jobId: "j0", mediaId: "m9" }]),
-    ).not.toBe(generationSetHash([{ sortOrder: 0, jobId: "j0", mediaId: "m0" }]));
+    ).not.toBe(
+      generationSetHash([{ sortOrder: 0, jobId: "j0", mediaId: "m0" }]),
+    );
   });
 
   it("initializes a new manual draft at the post-plan boundary", () => {

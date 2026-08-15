@@ -757,8 +757,7 @@ function v3ReadModel(
                         ?.mediaId,
                     })),
                   ),
-              matchesColumn:
-                text(captionOutput.caption) === draft.caption,
+              matchesColumn: text(captionOutput.caption) === draft.caption,
             },
           }
         : {}),

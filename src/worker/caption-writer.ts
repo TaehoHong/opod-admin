@@ -99,9 +99,7 @@ export async function captionUserContent(
   images: CaptionShotImage[],
   readBytes: MediaBytesReader,
 ): Promise<unknown[]> {
-  const blocks: unknown[] = [
-    { type: "text", text: JSON.stringify(input) },
-  ];
+  const blocks: unknown[] = [{ type: "text", text: JSON.stringify(input) }];
   for (const image of [...images].sort((a, b) => a.sortOrder - b.sortOrder)) {
     const { bytes, contentType } = await readBytes(image.media);
     blocks.push(

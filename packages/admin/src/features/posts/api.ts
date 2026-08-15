@@ -12,6 +12,7 @@ export type PostWorkStage =
   | "evaluation"
   | "generation"
   | "review"
+  | "caption"
   | "publish"
   | "memory";
 
@@ -42,13 +43,15 @@ export type PostWorkItem = {
   createdAt: string;
   updatedAt: string;
   pipelineV3?: {
-    version: "post-pipeline-v3";
+    // v4 = 검수 없음(⑥ 캡션 단계). 레일이 이 값으로 갈린다.
+    version: "post-pipeline-v3" | "post-pipeline-v4";
     stage:
       | "post_plan"
       | "image_plan"
       | "image_prompt"
       | "generation"
       | "review"
+      | "caption"
       | "publish"
       | "memory";
     state: string;
@@ -97,6 +100,15 @@ export type PostWorkItem = {
             source: string;
           }[];
         }[];
+      };
+      // V4 ⑥ 캡션 — stale·matchesColumn은 서버 계산.
+      captionBuild?: V3Lineage & {
+        caption: string;
+        hashtags: string[];
+        captionLanguages: string[];
+        operatorNote?: string;
+        stale: boolean;
+        matchesColumn: boolean;
       };
     };
   };

@@ -18,7 +18,9 @@ import { CandidateCard } from "./CandidateCard";
 import { EvaluationChips } from "./EvaluationChips";
 import {
   generateShot,
+  isPipelineV4,
   regenerateShot,
+  v4PausedAt,
   type Draft,
   type DraftEvaluation,
   type DraftReference,
@@ -43,8 +45,12 @@ export function ShotCard({
   // 않고 대조하기 위한 것이라 생성 단계에서는 넘기지 않는다.
   planned?: V3ImagePlanShot;
 }) {
+  // V4(검수 없음)는 캡션·게시 대기 중에도 컷을 다시 만들 수 있다 — 완료되면
+  // 다시 ⑥ 캡션 대기로 가고 캡션 원본은 stale로 표시된다.
   const canRegenerate =
-    draft.status === "needs_review" || draft.status === "failed";
+    draft.status === "needs_review" ||
+    draft.status === "failed" ||
+    v4PausedAt(draft, ["caption", "publish"]);
 
   const regenerate = useDraftMutation(draft.id, () =>
     regenerateShot(draft.id, shot.jobId),
@@ -341,10 +347,14 @@ function ShotBody({
           {/* 재생성은 needs_review·failed 초안에서만 허용된다
               (drafts.service.ts). 버튼이 없는 이유를 쓰지 않으면 운영자가
               막힌 채로 기다린다. */}
-          {draft.status !== "needs_review" && draft.status !== "failed" ? (
+          {!(
+            draft.status === "needs_review" ||
+            draft.status === "failed" ||
+            v4PausedAt(draft, ["caption", "publish"])
+          ) ? (
             <Text size="xs" c="dimmed">
-              다른 컷이 끝나 초안이 검수 또는 실패 상태가 되면 이 컷을 다시
-              생성할 수 있습니다.
+              다른 컷이 끝나 초안이 {isPipelineV4(draft) ? "캡션 대기" : "검수"}{" "}
+              또는 실패 상태가 되면 이 컷을 다시 생성할 수 있습니다.
             </Text>
           ) : null}
         </Stack>

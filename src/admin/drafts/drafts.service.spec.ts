@@ -447,7 +447,9 @@ describe("DraftsService", () => {
 
     await expect(
       service.updateDraft({ draftId: "draft-1", caption: " 새 캡션 " }),
-    ).rejects.toThrow("Only needs_review or approved drafts (or V4 drafts waiting to publish) can be edited");
+    ).rejects.toThrow(
+      "Only needs_review or approved drafts (or V4 drafts waiting to publish) can be edited",
+    );
     expect(repository.updateEditableDraft).toHaveBeenCalledWith(
       "draft-1",
       ["needs_review", "approved"],

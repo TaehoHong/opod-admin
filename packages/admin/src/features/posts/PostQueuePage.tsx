@@ -39,6 +39,7 @@ const STAGE_LABEL: Record<PostWorkItem["currentStage"], string> = {
   evaluation: "평가",
   generation: "이미지 생성",
   review: "검수",
+  caption: "캡션",
   publish: "게시",
   memory: "메모리",
 };
@@ -134,8 +135,14 @@ export function PostQueuePage() {
                         fw={600}
                         size="sm"
                       >
+                        {/* V4는 ⑥ 캡션 전까지 캡션이 비어 있다 — 기획 전제를
+                            가제로 보인다. "(기획 전)"은 기획 후에도 캡션이 없는
+                            V4에서 거짓이 된다. */}
                         <TableText lines={1}>
-                          {item.caption || "(기획 전)"}
+                          {item.caption ||
+                            (item.pipelineV3?.artifacts.postPlan?.premise
+                              ? `${item.pipelineV3.artifacts.postPlan.premise} (가제)`
+                              : "(제목 없음)")}
                         </TableText>
                       </Anchor>
                       <Badge variant="light" color="ink" size="xs">

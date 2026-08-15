@@ -286,7 +286,9 @@ describe("PostWorkspaceService", () => {
           status: "completed",
           prompt: "p",
           updatedAt: new Date("2026-08-15T02:00:00.000Z"),
-          outputs: [{ selected: true, mediaId: "media-new", media: { url: "u" } }],
+          outputs: [
+            { selected: true, mediaId: "media-new", media: { url: "u" } },
+          ],
         },
         {
           id: "job-old",
@@ -294,7 +296,9 @@ describe("PostWorkspaceService", () => {
           status: "completed",
           prompt: "p",
           updatedAt: new Date("2026-08-15T01:00:00.000Z"),
-          outputs: [{ selected: true, mediaId: "media-old", media: { url: "u" } }],
+          outputs: [
+            { selected: true, mediaId: "media-old", media: { url: "u" } },
+          ],
         },
       ],
     } as never);

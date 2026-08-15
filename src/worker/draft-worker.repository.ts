@@ -919,8 +919,11 @@ export class DraftWorkerRepository {
     }
     return [...latest.values()]
       .filter(
-        (job): job is typeof job & { outputMedia: NonNullable<typeof job.outputMedia> } =>
-          job.status === "completed" && job.outputMedia !== null,
+        (
+          job,
+        ): job is typeof job & {
+          outputMedia: NonNullable<typeof job.outputMedia>;
+        } => job.status === "completed" && job.outputMedia !== null,
       )
       .map((job) => ({
         sortOrder: job.sortOrder,

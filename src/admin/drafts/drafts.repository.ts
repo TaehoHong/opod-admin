@@ -51,7 +51,9 @@ export type RegenerationResult =
 // V4(검수 없음)에서 사람이 개입할 수 있는 정지 지점 — ⑤ 완료 후 ⑥ 캡션 대기,
 // ⑥ 완료 후 ⑦ 게시 대기. 둘 다 status=planned + pipeline.state=pending이다.
 // 편집 계열 4곳(캡션·마감 프리셋·컷 재생성)이 같은 술어를 쓴다.
-export function v4PausedAt(stages: ("caption" | "publish")[]): Prisma.PostDraftWhereInput {
+export function v4PausedAt(
+  stages: ("caption" | "publish")[],
+): Prisma.PostDraftWhereInput {
   return {
     status: "planned",
     AND: [

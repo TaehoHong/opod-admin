@@ -302,7 +302,11 @@ describe("PostPipelineV3Runner", () => {
             sortOrder: 0,
             jobId: "job-0",
             mediaId: "media-0",
-            media: { url: "https://cdn.local/0.png", storageKey: null, contentType: "image/png" },
+            media: {
+              url: "https://cdn.local/0.png",
+              storageKey: null,
+              contentType: "image/png",
+            },
           },
         ],
       },
@@ -314,7 +318,10 @@ describe("PostPipelineV3Runner", () => {
       expect.objectContaining({ url: "https://cdn.local/0.png" }),
     );
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    const userContent = body.messages[1].content as { type: string; text?: string }[];
+    const userContent = body.messages[1].content as {
+      type: string;
+      text?: string;
+    }[];
     expect(userContent.some((block) => block.type === "image_url")).toBe(true);
     expect(userContent[0].text).toContain("존댓말로 짧게");
     expect(userContent[0].text).toContain("이모지 빼고");
