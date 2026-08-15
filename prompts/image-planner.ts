@@ -1,6 +1,6 @@
 import { rootUnionSchema } from "./strict-schema";
 
-export const IMAGE_PLANNER_PROMPT_VERSION = "image-planner-v2";
+export const IMAGE_PLANNER_PROMPT_VERSION = "image-planner-v3";
 export const IMAGE_PLAN_CONTRACT_VERSION = "image-plan-v1";
 
 export const IMAGE_PLANNER_SYSTEM_PROMPT = `You are the Image Planning Agent in an automated social-post creation pipeline.
@@ -17,9 +17,9 @@ Priorities
 Responsibilities
 - Give every shot a distinct visualPurpose; multiple shots must add different information, not merely change angle.
 - scene contains only final-frame visible people, actions, objects, space, framing, and crop. captureSetup contains off-frame photographer/device/camera position, height, direction, and distance. Never leak off-frame capture mechanics into scene.
-- captureSetup must be geometrically able to produce scene. A reflected view requires the lens aimed at the reflective surface, so a self-taken mirror shot uses the rear camera and the device shows its back in the reflection, while a front camera frames the subject directly and yields no reflected view. Every stated hand, device, limb, and body orientation must be simultaneously possible for one person.
+- captureSetup must be geometrically able to produce scene. A reflected view requires the lens aimed at the reflective surface, so a self-taken mirror shot uses the rear camera and the device shows its back in the reflection, while a front camera frames the subject directly and yields no reflected view. Every stated hand, device, limb, and body orientation must be simultaneously possible for one person. Whatever supports or holds the camera occupies the camera position: in a direct shot it stays outside the frame and cannot appear in scene; only a reflected shot may show the device, inside the reflection at its true position.
 - Decide character presentation. If recognizable features are visible, identityPreservationRequired is true and at least one suitable identity binding is required.
-- Select only supplied identity/environment reference IDs. bindingId must be unique. State semanticPurposes, preserve, and source-scoped avoidCopying. Do not decide model slot/order.
+- Select only supplied identity/environment reference IDs. bindingId must be unique. State semanticPurposes, preserve, and source-scoped avoidCopying. Do not decide model slot/order. preserve names concrete visible elements — furniture, colors, materials, relative placement — never a layout, composition, or camera viewpoint; the viewpoint belongs to captureSetup alone. A mirror shot's scene shows the same space reflected from the mirror's position, not the reference photo's own view.
 - Use at most one semantic location. locationId is a supplied catalog ID or null for an uncatalogued single place.
 - Put only concrete values shared by at least two declared shots in continuity.lockedElements.
 

@@ -588,6 +588,7 @@ capability probe와 같은 가짜 통과를 만들 위험이 크다 — 모델�
 | 12 | 두 모델이 장소 레퍼런스를 반대로 다룬다 | (미적용) 원인은 계약 모순 — 같은 프롬프트가 레퍼런스 시점과 거울 반사 시점을 동시에 요구한다 | 관측만 | research-log `negative-block-ablation` 부수 발견 |
 | 13 | 운영자 재리뷰: 실험 12장 중 게시 가능 2~3장. 공통 탈락은 배경 비현실성과 마루 위 운동화 | (미적용) 위반은 프롬프트가 상류에서 지시했다 — "stands on the oak floor … gray running shoes, all fully visible". 주거 문화 규범을 소유하는 평가 차원이 없다 | 관측만. planner-v3 후보 2건 추가 | research-log `negative-block-ablation` 재리뷰 |
 | 14 | (13의 후속 가설) 결함은 디테일 간 상호작용에서 난다 — 플래너가 과잉 단언한다 | "없어도 되는" 단언 11건(마루·신발·거리·정체성 재서술 등, 727자)을 뺀 조건 C를 사전 등록 후 시드 페어 6쌍으로 검증 | **기각.** 통과 A 2/6 : C 2/6 동률, 둘 다 통과한 쌍 0. B(악화)·C(무효과)로 과제약 가설 양 절반이 닫혔다 — 프롬프트 길이 층은 통과율의 지렛대가 아니다 | research-log `detail-budget-ablation` |
+| 15 | 계약 모순 2유형이 픽셀까지 내려간다 — 지지물 프레임 침입, layout↔반사 시점 | `image-planner-v3` — 지지물은 카메라 위치(직촬에서 프레임 밖), preserve는 요소만(layout·composition·시점 금지, 시점은 captureSetup 소유) | 관측 대기 | research-log `image-planner-v3` |
 
 ### 19.2 되풀이된 실패 유형
 

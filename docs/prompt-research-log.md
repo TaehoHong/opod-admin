@@ -608,3 +608,48 @@ $1.20 (12장). 실험 누적 $3.00.
 판정 완료 전 통과 산수를 잘못 계산해("답에 따라 A2:C4가 될 수 있다") 불필요한
 확인 질문을 했다. 미확정 4장은 A2·C2 대칭이라 어느 응답이어도 동률 → 기각으로
 동일했다. 확인 질문 자체는 판정 모호성을 없앴으므로 무해했지만, 근거가 틀렸다.
+
+## image-planner-v3 — 촬영 지지물·보존 의미 규칙 (2026-08-14)
+
+- 상태: **적용 중 (관측 전)**
+- 대상: `prompts/image-planner.ts` 시스템 프롬프트. 스키마와 계약(`image-plan-v1`)
+  불변
+- 발단: 계약 모순 2유형이 기획에서 관측되고 픽셀까지 내려갔다.
+  1. **지지물 프레임 침입** — "폰을 신발장에 거치 + 그 신발장이 그녀 뒤에
+     보인다"(draft `019ffa17…` 컷 1). 기획 평가자가 major로 잡았고, 생성된
+     후보 2장 모두 폰이 프레임 안에 등장, 생성 이미지 평가자도 major로 확인
+  2. **layout↔반사 시점** — preserve "cream entryway layout"과 captureSetup의
+     거울 반사 시점이 동시에 성립 불가. 두 모델이 반대로 해소했다
+     (gpt-image-2는 레이아웃, nano-banana는 촬영)
+- 근거 보강: `detail-budget-ablation` 기각으로 "단언을 줄이면 낫다" 경로가
+  닫혔으므로, 남는 처방은 모순 자체를 막는 규칙이다.
+- 변경 (v2 → v3, 문장 2개 추가):
+
+  R1 (촬영 기하 귀결 — v2에서 일반화에 실패한 것을 직접 명문화):
+
+  ```
+  Whatever supports or holds the camera occupies the camera position: in a
+  direct shot it stays outside the frame and cannot appear in scene; only a
+  reflected shot may show the device, inside the reflection at its true
+  position.
+  ```
+
+  R2 (보존은 요소, 시점은 촬영 소유):
+
+  ```
+  preserve names concrete visible elements — furniture, colors, materials,
+  relative placement — never a layout, composition, or camera viewpoint; the
+  viewpoint belongs to captureSetup alone. A mirror shot's scene shows the
+  same space reflected from the mirror's position, not the reference photo's
+  own view.
+  ```
+
+- 범위 밖: R3(주거 문화 규범 — 마루 위 운동화)는 모순이 아니라 **정합적으로
+  틀린 지시**라 별도 결정으로 남긴다. 운영자 승인 범위가 R1·R2였다.
+- 관측 방법: ③ 재실행 후 (a) artifact `promptVersion`이 `image-planner-v3`인지,
+  (b) 기획 텍스트 검사 — 지지물이 scene에 등장하는가, preserve에
+  layout/composition/viewpoint류 단어가 있는가, (c) 생성까지 가면 게시가능
+  게이트. 표본 1로 판정하지 않는다(v2 교훈).
+- 위험: v2에서 "사례는 지켜지고 원칙은 일반화되지 않는다"를 관측했다. R1은 그
+  실패한 귀결을 직접 명문화한 것이므로, 미열거 귀결이 또 새면 규칙 나열 접근
+  자체를 재검토한다.
