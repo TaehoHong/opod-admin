@@ -467,7 +467,12 @@ function V3Stage({
   evaluationKind: DraftEvaluation["kind"];
   evaluationLabel: string;
   runLabel: string;
-  lineage?: { revision: number; hash?: string; contractVersion?: string };
+  lineage?: {
+    revision: number;
+    hash?: string;
+    contractVersion?: string;
+    promptVersion?: string;
+  };
   status?: string;
   children?: React.ReactNode;
 }) {
@@ -787,12 +792,19 @@ function StageStateBadge({ state }: { state: V3StageState }) {
   return <Badge color={copy.color}>{copy.label}</Badge>;
 }
 
-// 산출물 계보. artifact에 실행 시각이 없으므로 리비전·계약·해시만 보여준다.
+// 산출물 계보. artifact에 실행 시각이 없으므로 리비전·버전·해시만 보여준다.
+// 프롬프트 버전은 재실행이 새 프롬프트로 돌았는지 확인하는 1차 증거라 라벨을
+// 붙여 계약 버전과 헷갈리지 않게 한다.
 function Lineage({
   lineage,
   status,
 }: {
-  lineage: { revision: number; hash?: string; contractVersion?: string };
+  lineage: {
+    revision: number;
+    hash?: string;
+    contractVersion?: string;
+    promptVersion?: string;
+  };
   status?: string;
 }) {
   return (
@@ -800,6 +812,7 @@ function Lineage({
       revision {lineage.revision}
       {status ? ` · ${status}` : ""}
       {lineage.contractVersion ? ` · ${lineage.contractVersion}` : ""}
+      {lineage.promptVersion ? ` · 프롬프트 ${lineage.promptVersion}` : ""}
       {lineage.hash ? ` · ${lineage.hash.slice(0, 15)}…` : ""}
     </Text>
   );

@@ -196,6 +196,49 @@ describe("PostWorkspaceService", () => {
     });
   });
 
+  // 어느 프롬프트 버전이 산출물을 만들었는지는 프롬프트 실험 관측의 1차
+  // 증거다. PromptSet은 같은 정보를 다른 키(commonPromptVersion)로 기록하므로
+  // 그 키를 놓치면 ④에서만 조용히 사라진다.
+  it("exposes the prompt version behind each artifact, across both key names", async () => {
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v3",
+        source: "manual",
+        mode: "manual",
+        pipeline: { stage: "generation", state: "ready", imageCount: 1 },
+        postPlanning: {
+          revision: 1,
+          promptVersion: "post-planner-v1",
+          output: {},
+        },
+        imagePlanning: {
+          revision: 2,
+          promptVersion: "image-planner-v3",
+          output: {},
+        },
+        promptBuild: {
+          revision: 1,
+          commonPromptVersion: "image-prompt-generator-v1",
+          output: {},
+        },
+      },
+      jobs: [],
+    } as never);
+
+    const item = await service.get("draft-1");
+
+    expect(item.pipelineV3?.artifacts.postPlan?.promptVersion).toBe(
+      "post-planner-v1",
+    );
+    expect(item.pipelineV3?.artifacts.imagePlan?.promptVersion).toBe(
+      "image-planner-v3",
+    );
+    expect(item.pipelineV3?.artifacts.promptBuild?.promptVersion).toBe(
+      "image-prompt-generator-v1",
+    );
+  });
+
   // 게시 트랜잭션(`selectedPublishedMemories`)은 selected이면서 현재 PostPlan
   // 해시에서 나온 후보만 저장한다. read model이 다른 기준을 쓰면 화면이 저장되지
   // 않은 기억을 저장됐다고 말하게 된다.

@@ -105,6 +105,8 @@ export type PostWorkItem = {
 export type V3Lineage = {
   revision: number;
   contractVersion?: string;
+  // 이 산출물을 만든 Agent 프롬프트 버전 (예: image-planner-v3).
+  promptVersion?: string;
   hash?: string;
 };
 

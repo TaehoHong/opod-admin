@@ -56,6 +56,7 @@ export type PostPipelineV3ReadModel = {
       revision: number;
       status: string;
       contractVersion?: string;
+      promptVersion?: string;
       hash?: string;
       premise?: string;
       primaryPurpose?: string;
@@ -71,6 +72,7 @@ export type PostPipelineV3ReadModel = {
       revision: number;
       status: string;
       contractVersion?: string;
+      promptVersion?: string;
       hash?: string;
       shotCount?: number;
       locationId?: string;
@@ -86,6 +88,7 @@ export type PostPipelineV3ReadModel = {
       revision: number;
       shotCount: number;
       contractVersion?: string;
+      promptVersion?: string;
       hash?: string;
       targetModelId?: string;
       policyVersion?: string;
@@ -673,13 +676,22 @@ function v3ReadModel(
   };
 }
 
-// 산출물 계보. artifact에는 실행 시각이 없으므로 revision/hash/계약 버전만 내린다.
+// 산출물 계보. artifact에는 실행 시각이 없으므로 revision/hash/버전만 내린다.
+// 어느 프롬프트 버전이 실제로 쓰였는지는 프롬프트 실험 관측의 1차 증거다.
+// PromptSet은 같은 정보를 commonPromptVersion 키로 기록하므로 둘 다 읽는다.
 function lineage(artifact: Record<string, unknown>) {
+  const promptVersion =
+    typeof artifact.promptVersion === "string"
+      ? artifact.promptVersion
+      : typeof artifact.commonPromptVersion === "string"
+        ? artifact.commonPromptVersion
+        : undefined;
   return {
     ...(typeof artifact.hash === "string" ? { hash: artifact.hash } : {}),
     ...(typeof artifact.contractVersion === "string"
       ? { contractVersion: artifact.contractVersion }
       : {}),
+    ...(promptVersion ? { promptVersion } : {}),
   };
 }
 
