@@ -664,7 +664,7 @@ capability probe(#3)와, 한국어 연어 부자연스러움에 만점을 준 �
 ## 20. V4 설계 — 캡션 Agent 후치 (2026-08-15)
 
 - 설계일: 2026-08-15
-- 상태: 설계 검토 대기 (구현 착수 전)
+- 상태: 설계 리뷰 반영 완료(§20.13, 2026-08-15) — 구현 승인 대기
 - 발단과 근거 관측: §18 (2026-08-13). 이 절이 설계 정본이고 §18은 발단 기록으로 남긴다.
 - 진입 조건: `image-planner-v3` 유지 확정(research-log, 2026-08-15 운영자 게이트).
   이미지 트랙이 안정되어 다음 병목인 글 트랙으로 이동한다.
@@ -730,9 +730,13 @@ V3 구조(§6)에서 바뀌는 것은 두 가지뿐이다: Post Planning Agent�
 - `postPlan.intent` — premise·primaryPurpose·secondaryPurpose. 사건·관계의 authoritative.
 - 페르소나 writing profile — voice·contentStyle·boundaries·검증된 예시 캡션.
 - recentPosts 캡션·해시태그 — 반복 회피.
-- **선택 이미지** — 컷별 selected media URL(vision 입력) + ImagePlan의 컷별
+- **선택 이미지** — 컷별 selected media(vision 입력) + ImagePlan의 컷별
   visualPurpose/scene 요약(텍스트 근거). 이미지가 흐릿하게 담은 것을 계획 텍스트가
-  보완한다.
+  보완한다. 전송은 생성 이미지 평가가 이미 쓰는 경로를 재사용한다 — 실행 시점에
+  media bytes를 읽어 base64 `image_url` 블록으로 보내는 `visionUserContent`
+  (`evaluation-worker.service.ts:825-880`) 패턴. 따라서 `captionBuild.input`에는
+  **media ID만** 저장한다(URL·bytes 저장 금지 — URL은 영속 보장이 없고 bytes는
+  `conceptJson` 상한(§15)을 깨뜨린다).
 - 캐릭터 콘텐츠 언어 스냅숏.
 - `operatorNote` (선택) — 재생성 시 운영자 지시. 검수 시점에는 operator-request가
   이미 닫혀 있으므로(`planned/failed` 전용) 캡션 스텝 자체 통로가 필요하다.
@@ -743,16 +747,33 @@ preflight(전 컷 선택 여부)가 걸러내므로 blocked variant는 필요가
 
 제약 (memory discipline, §18.6): postPlan에 없는 **새 사건·관계·루틴·지속 사실
 금지**. 선택 이미지에 보이는 일회성 시각 요소 언급은 허용 — 그것이 후치의 목적이다.
+단, 경계를 하나 둔다(리뷰 A7): **이미지와 ImagePlan이 함께 뒷받침하는 요소만
+캡션의 근거로 삼는다.** 이미지에만 있고 계획에 없는 요소(예: 오생성된 소품)를
+캡션이 서술하면 생성 결함이 게시물의 사실로 승격된다. 이 규칙은 "캡션 주장 vs
+계획 텍스트" 대조라 평가 Agent가 잡을 수 있는 축이다(`image_grounding`, §20.6).
 
 저장 (원칙 5): `conceptJson.captionBuild = { revision, hash, contractVersion,
 promptVersion, producerLogId, input, output, sourceArtifacts: [postPlanning
 rev/hash, selectedSetHash] }`. **selectedSetHash에 고정**한다 — 선택을 바꾸면
 captionBuild는 stale이고, 화면이 재생성을 유도한다. 역방향은 자유다: 캡션 재생성은
-②~⑤ 어떤 산출물도 stale로 만들지 않는다(목표 3).
+②~⑤ 어떤 산출물도 stale로 만들지 않는다(목표 3). selectedSetHash는 **lease claim
+직후, LLM 호출 전에** 계산해 고정한다 — 실행 중 선택이 바뀌면 저장된 hash가 현재와
+어긋나 즉시 stale로 표시되므로 별도 경합 처리가 필요 없다(리뷰 B③).
 
-성공 시 `draft.caption`/`hashtags`를 CAS(status=needs_review)로 갱신하고
-`DRAFT_V3_CAPTION_READY` 액션을 남긴다. 운영자 `PATCH`는 지금처럼 컬럼만 덮어쓴다
-— artifact 원본이 남는 것이 §20.7 피드백 쌍의 좌변이 된다.
+성공 시 artifact 저장과 `draft.caption`/`hashtags` 컬럼 갱신을 **한 트랜잭션**에서
+CAS(status=needs_review)로 수행하고 `DRAFT_V3_CAPTION_READY` 액션을 남긴다. CAS
+실패(실행 중 승인 등)는 산출물을 버리고 사유를 화면에 노출한다 — 반쪽 저장을
+만들지 않는다(리뷰 B②). 운영자 `PATCH`는 지금처럼 컬럼만 덮어쓴다 — artifact
+원본이 남는 것이 §20.7 피드백 쌍의 좌변이 된다.
+
+**stale의 의미 (리뷰 F4 결정)**: stale은 `captionBuild` **artifact**의 속성이지
+컬럼의 속성이 아니다. 게시는 컬럼을 읽고 컬럼은 운영자 소유이므로, stale
+captionBuild는 승인·게시를 **막지 않는다** — ⑥·⑦ 화면에 "이 캡션은 이전 이미지
+선택 기준으로 작성됨" 경고와 재생성 버튼을 보이고, 승인은 그 경고를 인지한
+운영자의 판단이다. 하드 차단은 "사람이 최종 판정자"라는 전제를 신선도 게이트가
+뒤집는 구조이고, 캡션과 무관한 컷 교체마다 확정한 텍스트를 버리게 만든다. stale
+artifact는 §8 규칙대로 **실행 입력으로는 못 쓴다** — 캡션 평가는 stale 대상을
+건너뛰고, few-shot 쌍 선별(§20.7)은 stale 아닌 쌍만 쓴다.
 
 ### 20.5 실행 위치 — review 단계의 하위 스텝
 
@@ -804,7 +825,12 @@ sequenceDiagram
 - 신설 차원 제안: `image_grounding` — 캡션이 선택 이미지·ImagePlan과 어긋나는지
   ("거울 앞에 서게 돼요"인데 거울 반사가 성립하지 않던 §18.3 사례). 언어화 가능한
   계약-대조라 평가 Agent가 유능한 축이다(§18.8 관측).
+- §14 지표 재귀속(리뷰 R5): 글 품질 행의 "AI-tell issue율·persona/voice issue율"은
+  V4-1 시점부터 게시글 평가에서 사라지고 V4-2의 caption 평가에서 다시 나온다.
+  V4 전후 비교 시 11차원 평균과 7차원 평균을 그대로 비교하지 않는다 — 차원별로
+  비교한다(§19.3 "총점은 약한 신호").
 - 트리거: 존재 게이트 = `captionBuild` 존재, 재트리거 액션 = `DRAFT_V3_CAPTION_READY`.
+  stale captionBuild(selectedSetHash 불일치)는 평가 대상에서 제외한다.
   운영자 PATCH 수정은 재평가를 트리거하지 않는다 — 평가는 Agent 산출물 진단이다.
 - 동반 수리 2건 (측정 도구를 먼저 고친다):
   1. `evaluationAverage()` overallScore=0 버그 — 하위로는 자유롭게 내려가되
@@ -821,6 +847,11 @@ sequenceDiagram
 `Post.content`(게시본). 게시된 V3 draft에서 두 값이 다르면 그것이 운영자 정정
 사례다. **새 테이블 없이** 같은 캐릭터의 최근 정정 쌍 N개를 Caption Agent 입력에
 few-shot으로 주입한다.
+
+선별 규칙(리뷰 R4 예비): 편집된 쌍만 넣으면 모델이 "항상 고쳐야 한다"고 배우고,
+맥락 한정 정정 1건이 소표본에서 상시 규칙이 된다. **무편집 승인(좌변=우변)도
+양성 예시로 함께 넣고, stale 아닌 쌍만 쓴다.** 세부 선별 규칙은 V4-3 설계에서
+정한다.
 
 전제: 쌍은 captionBuild가 존재하는 게시가 쌓여야 생긴다. 따라서 이 단계(V4-3)는
 V4-1 배포 후 게시 표본이 모인 뒤에 켠다. 조회 비용이 문제로 관측되면 그때 전용
@@ -842,6 +873,7 @@ V4-1 배포 후 게시 표본이 모인 뒤에 켠다. 조회 비용이 문제�
 
 | 단계 | 내용 | 되돌림 |
 |---|---|---|
+| **V4-0 선행 조건** (리뷰 F3) | 현행 V3 경로로 초안 2~3건을 ⑦ 게시까지 완주한다 — 지금 `needs_review`인 `01a003f0…`·`019ffa17…`이 후보. 개발 0, 운영자 행동만 | 얻는 것 둘: (a) V3 ⑥→⑦ 경로가 검증되지 않은 채 V4-1이 바로 그 구간을 바꾸는 상황을 피한다(§19.4 "⑦까지 간 V3 초안 없음"), (b) V4 전 기준선 쌍(`postPlanning.output.caption` vs `Post.content`)이 생긴다 |
 | **V4-1 소유권 이동** | `post-planner-v2`(caption·hashtags·captionLanguages 제거) + `caption-writer-v1` 신설 + ③ 입력에서 caption 제거 + `persistV3PromptJobs` 컬럼 기록 중단 + `/caption` 엔드포인트 + ⑥ UI + 게시글 평가 루브릭 v2(4차원 제거) + 제목 premise 폴백 | 프롬프트·계약 버전 롤백. 이중 소유 과도기를 두지 않는다(§20.12 결정 1) |
 | **V4-2 평가 복원** | `DraftEvaluationKind.caption` 마이그레이션 + caption 평가 Agent(이동 4차원 + `image_grounding`) + 동반 수리 2건(overallScore, `DRAFT_V3_PROMPTS_READY`) | 평가는 비차단이라 생성 경로와 독립적으로 되돌릴 수 있다 |
 | **V4-3 피드백 루프** | 게시 정정 쌍 few-shot 주입 (`caption-writer-v2`) | 프롬프트 버전 롤백. 게시 표본이 모인 뒤에만 착수 |
@@ -853,9 +885,16 @@ V4-1과 V4-2를 나누는 이유: V4-1 직후는 캡션 평가가 없는 공백�
 ### 20.10 수용 기준
 
 - PostPlan 계약(v2)에 caption·hashtags·captionLanguages 필드가 없다.
-- CaptionSet은 selectedSetHash에 고정되고, 선택 변경 시 stale로 표시되며 stale
-  캡션으로 승인·게시할 수 없다.
+- CaptionSet은 selectedSetHash에 고정되고, 선택 변경 시 ⑥·⑦ 화면에 stale 경고와
+  재생성 버튼이 보인다. 승인·게시는 막지 않는다(§20.4 stale의 의미). stale
+  captionBuild는 캡션 평가 대상과 few-shot 쌍에서 제외된다.
 - 캡션 재생성은 ②~⑤ 어떤 산출물도 stale로 만들지 않는다.
+- 파이프라인은 `draft.caption` 컬럼을 **쓰기만 하고 비우지 않는다.** ② 재실행으로
+  postPlanning hash가 바뀌면 captionBuild가 stale로 표시될 뿐, 컬럼은 운영자가
+  재생성하거나 수정할 때까지 유지된다.
+- 배포 전 존재하던 구 계약 V3 draft(`postPlanning.output.caption` 보유)는 ② 카드에
+  캡션 필드가 계속 보이고(계약 v1 표시 호환), 컬럼은 이미 채워져 있으므로 기존
+  경로로 게시된다. ②를 재실행하면 그때부터 v2 계약이다.
 - Caption Agent는 postPlan intent에 없는 새 지속 사실을 만들지 않는다. memory
   candidates는 여전히 PostPlan 소유이고 캡션에서 파생되지 않는다(§13.6 유지).
 - 게시는 `draft.caption` 컬럼을 읽는다 — 운영자 수기 캡션도 Agent 캡션과 동급.
@@ -869,7 +908,7 @@ V4-1과 V4-2를 나누는 이유: V4-1 직후는 캡션 평가가 없는 공백�
 | 비용/위험 | 영향 | 완화 |
 |---|---|---|
 | vision 호출 1회 추가 (컷 N장) | token·latency 증가 | 선택 이미지만 입력, 게시당 1회가 기본(재생성만 반복) |
-| `StrictJsonAgentClient`가 텍스트 전용 | 전송 계층에 이미지 파트 확장 필요 — V4-1의 유일한 인프라 변경 | strict json_schema 응답 계약은 유지, 입력 content만 배열화. capability는 기존 probe 체계에 vision 확인 추가 |
+| ~~`StrictJsonAgentClient`가 텍스트 전용~~ — **설계자 오류, 2026-08-15 정정** | 초안은 "전송 계층에 이미지 파트 확장 필요, V4-1의 유일한 인프라 변경"이라 썼으나 실측 결과 틀렸다. `StrictJsonAgentClient.run`은 `userContent?: unknown`을 받고(`strict-json-agent.ts:26,51`), 생성 이미지 평가가 이미 이 경로로 base64 `image_url` 블록을 보낸다(`evaluation-worker.service.ts:825-880`) | **인프라 변경 없음.** Caption Agent는 같은 클라이언트와 `visionUserContent` 패턴을 재사용한다. 탐색 요약("텍스트 전용")을 코드로 확인하지 않고 옮겨 적은 것이 원인 — §19.2 "가짜 초록불"의 설계 문서판이다 |
 | ⑥ 전까지 `draft.caption` 공백 | 목록 제목·게시 미리보기 공백 | premise 폴백. "기획 가제"가 캡션 행세하는 것보다 정확하다 |
 | 검수 클릭 1회 증가 | 운영 부담 | 수동 파이프라인 원칙과 일치(스텝 = 버튼). 선택 완료 시 자동 실행은 자동 선택 정책과 함께 별도 결정 |
 | 연어 자연스러움은 여전히 미판정 | V4-1이 캡션 품질을 즉시 올린다는 보장 없음 | 기대 효과는 (a) 이미지 근거 확보, (b) few-shot 지면. 판정은 여전히 사람(§20.1 비목표) |
@@ -888,10 +927,61 @@ V4-1과 V4-2를 나누는 이유: V4-1 직후는 캡션 평가가 없는 공백�
    쌍을 이미 기록하고 있다(§20.7). 조회 비용 문제가 관측되면 그때 결정.
 4. **blocked variant 없이 시작.** preflight가 입력 부족을 막고, Caption Agent에는
    시각화 불가 같은 차단 사유가 구조적으로 없다.
+5. **stale은 경고, 차단 아님** (2026-08-15 리뷰 F4). 근거는 §20.4 "stale의 의미".
+   기존 코드도 같은 방향이다 — 컷 선택 엔드포인트는 draft 상태 게이트가 없고
+   (`drafts.repository.ts:378-389`, job status만 검사) PATCH는 approved에서도
+   열려 있어, 승인 후 수정을 시스템이 이미 허용한다. 하드 차단은 이 관례와도
+   어긋난다.
+6. **파이프라인은 컬럼을 비우지 않는다** (2026-08-15 리뷰 C). ② 재실행·구 계약
+   draft 모두 컬럼 유지 + artifact stale 표시. 근거는 §20.10.
 
 열린 결정 (구현 승인 전 확인):
 
-1. V4-1 범위 승인 — 소유권 원자 이동(post-planner-v2 동시 적용) 방식.
-2. `image_grounding` 평가 차원 신설(V4-2) 여부 — 권장: 신설.
-3. V4-3 착수 시점 — 게시 정정 쌍 몇 건부터 few-shot을 켤지(권장: 쌓이는 것을 보고
-   결정, 지금 확정하지 않음).
+1. V4-1 범위 승인 — 소유권 원자 이동(post-planner-v2 동시 적용) 방식 + V4-0 선행
+   조건(V3 초안 2~3건 게시 완주) 수용 여부.
+2. `image_grounding` 평가 차원 신설(V4-2) 여부 — 권장: 신설. PM 리뷰도 동의.
+3. V4-3 착수 시점 — §20.13 측정 계획의 판정 규칙(쌍 N건 + 편집률 관측)으로
+   대체. 지금 건수를 확정하지 않는다.
+
+### 20.13 설계 리뷰 결과 (2026-08-15)
+
+리뷰 기준은 §19.2의 되풀이된 실패 유형에서 도출했다(A1 가짜 초록불 / A2 저장-표시
+불일치 / A3 사례-원칙 / A4 처방 경로 / A6 계약 모순 / A7 계약 내 결함)에 설계
+일반 기준(B 상태·동시성 / C 마이그레이션 / D 목표-수단 / E 시험 가능성 / F 검수
+UX)을 더했다. finding은 **구체적 실패 시나리오가 있는 것만** 인정했다.
+PM(A3·D) 리뷰는 subagent가 완료했고, 개발(A2·A6·A7·B·C)·QA(A1·A4·E)·UX(F)는
+subagent가 세션 한도로 중단되어 **설계자가 코드로 직접 검증**했다 — 그래서 QA·UX
+축은 아래 표에서 부분 커버다.
+
+| # | 기준 | 심각도 | finding | 검증 | 반영 |
+|---|---|---|---|---|---|
+| R1 | D | should-fix | V4 자체 측정 계획이 없어 V4-1 효과 관측과 V4-3 진행 판정이 지표 없이 열려 있다 | 타당 — §20.11이 "보장 없음"만 적고 관측 방법을 안 적었다 | 아래 측정 계획 추가 |
+| R2 | D | should-fix | V3 게시 완주 0건인데 V4-1이 정확히 ⑥→⑦을 바꾼다 | 타당 — §19.4 실측 | V4-0 선행 조건 신설(§20.9) |
+| R3 | D | should-fix | stale 하드 차단 vs 운영자 수기 캡션 동급 게시가 모순 | 타당 + 코드 확인: 선택 엔드포인트에 상태 게이트 없음, PATCH는 approved 허용 | 결정 5 — stale은 경고. §20.4·§20.10 수정 |
+| R4 | A3 | note | few-shot 쌍 선별 규칙 미정의 — 소표본에서 맥락 한정 정정이 상시 규칙으로 역일반화 | 타당하나 V4-3 설계 사항 | §20.7에 "무편집 승인도 양성 예시로 포함, stale 아닌 쌍만" 한 줄. 선별 규칙은 V4-3 설계에서 |
+| R5 | D | note | 게시글 평가 루브릭 v2로 §14 글 품질 지표 시계열이 끊긴다 | 타당 | §20.6에 재귀속 명시 |
+| R6 | B② | note | 캡션 컬럼 CAS(needs_review)와 실행 중 승인의 경합 | 설계자 검증 — 이론적 경합, 1인 운영 | 한 트랜잭션 + CAS 실패 시 사유 노출(§20.4) |
+| R7 | B③ | note | Agent 실행 중 선택 변경 시 저장된 캡션이 어느 선택 기준인지 불명 | 설계자 검증 | selectedSetHash를 claim 직후 고정(§20.4) |
+| R8 | C | should-fix | 구 계약 V3 draft 3건(`01a003f0…`·`019ffa17…`·`019ff9b5…`)의 재실행·표시·게시 경로 미기재 | 설계자 검증 — 컬럼은 이미 채워져 게시 가능, ② 카드는 v1 표시 호환 필요 | 결정 6 + §20.10 두 항목 |
+| R9 | A7 | should-fix | "일회성 시각 요소 언급 허용"의 경계 — 오생성 소품을 캡션이 사실로 승격 | 설계자 검증 — R1 결함(신발장 위 폰)이 그대로 캡션이 될 수 있었다 | §20.4 제약에 "이미지·계획이 함께 뒷받침하는 것만" 추가 |
+| R10 | C·A2 | **설계자 오류** | §20.11 "전송 계층 텍스트 전용" 주장이 틀렸다 | 코드 확인: `userContent` 존재, 이미지 평가가 이미 vision 전송 | §20.11 정정. captionBuild.input은 media ID만 저장(§20.4) |
+
+미커버(구현 전 재확인 필요): A1 — vision capability probe는 인프라 변경이 없어져
+필요성 자체가 사라졌으나, `image_grounding` 차원이 자연스러움 판정으로 새지 않도록
+루브릭 문구를 V4-2 설계에서 검사한다. A4 — 처방 경로 표는 구현 계획서에서
+작성한다. E — §20.10 수용 기준의 시험 문장 변환은 구현 계획서의 Test Value Gate에서
+수행한다. F — 검수 화면의 "어느 캡션이 게시되는가" 표현은 §20.8에 원칙만 있고
+구체 배치는 구현 시 UX 확인이 필요하다.
+
+**측정 계획 (R1 반영)** — 인프라 신설 없이 기존 데이터에서 유도한다.
+
+| 지표 | 유도 방법 | 기준선 | 판정 용도 |
+|---|---|---|---|
+| 게시 캡션 편집률 | 게시된 draft에서 Agent 원본(V4 전: `postPlanning.output.caption`, V4 후: `captionBuild.output.caption`) ≠ `Post.content` 비율 | V4-0에서 얻는 V3 쌍 2~3건 (표본이 작음을 명시) | V4-1 전후 비교, V4-3 전후 비교(`promptVersion` 계보로 분리) |
+| 편집 유형 | 편집된 쌍을 설계자가 리뷰해 연어 / 이미지 어긋남 / 페르소나 / 반복 / 기타로 라벨, research-log에 기록 | 없음 | 어느 축이 남는지 → 다음 프롬프트 변경 대상 |
+| 재생성 횟수/초안 | `DRAFT_V3_CAPTION_READY` 액션 로그 카운트 | 없음 | 운영 마찰 관측 |
+| 이미지-캡션 어긋남 | V4-2 `image_grounding` 지적 건수 (V4-1 기간은 편집 유형 라벨로 대체) | 없음 | 후치의 직접 효과 |
+
+판정 규칙: 표본 수를 항상 함께 적는다(§19.3). V4-3 착수는 stale 아닌 편집 쌍이
+**최소 10건** 쌓인 뒤 검토한다 — 이 숫자는 few-shot 지면 확보의 하한이지 효과
+판정 표본이 아니다.
