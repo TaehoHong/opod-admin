@@ -1,6 +1,7 @@
 import { IMAGE_PLAN_JSON_SCHEMA } from "../../prompts/image-planner";
 import { PROMPT_SET_JSON_SCHEMA } from "../../prompts/image-prompt-generator";
 import { POST_PLAN_JSON_SCHEMA } from "../../prompts/post-planner";
+import { CAPTION_SET_JSON_SCHEMA } from "../../prompts/caption-writer";
 import {
   UNION_ENVELOPE_KEY,
   assertStrictSchemaCompatible,
@@ -23,6 +24,7 @@ describe("V3 strict schema compatibility", () => {
     ["post plan", POST_PLAN_JSON_SCHEMA],
     ["image plan", IMAGE_PLAN_JSON_SCHEMA],
     ["prompt set", PROMPT_SET_JSON_SCHEMA],
+    ["caption set", CAPTION_SET_JSON_SCHEMA],
   ])("%s schema is compatible", (label, schema) => {
     expect(() => assertStrictSchemaCompatible(schema, label)).not.toThrow();
   });

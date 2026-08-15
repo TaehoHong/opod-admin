@@ -20,4 +20,9 @@ export class UpdateDraftDto {
   @IsOptional()
   @IsString()
   finish?: string | null;
+
+  // 캡션을 왜 고쳤는지 — 액션 로그 reason으로만 남는다(측정 원자료).
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }

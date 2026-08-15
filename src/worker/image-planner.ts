@@ -16,7 +16,9 @@ export type ImagePlannerInput = {
       primaryPurpose: string;
       secondaryPurpose: string | null;
     };
-    caption: string;
+    // V4: 캡션은 ⑤ 생성 뒤에 쓰므로 여기 없다. 프롬프트 문장(image-planner-v3)은
+    // 손대지 않는다 — 입력 부재 시 "caption is supporting tone only"는 무해한
+    // 죽은 문장이다(research-log image-planner-v3 항목).
   };
   imageCount: number;
   characterVisualContext: {

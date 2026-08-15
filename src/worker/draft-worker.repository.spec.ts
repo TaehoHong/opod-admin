@@ -207,7 +207,7 @@ describe("DraftWorkerRepository", () => {
     expect(
       prisma.postDraft.create.mock.calls[0][0].data.conceptJson,
     ).toMatchObject({
-      pipelineVersion: "post-pipeline-v3",
+      pipelineVersion: "post-pipeline-v4",
       source: "scheduler",
       mode: "auto",
       pipeline: { stage: "post_plan", state: "pending" },
@@ -232,7 +232,7 @@ describe("DraftWorkerRepository", () => {
         memoryContent: "memory",
         media: [{ originalMediaId: "media-1", finishedFile: null }],
       }),
-    ).rejects.toThrow("draft left the approved state before publish");
+    ).rejects.toThrow("draft left the publishable state before publish");
     expect(tx.post.create).not.toHaveBeenCalled();
     expect(tx.characterMemory.create).not.toHaveBeenCalled();
   });

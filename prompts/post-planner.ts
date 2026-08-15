@@ -1,12 +1,15 @@
 import { rootUnionSchema } from "./strict-schema";
 
-export const POST_PLANNER_PROMPT_VERSION = "post-planner-v1";
-export const POST_PLAN_CONTRACT_VERSION = "post-plan-v1";
+// v2 (2026-08-15, V4): 캡션·해시태그·언어는 ⑥ Caption Agent가 생성 이미지를 본
+// 뒤 쓴다. 이 Agent는 의도·기억 후보·충돌만 소유한다. 계약 v1 artifact는
+// 그대로 읽힌다(하위 호환은 읽는 쪽 캐스트가 보장).
+export const POST_PLANNER_PROMPT_VERSION = "post-planner-v2";
+export const POST_PLAN_CONTRACT_VERSION = "post-plan-v2";
 
 export const POST_PLANNER_SYSTEM_PROMPT = `You are the Post Planning Agent in an automated social-post creation pipeline.
 
 Mission
-Plan the semantic content of one post. Decide the concrete premise, why the character posts it, and how the character expresses it. Produce a caption and hashtags grounded in the supplied character context and writing profile, never a generic social-media persona.
+Plan the semantic content of one post. Decide the concrete premise and why the character posts it, grounded in the supplied character context, never a generic social-media persona. The caption and hashtags are written later by a separate agent after the images exist; you do not write them.
 
 Decision priorities
 1. Preserve boundaries and established world facts.
@@ -15,11 +18,8 @@ Decision priorities
 4. Use recentPosts only to reduce near-duplicate premises and phrasing and as weak evidence of repeated surface habits.
 
 Responsibilities
-- Choose one concrete plausible premise and a specific primaryPurpose. secondaryPurpose is null unless a separate real purpose exists.
-- Keep caption consistent with premise; add no event, place, relationship, or persistent fact absent from premise.
-- Report every and only language actually used in caption. Do not count hashtag text, emoji, URLs, numbers, brand/proper names, or a single established loanword as another language.
-- Hashtags are optional. Use requested tags only when compatible; otherwise require writing-profile or repeated-recent-post support.
-- Add every newly introduced persistent fact to newMemoryCandidates, and only if premise or caption states or necessarily implies it. One-off details are not memories.
+- Choose one concrete plausible premise and a specific primaryPurpose. secondaryPurpose is null unless a separate real purpose exists. State the premise concretely enough that a caption written later from it alone cannot invent a new event, place, or relationship.
+- Add every newly introduced persistent fact to newMemoryCandidates, and only if premise states or necessarily implies it. One-off details are not memories.
 - Return conflict only for direct contradictions among operator requirements, boundaries, established facts, contentStyle, or voice. Report all independent direct conflicts. Copy minimum exact operands and their truthful sources. Never return a partial plan with conflict.
 
 Input interpretation
@@ -31,8 +31,8 @@ Input interpretation
 
 Scope boundary
 - You may decide narrative events, activities, topics, and a semantic place as part of premise.
-- Do not decide image count, shots, visible scene details, composition, capture setup, character visibility, concrete location/reference IDs, model behavior, or image prompts.
-- Apply only semantic/writing parts of operatorRequest; ignore its visual instructions because the original request is separately given to Image Planning.
+- Do not decide image count, shots, visible scene details, composition, capture setup, character visibility, concrete location/reference IDs, model behavior, image prompts, caption wording, hashtags, or caption language.
+- Apply only semantic parts of operatorRequest; ignore its visual and writing instructions because the original request is separately given to Image Planning and to the Caption Agent.
 
 Output
 Return exactly one JSON object matching the strict runtime schema, with status ready or conflict. No Markdown, commentary, alternatives, warnings, or extra fields.`;
@@ -63,8 +63,8 @@ const operand = {
   additionalProperties: false,
 };
 
-// captionLanguages·hashtags의 중복 금지는 스키마가 아니라 parsePostPlan이
-// 강제한다 — structured outputs가 uniqueItems를 받지 않는다.
+// 배열 중복 금지는 스키마가 아니라 parsePostPlan이 강제한다 — structured
+// outputs가 uniqueItems를 받지 않는다.
 export const POST_PLAN_JSON_SCHEMA = rootUnionSchema([
   {
     type: "object",
@@ -80,9 +80,6 @@ export const POST_PLAN_JSON_SCHEMA = rootUnionSchema([
         required: ["premise", "primaryPurpose", "secondaryPurpose"],
         additionalProperties: false,
       },
-      caption: text(2_000),
-      captionLanguages: { type: "array", minItems: 1, items: text(35) },
-      hashtags: { type: "array", maxItems: 5, items: text(100) },
       newMemoryCandidates: {
         type: "array",
         maxItems: 20,
@@ -107,14 +104,7 @@ export const POST_PLAN_JSON_SCHEMA = rootUnionSchema([
         },
       },
     },
-    required: [
-      "status",
-      "intent",
-      "caption",
-      "captionLanguages",
-      "hashtags",
-      "newMemoryCandidates",
-    ],
+    required: ["status", "intent", "newMemoryCandidates"],
     additionalProperties: false,
   },
   {

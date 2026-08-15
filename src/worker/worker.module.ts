@@ -52,7 +52,16 @@ function storageEnv(config: S3Config | undefined) {
         settings: GenerationSettingsService,
         llmLogs: LlmLogService,
         config: AppConfigService,
-      ) => new PostPipelineV3Runner(drafts, settings, llmLogs, config),
+      ) =>
+        new PostPipelineV3Runner(
+          drafts,
+          settings,
+          llmLogs,
+          config,
+          Math.random,
+          fetch,
+          createMediaBytesReader(config.s3),
+        ),
       inject: [
         DraftWorkerRepository,
         GenerationSettingsService,
@@ -149,7 +158,7 @@ function storageEnv(config: S3Config | undefined) {
           undefined,
           undefined,
           async () => (await settings.resolvePipelineV3()).enabled,
-          (draftId) => v3.runCurrentStage(draftId),
+          (draftId, options) => v3.runCurrentStage(draftId, options),
         ),
       inject: [
         DraftWorkerRepository,

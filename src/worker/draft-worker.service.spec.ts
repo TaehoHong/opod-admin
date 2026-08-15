@@ -41,6 +41,7 @@ function repositoryFake() {
     requeueDraftWithoutJobs: jest.fn().mockResolvedValue(undefined),
     failGeneratedDraft: jest.fn().mockResolvedValue(true),
     markDraftNeedsReview: jest.fn().mockResolvedValue(true),
+    markDraftCaptionPending: jest.fn().mockResolvedValue(true),
     findDueDrafts: jest.fn().mockResolvedValue([]),
     recordPublishFailure: jest.fn().mockResolvedValue(undefined),
     findPublishJobs: jest.fn().mockResolvedValue([]),
@@ -616,6 +617,45 @@ describe("DraftWorkerService aggregation", () => {
     );
   });
 
+  // V4: 검수 없음 — 컷이 다 나오면 ⑥ 캡션 단계(planned+pending)로 간다.
+  // v3 draft가 needs_review로 가는 위 테스트와 짝이다: 버전으로만 갈린다.
+  it("moves a V4 draft to the caption stage instead of review", async () => {
+    const repository = repositoryFake();
+    repository.findGeneratingDrafts.mockResolvedValue([
+      {
+        id: "draft-1",
+        characterId: "character-1",
+        status: "generating",
+        conceptJson: {
+          pipelineVersion: "post-pipeline-v4",
+          mode: "auto",
+          pipeline: { stage: "generation", state: "ready", imageCount: 1 },
+        },
+        jobs: [{ sortOrder: 0, status: "completed" }],
+      },
+    ]);
+    const service = makeService(repository);
+
+    await service.tick();
+
+    expect(repository.markDraftNeedsReview).not.toHaveBeenCalled();
+    expect(repository.markDraftCaptionPending).toHaveBeenCalledWith(
+      "draft-1",
+      "generating",
+      expect.objectContaining({
+        pipelineVersion: "post-pipeline-v4",
+        pipeline: expect.objectContaining({
+          stage: "caption",
+          state: "pending",
+          imageCount: 1,
+        }),
+      }),
+    );
+    expect(repository.recordActionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ actionType: "DRAFT_V3_IMAGES_READY" }),
+    );
+  });
+
   it("marks the draft failed when a latest shot failed", async () => {
     const repository = repositoryFake();
     repository.findGeneratingDrafts.mockResolvedValue([
@@ -762,7 +802,7 @@ describe("DraftWorkerService publishing", () => {
         id: "draft-broken",
         characterId: "character-1",
         contentType: "photo",
-        caption: "",
+        caption: "본문은 있으나 미디어가 없다",
         hashtags: [],
         conceptJson: {},
       },
@@ -795,6 +835,34 @@ describe("DraftWorkerService publishing", () => {
     );
     expect(repository.persistPublishedPost).toHaveBeenCalledWith(
       expect.objectContaining({ draftId: "draft-good" }),
+    );
+  });
+
+  // V4는 ⑥ 캡션 단계 없이 ⑦에 오는 경로가 없어야 하지만, 본문 없는 게시물은
+  // 되돌릴 수 없으므로 게시 직전에 한 번 더 막는다(아키텍처 §20.4).
+  it("refuses to publish a draft whose caption is empty", async () => {
+    const repository = repositoryFake();
+    repository.findDueDrafts.mockResolvedValue([
+      {
+        id: "draft-empty",
+        characterId: "character-1",
+        contentType: "photo",
+        caption: "   ",
+        hashtags: [],
+        conceptJson: {},
+      },
+    ]);
+    const service = makeService(repository);
+
+    await service.tick();
+
+    expect(repository.findPublishJobs).not.toHaveBeenCalled();
+    expect(repository.persistPublishedPost).not.toHaveBeenCalled();
+    expect(repository.recordPublishFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        draftId: "draft-empty",
+        message: expect.stringContaining("caption_missing"),
+      }),
     );
   });
 

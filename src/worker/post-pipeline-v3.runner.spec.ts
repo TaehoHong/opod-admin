@@ -33,10 +33,15 @@ function draft(
   };
 }
 
-function setup(currentDraft: Record<string, unknown>, fetchResult?: unknown) {
+function setup(
+  currentDraft: Record<string, unknown>,
+  fetchResult?: unknown,
+  options: { captionShots?: unknown[]; readMedia?: boolean } = {},
+) {
   const repository = {
     findPlannedDraft: jest.fn().mockResolvedValue(currentDraft),
     findAvailableLocations: jest.fn().mockResolvedValue([]),
+    findCaptionShots: jest.fn().mockResolvedValue(options.captionShots ?? []),
     persistV3Paused: jest.fn().mockResolvedValue(true),
     persistV3Artifact: jest.fn().mockResolvedValue(true),
     persistV3PromptJobs: jest.fn().mockResolvedValue(true),
@@ -72,6 +77,10 @@ function setup(currentDraft: Record<string, unknown>, fetchResult?: unknown) {
       logId: "101",
     })),
   };
+  const readMedia = jest.fn(async () => ({
+    bytes: Buffer.from("png"),
+    contentType: "image/png",
+  }));
   const runner = new PostPipelineV3Runner(
     repository as never,
     settings as never,
@@ -79,8 +88,62 @@ function setup(currentDraft: Record<string, unknown>, fetchResult?: unknown) {
     { draftWorker: { maxShots: 3, maxAttempts: 3 } } as never,
     () => 0.5,
     fetchMock as never,
+    options.readMedia === false ? null : readMedia,
   );
-  return { runner, repository, settings, fetchMock };
+  return { runner, repository, settings, fetchMock, readMedia };
+}
+
+// V4 ⑥ 캡션 단계에 도달한 draft — ②③이 ready이고 ⑤가 컷당 1장을 만들었다.
+function captionStageDraft() {
+  return draft({
+    pipelineVersion: "post-pipeline-v4",
+    source: "manual",
+    mode: "manual",
+    operatorRequest: "존댓말로 짧게",
+    pipeline: {
+      stage: "caption",
+      state: "running",
+      imageCount: 1,
+      reasonCodes: [],
+    },
+    postPlanning: {
+      revision: 1,
+      hash: "sha256:post",
+      output: {
+        status: "ready",
+        intent: {
+          premise: "필라테스 다녀와 현관 거울 앞에 섰다.",
+          primaryPurpose: "운동 후 기록",
+          secondaryPurpose: null,
+        },
+        newMemoryCandidates: [],
+      },
+    },
+    imagePlanning: {
+      revision: 1,
+      hash: "sha256:image",
+      output: {
+        status: "ready",
+        locationId: null,
+        continuity: { lockedElements: [] },
+        shots: [
+          {
+            sortOrder: 0,
+            visualPurpose: "전신 핏",
+            scene: "현관 전신거울에 비친 모습",
+            captureSetup: "후면 카메라를 거울로",
+            characterPresentation: {
+              mode: "reflection",
+              visibleParts: [],
+              faceVisible: false,
+              identityPreservationRequired: false,
+            },
+            referenceBindings: [],
+          },
+        ],
+      },
+    },
+  });
 }
 
 describe("PostPipelineV3Runner", () => {
@@ -133,6 +196,7 @@ describe("PostPipelineV3Runner", () => {
         reasonCodes: [],
       },
     });
+    // post-planner-v2: 캡션 없음 — 캡션은 ⑥ 캡션 단계 소유.
     const { runner, repository } = setup(current, {
       status: "ready",
       intent: {
@@ -140,9 +204,6 @@ describe("PostPipelineV3Runner", () => {
         primaryPurpose: "일찍 온 민망함을 기록한다.",
         secondaryPurpose: null,
       },
-      caption: "또 너무 일찍 옴",
-      captionLanguages: ["ko"],
-      hashtags: [],
       newMemoryCandidates: [],
     });
 
@@ -222,5 +283,98 @@ describe("PostPipelineV3Runner", () => {
       }),
     );
     expect(repository.persistV3Paused).not.toHaveBeenCalled();
+  });
+
+  // ⑥ 캡션: 산출물 저장과 게시 컬럼 갱신이 한 CAS 트랜잭션이고, 다음 단계는
+  // 검수가 아니라 게시 대기다. 이미지가 vision 블록으로 실제 전송돼야 한다.
+  it("runs the caption stage on the generated images and hands off to publish", async () => {
+    const { runner, repository, fetchMock, readMedia } = setup(
+      captionStageDraft(),
+      {
+        status: "ready",
+        caption: "필라테스 끝나고 한 컷,, 오늘도 완룟",
+        captionLanguages: ["ko"],
+        hashtags: ["#필라테스"],
+      },
+      {
+        captionShots: [
+          {
+            sortOrder: 0,
+            jobId: "job-0",
+            mediaId: "media-0",
+            media: { url: "https://cdn.local/0.png", storageKey: null, contentType: "image/png" },
+          },
+        ],
+      },
+    );
+
+    await runner.runCurrentStage("draft-1", { operatorNote: "이모지 빼고" });
+
+    expect(readMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ url: "https://cdn.local/0.png" }),
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const userContent = body.messages[1].content as { type: string; text?: string }[];
+    expect(userContent.some((block) => block.type === "image_url")).toBe(true);
+    expect(userContent[0].text).toContain("존댓말로 짧게");
+    expect(userContent[0].text).toContain("이모지 빼고");
+    expect(userContent[0].text).not.toContain("captureSetup");
+
+    expect(repository.persistV3Artifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expected: expect.objectContaining({
+          stage: "caption",
+          artifactKey: "captionBuild",
+          revision: null,
+        }),
+        columns: {
+          caption: "필라테스 끝나고 한 컷,, 오늘도 완룟",
+          hashtags: ["필라테스"],
+        },
+        actionType: "DRAFT_V3_CAPTION_READY",
+        conceptJson: expect.objectContaining({
+          captionBuild: expect.objectContaining({
+            revision: 1,
+            promptVersion: "caption-writer-v1",
+            contractVersion: "caption-set-v1",
+            source: expect.objectContaining({
+              postPlanningHash: "sha256:post",
+              generationSetHash: expect.stringMatching(/^sha256:/),
+            }),
+            input: expect.objectContaining({
+              operatorNote: "이모지 빼고",
+              shots: [expect.objectContaining({ mediaId: "media-0" })],
+            }),
+          }),
+          pipeline: expect.objectContaining({
+            stage: "publish",
+            state: "pending",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("pauses the caption stage as needs_configuration when no media reader is wired", async () => {
+    const { runner, repository, fetchMock } = setup(
+      captionStageDraft(),
+      undefined,
+      { readMedia: false },
+    );
+
+    await runner.runCurrentStage("draft-1");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(repository.persistV3Paused).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedStage: "caption",
+        conceptJson: expect.objectContaining({
+          pipeline: expect.objectContaining({
+            state: "needs_configuration",
+            reasonCodes: ["media_reader_missing"],
+          }),
+        }),
+      }),
+    );
   });
 });

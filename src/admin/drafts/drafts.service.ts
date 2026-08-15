@@ -10,7 +10,8 @@ import { parseFinishPreset } from "../../worker/film-finish";
 import { GenerationSettingsService } from "../../domain/settings/generation-settings.service";
 import {
   createPostPipelineV3Concept,
-  POST_PIPELINE_V3,
+  isPostPipelineV3,
+  isPostPipelineV4,
 } from "../../worker/post-pipeline-v3";
 import { DraftJobRow, DraftRow, DraftsRepository } from "./drafts.repository";
 
@@ -554,6 +555,7 @@ export class DraftsService {
     hashtags?: string[];
     scheduledAt?: string | null;
     finish?: string | null;
+    reason?: string;
   }): Promise<AdminDraft> {
     const data: Record<string, unknown> = {};
     if (input.caption !== undefined) {
@@ -606,15 +608,23 @@ export class DraftsService {
       throw new BadRequestException("Nothing to update");
     }
 
+    // V4에는 검수 상태가 없다. 캡션·해시태그·일정은 ⑥ 캡션이 끝난 게시 대기에서,
+    // 마감 프리셋은 ⑤ 완료 이후(캡션 대기 포함)에서 고친다 — 캡션 대기 중의
+    // 캡션 편집은 ⑥ 실행이 덮어쓰므로 허용하지 않는다.
+    const captionLike =
+      input.caption !== undefined ||
+      input.hashtags !== undefined ||
+      input.scheduledAt !== undefined;
     const transitioned = await this.repository.updateEditableDraft(
       input.draftId,
       EDITABLE_STATUSES,
       data,
+      captionLike ? ["publish"] : ["caption", "publish"],
     );
     if (!transitioned) {
       await this.assertDraftExists(input.draftId);
       throw new BadRequestException(
-        "Only needs_review or approved drafts can be edited",
+        "Only needs_review or approved drafts (or V4 drafts waiting to publish) can be edited",
       );
     }
     if (
@@ -623,6 +633,17 @@ export class DraftsService {
       input.finish !== undefined
     ) {
       await this.repository.markManual(input.draftId);
+    }
+    if (input.caption !== undefined || input.hashtags !== undefined) {
+      // 편집 이유는 측정 원자료다(아키텍처 §20.8 — 편집 당사자의 1차 라벨).
+      const draft = await this.getDraft(input.draftId);
+      await this.recordActionLog(
+        draft.characterId,
+        input.draftId,
+        "DRAFT_CAPTION_EDITED",
+        input.reason?.trim() || "caption edited by operator",
+      );
+      return draft;
     }
     return this.getDraft(input.draftId);
   }
@@ -652,9 +673,9 @@ export class DraftsService {
         : {};
     // V2 플래너는 sceneHint를 읽는다. V2 draft에 operatorRequest를 써봐야 아무도
     // 읽지 않으므로, 저장을 성공으로 보고하지 않는다.
-    if (concept.pipelineVersion !== POST_PIPELINE_V3) {
+    if (!isPostPipelineV3(concept)) {
       throw new BadRequestException(
-        "Only post-pipeline-v3 drafts have an operator request",
+        "Only post-pipeline-v3/v4 drafts have an operator request",
       );
     }
     // 빈 값은 "지정 없음"으로 되돌리는 것이다. 런타임도 공백을 요청 없음으로
@@ -828,6 +849,13 @@ export class DraftsService {
     jobId: string;
     mediaId: string;
   }): Promise<AdminDraft> {
+    const existing = await this.repository.findDraftConcept(input.draftId);
+    if (existing && isPostPipelineV4(existing.conceptJson)) {
+      // V4: 프롬프트당 1장, 고를 것이 없다(아키텍처 §20.0 결정 3).
+      throw new BadRequestException(
+        "V4 drafts have no candidate selection — each shot has one image",
+      );
+    }
     const job = await this.repository.findCompletedShotCandidates(
       input.draftId,
       input.jobId,

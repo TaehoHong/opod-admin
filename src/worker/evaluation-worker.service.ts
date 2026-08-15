@@ -42,7 +42,7 @@ import {
   IMAGE_PROMPT_EVALUATOR_VERSION,
   POST_EVALUATOR_VERSION,
 } from "../../prompts/v3-evaluators";
-import { canonicalJsonHash } from "./post-pipeline-v3";
+import { generationSetHash } from "./post-pipeline-v3";
 import { MediaBytesReader } from "./reference-captioner";
 
 export type EvaluationWorkerConfig = AppConfig["evaluationWorker"];
@@ -813,7 +813,7 @@ function selectedSetHash(
       | undefined;
   }[],
 ): string {
-  return canonicalJsonHash(
+  return generationSetHash(
     selected.map((item) => ({
       sortOrder: item.sortOrder,
       jobId: item.jobId,

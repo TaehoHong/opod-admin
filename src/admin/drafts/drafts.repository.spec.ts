@@ -44,10 +44,14 @@ describe("DraftsRepository", () => {
       }),
     ).resolves.toBe("regenerated");
     expect(transaction).toHaveBeenCalledTimes(1);
+    // 검수 상태(v2·v3) 또는 V4의 캡션·게시 대기 — 어느 쪽이든 같은 전이.
     expect(transitionDraft).toHaveBeenCalledWith({
       where: {
         id: "draft-1",
-        status: { in: ["needs_review", "failed"] },
+        OR: [
+          { status: { in: ["needs_review", "failed"] } },
+          expect.objectContaining({ status: "planned" }),
+        ],
       },
       data: { status: "regenerating", errorMessage: null },
     });

@@ -15,6 +15,7 @@ export const LLM_LOG_TYPE = {
   postPlanV3: "admin.v3.post.plan",
   imagePlanV3: "admin.v3.image.plan",
   imagePromptV3: "admin.v3.image.prompt",
+  captionWriteV4: "admin.v4.caption.write",
   referenceCaption: "admin.reference.caption",
   connectionTest: "admin.connection.test",
   imageGenerate: "admin.image.generate",

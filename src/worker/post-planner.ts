@@ -6,7 +6,6 @@ import {
   LLM_LOG_TYPE,
   LlmLogContext,
 } from "../domain/llm-logs/llm-log.service";
-import { cleanHashtags } from "./content-planner";
 import { StrictJsonAgentClient } from "./strict-json-agent";
 import { isRecord } from "./value-utils";
 
@@ -57,9 +56,6 @@ export type PostPlanReady = {
     primaryPurpose: string;
     secondaryPurpose: string | null;
   };
-  caption: string;
-  captionLanguages: string[];
-  hashtags: string[];
   newMemoryCandidates: { type: string; content: string }[];
 };
 export type PostPlanConflict = {
@@ -81,7 +77,7 @@ export class PostPlanningAgent {
   ): Promise<{ output: PostPlan; producerLogId: string | null }> {
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.postPlanV3,
-      schemaName: "opod_post_plan_v1",
+      schemaName: "opod_post_plan_v2",
       schema: POST_PLAN_JSON_SCHEMA as unknown as Record<string, unknown>,
       systemPrompt: POST_PLANNER_SYSTEM_PROMPT,
       input,
@@ -130,14 +126,7 @@ export function parsePostPlan(value: unknown): PostPlan {
   }
   exactKeys(
     value,
-    [
-      "status",
-      "intent",
-      "caption",
-      "captionLanguages",
-      "hashtags",
-      "newMemoryCandidates",
-    ],
+    ["status", "intent", "newMemoryCandidates"],
     "post plan ready",
   );
   if (!isRecord(value.intent)) throw new Error("post plan intent is invalid");
@@ -150,22 +139,6 @@ export function parsePostPlan(value: unknown): PostPlan {
     value.intent.secondaryPurpose === null
       ? null
       : requiredText(value.intent.secondaryPurpose, 1_000, "secondaryPurpose");
-  const captionLanguages = stringArray(
-    value.captionLanguages,
-    1,
-    10,
-    35,
-    "captionLanguages",
-  );
-  for (const language of captionLanguages) {
-    if (!isCanonicalLanguageTag(language))
-      throw new Error(`caption language ${language} is not canonical BCP-47`);
-  }
-  if (!Array.isArray(value.hashtags))
-    throw new Error("hashtags must be an array");
-  const hashtags = cleanHashtags(value.hashtags);
-  if (hashtags.length !== value.hashtags.length)
-    throw new Error("hashtags are not normalized or unique");
   if (
     !Array.isArray(value.newMemoryCandidates) ||
     value.newMemoryCandidates.length > 20
@@ -204,9 +177,6 @@ export function parsePostPlan(value: unknown): PostPlan {
       ),
       secondaryPurpose,
     },
-    caption: requiredText(value.caption, 2_000, "caption"),
-    captionLanguages,
-    hashtags,
     newMemoryCandidates,
   };
 }
@@ -229,21 +199,6 @@ function requiredText(value: unknown, max: number, label: string): string {
   return value.trim();
 }
 
-function stringArray(
-  value: unknown,
-  min: number,
-  max: number,
-  itemMax: number,
-  label: string,
-): string[] {
-  if (!Array.isArray(value) || value.length < min || value.length > max)
-    throw new Error(`${label} is invalid`);
-  const result = value.map((item) => requiredText(item, itemMax, label));
-  if (new Set(result).size !== result.length)
-    throw new Error(`${label} has duplicates`);
-  return result;
-}
-
 function exactKeys(
   value: Record<string, unknown>,
   keys: string[],
@@ -256,13 +211,5 @@ function exactKeys(
     actual.some((key, index) => key !== expected[index])
   ) {
     throw new Error(`${label} has invalid fields`);
-  }
-}
-
-function isCanonicalLanguageTag(value: string): boolean {
-  try {
-    return Intl.getCanonicalLocales(value)[0] === value;
-  } catch {
-    return false;
   }
 }

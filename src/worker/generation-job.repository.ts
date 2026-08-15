@@ -231,11 +231,15 @@ export class GenerationJobRepository {
         });
         mediaIds.push(media.id);
       }
+      // 출력이 정확히 1장이면 고를 것이 없으므로 그 장이 곧 게시 이미지다
+      // (V4: 프롬프트당 1장, 검수·선택 단계 없음). 후보가 여럿이면 종전대로
+      // 사람이 고를 때까지 미선택.
+      const soleMediaId = mediaIds.length === 1 ? mediaIds[0] : null;
       const transitioned = await tx.generationJob.updateMany({
         where: { id: input.jobId, status: "running" },
         data: {
           status: "completed",
-          outputMediaId: null,
+          outputMediaId: soleMediaId,
           costUsd: input.costUsd,
           leaseExpiresAt: null,
           errorMessage: null,
@@ -249,7 +253,7 @@ export class GenerationJobRepository {
           jobId: input.jobId,
           mediaId,
           candidateIndex: index,
-          selected: false,
+          selected: mediaId === soleMediaId,
         })),
       });
       const llmLog = await tx.llmLog.findFirst({

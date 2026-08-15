@@ -48,6 +48,23 @@ export type RegenerationSource = Prisma.GenerationJobGetPayload<{
 export type RegenerationResult =
   "regenerated" | "stale-job" | "draft-not-found" | "invalid-draft-status";
 
+// V4(검수 없음)에서 사람이 개입할 수 있는 정지 지점 — ⑤ 완료 후 ⑥ 캡션 대기,
+// ⑥ 완료 후 ⑦ 게시 대기. 둘 다 status=planned + pipeline.state=pending이다.
+// 편집 계열 4곳(캡션·마감 프리셋·컷 재생성)이 같은 술어를 쓴다.
+export function v4PausedAt(stages: ("caption" | "publish")[]): Prisma.PostDraftWhereInput {
+  return {
+    status: "planned",
+    AND: [
+      {
+        OR: stages.map((stage) => ({
+          conceptJson: { path: ["pipeline", "stage"], equals: stage },
+        })),
+      },
+      { conceptJson: { path: ["pipeline", "state"], equals: "pending" } },
+    ],
+  };
+}
+
 const planEditFields = {
   id: true,
   characterId: true,
@@ -230,9 +247,17 @@ export class DraftsRepository {
     draftId: string,
     statuses: PostDraftStatus[],
     data: Record<string, unknown>,
+    // V4는 상태가 아니라 정지 지점으로 편집 가능 여부를 정한다.
+    v4Stages: ("caption" | "publish")[] = [],
   ): Promise<boolean> {
     const result = await this.prisma.postDraft.updateMany({
-      where: { id: draftId, status: { in: statuses } },
+      where: {
+        id: draftId,
+        OR: [
+          { status: { in: statuses } },
+          ...(v4Stages.length ? [v4PausedAt(v4Stages)] : []),
+        ],
+      },
       data: data as never,
     });
     return result.count > 0;
@@ -330,7 +355,12 @@ export class DraftsRepository {
       const transitioned = await tx.postDraft.updateMany({
         where: {
           id: input.draftId,
-          status: { in: ["needs_review", "failed"] },
+          OR: [
+            { status: { in: ["needs_review", "failed"] } },
+            // V4: 캡션·게시 대기 중에도 컷을 다시 만들 수 있다. 완료되면
+            // 집계가 다시 ⑥ 캡션 대기로 보내고 captionBuild는 stale이 된다.
+            v4PausedAt(["caption", "publish"]),
+          ],
         },
         data: { status: "regenerating", errorMessage: null },
       });

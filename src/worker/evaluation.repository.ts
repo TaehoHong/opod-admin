@@ -122,7 +122,7 @@ export class EvaluationRepository {
               SELECT 1 FROM opod.character_action_logs ready
               WHERE ready.target_table = 'post_drafts'
                 AND ready.target_id = d.id
-                AND ready.action_type = 'DRAFT_READY_FOR_REVIEW'
+                AND ready.action_type IN ('DRAFT_READY_FOR_REVIEW', 'DRAFT_V3_IMAGES_READY')
             )
             AND NOT EXISTS (
               SELECT 1 FROM opod.character_action_logs regenerated
@@ -134,11 +134,12 @@ export class EvaluationRepository {
                   FROM opod.character_action_logs ready
                   WHERE ready.target_table = 'post_drafts'
                     AND ready.target_id = d.id
-                    AND ready.action_type = 'DRAFT_READY_FOR_REVIEW'
+                    AND ready.action_type IN ('DRAFT_READY_FOR_REVIEW', 'DRAFT_V3_IMAGES_READY')
                 )
             )
             AND (
-              d.concept_json->>'pipelineVersion' IS DISTINCT FROM 'post-pipeline-v3'
+              d.concept_json->>'pipelineVersion' NOT IN ('post-pipeline-v3', 'post-pipeline-v4')
+              OR d.concept_json->>'pipelineVersion' IS NULL
               OR NOT EXISTS (
                 SELECT 1
                 FROM opod.generation_jobs latest
@@ -162,10 +163,11 @@ export class EvaluationRepository {
           : kind === "image_plan"
             ? Prisma.sql`l.action_type IN ('DRAFT_V3_IMAGE_PLAN_READY', 'DRAFT_V3_PAUSED')`
             : kind === "image"
-              ? Prisma.sql`l.action_type = 'DRAFT_READY_FOR_REVIEW'`
+              ? Prisma.sql`l.action_type IN ('DRAFT_READY_FOR_REVIEW', 'DRAFT_V3_IMAGES_READY')`
               : Prisma.sql`l.action_type IN (
               'DRAFT_PLANNED',
               'DRAFT_PROMPTS_BUILT',
+              'DRAFT_V3_PROMPTS_READY',
               'DRAFT_SHOT_REGENERATED'
             )`;
       const rows = await tx.$queryRaw<

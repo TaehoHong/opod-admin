@@ -12,7 +12,9 @@ const draftWorkItemInclude = {
     },
   },
   jobs: {
-    orderBy: [{ updatedAt: "desc" as const }, { id: "desc" as const }],
+    // 컷별 "최신 잡" 판정은 생산자(집계·게시·캡션·평가)와 같은 정렬이어야
+    // 한다 — 다르면 stale 판정이 화면에서만 어긋난다.
+    orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }],
     select: {
       id: true,
       sortOrder: true,
@@ -23,6 +25,7 @@ const draftWorkItemInclude = {
         orderBy: { candidateIndex: "asc" as const },
         select: {
           selected: true,
+          mediaId: true,
           media: { select: { url: true } },
         },
       },

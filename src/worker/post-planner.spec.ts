@@ -7,26 +7,25 @@ const ready = {
     primaryPurpose: "일찍 도착한 민망함을 자조적으로 기록한다.",
     secondaryPurpose: null,
   },
-  caption: "20분 일찍 왔는데 벌써 다 마심",
-  captionLanguages: ["ko"],
-  hashtags: ["#카페", "기다리는중"],
   newMemoryCandidates: [],
 };
 
-describe("Post Planning Agent contract", () => {
-  it("accepts a strict ready result and preserves current hashtag normalization", () => {
-    expect(parsePostPlan(ready)).toMatchObject({
-      status: "ready",
-      hashtags: ["카페", "기다리는중"],
-    });
+describe("Post Planning Agent contract (v2)", () => {
+  it("accepts a strict ready result with intent and memory candidates only", () => {
+    expect(parsePostPlan(ready)).toEqual(ready);
   });
 
-  it("rejects extra fields and non-canonical caption language tags", () => {
-    expect(() => parsePostPlan({ ...ready, imageCount: 2 })).toThrow(
+  // V4: 캡션·해시태그·언어는 ⑥ Caption Agent 소유다. 여기서 받아주면 이중 소유가
+  // 되살아난다 — 이 테스트가 그 회귀를 잡는다.
+  it("rejects caption fields and other extra fields", () => {
+    expect(() =>
+      parsePostPlan({ ...ready, caption: "20분 일찍 왔는데 벌써 다 마심" }),
+    ).toThrow("invalid fields");
+    expect(() => parsePostPlan({ ...ready, hashtags: ["#카페"] })).toThrow(
       "invalid fields",
     );
-    expect(() => parsePostPlan({ ...ready, captionLanguages: ["KO"] })).toThrow(
-      "canonical BCP-47",
+    expect(() => parsePostPlan({ ...ready, imageCount: 2 })).toThrow(
+      "invalid fields",
     );
   });
 

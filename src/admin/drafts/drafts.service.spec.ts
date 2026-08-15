@@ -363,7 +363,7 @@ describe("DraftsService", () => {
       characterId: "ai-1",
       contentType: "feed",
       conceptJson: {
-        pipelineVersion: "post-pipeline-v3",
+        pipelineVersion: "post-pipeline-v4",
         source: "manual",
         mode: "manual",
         operatorRequest: "카페에서 비 오는 오후",
@@ -447,11 +447,12 @@ describe("DraftsService", () => {
 
     await expect(
       service.updateDraft({ draftId: "draft-1", caption: " 새 캡션 " }),
-    ).rejects.toThrow("Only needs_review or approved drafts can be edited");
+    ).rejects.toThrow("Only needs_review or approved drafts (or V4 drafts waiting to publish) can be edited");
     expect(repository.updateEditableDraft).toHaveBeenCalledWith(
       "draft-1",
       ["needs_review", "approved"],
       { caption: "새 캡션" },
+      ["publish"],
     );
   });
 

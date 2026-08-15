@@ -21,6 +21,7 @@ import { RejectDraftDto } from "./dto/reject-draft.dto";
 import { SelectShotOutputDto } from "./dto/select-shot-output.dto";
 import { UpdateDraftDto } from "./dto/update-draft.dto";
 import { UpdateOperatorRequestDto } from "./dto/update-operator-request.dto";
+import { RunStageDto } from "./dto/run-stage.dto";
 import { UpdateShotOutputFilterDto } from "./dto/update-shot-output-filter.dto";
 import { UpdateDraftPlanDto } from "./dto/update-draft-plan.dto";
 import { UpdateDraftPromptsDto } from "./dto/update-draft-prompts.dto";
@@ -107,8 +108,14 @@ export class DraftsController {
   // 자동 경로와 동일한 claim → planDraft를 타므로 결과(성공/실패)도 동일한
   // 상태 전이로 나타난다. 응답은 기획 반영 후의 draft.
   @Post(":id/plan")
-  async planDraftNow(@Param("id") draftId: string) {
-    const result = await this.draftWorker.planDraftNow(draftId);
+  async planDraftNow(
+    @Param("id") draftId: string,
+    @Body() body: RunStageDto = {},
+  ) {
+    const result = await this.draftWorker.planDraftNow(
+      draftId,
+      body.note?.trim() ? { operatorNote: body.note.trim() } : undefined,
+    );
     if (!result.planned) {
       await this.draftsService.getDraft(draftId); // 404를 400보다 먼저 구분한다.
       throw new BadRequestException(

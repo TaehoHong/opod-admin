@@ -11,7 +11,6 @@ const input: ImagePlannerInput = {
       primaryPurpose: "기다림을 기록한다.",
       secondaryPurpose: null,
     },
-    caption: "조금 일찍 왔다",
   },
   imageCount: 1,
   characterVisualContext: {

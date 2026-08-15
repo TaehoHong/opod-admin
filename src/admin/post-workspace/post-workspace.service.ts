@@ -5,6 +5,11 @@ import {
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import {
+  generationSetHash,
+  isPostPipelineV3,
+  isPostPipelineV4,
+} from "../../worker/post-pipeline-v3";
+import {
   PostWorkspaceRepository,
   PostWorkDraft,
   StandalonePost,
@@ -29,19 +34,22 @@ export type PostWorkStage =
   | "evaluation"
   | "generation"
   | "review"
+  | "caption"
   | "publish"
   | "memory";
 export type OperationalStatus =
   "failed" | "needs_action" | "publish_waiting" | "agent_running" | "completed";
 
 export type PostPipelineV3ReadModel = {
-  version: "post-pipeline-v3";
+  // v4 = 검수 없음(⑥ 캡션 단계). 화면 레일이 이 값으로 갈린다.
+  version: "post-pipeline-v3" | "post-pipeline-v4";
   stage:
     | "post_plan"
     | "image_plan"
     | "image_prompt"
     | "generation"
     | "review"
+    | "caption"
     | "publish"
     | "memory";
   state: string;
@@ -104,6 +112,22 @@ export type PostPipelineV3ReadModel = {
           source: string;
         }[];
       }[];
+    };
+    // V4 ⑥ 캡션. stale·matchesColumn은 서버 계산이다 — 클라이언트가 두 쿼리를
+    // 비교하면 폴링 간격만큼 어긋난 값이 깜빡인다.
+    captionBuild?: {
+      revision: number;
+      contractVersion?: string;
+      promptVersion?: string;
+      hash?: string;
+      caption: string;
+      hashtags: string[];
+      captionLanguages: string[];
+      operatorNote?: string;
+      // 컷 재생성으로 게시 이미지 집합이 바뀌었는가(작성 기준 ≠ 현재).
+      stale: boolean;
+      // 게시 컬럼이 Agent 원본과 같은가(false = 운영자 수정본).
+      matchesColumn: boolean;
     };
   };
 };
@@ -187,6 +211,18 @@ const V3_STAGES: PostWorkStage[] = [
   "prompt",
   "generation",
   "review",
+  "publish",
+  "memory",
+];
+
+// V4: 검수 대신 캡션. 같은 8칸이라 stageIndex 의미가 유지된다.
+const V4_STAGES: PostWorkStage[] = [
+  "brief",
+  "post_plan",
+  "image_plan",
+  "prompt",
+  "generation",
+  "caption",
   "publish",
   "memory",
 ];
@@ -294,7 +330,7 @@ function toDraftWorkItem(draft: PostWorkDraft): PostWorkItem {
   const latestJobs = latestJobsPerShot(draft);
   const currentStage = stageForDraft(draft, latestJobs);
   const operational = statusForDraft(draft, latestJobs, currentStage, mode);
-  const pipelineV3 = v3ReadModel(concept);
+  const pipelineV3 = v3ReadModel(concept, draft, latestJobs);
   const publishedThumbnail =
     draft.publishedPost?.postMedia[0]?.media.url ?? undefined;
   const generatedThumbnail = latestJobs
@@ -314,7 +350,13 @@ function toDraftWorkItem(draft: PostWorkDraft): PostWorkItem {
       ? { thumbnailUrl: publishedThumbnail ?? generatedThumbnail }
       : {}),
     currentStage,
-    stageIndex: (pipelineV3 ? V3_STAGES : STAGES).indexOf(currentStage) + 1,
+    stageIndex:
+      (pipelineV3
+        ? pipelineV3.version === "post-pipeline-v4"
+          ? V4_STAGES
+          : V3_STAGES
+        : STAGES
+      ).indexOf(currentStage) + 1,
     operationalStatus: operational.status,
     statusDetail: operational.detail,
     executionMode: mode,
@@ -370,13 +412,17 @@ function stageForDraft(
     return "review";
   }
   const concept = record(draft.conceptJson);
-  if (concept.pipelineVersion === "post-pipeline-v3") {
+  if (isPostPipelineV3(concept)) {
+    // V4 컷 재생성 중(regenerating)은 conceptJson stage가 caption/publish여도
+    // 실제로는 ⑤가 다시 도는 중이다.
+    if (draft.status === "regenerating") return "generation";
     const stage = record(concept.pipeline).stage;
     if (stage === "post_plan") return "post_plan";
     if (stage === "image_plan") return "image_plan";
     if (stage === "image_prompt") return "prompt";
     if (stage === "generation") return "generation";
     if (stage === "review") return "review";
+    if (stage === "caption") return "caption";
     if (stage === "publish") return "publish";
     if (stage === "memory") return "memory";
     return "post_plan";
@@ -424,7 +470,7 @@ function statusForDraft(
     return { status: "completed", detail: "반려됨" };
   }
   const concept = record(draft.conceptJson);
-  if (concept.pipelineVersion === "post-pipeline-v3") {
+  if (isPostPipelineV3(concept)) {
     const pipeline = record(concept.pipeline);
     const state =
       typeof pipeline.state === "string" ? pipeline.state : "pending";
@@ -460,6 +506,7 @@ function statusForDraft(
     evaluation: "평가 확인 후 생성",
     generation: "이미지 생성 필요",
     review: "검수 필요",
+    caption: "캡션 생성 필요",
     publish: "게시 필요",
     memory: "완료",
   };
@@ -468,8 +515,13 @@ function statusForDraft(
 
 function v3ReadModel(
   concept: Record<string, unknown>,
+  draft: Pick<PostWorkDraft, "caption">,
+  latestJobs: PostWorkDraft["jobs"],
 ): PostPipelineV3ReadModel | undefined {
-  if (concept.pipelineVersion !== "post-pipeline-v3") return undefined;
+  if (!isPostPipelineV3(concept)) return undefined;
+  const version = isPostPipelineV4(concept)
+    ? ("post-pipeline-v4" as const)
+    : ("post-pipeline-v3" as const);
   const pipeline = record(concept.pipeline);
   const rawStage = pipeline.stage;
   const stage =
@@ -480,6 +532,7 @@ function v3ReadModel(
         "image_prompt",
         "generation",
         "review",
+        "caption",
         "publish",
         "memory",
       ] as const
@@ -502,8 +555,12 @@ function v3ReadModel(
   const promptOutput = record(promptBuild.output);
   const promptInput = record(promptBuild.input);
   const modelPolicy = record(promptInput.modelPolicy);
+  const captionBuild = record(concept.captionBuild);
+  const captionOutput = record(captionBuild.output);
+  const captionInput = record(captionBuild.input);
+  const captionSource = record(captionBuild.source);
   return {
-    version: "post-pipeline-v3",
+    version,
     stage,
     state,
     imageCount,
@@ -669,6 +726,39 @@ function v3ReadModel(
                     }),
                   }
                 : {}),
+            },
+          }
+        : {}),
+      ...(Number.isInteger(captionBuild.revision)
+        ? {
+            captionBuild: {
+              revision: captionBuild.revision as number,
+              ...lineage(captionBuild),
+              caption: text(captionOutput.caption),
+              hashtags: Array.isArray(captionOutput.hashtags)
+                ? strings(captionOutput.hashtags)
+                : [],
+              captionLanguages: Array.isArray(captionOutput.captionLanguages)
+                ? strings(captionOutput.captionLanguages)
+                : [],
+              ...(typeof captionInput.operatorNote === "string"
+                ? { operatorNote: captionInput.operatorNote }
+                : {}),
+              // 작성 기준 이미지 집합 ≠ 현재 최신 완료 잡의 이미지 집합이면 stale.
+              // 해시 함수는 캡션 단계·평가와 공유한다(post-pipeline-v3.ts).
+              stale:
+                typeof captionSource.generationSetHash === "string" &&
+                captionSource.generationSetHash !==
+                  generationSetHash(
+                    latestJobs.map((job) => ({
+                      sortOrder: job.sortOrder,
+                      jobId: job.id,
+                      mediaId: job.outputs.find((output) => output.selected)
+                        ?.mediaId,
+                    })),
+                  ),
+              matchesColumn:
+                text(captionOutput.caption) === draft.caption,
             },
           }
         : {}),

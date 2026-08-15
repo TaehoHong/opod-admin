@@ -11,6 +11,7 @@ const aggregateDraftSelect = {
   id: true,
   characterId: true,
   status: true,
+  conceptJson: true,
   jobs: {
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     select: { sortOrder: true, status: true },
@@ -89,6 +90,22 @@ export type PublishDraft = Prisma.PostDraftGetPayload<{
   select: typeof publishDraftSelect;
 }>;
 
+// 게시 가능 = V2/v3의 approved, 또는 V4의 planned + pipeline.stage=publish +
+// state=pending(⑥ 캡션 완료 직후). 게시 경로 4곳(due 조회·수동 조회·오류 기록·
+// 게시 CAS)이 같은 술어를 써야 "조회는 되는데 CAS는 실패"가 안 난다.
+const PUBLISHABLE_WHERE: Prisma.PostDraftWhereInput = {
+  OR: [
+    { status: "approved" },
+    {
+      status: "planned",
+      AND: [
+        { conceptJson: { path: ["pipeline", "stage"], equals: "publish" } },
+        { conceptJson: { path: ["pipeline", "state"], equals: "pending" } },
+      ],
+    },
+  ],
+};
+
 export type PromptBuildDraft = {
   id: string;
   characterId: string;
@@ -132,6 +149,13 @@ export type DraftImageJob = {
   sortOrder: number;
   status: string;
   paramsJson: unknown;
+};
+
+export type CaptionShot = {
+  sortOrder: number;
+  jobId: string;
+  mediaId: string;
+  media: { url: string; storageKey: string | null; contentType: string | null };
 };
 
 export type PublishJob = {
@@ -188,7 +212,7 @@ export class DraftWorkerRepository {
     return this.prisma.postDraft.findFirst({
       where: {
         id: draftId,
-        status: "approved",
+        AND: [PUBLISHABLE_WHERE],
         draftType: "post",
         character: { status: "active" },
       },
@@ -198,7 +222,7 @@ export class DraftWorkerRepository {
 
   async recordPublishError(draftId: string, message: string): Promise<void> {
     await this.prisma.postDraft.updateMany({
-      where: { id: draftId, status: "approved" },
+      where: { id: draftId, AND: [PUBLISHABLE_WHERE] },
       data: { errorMessage: message },
     });
   }
@@ -340,6 +364,8 @@ export class DraftWorkerRepository {
       revision: number | null;
     };
     conceptJson: Prisma.InputJsonValue;
+    // V4 ⑥ 캡션 단계만 쓴다 — artifact 저장과 게시 컬럼 갱신을 한 트랜잭션에.
+    columns?: { caption: string; hashtags: string[] };
     actionType: string;
     reason: string;
   }): Promise<boolean> {
@@ -375,6 +401,7 @@ export class DraftWorkerRepository {
         },
         data: {
           conceptJson: input.conceptJson,
+          ...(input.columns ?? {}),
           status: "planned",
           leaseExpiresAt: null,
           errorMessage: null,
@@ -587,11 +614,14 @@ export class DraftWorkerRepository {
   async persistV3PromptJobs(input: {
     draftId: string;
     characterId: string;
-    caption: string;
-    hashtags: string[];
+    // v3 계약(post-plan-v1) draft가 ④를 재실행할 때만 채운다. V4는 캡션 컬럼을
+    // ⑥ 캡션 단계가 소유하므로 여기서 건드리지 않는다(이중 소유 금지).
+    columns?: { caption: string; hashtags: string[] };
     locationId: string | null;
     conceptJson: Prisma.InputJsonValue;
     manual: boolean;
+    // V4: 프롬프트당 1장. undefined면 워커 기본값(env)을 따른다(v3·V2).
+    candidateCount?: number;
     jobs: {
       prompt: string;
       sortOrder: number;
@@ -619,8 +649,7 @@ export class DraftWorkerRepository {
           ],
         },
         data: {
-          caption: input.caption,
-          hashtags: input.hashtags,
+          ...(input.columns ?? {}),
           locationId: input.locationId,
           conceptJson: input.conceptJson,
           leaseExpiresAt: null,
@@ -637,6 +666,9 @@ export class DraftWorkerRepository {
             draftId: input.draftId,
             sortOrder: job.sortOrder,
             ...(input.manual ? { status: "draft" as const } : {}),
+            ...(input.candidateCount !== undefined
+              ? { candidateCount: input.candidateCount }
+              : {}),
             paramsJson: job.paramsJson,
           },
         });
@@ -813,10 +845,24 @@ export class DraftWorkerRepository {
     return transitioned.count > 0;
   }
 
+  // V4: 컷이 전부 완료되면 검수가 아니라 ⑥ 캡션 단계로 간다. 자동 모드는
+  // 워커가 planned+pending을 집어가고, 수동 모드는 단계 버튼이 집어간다.
+  async markDraftCaptionPending(
+    draftId: string,
+    currentStatus: string,
+    conceptJson: Prisma.InputJsonValue,
+  ): Promise<boolean> {
+    const transitioned = await this.prisma.postDraft.updateMany({
+      where: { id: draftId, status: currentStatus as never },
+      data: { status: "planned", conceptJson, errorMessage: null },
+    });
+    return transitioned.count > 0;
+  }
+
   findDueDrafts(now: Date, take: number): Promise<PublishDraft[]> {
     return this.prisma.postDraft.findMany({
       where: {
-        status: "approved",
+        AND: [PUBLISHABLE_WHERE],
         draftType: "post",
         OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
         character: { status: "active" },
@@ -851,6 +897,44 @@ export class DraftWorkerRepository {
     }
   }
 
+  // V4 ⑥ 캡션 입력 — 컷별 최신 completed 잡의 게시 이미지(1장). 컷이 재생성되면
+  // 최신 잡이 바뀌므로 같은 정렬을 게시·평가와 공유한다.
+  async findCaptionShots(draftId: string): Promise<CaptionShot[]> {
+    const jobs = await this.prisma.generationJob.findMany({
+      where: { draftId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: {
+        id: true,
+        sortOrder: true,
+        status: true,
+        outputMediaId: true,
+        outputMedia: {
+          select: { id: true, url: true, storageKey: true, contentType: true },
+        },
+      },
+    });
+    const latest = new Map<number, (typeof jobs)[number]>();
+    for (const job of jobs) {
+      if (!latest.has(job.sortOrder)) latest.set(job.sortOrder, job);
+    }
+    return [...latest.values()]
+      .filter(
+        (job): job is typeof job & { outputMedia: NonNullable<typeof job.outputMedia> } =>
+          job.status === "completed" && job.outputMedia !== null,
+      )
+      .map((job) => ({
+        sortOrder: job.sortOrder,
+        jobId: job.id,
+        mediaId: job.outputMedia.id,
+        media: {
+          url: job.outputMedia.url,
+          storageKey: job.outputMedia.storageKey,
+          contentType: job.outputMedia.contentType,
+        },
+      }))
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+
   findPublishJobs(draftId: string): Promise<PublishJob[]> {
     return this.prisma.generationJob.findMany({
       where: { draftId },
@@ -881,11 +965,11 @@ export class DraftWorkerRepository {
   }): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const transitioned = await tx.postDraft.updateMany({
-        where: { id: input.draftId, status: "approved" },
+        where: { id: input.draftId, AND: [PUBLISHABLE_WHERE] },
         data: { status: "published", errorMessage: null },
       });
       if (transitioned.count === 0) {
-        throw new Error("draft left the approved state before publish");
+        throw new Error("draft left the publishable state before publish");
       }
       const publishMediaIds: string[] = [];
       for (const item of input.media) {

@@ -1,3 +1,4 @@
+import { generationSetHash } from "../../worker/post-pipeline-v3";
 import { PostWorkspaceRepository } from "./post-workspace.repository";
 import { PostWorkspaceService } from "./post-workspace.service";
 
@@ -237,6 +238,106 @@ describe("PostWorkspaceService", () => {
     expect(item.pipelineV3?.artifacts.promptBuild?.promptVersion).toBe(
       "image-prompt-generator-v1",
     );
+  });
+
+  // V4 ⑥ 캡션: stale(컷 재생성으로 게시 이미지가 바뀜)과 matchesColumn(운영자
+  // 수정 여부)은 서버가 계산해야 한다 — 두 쿼리를 클라이언트가 비교하면 폴링
+  // 간격만큼 어긋난 값이 깜빡이고, "저장돼 있는데 화면이 못 읽는" 사고를 두 번
+  // 겪었다(아키텍처 §19.2). 레일은 v4에서 검수 대신 캡션이다.
+  it("exposes the V4 caption artifact with server-computed staleness", async () => {
+    const captionOutput = {
+      status: "ready",
+      caption: "필라테스 끝나고 한 컷,, 오늘도 완룟",
+      captionLanguages: ["ko"],
+      hashtags: ["필라테스"],
+    };
+    const generationSet = generationSetHash([
+      { sortOrder: 0, jobId: "job-old", mediaId: "media-old" },
+    ]);
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      status: "planned",
+      caption: "운영자가 고친 캡션",
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v4",
+        source: "manual",
+        mode: "manual",
+        pipeline: { stage: "publish", state: "pending", imageCount: 1 },
+        postPlanning: { revision: 1, hash: "sha256:post", output: {} },
+        captionBuild: {
+          revision: 2,
+          hash: "sha256:caption",
+          contractVersion: "caption-set-v1",
+          promptVersion: "caption-writer-v1",
+          source: {
+            postPlanningRevision: 1,
+            postPlanningHash: "sha256:post",
+            generationSetHash: generationSet,
+          },
+          input: { operatorNote: "이모지 빼고" },
+          output: captionOutput,
+        },
+      },
+      jobs: [
+        // 컷 재생성으로 최신 잡이 바뀌었다 → 작성 기준과 다르므로 stale.
+        {
+          id: "job-new",
+          sortOrder: 0,
+          status: "completed",
+          prompt: "p",
+          updatedAt: new Date("2026-08-15T02:00:00.000Z"),
+          outputs: [{ selected: true, mediaId: "media-new", media: { url: "u" } }],
+        },
+        {
+          id: "job-old",
+          sortOrder: 0,
+          status: "completed",
+          prompt: "p",
+          updatedAt: new Date("2026-08-15T01:00:00.000Z"),
+          outputs: [{ selected: true, mediaId: "media-old", media: { url: "u" } }],
+        },
+      ],
+    } as never);
+
+    const item = await service.get("draft-1");
+
+    expect(item.currentStage).toBe("publish");
+    expect(item.stageIndex).toBe(7);
+    expect(item.pipelineV3?.version).toBe("post-pipeline-v4");
+    expect(item.pipelineV3?.artifacts.captionBuild).toEqual({
+      revision: 2,
+      hash: "sha256:caption",
+      contractVersion: "caption-set-v1",
+      promptVersion: "caption-writer-v1",
+      caption: "필라테스 끝나고 한 컷,, 오늘도 완룟",
+      hashtags: ["필라테스"],
+      captionLanguages: ["ko"],
+      operatorNote: "이모지 빼고",
+      stale: true,
+      matchesColumn: false,
+    });
+  });
+
+  it("maps the V4 caption stage and reports it as the operator's next action", async () => {
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      status: "planned",
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v4",
+        source: "manual",
+        mode: "manual",
+        pipeline: { stage: "caption", state: "pending", imageCount: 1 },
+      },
+      jobs: [],
+    } as never);
+
+    const item = await service.get("draft-1");
+
+    expect(item.currentStage).toBe("caption");
+    expect(item.stageIndex).toBe(6);
+    expect(item.operationalStatus).toBe("needs_action");
+    expect(item.statusDetail).toBe("캡션 생성 필요");
+    expect(item.pipelineV3?.artifacts.captionBuild).toBeUndefined();
   });
 
   // 게시 트랜잭션(`selectedPublishedMemories`)은 selected이면서 현재 PostPlan

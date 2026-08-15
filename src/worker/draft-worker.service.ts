@@ -30,7 +30,7 @@ import {
   targetModelIdForShot,
 } from "./image-prompt-builder";
 import { errorMessage, isRecord } from "./value-utils";
-import { isPostPipelineV3 } from "./post-pipeline-v3";
+import { isPostPipelineV3, isPostPipelineV4 } from "./post-pipeline-v3";
 
 export type DraftWorkerConfig = AppConfig["draftWorker"];
 
@@ -74,7 +74,11 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly resolvePipelineV3Enabled: () => Promise<boolean> = () =>
       Promise.resolve(false),
     private readonly runV3Stage:
-      ((draftId: string) => Promise<void>) | null = null,
+      | ((
+          draftId: string,
+          options?: { operatorNote?: string },
+        ) => Promise<void>)
+      | null = null,
   ) {}
 
   onModuleInit(): void {
@@ -143,14 +147,17 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
 
   // 지정 draft를 즉시 기획한다. planned가 아니거나 캐릭터가 inactive면 false.
   // 기획 실패는 자동 경로와 동일하게 planned 복귀/failed 전이로 흡수된다.
-  async planDraftNow(draftId: string): Promise<{ planned: boolean }> {
+  async planDraftNow(
+    draftId: string,
+    options?: { operatorNote?: string },
+  ): Promise<{ planned: boolean }> {
     if (this.runV3Stage) {
       const claimedV3 = await this.repository.claimV3DraftNow(
         draftId,
         this.config.planLeaseSeconds,
       );
       if (claimedV3) {
-        await this.runV3Stage(draftId);
+        await this.runV3Stage(draftId, options);
         return { planned: true };
       }
     }
@@ -631,8 +638,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     id: string;
     characterId: string;
     status: string;
+    conceptJson: unknown;
     jobs: { sortOrder: number; status: string }[];
-  }): Promise<"planned" | "failed" | "needs_review" | "pending"> {
+  }): Promise<"planned" | "failed" | "needs_review" | "caption" | "pending"> {
     if (draft.jobs.length === 0) {
       // 기획 트랜잭션이 잡을 못 만든 비정상 상태 — 기획으로 되돌린다.
       await this.repository.requeueDraftWithoutJobs(draft.id, draft.status);
@@ -662,6 +670,34 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       return "failed";
     }
     if (statuses.every((status) => status === "completed")) {
+      // V4: 검수 없음 — 컷이 다 나오면 ⑥ 캡션 단계(planned+pending)로 간다.
+      // 액션 로그는 생성 이미지 평가의 트리거이기도 하다(evaluation.repository).
+      if (isPostPipelineV4(draft.conceptJson)) {
+        const concept = draft.conceptJson as Record<string, unknown>;
+        const pipeline = isRecord(concept.pipeline) ? concept.pipeline : {};
+        const transitioned = await this.repository.markDraftCaptionPending(
+          draft.id,
+          draft.status,
+          {
+            ...concept,
+            pipeline: {
+              ...pipeline,
+              stage: "caption",
+              state: "pending",
+              reasonCodes: [],
+            },
+          } as Prisma.InputJsonValue,
+        );
+        if (transitioned) {
+          await this.recordActionLog(
+            draft.characterId,
+            draft.id,
+            "DRAFT_V3_IMAGES_READY",
+            "all shots generated; caption stage pending",
+          );
+        }
+        return "caption";
+      }
       const transitioned = await this.repository.markDraftNeedsReview(
         draft.id,
         draft.status,
@@ -720,6 +756,11 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     hashtags: string[];
     conceptJson: unknown;
   }): Promise<void> {
+    // V4는 ⑥ 캡션 단계가 끝나야 여기 오지만, 운영자가 컬럼을 비울 수는 없어도
+    // 경로가 늘어날 수 있으니 안전판을 둔다 — 본문 없는 게시물은 되돌릴 수 없다.
+    if (!draft.caption.trim()) {
+      throw new Error("caption_missing: draft has no caption to publish");
+    }
     // 컷별 최신 completed 잡의 선택 출력 수집.
     const jobs = await this.repository.findPublishJobs(draft.id);
     const mediaByShot = new Map<
