@@ -128,14 +128,20 @@ export function EvaluationChips({
     shotSortOrder,
     candidateIndex,
   );
-  const severe = severeEntries(evaluation, shotSortOrder);
+  // 컷 단위에서는 지적을 아래에 그대로 펼치므로 "중대 지적 N건" 배지는 중복이다.
+  const severe =
+    shotSortOrder === undefined ? severeEntries(evaluation, shotSortOrder) : [];
   const verdict = candidateVerdict(evaluation, shotSortOrder, candidateIndex);
   // V3 이미지 평가는 저장된 총점이 0인 행이 있다 — 수집기가 shots[].dimensions
   // 까지 못 내려가던 버그(2026-08-16 수정). 화면은 지금 보여주는 차원 점수의
   // 평균을 직접 계산해 쓴다. 배지와 칩이 같은 데이터를 말하게 되고, 고치기 전에
   // 쌓인 평가도 올바른 값으로 보인다.
-  const shotSummaries =
-    shotSortOrder === undefined ? v3ImageShotSummaries(evaluation) : [];
+  // 지적은 컷 안에 들어 있어서 지금까지는 "평가 원문 보기"를 열어야 나왔다.
+  // 컷 단위 자리(컷 카드 = 이미지 바로 옆)에서는 그 컷의 지적만, 블록 자리에서는
+  // 컷 카드가 없는 화면을 위해 전 컷을 펼친다.
+  const shotSummaries = v3ImageShotSummaries(evaluation).filter(
+    (shot) => shotSortOrder === undefined || shot.sortOrder === shotSortOrder,
+  );
   const computed =
     shotSortOrder === undefined ? v3ImageAverage(evaluation) : undefined;
   const overall =
@@ -282,26 +288,30 @@ export function EvaluationChips({
           컷별로 펼쳐 둔다 — 만점 차원은 말할 게 없으니 접는다. */}
       {shotSummaries.map((shot) => (
         <Stack key={`${prefix}:shot-${shot.sortOrder}`} gap={2}>
-          <Group gap={6} wrap="wrap" align="center">
-            <Text size="xs" fw={600}>
-              컷 {shot.sortOrder + 1}
-            </Text>
-            {shot.flagged.length === 0 ? (
-              <Text size="xs" c="dimmed">
-                전 차원 5/5 · 지적 없음
+          {/* 컷 단위 자리에는 차원 칩이 이미 위에 있다 — 컷 번호와 칩을 다시
+              그리지 않고 지적만 잇는다. */}
+          {shotSortOrder === undefined ? (
+            <Group gap={6} wrap="wrap" align="center">
+              <Text size="xs" fw={600}>
+                컷 {shot.sortOrder + 1}
               </Text>
-            ) : (
-              shot.flagged.map((entry) => (
-                <Badge
-                  key={`${prefix}:shot-${shot.sortOrder}:${entry.dimension}`}
-                  variant="light"
-                  color={scoreColor(entry.score)}
-                >
-                  {LABELS[entry.dimension] ?? entry.dimension} {entry.score}/5
-                </Badge>
-              ))
-            )}
-          </Group>
+              {shot.flagged.length === 0 ? (
+                <Text size="xs" c="dimmed">
+                  전 차원 5/5 · 지적 없음
+                </Text>
+              ) : (
+                shot.flagged.map((entry) => (
+                  <Badge
+                    key={`${prefix}:shot-${shot.sortOrder}:${entry.dimension}`}
+                    variant="light"
+                    color={scoreColor(entry.score)}
+                  >
+                    {LABELS[entry.dimension] ?? entry.dimension} {entry.score}/5
+                  </Badge>
+                ))
+              )}
+            </Group>
+          ) : null}
           {shot.issues.map((issue, index) => (
             <Text
               key={`${prefix}:shot-${shot.sortOrder}:issue-${index}`}

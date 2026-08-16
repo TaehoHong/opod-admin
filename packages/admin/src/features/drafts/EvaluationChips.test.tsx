@@ -155,8 +155,14 @@ describe("EvaluationChips", () => {
     expect(screen.getByText("정체성·외모 2/5")).toBeInTheDocument();
     // 계약이 없어 평가 대상이 아닌 차원과 낮은 점수를 받은 차원은 다르다.
     expect(screen.queryByText(/텍스트 정확도/)).not.toBeInTheDocument();
-    // 심각도를 버리면 "지적 있음"과 "치명적 결함"이 같아 보인다.
-    expect(screen.getByText("중대 지적 1건")).toBeInTheDocument();
+    // 컷 카드는 이미지 바로 옆이다 — 지적을 접어두지 않고 심각도·차원·내용을
+    // 그대로 편다("중대 지적 N건" 배지를 눌러야 보이던 것을 대체).
+    expect(
+      screen.getByText(/중대 · 정체성·외모 · 턱선이 레퍼런스와 다르다/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("중대 지적 1건")).not.toBeInTheDocument();
+    // 컷 번호와 칩은 이 자리에 이미 있으므로 다시 그리지 않는다.
+    expect(screen.queryByText("컷 1")).not.toBeInTheDocument();
   });
 
   it("renders V3 set dimensions and the verdict at the set level", () => {

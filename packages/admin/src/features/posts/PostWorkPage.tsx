@@ -395,9 +395,7 @@ function StageBody({
     return <ReviewStage item={item} draft={draft!} evaluations={evaluations} />;
   }
   if (stage === "caption") {
-    return (
-      <V3CaptionStage item={item} draft={draft!} evaluations={evaluations} />
-    );
+    return <V3CaptionStage item={item} draft={draft!} />;
   }
   if (stage === "publish") {
     return <PublishStage item={item} draft={draft} post={post} />;
@@ -1564,6 +1562,14 @@ function GenerationStage({
           imageEvaluation={imageEvaluation}
         />
       ))}
+      {/* 생성 이미지 평가는 이 단계의 산출물을 심사한다 — 컷별 점수·지적은 각
+          컷 카드에, 총점·판정·세트 차원과 원문은 여기에 둔다. */}
+      {imageEvaluation ? (
+        <EvaluationBlock
+          label="생성 이미지 평가"
+          evaluation={imageEvaluation}
+        />
+      ) : null}
       {aggregate.isError ? <MutationError error={aggregate.error} /> : null}
       {allCompleted &&
       (draft.status === "generating" || draft.status === "regenerating") ? (
@@ -1955,15 +1961,9 @@ function workTitle(item: PostWorkItem): string {
 // ⑥ 캡션 (V4) — 캡션 Agent가 생성 이미지를 보고 쓴 원본(참고용)과 실제로
 // 게시되는 캡션(컬럼, 편집 가능)을 한 화면에 둔다. 어느 것이 게시되는지가
 // 흐려지지 않게 라벨을 나누고, 재실행이 수정본을 덮는 것은 확인을 받는다.
-function V3CaptionStage({
-  item,
-  draft,
-  evaluations,
-}: {
-  item: PostWorkItem;
-  draft: Draft;
-  evaluations: DraftEvaluation[];
-}) {
+// ⑥ 캡션에는 평가 Agent가 없다(운영자 결정, 아키텍처 §20.0). 생성 이미지 평가는
+// 그 산출물이 있는 ⑤에 붙는다.
+function V3CaptionStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
   const pipeline = item.pipelineV3;
   const artifact = pipeline?.artifacts.captionBuild;
   const stageState = v3StageState(pipeline, "caption");
@@ -1991,7 +1991,6 @@ function V3CaptionStage({
     }
     run.mutate(undefined);
   };
-  const evaluation = latestEvaluation(evaluations, "image");
   return (
     <StagePaper
       title="⑥ 캡션"
@@ -2054,7 +2053,6 @@ function V3CaptionStage({
             : ""}
         </Alert>
       )}
-      <EvaluationBlock label="생성 이미지 평가" evaluation={evaluation} />
       {current && pipeline ? (
         <Alert color="blue">다음 행동 · {pipeline.nextAction}</Alert>
       ) : null}
