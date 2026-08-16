@@ -501,6 +501,12 @@ export class PostPipelineV3Runner {
               captureSetup: plannedShot.captureSetup,
               characterVisible:
                 plannedShot.characterPresentation.mode !== "none",
+              // V3 계약: 인물 레퍼런스가 필요한지는 기획이 정한다(손만 보이는
+              // 컷은 보이지만 필요 없음). 워커의 인물 레퍼런스 가드는 이 값을
+              // 본다 — characterVisible로 판단하면 계약보다 엄격해져 정당한
+              // 컷을 실패시킨다.
+              identityRequired:
+                plannedShot.characterPresentation.identityPreservationRequired,
               identityReferenceMediaIds,
               environmentReferenceMediaIds,
               referenceMediaIds: slots.map((slot) => slot.referenceId),

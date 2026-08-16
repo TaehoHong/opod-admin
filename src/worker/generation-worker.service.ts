@@ -56,6 +56,18 @@ function shotTargetModelId(paramsJson: unknown): string | undefined {
     : undefined;
 }
 
+// V3 잡의 인물 레퍼런스 필요 여부. 값이 없는 옛 V3 잡(이 필드 도입 전)은
+// 기획 파서가 이미 "필요하면 바인딩 필수"를 통과시킨 잡이므로 false로 본다 —
+// 그 잡들이 실제로 인물 바인딩을 갖고 있으면 어차피 통과하고, 없으면 기획이
+// 불필요하다고 판단한 컷이다.
+function shotIdentityRequired(paramsJson: unknown): boolean {
+  return (
+    isRecord(paramsJson) &&
+    isRecord(paramsJson._shot) &&
+    paramsJson._shot.identityRequired === true
+  );
+}
+
 function shotCharacterVisible(paramsJson: unknown): boolean | undefined {
   if (!isRecord(paramsJson) || !isRecord(paramsJson._shot)) {
     return undefined;
@@ -490,9 +502,18 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
         );
       }
     }
+    // V2: 캐릭터가 보이면 인물 레퍼런스가 있어야 한다(기획이 그 판단을 안 함).
+    // V3/V4: 그 판단은 이미지 기획 계약(identityPreservationRequired)이 소유하고
+    // 파서가 "필요하면 바인딩 필수"를 이미 강제한다. 여기서 characterVisible로
+    // 다시 판단하면 손·팔뚝만 보이는 컷(보이지만 인물 레퍼런스 불필요)을
+    // 실패시킨다 — 2026-08-16 한소이 첫 V4 초안에서 실제로 났다. 서린은
+    // 항상 체형 레퍼런스를 묶어서 이 가드가 우연히 안 걸렸을 뿐이다.
+    const requiresIdentity = v3
+      ? shotIdentityRequired(job.paramsJson)
+      : characterVisible === true;
     try {
       assertVisibleCharacterHasReference(
-        characterVisible === true,
+        requiresIdentity,
         ordered.filter((reference) => identityIds.has(reference.mediaId))
           .length,
         `shot ${job.id}`,

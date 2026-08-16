@@ -844,6 +844,90 @@ describe("GenerationWorkerService", () => {
     );
   });
 
+  // V3 계약: 인물 레퍼런스가 필요한지는 이미지 기획이 정한다. 손·팔뚝만 보이는
+  // 컷은 "보이지만(mode≠none) 인물 레퍼런스 불필요"라 환경 레퍼런스만 묶는다.
+  // V2 가드(보이면 인물 레퍼런스 필수)를 그대로 쓰면 이런 컷이 실패한다 —
+  // 2026-08-16 한소이 첫 V4 초안에서 실제로 났다.
+  it("lets a V3 hands-only shot run with only an environment reference", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        paramsJson: {
+          _shot: {
+            characterVisible: true,
+            identityRequired: false,
+            referenceMediaIds: ["desk-ref-1"],
+          },
+          _v3: {
+            referenceBindings: [
+              {
+                bindingId: "env-home-desk-01",
+                referenceId: "desk-ref-1",
+                slot: "Image 1",
+              },
+            ],
+            negativePrompt: null,
+          },
+        },
+        draft: {
+          location: {
+            references: [
+              {
+                mediaId: "desk-ref-1",
+                media: {
+                  url: "https://cdn.local/desk.png",
+                  storageKey: "pod/reference/desk.png",
+                  uploadedAt: new Date("2026-07-01T00:00:00.000Z"),
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(repository.markFailed).not.toHaveBeenCalled();
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referenceImageUrls: ["https://cdn.local/desk.png"],
+      }),
+    );
+  });
+
+  it("still refuses a V3 shot whose plan requires identity but has no identity reference", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        paramsJson: {
+          _shot: {
+            characterVisible: true,
+            identityRequired: true,
+            referenceMediaIds: [],
+          },
+          _v3: { referenceBindings: [], negativePrompt: null },
+        },
+      }),
+    );
+    const provider = providerMock([]);
+    const { service } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(provider.submit).not.toHaveBeenCalled();
+    expect(repository.markFailed).toHaveBeenCalledWith(
+      "job-1",
+      "shot job-1 shows the character but has no usable identity reference",
+    );
+  });
+
   it("rejects a V3 binding-to-asset mismatch instead of silently dropping it", async () => {
     const repository = repositoryFake();
     repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
