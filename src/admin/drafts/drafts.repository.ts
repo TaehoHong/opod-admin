@@ -359,6 +359,12 @@ export class DraftsRepository {
           id: input.draftId,
           OR: [
             { status: { in: ["needs_review", "failed"] } },
+            // 컷 하나가 실패해도 수동 초안은 generating에 머문다(집계 버튼은 전
+            // 컷 완료 때만 뜨고, 자동 모드처럼 집계가 failed로 넘겨주지 않는다).
+            // 실패한 컷을 그 자리에서 다시 만들 수 있어야 막히지 않는다 —
+            // 서비스가 이미 "완료·실패한 잡만"을 강제하므로 실행 중인 컷을
+            // 건드리는 일은 없다.
+            { status: { in: ["generating", "regenerating"] } },
             // V4: 캡션·게시 대기 중에도 컷을 다시 만들 수 있다. 완료되면
             // 집계가 다시 ⑥ 캡션 대기로 보내고 captionBuild는 stale이 된다.
             v4PausedAt(["caption", "publish"]),

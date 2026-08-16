@@ -18,7 +18,6 @@ import { CandidateCard } from "./CandidateCard";
 import { EvaluationChips } from "./EvaluationChips";
 import {
   generateShot,
-  isPipelineV4,
   regenerateShot,
   v4PausedAt,
   type Draft,
@@ -50,6 +49,10 @@ export function ShotCard({
   const canRegenerate =
     draft.status === "needs_review" ||
     draft.status === "failed" ||
+    // 실패한 컷은 초안이 아직 generating이어도 그 자리에서 다시 만든다 —
+    // 수동 모드는 집계가 failed로 넘겨주지 않아 여기서 막히면 갈 데가 없다.
+    ((draft.status === "generating" || draft.status === "regenerating") &&
+      shot.status === "failed") ||
     v4PausedAt(draft, ["caption", "publish"]);
 
   const regenerate = useDraftMutation(draft.id, () =>
@@ -350,11 +353,12 @@ function ShotBody({
           {!(
             draft.status === "needs_review" ||
             draft.status === "failed" ||
+            draft.status === "generating" ||
+            draft.status === "regenerating" ||
             v4PausedAt(draft, ["caption", "publish"])
           ) ? (
             <Text size="xs" c="dimmed">
-              다른 컷이 끝나 초안이 {isPipelineV4(draft) ? "캡션 대기" : "검수"}{" "}
-              또는 실패 상태가 되면 이 컷을 다시 생성할 수 있습니다.
+              이 상태에서는 컷을 다시 생성할 수 없습니다.
             </Text>
           ) : null}
         </Stack>

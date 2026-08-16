@@ -836,7 +836,7 @@ export class DraftsService {
     }
     if (result === "invalid-draft-status") {
       throw new BadRequestException(
-        "Only needs_review or failed drafts can regenerate shots",
+        "This draft is not in a state where shots can be regenerated",
       );
     }
     await this.repository.markManual(input.draftId);

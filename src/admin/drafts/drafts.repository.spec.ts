@@ -50,6 +50,8 @@ describe("DraftsRepository", () => {
         id: "draft-1",
         OR: [
           { status: { in: ["needs_review", "failed"] } },
+          // 실패한 컷은 초안이 generating이어도 그 자리에서 다시 만든다.
+          { status: { in: ["generating", "regenerating"] } },
           expect.objectContaining({ status: "planned" }),
         ],
       },
