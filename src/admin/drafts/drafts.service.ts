@@ -802,11 +802,14 @@ export class DraftsService {
   }
 
   // 컷 재생성: 같은 (draftId, sortOrder)로 새 잡을 만들고 draft를 regenerating으로.
+  // 새 잡 id를 돌려준다 — 컨트롤러가 곧바로 runJobNow로 실행한다(수동 = 자동의
+  // 스텝 실행 모드). 큐에만 넣고 끝내면 자동 워커 루프가 꺼진 개발 환경에서
+  // 아무도 집어가지 않는다(2026-08-16 한소이 초안에서 실제로 4분간 queued 방치).
   async regenerateShot(input: {
     draftId: string;
     jobId: string;
     prompt?: string;
-  }): Promise<AdminDraft> {
+  }): Promise<{ draft: AdminDraft; newJobId: string }> {
     const job = await this.repository.findRegenerationSource(
       input.draftId,
       input.jobId,
@@ -826,21 +829,24 @@ export class DraftsService {
       source: job,
       prompt,
     });
-    if (result === "stale-job") {
+    if (result.outcome === "stale-job") {
       throw new BadRequestException(
         "Only the latest draft shot can be regenerated",
       );
     }
-    if (result === "draft-not-found") {
+    if (result.outcome === "draft-not-found") {
       throw new BadRequestException("Draft not found");
     }
-    if (result === "invalid-draft-status") {
+    if (result.outcome === "invalid-draft-status") {
       throw new BadRequestException(
         "This draft is not in a state where shots can be regenerated",
       );
     }
     await this.repository.markManual(input.draftId);
-    return this.getDraft(input.draftId);
+    return {
+      draft: await this.getDraft(input.draftId),
+      newJobId: result.jobId,
+    };
   }
 
   // best-of-N 후보 선택 교체.

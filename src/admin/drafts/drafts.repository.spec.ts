@@ -42,7 +42,7 @@ describe("DraftsRepository", () => {
         source,
         prompt: "수정 프롬프트",
       }),
-    ).resolves.toBe("regenerated");
+    ).resolves.toEqual({ outcome: "regenerated", jobId: "job-2" });
     expect(transaction).toHaveBeenCalledTimes(1);
     // 검수 상태(v2·v3) 또는 V4의 캡션·게시 대기 — 어느 쪽이든 같은 전이.
     expect(transitionDraft).toHaveBeenCalledWith({
@@ -58,6 +58,7 @@ describe("DraftsRepository", () => {
       data: { status: "regenerating", errorMessage: null },
     });
     expect(createJob).toHaveBeenCalledWith({
+      select: { id: true },
       data: {
         characterId: "ai-1",
         mediaType: "image",
@@ -106,7 +107,7 @@ describe("DraftsRepository", () => {
         source,
         prompt: source.prompt,
       }),
-    ).resolves.toBe("stale-job");
+    ).resolves.toEqual({ outcome: "stale-job" });
     expect(transitionDraft).not.toHaveBeenCalled();
     expect(createJob).not.toHaveBeenCalled();
   });

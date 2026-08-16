@@ -178,13 +178,21 @@ export class DraftsController {
     return this.draftsService.rejectDraft({ draftId, ...body });
   }
 
+  // 재생성도 생성 실행(generate)과 같이 새 잡을 곧바로 돌린다 — 수동 = 자동의
+  // 스텝 실행 모드. 큐에만 넣으면 자동 루프가 꺼진 환경에서 영영 안 돈다.
   @Post(":id/jobs/:jobId/regenerate")
-  regenerateShot(
+  async regenerateShot(
     @Param("id") draftId: string,
     @Param("jobId") jobId: string,
     @Body() body: RegenerateShotDto,
   ) {
-    return this.draftsService.regenerateShot({ draftId, jobId, ...body });
+    const { newJobId } = await this.draftsService.regenerateShot({
+      draftId,
+      jobId,
+      ...body,
+    });
+    await this.generationWorker.runJobNow(newJobId);
+    return this.draftsService.getDraft(draftId);
   }
 
   @Post(":id/jobs/:jobId/select")

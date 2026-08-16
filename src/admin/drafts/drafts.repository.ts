@@ -46,7 +46,10 @@ export type RegenerationSource = Prisma.GenerationJobGetPayload<{
   select: typeof regenerationSourceFields;
 }>;
 export type RegenerationResult =
-  "regenerated" | "stale-job" | "draft-not-found" | "invalid-draft-status";
+  | { outcome: "regenerated"; jobId: string }
+  | { outcome: "stale-job" }
+  | { outcome: "draft-not-found" }
+  | { outcome: "invalid-draft-status" };
 
 // V4(검수 없음)에서 사람이 개입할 수 있는 정지 지점 — ⑤ 완료 후 ⑥ 캡션 대기,
 // ⑥ 완료 후 ⑦ 게시 대기. 둘 다 status=planned + pipeline.state=pending이다.
@@ -352,7 +355,7 @@ export class DraftsRepository {
         select: { id: true },
       });
       if (latest?.id !== input.source.id) {
-        return "stale-job";
+        return { outcome: "stale-job" };
       }
       const transitioned = await tx.postDraft.updateMany({
         where: {
@@ -377,9 +380,12 @@ export class DraftsRepository {
           where: { id: input.draftId },
           select: { id: true },
         });
-        return draft ? "invalid-draft-status" : "draft-not-found";
+        return draft
+          ? { outcome: "invalid-draft-status" }
+          : { outcome: "draft-not-found" };
       }
-      await tx.generationJob.create({
+      const created = await tx.generationJob.create({
+        select: { id: true },
         data: {
           characterId: input.source.characterId,
           mediaType: "image",
@@ -409,7 +415,7 @@ export class DraftsRepository {
           reason: `shot ${input.source.sortOrder} regeneration queued`,
         },
       });
-      return "regenerated";
+      return { outcome: "regenerated", jobId: created.id };
     });
   }
 

@@ -565,6 +565,34 @@ describe("DraftsService", () => {
     );
   });
 
+  // 재생성은 새 잡 id를 돌려줘야 컨트롤러가 곧바로 실행할 수 있다 — 큐에만
+  // 넣으면 자동 루프가 꺼진 환경에서 영영 안 돈다(2026-08-16 실제 발생).
+  it("returns the new job id so the controller can run it immediately", async () => {
+    const source = {
+      id: "job-1",
+      characterId: "ai-1",
+      sortOrder: 0,
+      status: "failed",
+      inputPrompt: null,
+      prompt: "p",
+      candidateCount: 1,
+      paramsJson: null,
+    } as const;
+    const repository = repositoryFake({
+      findRegenerationSource: jest.fn().mockResolvedValue(source),
+      regenerateShot: jest
+        .fn()
+        .mockResolvedValue({ outcome: "regenerated", jobId: "job-2" }),
+      findDraft: jest.fn().mockResolvedValue(draftRow),
+    });
+    const service = makeService(repository);
+
+    await expect(
+      service.regenerateShot({ draftId: "draft-1", jobId: "job-1" }),
+    ).resolves.toMatchObject({ newJobId: "job-2" });
+    expect(repository.markManual).toHaveBeenCalledWith("draft-1");
+  });
+
   it("maps stale regeneration attempts to the operator-facing error", async () => {
     const source = {
       id: "job-old",
@@ -578,7 +606,7 @@ describe("DraftsService", () => {
     } as const;
     const repository = repositoryFake({
       findRegenerationSource: jest.fn().mockResolvedValue(source),
-      regenerateShot: jest.fn().mockResolvedValue("stale-job"),
+      regenerateShot: jest.fn().mockResolvedValue({ outcome: "stale-job" }),
     });
     const service = makeService(repository);
 
