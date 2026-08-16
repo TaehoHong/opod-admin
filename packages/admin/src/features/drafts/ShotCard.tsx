@@ -19,6 +19,7 @@ import { EvaluationChips } from "./EvaluationChips";
 import {
   generateShot,
   regenerateShot,
+  runQueuedShot,
   v4PausedAt,
   type Draft,
   type DraftEvaluation,
@@ -55,8 +56,10 @@ export function ShotCard({
       shot.status === "failed") ||
     v4PausedAt(draft, ["caption", "publish"]);
 
-  const regenerate = useDraftMutation(draft.id, () =>
-    regenerateShot(draft.id, shot.jobId),
+  // 큐에 넣기와 바로 실행은 다른 행동이다 — 자동 루프가 꺼져 있으면 큐에만
+  // 넣은 컷은 아무도 집어가지 않는다.
+  const regenerate = useDraftMutation(draft.id, (runNow: boolean) =>
+    regenerateShot(draft.id, shot.jobId, { runNow }),
   );
 
   return (
@@ -134,14 +137,22 @@ export function ShotCard({
         <ShotBody draft={draft} shot={shot} imageEvaluation={imageEvaluation} />
 
         {canRegenerate && shot.status !== "draft" ? (
-          <Group>
+          <Group gap="xs">
+            <Button
+              variant="default"
+              size="compact-sm"
+              loading={regenerate.isPending}
+              onClick={() => regenerate.mutate(true)}
+            >
+              재생성 후 지금 실행
+            </Button>
             <Button
               variant="subtle"
               size="compact-sm"
               loading={regenerate.isPending}
-              onClick={() => regenerate.mutate()}
+              onClick={() => regenerate.mutate(false)}
             >
-              재생성
+              재생성 (큐에만 넣기)
             </Button>
           </Group>
         ) : null}
@@ -334,7 +345,10 @@ function ShotBody({
   if (shot.status === "draft") {
     return <GenerateShotForm draft={draft} shot={shot} />;
   }
-  if (shot.status === "queued" || shot.status === "running") {
+  if (shot.status === "queued") {
+    return <QueuedShotBody draft={draft} shot={shot} />;
+  }
+  if (shot.status === "running") {
     return (
       <Text size="sm" c="dimmed">
         이미지를 생성하는 중입니다…
@@ -404,15 +418,20 @@ function GenerateShotForm({ draft, shot }: { draft: Draft; shot: DraftShot }) {
 
   const generate = useDraftMutation(
     draft.id,
-    (values: { prompt: string; candidateCount: number }) =>
+    (values: { prompt: string; candidateCount: number; runNow: boolean }) =>
       generateShot(draft.id, shot.jobId, {
         prompt: values.prompt.trim(),
         candidateCount: values.candidateCount,
+        runNow: values.runNow,
       }),
   );
 
   return (
-    <form onSubmit={form.onSubmit((values) => generate.mutate(values))}>
+    <form
+      onSubmit={form.onSubmit((values) =>
+        generate.mutate({ ...values, runNow: true }),
+      )}
+    >
       <Stack gap="xs">
         <Textarea
           label="최종 프롬프트"
@@ -439,12 +458,57 @@ function GenerateShotForm({ draft, shot }: { draft: Draft; shot: DraftShot }) {
             {generate.error.message}
           </Alert>
         ) : null}
-        <Group>
+        <Group gap="xs">
           <Button type="submit" loading={generate.isPending}>
-            이미지 생성 실행
+            지금 생성
+          </Button>
+          <Button
+            variant="default"
+            loading={generate.isPending}
+            onClick={() =>
+              form.validate().hasErrors
+                ? undefined
+                : generate.mutate({ ...form.getValues(), runNow: false })
+            }
+          >
+            큐에만 넣기
           </Button>
         </Group>
+        <Text size="xs" c="dimmed">
+          "지금 생성"은 이 자리에서 바로 돌립니다. "큐에만 넣기"는 자동 루프가
+          집어가길 기다립니다 — 루프가 꺼져 있으면 컷 카드의 "지금 실행"으로
+          밀어야 합니다.
+        </Text>
       </Stack>
     </form>
+  );
+}
+
+// 큐에 들어갔지만 아직 아무도 집어가지 않은 컷. 자동 루프가 꺼진 환경에서는
+// 여기서 영영 기다리므로 "실행 중"처럼 보이면 안 된다 — 지금 실행 버튼을 준다.
+function QueuedShotBody({ draft, shot }: { draft: Draft; shot: DraftShot }) {
+  const run = useDraftMutation(draft.id, () =>
+    runQueuedShot(draft.id, shot.jobId),
+  );
+  return (
+    <Stack gap="xs">
+      <Text size="sm" c="dimmed">
+        대기열에 있습니다 — 생성 워커 자동 루프가 켜져 있으면 곧 실행됩니다.
+      </Text>
+      {run.isError ? (
+        <Text size="xs" c="red" role="alert">
+          {run.error.message}
+        </Text>
+      ) : null}
+      <Group>
+        <Button
+          size="compact-sm"
+          loading={run.isPending}
+          onClick={() => run.mutate()}
+        >
+          지금 실행
+        </Button>
+      </Group>
+    </Stack>
   );
 }

@@ -171,7 +171,8 @@ plain re-run repeats the same input.
 ```http
 POST /api/drafts/:id/plan                   { "note": "이모지 빼고" }   // note optional
 POST /api/drafts/:id/build-prompts
-POST /api/drafts/:id/jobs/:jobId/generate   { "prompt": "...", "candidateCount": 2 }
+POST /api/drafts/:id/jobs/:jobId/generate   { "prompt": "...", "candidateCount": 2, "runNow": true }
+POST /api/drafts/:id/jobs/:jobId/run        // run an already-queued shot now
 POST /api/drafts/:id/aggregate
 POST /api/drafts/:id/publish
 ```
@@ -192,8 +193,14 @@ pipeline) and returns the updated draft; failures are HTTP 400 with a reason
   Re-running while shots are still `draft` overwrites the prompts. Records
   `conceptJson.builderName`.
 - `generate` (optionally) overrides the prompt/candidate count, then queues the
-  shot and runs it immediately. Queuing a shot whose stored prompt is empty
-  without providing one is rejected (400) — build prompts first.
+  shot. `runNow` (default `true`) runs it immediately in this process; with
+  `runNow: false` it only sits in the queue for the automatic worker loop
+  (`worker.enabled`) — if that loop is off, nobody picks it up until `run` is
+  called. Queuing a shot whose stored prompt is empty without providing one is
+  rejected (400) — build prompts first.
+- `run` claims a **queued** shot and runs it now (400 if it is not queued —
+  already running, finished, or belongs to another draft). This is the
+  operator's push button for queued work when the automatic loop is off.
 - `aggregate` runs the shot aggregation now for a `generating`/`regenerating`
   draft: all latest shot jobs `completed` → `needs_review` (V2/V3) or the
   **caption stage** (V4: `planned` + `pipeline.stage=caption`); any `failed` →
@@ -245,11 +252,13 @@ published by the worker at `scheduledAt` (or immediately).
 POST /api/drafts/:id/jobs/:jobId/regenerate
 Content-Type: application/json
 
-{ "prompt": "다른 구도의 해변 장면 ..." }
+{ "prompt": "다른 구도의 해변 장면 ...", "runNow": true }
 ```
 
-Allowed from `needs_review` or `failed`, and in V4 from the caption/publish
-wait as well. Creates a new generation job for the same cut (`originJobId`
+Allowed from `needs_review` or `failed`, from `generating`/`regenerating` when
+the shot itself already finished (so a failed cut can be redone without waiting
+for aggregation), and in V4 from the caption/publish wait as well. `runNow`
+(default `true`) runs the new job immediately; `false` only queues it. Creates a new generation job for the same cut (`originJobId`
 lineage, prompt override optional) and moves the draft to `regenerating`; it
 returns to `needs_review` (V2/V3) or the caption stage (V4) when the new job
 completes. In V4 the existing `captionBuild` then reads as **stale** because the

@@ -906,6 +906,18 @@ export class DraftsService {
     return this.getDraft(input.draftId);
   }
 
+  // 큐에 있는 컷을 지금 실행하기 전 소속 확인 — 다른 초안의 잡을 이 경로로
+  // 밀 수 없게 한다. 실행 자체는 워커의 조건부 claim(queued만)이 소유한다.
+  async assertShotBelongsToDraft(
+    draftId: string,
+    jobId: string,
+  ): Promise<void> {
+    if (!(await this.repository.shotBelongsToDraft(draftId, jobId))) {
+      await this.assertDraftExists(draftId);
+      throw new BadRequestException("Draft shot job not found");
+    }
+  }
+
   private async assertDraftExists(draftId: string): Promise<void> {
     if (!(await this.repository.draftExists(draftId))) {
       throw new BadRequestException("Draft not found");

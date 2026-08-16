@@ -271,7 +271,8 @@ export function rejectDraft(draftId: string, reason?: string): Promise<Draft> {
 export function generateShot(
   draftId: string,
   jobId: string,
-  body: { prompt?: string; candidateCount?: number },
+  // runNow=false면 큐에만 넣는다(자동 루프가 집어감). 기본은 바로 실행.
+  body: { prompt?: string; candidateCount?: number; runNow?: boolean },
 ): Promise<Draft> {
   return draftAction(
     draftId,
@@ -283,13 +284,18 @@ export function generateShot(
 export function regenerateShot(
   draftId: string,
   jobId: string,
-  body: { prompt?: string } = {},
+  body: { prompt?: string; runNow?: boolean } = {},
 ): Promise<Draft> {
   return draftAction(
     draftId,
     `jobs/${encodeURIComponent(jobId)}/regenerate`,
     body,
   );
+}
+
+// 큐에 있는 컷을 지금 실행 — 자동 루프가 꺼져 있을 때 대기 잡을 미는 버튼.
+export function runQueuedShot(draftId: string, jobId: string): Promise<Draft> {
+  return draftAction(draftId, `jobs/${encodeURIComponent(jobId)}/run`);
 }
 
 export function selectShotOutput(

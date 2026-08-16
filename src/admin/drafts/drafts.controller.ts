@@ -62,14 +62,34 @@ export class DraftsController {
 
   // 수동 진행 컷 생성 실행 — draft 상태 컷의 프롬프트/후보 수를 (선택) 수정하고
   // queued로 전환한 뒤 즉시 생성 워커에 태운다 (WORKER_ENABLED 무관).
+  // 큐에 넣기와 바로 실행은 다른 행동이다. runNow=false면 큐에만 넣고 자동
+  // 루프에 맡긴다(루프가 꺼져 있으면 아래 /run으로 운영자가 밀어야 한다).
   @Post(":id/jobs/:jobId/generate")
   async generateShotNow(
     @Param("id") draftId: string,
     @Param("jobId") jobId: string,
     @Body() body: GenerateShotDto,
   ) {
-    await this.draftsService.queueShot({ draftId, jobId, ...body });
-    await this.generationWorker.runJobNow(jobId);
+    const { runNow = true, ...queue } = body;
+    await this.draftsService.queueShot({ draftId, jobId, ...queue });
+    if (runNow) await this.generationWorker.runJobNow(jobId);
+    return this.draftsService.getDraft(draftId);
+  }
+
+  // 이미 큐에 있는 컷을 지금 실행한다 — 자동 루프가 꺼져 있을 때 운영자가
+  // 대기 잡을 미는 버튼. queued가 아니면 400.
+  @Post(":id/jobs/:jobId/run")
+  async runQueuedShotNow(
+    @Param("id") draftId: string,
+    @Param("jobId") jobId: string,
+  ) {
+    await this.draftsService.assertShotBelongsToDraft(draftId, jobId);
+    const result = await this.generationWorker.runJobNow(jobId);
+    if (!result.jobId) {
+      throw new BadRequestException(
+        "Only a queued shot can be run now — it may already be running or finished",
+      );
+    }
     return this.draftsService.getDraft(draftId);
   }
 
@@ -186,12 +206,13 @@ export class DraftsController {
     @Param("jobId") jobId: string,
     @Body() body: RegenerateShotDto,
   ) {
+    const { runNow = true, ...regenerate } = body;
     const { newJobId } = await this.draftsService.regenerateShot({
       draftId,
       jobId,
-      ...body,
+      ...regenerate,
     });
-    await this.generationWorker.runJobNow(newJobId);
+    if (runNow) await this.generationWorker.runJobNow(newJobId);
     return this.draftsService.getDraft(draftId);
   }
 

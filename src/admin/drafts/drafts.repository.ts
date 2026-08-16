@@ -330,6 +330,14 @@ export class DraftsRepository {
     });
   }
 
+  async shotBelongsToDraft(draftId: string, jobId: string): Promise<boolean> {
+    const job = await this.prisma.generationJob.findFirst({
+      where: { id: jobId, draftId },
+      select: { id: true },
+    });
+    return job !== null;
+  }
+
   findRegenerationSource(
     draftId: string,
     jobId: string,
