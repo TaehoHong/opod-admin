@@ -374,6 +374,9 @@ describe("post work stage screens", () => {
       },
     );
 
+    // 버전 배지도 실제 값에서 뽑아야 한다 — 문구에 박아두면 V4 초안이 V3로
+    // 보이고, 운영자가 "V3로 돌고 있나?"를 의심하게 된다(실제로 났던 오해).
+    expect(await screen.findByText("Agent V4")).toBeInTheDocument();
     const rail = within(
       await screen.findByRole("navigation", { name: "게시물 생성 단계" }),
     );

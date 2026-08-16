@@ -238,7 +238,7 @@ function PostWorkHeader({
                 "이미지 기획 단계가 없다"는 오해가 났다. */}
             {item.kind === "draft" ? (
               <Badge variant="outline" color={item.pipelineV3 ? "teal" : "ink"}>
-                {item.pipelineV3 ? "Agent V3" : "V2 legacy"}
+                {pipelineLabel(item.pipelineV3)}
               </Badge>
             ) : null}
           </Group>
@@ -1000,7 +1000,7 @@ function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
       description="게시물 생성의 입력과 실행 출처를 확인합니다."
       status={
         <Badge variant="outline" color={v3 ? "teal" : "ink"}>
-          {v3 ? "Agent V3" : "V2 legacy"}
+          {pipelineLabel(v3)}
         </Badge>
       }
     >
@@ -1936,6 +1936,13 @@ function PublishPreview({ draft }: { draft: Draft }) {
       </Stack>
     </Paper>
   );
+}
+
+// 어느 세대의 파이프라인을 보고 있는지. 버전을 문구에 박아두면 새 버전이
+// 나와도 옛 이름이 그대로 보인다 — 실제 값에서 뽑는다.
+function pipelineLabel(pipeline: PostWorkItem["pipelineV3"]): string {
+  if (!pipeline) return "V2 legacy";
+  return pipeline.version === "post-pipeline-v4" ? "Agent V4" : "Agent V3";
 }
 
 // 제목: 캡션 → 기획 전제(가제) → 없음. V4는 ⑥ 전까지 캡션이 비어 있다.
