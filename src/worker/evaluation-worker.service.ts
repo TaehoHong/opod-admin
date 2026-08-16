@@ -766,28 +766,44 @@ export class EvaluationWorkerService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
-function evaluationAverage(result: Record<string, unknown>): number {
+// 점수는 세대마다 다른 깊이에 있다. 텍스트 평가 3종은 `result.scores`가 평면
+// `{차원: 숫자}`이고, V3 생성 이미지 평가는 `shots[].dimensions.<차원>.score`와
+// `setDimensions.<차원>.score`로 두 단계 더 깊다.
+//
+// 원래 구현은 `key === "score"`인 키로만 하위로 내려갔다. shot 레코드의 키는
+// `sortOrder`/`issues`/`dimensions`뿐이라 거기서 멈췄고, 숫자를 하나도 못 모아
+// 0을 반환했다 — 실제 평균이 4.8인데 화면에는 `이미지 심사 0.0/5`.
+//
+// 고칠 때의 함정: 무작정 전 계층을 순회하면 `sortOrder: 0`을 점수로 주워 담는다.
+// 그래서 **내려가는 것은 자유롭게, 수확은 `score` 키에서만** 한다.
+export function evaluationAverage(result: Record<string, unknown>): number {
   const numbers: number[] = [];
-  const collect = (value: unknown): void => {
-    if (typeof value === "number" && Number.isFinite(value)) {
+  const push = (value: unknown): void => {
+    if (typeof value === "number" && Number.isFinite(value))
       numbers.push(value);
-      return;
-    }
+  };
+  const harvest = (value: unknown): void => {
     if (Array.isArray(value)) {
-      value.forEach(collect);
+      value.forEach(harvest);
       return;
     }
-    if (isRecord(value)) {
-      for (const [key, item] of Object.entries(value)) {
-        if (key === "score") collect(item);
-      }
+    if (!isRecord(value)) return;
+    // 계약이 없어 평가 대상이 아닌 차원은 화면에서도 빠진다 — 평균에도 넣지 않는다.
+    if (value.applicable === false) return;
+    for (const [key, item] of Object.entries(value)) {
+      if (key === "score") push(item);
+      else harvest(item);
     }
   };
   if (isRecord(result.scores)) {
-    for (const score of Object.values(result.scores)) collect(score);
+    // 평면 `{차원: 숫자}` 또는 `{차원: {score}}` 둘 다 온다.
+    for (const score of Object.values(result.scores)) {
+      if (typeof score === "number") push(score);
+      else harvest(score);
+    }
   }
-  collect(result.shots);
-  collect(result.setDimensions);
+  harvest(result.shots);
+  harvest(result.setDimensions);
   return numbers.length
     ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length
     : 0;

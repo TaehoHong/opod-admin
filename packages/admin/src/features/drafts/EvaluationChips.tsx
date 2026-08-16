@@ -130,8 +130,18 @@ export function EvaluationChips({
   );
   const severe = severeEntries(evaluation, shotSortOrder);
   const verdict = candidateVerdict(evaluation, shotSortOrder, candidateIndex);
+  // V3 이미지 평가는 저장된 총점이 0인 행이 있다 — 수집기가 shots[].dimensions
+  // 까지 못 내려가던 버그(2026-08-16 수정). 화면은 지금 보여주는 차원 점수의
+  // 평균을 직접 계산해 쓴다. 배지와 칩이 같은 데이터를 말하게 되고, 고치기 전에
+  // 쌓인 평가도 올바른 값으로 보인다.
+  const shotSummaries =
+    shotSortOrder === undefined ? v3ImageShotSummaries(evaluation) : [];
+  const computed =
+    shotSortOrder === undefined ? v3ImageAverage(evaluation) : undefined;
   const overall =
-    shotSortOrder === undefined ? evaluation.overallScore : undefined;
+    shotSortOrder === undefined
+      ? (computed ?? evaluation.overallScore)
+      : undefined;
   // 총점·판정만 있고 차원 점수가 없는 평가도 있다. 점수 배열이 비었다고 해서
   // 블록 전체를 지우면 완료된 평가가 화면에서 사라진다.
   if (
@@ -139,6 +149,7 @@ export function EvaluationChips({
     lint.length === 0 &&
     hardFailures.length === 0 &&
     severe.length === 0 &&
+    shotSummaries.length === 0 &&
     overall == null &&
     !verdict
   )
@@ -264,8 +275,106 @@ export function EvaluationChips({
           ))}
         </Stack>
       ) : null}
+
+      {/* V3 이미지 평가의 지적은 컷 안에 들어 있어서, 이 블록에서는 총점과
+          판정만 보이고 실제 내용은 "평가 원문 보기"를 열어야 나왔다. 계약상
+          5점 미만 차원마다 지적이 하나씩 붙으므로, 만점이 아닌 차원과 그 지적을
+          컷별로 펼쳐 둔다 — 만점 차원은 말할 게 없으니 접는다. */}
+      {shotSummaries.map((shot) => (
+        <Stack key={`${prefix}:shot-${shot.sortOrder}`} gap={2}>
+          <Group gap={6} wrap="wrap" align="center">
+            <Text size="xs" fw={600}>
+              컷 {shot.sortOrder + 1}
+            </Text>
+            {shot.flagged.length === 0 ? (
+              <Text size="xs" c="dimmed">
+                전 차원 5/5 · 지적 없음
+              </Text>
+            ) : (
+              shot.flagged.map((entry) => (
+                <Badge
+                  key={`${prefix}:shot-${shot.sortOrder}:${entry.dimension}`}
+                  variant="light"
+                  color={scoreColor(entry.score)}
+                >
+                  {LABELS[entry.dimension] ?? entry.dimension} {entry.score}/5
+                </Badge>
+              ))
+            )}
+          </Group>
+          {shot.issues.map((issue, index) => (
+            <Text
+              key={`${prefix}:shot-${shot.sortOrder}:issue-${index}`}
+              size="xs"
+              c={issue.severity === "minor" ? "dimmed" : "red"}
+            >
+              {SEVERITY_LABELS[issue.severity] ?? issue.severity} ·{" "}
+              {LABELS[issue.dimension] ?? issue.dimension} · {issue.detail}
+            </Text>
+          ))}
+        </Stack>
+      ))}
     </Stack>
   );
+}
+
+const SEVERITY_LABELS: Record<string, string> = {
+  minor: "경미",
+  major: "중대",
+  critical: "치명",
+};
+
+type ShotSummary = {
+  sortOrder: number;
+  flagged: ScoreEntry[];
+  issues: { severity: string; dimension: string; detail: string }[];
+};
+
+// 컷별 "말할 거리"만 추린다 — 5점 미만 차원과 지적. 계약상 5점 미만에는 지적이
+// 반드시 붙으므로 둘은 대체로 짝이다.
+function v3ImageShotSummaries(evaluation: DraftEvaluation): ShotSummary[] {
+  const shots = v3ImageShots(evaluation);
+  if (!shots) return [];
+  return array(shots).flatMap((raw) => {
+    const shot = asRecord(raw);
+    if (!shot || typeof shot.sortOrder !== "number") return [];
+    const flagged = dimensionEntries(asRecord(shot.dimensions)).filter(
+      (entry) => entry.score < 5,
+    );
+    const issues = array(shot.issues).flatMap((rawIssue) => {
+      const issue = asRecord(rawIssue);
+      if (!issue || typeof issue.detail !== "string") return [];
+      return [
+        {
+          severity: String(issue.severity ?? "minor"),
+          dimension: String(issue.dimension ?? ""),
+          detail: issue.detail,
+        },
+      ];
+    });
+    return [{ sortOrder: shot.sortOrder, flagged, issues }];
+  });
+}
+
+// 화면이 보여주는 차원 점수(컷 + 세트)의 평균. 저장된 overallScore와 정의가
+// 같으므로, 버그로 0이 저장된 옛 행도 올바르게 보인다.
+function v3ImageAverage(evaluation: DraftEvaluation): number | undefined {
+  const shots = v3ImageShots(evaluation);
+  if (!shots) return undefined;
+  const result = v3Result(evaluation);
+  const scores = [
+    ...array(shots).flatMap((raw) =>
+      dimensionEntries(asRecord(asRecord(raw)?.dimensions)).map(
+        (entry) => entry.score,
+      ),
+    ),
+    ...dimensionEntries(asRecord(result?.setDimensions)).map(
+      (entry) => entry.score,
+    ),
+  ];
+  return scores.length
+    ? scores.reduce((sum, score) => sum + score, 0) / scores.length
+    : undefined;
 }
 
 // V3는 평가 본문을 scoresJson.result 아래에 두고 차원 점수를 숫자로 저장한다.
