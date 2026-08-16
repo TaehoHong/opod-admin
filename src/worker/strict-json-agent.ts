@@ -27,6 +27,32 @@ export type StrictJsonAgentRequest = {
   context?: LlmLogContext;
 };
 
+type TokenField = "max_tokens" | "max_completion_tokens";
+
+// 최신 OpenAI 모델(o-시리즈·gpt-5 계열)은 max_tokens를 거부하고
+// max_completion_tokens를 요구한다. 반대로 많은 OpenAI 호환 서버는 새 이름을
+// 모른다. 어느 쪽인지는 (엔드포인트, 모델) 조합이 정하므로 한 번 알아낸 답을
+// 프로세스 안에서 기억한다 — 기억하지 않으면 **모든 호출이 두 번 나간다**
+// (첫 호출이 400, 재시도가 200). 이미지가 붙는 호출은 base64를 두 번 올린다.
+// 2026-08-16 개발 서버 관측: 7일간 187건 중 36건이 이 낭비였다.
+const preferredTokenField = new Map<string, TokenField>();
+
+export function rememberedTokenField(config: {
+  apiUrl: string;
+  model: string;
+}): TokenField {
+  return preferredTokenField.get(tokenFieldKey(config)) ?? "max_tokens";
+}
+
+function tokenFieldKey(config: { apiUrl: string; model: string }): string {
+  return `${config.apiUrl}\u0000${config.model}`;
+}
+
+// 테스트·설정 변경 시 초기화용.
+export function resetTokenFieldMemory(): void {
+  preferredTokenField.clear();
+}
+
 // OpenAI-compatible native structured output transport. Agent-specific meaning
 // remains in each parser; this owner only handles request/log/response plumbing.
 export class StrictJsonAgentClient {
@@ -39,9 +65,7 @@ export class StrictJsonAgentClient {
   async run(
     request: StrictJsonAgentRequest,
   ): Promise<{ value: unknown; producerLogId: string | null }> {
-    const execute = async (
-      tokenField: "max_tokens" | "max_completion_tokens",
-    ) => {
+    const execute = async (tokenField: TokenField) => {
       const requestJson = {
         model: this.config.model,
         messages: [
@@ -86,14 +110,23 @@ export class StrictJsonAgentClient {
       return { response: logged.response, producerLogId: logged.logId };
     };
 
-    let result = await execute("max_tokens");
+    const first = rememberedTokenField(this.config);
+    let result = await execute(first);
     if (!result.response.ok) {
       const detail = await result.response.text().catch(() => "");
-      if (
-        result.response.status === 400 &&
-        detail.includes("max_completion_tokens")
-      ) {
-        result = await execute("max_completion_tokens");
+      // 프로바이더가 "이 파라미터 대신 저 파라미터"라고 말하면 반대쪽으로 한 번
+      // 재시도하고, 그 답을 기억한다. 양방향이어야 한다 — 기억이 max_completion_
+      // tokens인데 모델을 옛 호환 서버로 바꾸면 반대 방향 400이 난다.
+      const other: TokenField =
+        first === "max_tokens" ? "max_completion_tokens" : "max_tokens";
+      const aboutTokenField =
+        detail.includes("max_completion_tokens") ||
+        detail.includes("max_tokens");
+      if (result.response.status === 400 && aboutTokenField) {
+        result = await execute(other);
+        if (result.response.ok) {
+          preferredTokenField.set(tokenFieldKey(this.config), other);
+        }
       } else {
         throw new Error(
           `structured agent failed (${result.response.status}): ${detail.slice(0, 300)}`,
