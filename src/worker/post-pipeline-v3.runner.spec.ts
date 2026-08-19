@@ -41,6 +41,7 @@ function setup(
   const repository = {
     findPlannedDraft: jest.fn().mockResolvedValue(currentDraft),
     findAvailableLocations: jest.fn().mockResolvedValue([]),
+    findRecentVisualPlanDrafts: jest.fn().mockResolvedValue([]),
     findCaptionShots: jest.fn().mockResolvedValue(options.captionShots ?? []),
     persistV3Paused: jest.fn().mockResolvedValue(true),
     persistV3Artifact: jest.fn().mockResolvedValue(true),
@@ -285,6 +286,157 @@ describe("PostPipelineV3Runner", () => {
     expect(repository.persistV3Paused).not.toHaveBeenCalled();
   });
 
+  it("sends visual persona, memory, soft capture preferences, and recent plans to image planning", async () => {
+    const base = draft({});
+    const current = draft(
+      {
+        pipelineVersion: "post-pipeline-v4",
+        pipeline: {
+          stage: "image_plan",
+          state: "running",
+          imageCount: 1,
+          reasonCodes: [],
+        },
+        postPlanning: {
+          revision: 1,
+          hash: "sha256:post",
+          output: {
+            status: "ready",
+            intent: {
+              premise: "현상한 필름을 책상에 펼친다.",
+              primaryPurpose: "첫 롤을 기록한다.",
+              secondaryPurpose: null,
+            },
+            newMemoryCandidates: [],
+          },
+        },
+      },
+      {
+        character: {
+          ...base.character,
+          personas: [
+            ...base.character.personas,
+            { title: "capture_style", content: "혼자면 고정면 셀프타이머" },
+            { title: "world", content: "연남동 원룸에 산다" },
+          ],
+          memories: [{ type: "episodic", content: "비 오는 날 우산을 샀다" }],
+        },
+      },
+    );
+    const { runner, repository } = setup(current, {
+      status: "blocked",
+      reasons: [
+        { code: "missing_identity_reference", detail: "정체성 레퍼런스 없음" },
+      ],
+    });
+    repository.findRecentVisualPlanDrafts.mockResolvedValue([
+      {
+        id: "malformed-draft",
+        status: "planned",
+        createdAt: new Date("2026-08-18T00:00:00.000Z"),
+        publishedPostId: null,
+        conceptJson: null,
+      },
+      {
+        id: "blocked-draft",
+        status: "planned",
+        createdAt: new Date("2026-08-17T12:00:00.000Z"),
+        publishedPostId: null,
+        conceptJson: {
+          imagePlanning: { output: { status: "blocked", reasons: [] } },
+        },
+      },
+      {
+        id: "older-draft",
+        status: "planned",
+        createdAt: new Date("2026-08-17T00:00:00.000Z"),
+        publishedPostId: null,
+        conceptJson: {
+          postPlanning: {
+            output: {
+              status: "ready",
+              intent: { premise: "창가에서 우산을 말린다" },
+            },
+          },
+          imagePlanning: {
+            output: {
+              status: "ready",
+              shots: [
+                {
+                  sortOrder: 0,
+                  visualPurpose: "젖은 날의 여운",
+                  scene: "창가에 기대 우산을 내려다본다",
+                  captureSetup: "맞은편 허리 높이",
+                  characterPresentation: { mode: "partial" },
+                  subjectCameraRelation: "unaware",
+                },
+                ...Array.from({ length: 12 }, (_, index) => ({
+                  sortOrder: index + 1,
+                  visualPurpose: `추가 컷 ${index + 1}`,
+                  scene: `추가 장면 ${index + 1}`,
+                  captureSetup: `추가 촬영 ${index + 1}`,
+                  characterPresentation: { mode: "partial" },
+                  subjectCameraRelation: "aware_unposed",
+                })),
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    await runner.runCurrentStage("draft-1");
+
+    const paused = repository.persistV3Paused.mock.calls[0][0] as {
+      conceptJson: {
+        imagePlanning: {
+          input: {
+            characterVisualContext: Record<string, unknown>;
+            memories: unknown[];
+            recentVisualHistory: { shots: unknown[] }[];
+          };
+        };
+      };
+    };
+    const context =
+      paused.conceptJson.imagePlanning.input.characterVisualContext;
+    expect(context.capturePreferences).toEqual(["혼자면 고정면 셀프타이머"]);
+    expect(context.personaContext).toEqual(
+      expect.arrayContaining([
+        { title: "content_style", content: "사소한 일상을 구체적으로 쓴다" },
+        { title: "world", content: "연남동 원룸에 산다" },
+      ]),
+    );
+    expect(paused.conceptJson.imagePlanning.input.memories).toEqual([
+      { type: "episodic", content: "비 오는 날 우산을 샀다" },
+    ]);
+    expect(
+      paused.conceptJson.imagePlanning.input.recentVisualHistory[0],
+    ).toMatchObject({
+      publicationState: "unpublished",
+      premise: "창가에서 우산을 말린다",
+      shots: expect.arrayContaining([
+        {
+          visualPurpose: "젖은 날의 여운",
+          scene: "창가에 기대 우산을 내려다본다",
+          captureSetup: "맞은편 허리 높이",
+          characterPresentation: "partial",
+          subjectCameraRelation: "unaware",
+        },
+      ]),
+    });
+    expect(
+      paused.conceptJson.imagePlanning.input.recentVisualHistory.flatMap(
+        (entry) => entry.shots,
+      ),
+    ).toHaveLength(12);
+    expect(repository.findRecentVisualPlanDrafts).toHaveBeenCalledWith(
+      "character-1",
+      "draft-1",
+      8,
+    );
+  });
+
   // ⑥ 캡션: 산출물 저장과 게시 컬럼 갱신이 한 CAS 트랜잭션이고, 다음 단계는
   // 검수가 아니라 게시 대기다. 이미지가 vision 블록으로 실제 전송돼야 한다.
   it("runs the caption stage on the generated images and hands off to publish", async () => {
@@ -356,6 +508,40 @@ describe("PostPipelineV3Runner", () => {
           pipeline: expect.objectContaining({
             stage: "publish",
             state: "pending",
+          }),
+        }),
+      }),
+    );
+  });
+
+  // ⑦ 게시는 러너의 단계가 아니다. claim 게이트가 뚫려 여기 들어오더라도 초안을
+  // failed로 만들면 안 된다 — 게시·캡션 편집·컷 재생성 게이트가 전부
+  // state=pending을 요구해서, failed가 되는 순간 되살릴 경로가 사라진다.
+  it("releases a draft claimed at the publish stage instead of failing it", async () => {
+    const { runner, repository, fetchMock } = setup(
+      draft({
+        pipelineVersion: "post-pipeline-v4",
+        pipeline: {
+          stage: "publish",
+          state: "running",
+          imageCount: 1,
+          reasonCodes: [],
+        },
+        captionBuild: { revision: 1, hash: "sha256:caption" },
+      }),
+    );
+
+    await runner.runCurrentStage("draft-1");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(repository.persistV3Paused).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedStage: "publish",
+        conceptJson: expect.objectContaining({
+          pipeline: expect.objectContaining({
+            stage: "publish",
+            state: "pending",
+            reasonCodes: [],
           }),
         }),
       }),

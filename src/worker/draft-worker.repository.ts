@@ -109,6 +109,16 @@ function notV3FamilySql(alias: string) {
   return Prisma.sql`(${Prisma.raw(alias)}concept_json->>'pipelineVersion' IS NULL OR ${Prisma.raw(alias)}concept_json->>'pipelineVersion' NOT IN (${POST_PIPELINE_V3}, ${POST_PIPELINE_V4}))`;
 }
 
+// 러너가 실행하는 단계 = Agent 단계뿐이다(post-pipeline-v3.runner.ts
+// runCurrentStage의 디스패치). ⑦ 게시·⑧ 메모리는 게시 루프와 운영자의 몫이라
+// claim이 그 단계를 집으면 러너가 초안을 unknown_stage로 죽인다 — 그리고 failed
+// state는 게시·캡션 편집·컷 재생성 게이트(전부 state=pending)를 동시에 막아
+// 되살릴 방법이 없다. 그래서 "집지 않는다"가 1차 방어다.
+const AGENT_STAGES = ["post_plan", "image_plan", "image_prompt", "caption"];
+function agentStageSql(alias: string) {
+  return Prisma.sql`${Prisma.raw(alias)}concept_json#>>'{pipeline,stage}' IN (${Prisma.join(AGENT_STAGES)})`;
+}
+
 // 게시 가능 = V2/v3의 approved, 또는 V4의 planned + pipeline.stage=publish +
 // state=pending(⑥ 캡션 완료 직후). 게시 경로 4곳(due 조회·수동 조회·오류 기록·
 // 게시 CAS)이 같은 술어를 써야 "조회는 되는데 CAS는 실패"가 안 난다.
@@ -161,6 +171,13 @@ export type AvailableLocation = {
     description: string;
     media: { uploadedAt: Date | null };
   }[];
+};
+
+export type RecentVisualPlanDraft = {
+  id: string;
+  createdAt: Date;
+  publishedPostId: string | null;
+  conceptJson: unknown;
 };
 
 export type DraftImageJob = {
@@ -316,6 +333,29 @@ export class DraftWorkerRepository {
             media: { select: { uploadedAt: true } },
           },
         },
+      },
+    });
+  }
+
+  findRecentVisualPlanDrafts(
+    characterId: string,
+    excludeDraftId: string,
+    take: number,
+  ): Promise<RecentVisualPlanDraft[]> {
+    return this.prisma.postDraft.findMany({
+      where: {
+        characterId,
+        id: { not: excludeDraftId },
+        draftType: "post",
+        status: { notIn: ["failed", "rejected"] },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take,
+      select: {
+        id: true,
+        createdAt: true,
+        publishedPostId: true,
+        conceptJson: true,
       },
     });
   }
@@ -536,6 +576,7 @@ export class DraftWorkerRepository {
         WHERE d.status = 'planned' AND d.draft_type = 'post'
           AND ${v3FamilySql("d.")}
           AND d.concept_json#>>'{pipeline,state}' = 'pending'
+          AND ${agentStageSql("d.")}
           AND (d.concept_json->>'mode') IS DISTINCT FROM 'manual'
         ORDER BY d.created_at, d.id
         LIMIT 1
@@ -546,6 +587,17 @@ export class DraftWorkerRepository {
     return rows[0]?.id;
   }
 
+  // 수동 실행. 자동 claim과 두 가지가 다르다.
+  //
+  // 1) 멈춰 선 상태면 사유를 가리지 않고 집는다(running만 제외). 화면이 실패·
+  //    입력 부족·설정 부족에 "고친 뒤 재실행하세요"라고 안내하는데 claim이
+  //    pending만 집으면 그 버튼이 400을 낸다 — 실패 상태가 유일한 복구 경로까지
+  //    잠갔다. 자동 루프는 계속 pending만 집는다(실패를 무한 재시도하지 않는다).
+  // 2) ⑦ 게시에 서 있는 V4 초안은 단계를 ⑥ 캡션으로 되감아 집는다 — "캡션 다시
+  //    생성"이 부르는 경로가 여기라서, 되감지 않으면 러너가 게시 단계를
+  //    실행하려 든다. 되감아도 잃을 산출물이 없다(⑦은 산출물이 없고 captionBuild는
+  //    새 revision으로 쌓인다). 자동 claim은 절대 되감지 않는다 — 캡션↔게시를
+  //    무한히 왕복한다.
   async claimV3DraftNow(
     draftId: string,
     leaseSeconds: number,
@@ -555,13 +607,30 @@ export class DraftWorkerRepository {
       SET status = 'generating',
           lease_expires_at = now() + make_interval(secs => ${leaseSeconds}),
           attempt_count = attempt_count + 1,
-          concept_json = jsonb_set(concept_json, '{pipeline,state}', '"running"'::jsonb),
+          concept_json = jsonb_set(
+            jsonb_set(
+              concept_json,
+              '{pipeline,stage}',
+              CASE WHEN concept_json#>>'{pipeline,stage}' = 'publish'
+                   THEN '"caption"'::jsonb
+                   ELSE concept_json#>'{pipeline,stage}' END
+            ),
+            '{pipeline,state}',
+            '"running"'::jsonb
+          ),
           updated_at = now()
       WHERE id = ${draftId}::uuid
         AND status = 'planned'
         AND draft_type = 'post'
         AND ${v3FamilySql("")}
-        AND concept_json#>>'{pipeline,state}' = 'pending'
+        AND concept_json#>>'{pipeline,state}' <> 'running'
+        AND (
+          ${agentStageSql("")}
+          OR (
+            concept_json#>>'{pipeline,stage}' = 'publish'
+            AND concept_json->'captionBuild' IS NOT NULL
+          )
+        )
       RETURNING id
     `;
     return rows.length === 1;

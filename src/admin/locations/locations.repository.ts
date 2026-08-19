@@ -90,6 +90,7 @@ export class LocationsRepository {
     description: string;
     visualPrompt: string;
     negativePrompt: string;
+    referenceNegativePrompt: string;
   }): Promise<LocationRow> {
     try {
       return await this.prisma.characterLocation.create({
@@ -110,6 +111,7 @@ export class LocationsRepository {
       description?: string;
       visualPrompt?: string;
       negativePrompt?: string;
+      referenceNegativePrompt?: string;
     },
   ): Promise<LocationRow> {
     try {

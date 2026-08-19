@@ -18,8 +18,11 @@ const input: ImagePlannerInput = {
     appearance: "black bob hair",
     visualStyle: "ordinary phone photo",
     boundaries: [],
-    relevantContext: [],
+    capturePreferences: [],
+    personaContext: [],
   },
+  memories: [],
+  recentVisualHistory: [],
   identityReferences: [{ id: "person-1", description: "face reference" }],
   locations: [],
 };
@@ -40,6 +43,10 @@ const ready: ImagePlanReady = {
         faceVisible: false,
         identityPreservationRequired: false,
       },
+      subjectState: "",
+      motionEvidence: "",
+      notInFrame: [],
+      subjectCameraRelation: "not_applicable",
       referenceBindings: [],
     },
   ],
@@ -58,6 +65,22 @@ describe("Image Planning Agent contract", () => {
     );
   });
 
+  it("rejects a missing or unknown subject-camera relation", () => {
+    const missing = structuredClone(ready) as unknown as {
+      shots: Record<string, unknown>[];
+    };
+    delete missing.shots[0].subjectCameraRelation;
+    expect(() => parseImagePlan(missing, input)).toThrow("invalid fields");
+
+    const unknown = structuredClone(ready) as unknown as {
+      shots: { subjectCameraRelation: string }[];
+    };
+    unknown.shots[0].subjectCameraRelation = "casual";
+    expect(() => parseImagePlan(unknown, input)).toThrow(
+      "subjectCameraRelation is invalid",
+    );
+  });
+
   it("requires identity-purpose binding when recognizable identity is required", () => {
     const visible = structuredClone(ready);
     visible.shots[0].characterPresentation = {
@@ -66,6 +89,7 @@ describe("Image Planning Agent contract", () => {
       faceVisible: true,
       identityPreservationRequired: true,
     };
+    visible.shots[0].subjectCameraRelation = "deliberately_posed";
     expect(() => parseImagePlan(visible, input)).toThrow(
       "lacks an identity binding",
     );

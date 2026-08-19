@@ -90,6 +90,7 @@ function LocationForms({
       description: location.description,
       visualPrompt: location.visualPrompt,
       negativePrompt: location.negativePrompt,
+      referenceNegativePrompt: location.referenceNegativePrompt,
     },
     validate: {
       locationKey: (value) =>
@@ -201,10 +202,17 @@ function LocationForms({
               {...form.getInputProps("visualPrompt")}
             />
             <Textarea
-              label="네거티브 프롬프트"
+              label="네거티브 프롬프트 (컷 생성에 함께 나감)"
               rows={3}
               key={form.key("negativePrompt")}
               {...form.getInputProps("negativePrompt")}
+            />
+            <Textarea
+              label="레퍼런스 전용 네거티브"
+              description="빈 공간 레퍼런스를 만들 때만 쓰는 금지어(people, faces 등). 컷 생성 요청에는 나가지 않습니다."
+              rows={3}
+              key={form.key("referenceNegativePrompt")}
+              {...form.getInputProps("referenceNegativePrompt")}
             />
             <MutationAlert
               mutation={save}

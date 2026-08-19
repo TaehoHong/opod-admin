@@ -22,7 +22,7 @@ import {
   type CharacterPersona,
 } from "./api";
 
-// 표준 블록 12종. 제목은 Agent와 기획 프롬프트에 원문 그대로 들어가므로
+// 표준 블록 13종. 제목은 Agent와 기획 프롬프트에 원문 그대로 들어가므로
 // 저장값은 영문 키로 두고 한글은 화면 라벨로만 쓴다. 목록 순서가 곧 관례상의
 // 블록 순서지만 실제 순서는 sortOrder가 담당한다 — 제목에 번호를 붙이지 않는다.
 const PERSONA_TITLES = [
@@ -33,6 +33,7 @@ const PERSONA_TITLES = [
   { value: "voice", label: "말투" },
   { value: "world", label: "배경" },
   { value: "content_style", label: "콘텐츠 스타일" },
+  { value: "capture_style", label: "촬영 방식" },
   { value: "relationships", label: "관계" },
   { value: "preferences", label: "취향" },
   { value: "boundaries", label: "가드레일" },

@@ -22,6 +22,7 @@ export type LocationItem = {
   description: string;
   visualPrompt: string;
   negativePrompt: string;
+  referenceNegativePrompt: string;
   referenceCount: number;
   references: LocationReference[];
   createdAt: string;
@@ -35,6 +36,7 @@ export type LocationInput = {
   description: string;
   visualPrompt: string;
   negativePrompt: string;
+  referenceNegativePrompt: string;
 };
 
 export function fetchLocations(params: {

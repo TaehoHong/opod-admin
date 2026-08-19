@@ -379,14 +379,14 @@ model Character {
 }
 
 model UserCharacterFollow {
-  userId      String    @map("user_id") @db.Uuid
-  characterId String    @map("character_id") @db.Uuid
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  userId         String    @map("user_id") @db.Uuid
+  characterId    String    @map("character_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   // 팔로우 알림 워터마크. 이 시각 이후 게시글·스토리만 알림 대상이다.
   // 기본값이 팔로우 시각이라 팔로우 이전 콘텐츠는 알림되지 않는다.
-  notifiedUpToAt DateTime @default(now()) @map("notified_up_to_at") @db.Timestamptz(6)
-  user        User      @relation(fields: [userId], references: [id])
-  character   Character @relation(fields: [characterId], references: [id])
+  notifiedUpToAt DateTime  @default(now()) @map("notified_up_to_at") @db.Timestamptz(6)
+  user           User      @relation(fields: [userId], references: [id])
+  character      Character @relation(fields: [characterId], references: [id])
 
   @@id([userId, characterId])
   @@map("user_character_follows")
@@ -576,20 +576,20 @@ model Notification {
 }
 
 model MessageConversation {
-  id          String    @id @default(uuid(7)) @db.Uuid
-  userId      String    @map("user_id") @db.Uuid
-  characterId String    @map("character_id") @db.Uuid
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  id            String            @id @default(uuid(7)) @db.Uuid
+  userId        String            @map("user_id") @db.Uuid
+  characterId   String            @map("character_id") @db.Uuid
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   // 유저가 이 대화를 마지막으로 읽은 시각. null이면 한 번도 읽지 않았다는 뜻이라
   // 캐릭터 메시지 전부가 미읽음이다. 앱이 대화를 실제로 보여줄 때 갱신한다.
-  lastReadAt  DateTime? @map("last_read_at") @db.Timestamptz(6)
+  lastReadAt    DateTime?         @map("last_read_at") @db.Timestamptz(6)
   // 대화 목록 정렬 키. 관계의 MAX(createdAt)으로는 정렬할 수 없어 비정규화했다.
   // 메시지가 추가될 때마다 갱신한다.
-  lastMessageAt DateTime @default(now()) @map("last_message_at") @db.Timestamptz(6)
-  user        User      @relation(fields: [userId], references: [id])
-  character   Character @relation(fields: [characterId], references: [id])
-  messages    Message[]
-  replyJobs   MessageReplyJob[]
+  lastMessageAt DateTime          @default(now()) @map("last_message_at") @db.Timestamptz(6)
+  user          User              @relation(fields: [userId], references: [id])
+  character     Character         @relation(fields: [characterId], references: [id])
+  messages      Message[]
+  replyJobs     MessageReplyJob[]
 
   @@unique([userId, characterId])
   @@map("message_conversations")
@@ -619,31 +619,31 @@ model Message {
 // worker가 집어서 opod-agent를 호출한다. 프로세스가 죽어도 작업이 남아야 답변이
 // 유실되지 않으므로 진행 상태를 메모리가 아니라 여기에 둔다.
 model MessageReplyJob {
-  id             String                @id @default(uuid(7)) @db.Uuid
-  conversationId String                @map("conversation_id") @db.Uuid
+  id                   String                @id @default(uuid(7)) @db.Uuid
+  conversationId       String                @map("conversation_id") @db.Uuid
   // 이 작업을 유발한 사용자 메시지 ID. Agent 요청 헤더의 turn 키와 같은 값이라
   // 재시도해도 Agent 쪽에서 같은 턴으로 보인다.
-  turnId         String                @unique @map("turn_id") @db.Uuid
-  status         MessageReplyJobStatus @default(queued)
+  turnId               String                @unique @map("turn_id") @db.Uuid
+  status               MessageReplyJobStatus @default(queued)
   // chat_reply 예약 참조. 작업이 직접 capture/release하므로 예약에 TTL이 없다.
-  reservationReference String?          @map("reservation_reference")
+  reservationReference String?               @map("reservation_reference")
   // 처리 순서 키이자 재시도 지연. 재시도는 이 값을 현재 시각으로 다시 찍어
   // 대화의 마지막 순서로 보낸다.
-  readyAt        DateTime              @default(now()) @map("ready_at") @db.Timestamptz(6)
-  attemptCount   Int                   @default(0) @map("attempt_count")
+  readyAt              DateTime              @default(now()) @map("ready_at") @db.Timestamptz(6)
+  attemptCount         Int                   @default(0) @map("attempt_count")
   // 워커 claim 시 설정. 만료된 running 작업은 다음 tick이 회수한다.
-  leaseExpiresAt DateTime?             @map("lease_expires_at") @db.Timestamptz(6)
-  startedAt      DateTime?             @map("started_at") @db.Timestamptz(6)
+  leaseExpiresAt       DateTime?             @map("lease_expires_at") @db.Timestamptz(6)
+  startedAt            DateTime?             @map("started_at") @db.Timestamptz(6)
   // 최초 처리 시작 기준 15분. 넘기면 재시도하지 않고 실패로 닫는다.
-  deadlineAt     DateTime?             @map("deadline_at") @db.Timestamptz(6)
-  completedAt    DateTime?             @map("completed_at") @db.Timestamptz(6)
-  failedAt       DateTime?             @map("failed_at") @db.Timestamptz(6)
+  deadlineAt           DateTime?             @map("deadline_at") @db.Timestamptz(6)
+  completedAt          DateTime?             @map("completed_at") @db.Timestamptz(6)
+  failedAt             DateTime?             @map("failed_at") @db.Timestamptz(6)
   // 내부 분류만 저장한다. 사용자에게는 노출하지 않는다.
-  failureReason  String?               @map("failure_reason")
-  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
-  conversation   MessageConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  messages       Message[]
+  failureReason        String?               @map("failure_reason")
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  conversation         MessageConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  messages             Message[]
 
   @@index([status, readyAt])
   @@index([conversationId, status])
@@ -812,6 +812,8 @@ model Payment {
   providerTransactionKey String?                @map("provider_transaction_key")
   providerProductId      String                 @map("provider_product_id")
   providerEnvironment    String?                @map("provider_environment")
+  netAmount              Int?                   @map("net_amount")
+  taxAmount              Int?                   @map("tax_amount")
   paidAt                 DateTime?              @map("paid_at") @db.Timestamptz(6)
   refundedAt             DateTime?              @map("refunded_at") @db.Timestamptz(6)
   createdAt              DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -875,21 +877,21 @@ model PaymentProviderEvent {
 }
 
 model CreditPurchase {
-  id             String               @id @default(uuid(7)) @db.Uuid
-  userId         String               @map("user_id") @db.Uuid
+  id              String               @id @default(uuid(7)) @db.Uuid
+  userId          String               @map("user_id") @db.Uuid
   creditProductId String               @map("credit_product_id") @db.Uuid
-  productId      String               @map("product_id")
-  status         CreditPurchaseStatus @default(pending)
-  creditAmount   Int                  @map("credit_amount")
-  idempotencyKey String               @map("idempotency_key")
-  fulfilledAt    DateTime?            @map("fulfilled_at") @db.Timestamptz(6)
-  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user           User                 @relation(fields: [userId], references: [id])
-  creditProduct  CreditProduct        @relation(fields: [creditProductId], references: [id], onDelete: Restrict)
-  payment        Payment?
-  ledger         CreditLedger[]
-  refunds        CreditRefund[]
+  productId       String               @map("product_id")
+  status          CreditPurchaseStatus @default(pending)
+  creditAmount    Int                  @map("credit_amount")
+  idempotencyKey  String               @map("idempotency_key")
+  fulfilledAt     DateTime?            @map("fulfilled_at") @db.Timestamptz(6)
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user            User                 @relation(fields: [userId], references: [id])
+  creditProduct   CreditProduct        @relation(fields: [creditProductId], references: [id], onDelete: Restrict)
+  payment         Payment?
+  ledger          CreditLedger[]
+  refunds         CreditRefund[]
 
   @@unique([userId, idempotencyKey])
   @@index([userId, createdAt])
@@ -908,6 +910,7 @@ model CreditRefund {
   idempotencyKey        String             @map("idempotency_key")
   creditAmount          Int                @map("credit_amount")
   promotionAmount       Int                @default(0) @map("promotion_amount")
+  freePromotionAmount   Int                @default(0) @map("free_promotion_amount")
   lockedAmount          Int                @map("locked_amount")
   recoveryAmount        Int                @map("recovery_amount")
   debtAmount            Int                @default(0) @map("debt_amount")
@@ -1164,19 +1167,20 @@ model CharacterVisualProfileReference {
 // 캐릭터가 게시물에서 반복 사용하는 장소. characterId가 null이면 모든
 // 캐릭터가 사용할 수 있는 범용 장소이고, 값이 있으면 해당 캐릭터 전용이다.
 model CharacterLocation {
-  id             String                       @id @default(uuid(7)) @db.Uuid
-  characterId    String?                      @map("character_id") @db.Uuid
-  locationKey    String                       @map("location_key")
-  displayName    String                       @map("display_name")
-  description    String
-  visualPrompt   String                       @map("visual_prompt")
-  negativePrompt String                       @default("") @map("negative_prompt")
-  createdAt      DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt      DateTime?                    @map("deleted_at") @db.Timestamptz(6)
-  character      Character?                   @relation(fields: [characterId], references: [id], onDelete: Cascade)
-  references     CharacterLocationReference[]
-  drafts         PostDraft[]
+  id                      String                       @id @default(uuid(7)) @db.Uuid
+  characterId             String?                      @map("character_id") @db.Uuid
+  locationKey             String                       @map("location_key")
+  displayName             String                       @map("display_name")
+  description             String
+  visualPrompt            String                       @map("visual_prompt")
+  negativePrompt          String                       @default("") @map("negative_prompt")
+  referenceNegativePrompt String                       @default("") @map("reference_negative_prompt")
+  createdAt               DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt               DateTime?                    @map("deleted_at") @db.Timestamptz(6)
+  character               Character?                   @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  references              CharacterLocationReference[]
+  drafts                  PostDraft[]
 
   @@unique([characterId, locationKey])
   @@index([characterId, deletedAt, createdAt])

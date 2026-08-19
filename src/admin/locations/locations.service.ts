@@ -59,6 +59,7 @@ export class LocationsService {
     description: string;
     visualPrompt: string;
     negativePrompt?: string;
+    referenceNegativePrompt?: string;
   }) {
     const data = {
       characterId: this.characterId(input.characterId),
@@ -67,6 +68,7 @@ export class LocationsService {
       description: input.description.trim(),
       visualPrompt: input.visualPrompt.trim(),
       negativePrompt: input.negativePrompt?.trim() ?? "",
+      referenceNegativePrompt: input.referenceNegativePrompt?.trim() ?? "",
     };
     await this.assertCharacter(data.characterId);
     return this.handleDuplicate(() => this.locations.create(data));
@@ -81,6 +83,7 @@ export class LocationsService {
       description?: string;
       visualPrompt?: string;
       negativePrompt?: string;
+      referenceNegativePrompt?: string;
     },
   ) {
     await this.requireLocation(locationId);
@@ -102,6 +105,9 @@ export class LocationsService {
         : {}),
       ...(input.negativePrompt !== undefined
         ? { negativePrompt: input.negativePrompt.trim() }
+        : {}),
+      ...(input.referenceNegativePrompt !== undefined
+        ? { referenceNegativePrompt: input.referenceNegativePrompt.trim() }
         : {}),
     };
     if (input.characterId !== undefined) {
@@ -203,6 +209,7 @@ export class LocationsService {
       description: row.description,
       visualPrompt: row.visualPrompt,
       negativePrompt: row.negativePrompt,
+      referenceNegativePrompt: row.referenceNegativePrompt,
       referenceCount: row.references.length,
       references: row.references.map((reference) => ({
         mediaId: reference.mediaId,

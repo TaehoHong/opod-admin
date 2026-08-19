@@ -19,11 +19,16 @@ import {
 import { AppConfigService } from "../domain/config/app-config.service";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 import { GenerationSettingsService } from "../domain/settings/generation-settings.service";
-import { DraftWorkerRepository, PlannedDraft } from "./draft-worker.repository";
+import {
+  DraftWorkerRepository,
+  PlannedDraft,
+  RecentVisualPlanDraft,
+} from "./draft-worker.repository";
 import {
   ImagePlanningAgent,
   ImagePlanReady,
   ImagePlannerInput,
+  SubjectCameraRelation,
 } from "./image-planner";
 import {
   buildPromptPackage,
@@ -106,7 +111,14 @@ export class PostPipelineV3Runner {
       } else if (stage === "caption") {
         await this.runCaption(draft, concept, client, options?.operatorNote);
       } else {
-        await this.pause(draft, concept, "failed", ["unknown_stage"]);
+        // ⑦ 게시·⑧ 메모리는 러너의 단계가 아니다. 여기까지 왔다면 claim 게이트가
+        // 뚫린 것이므로 초안을 죽이지 말고 집기 전(pending)으로 돌려놓는다 —
+        // 게시 대기 초안을 failed로 만들면 게시·캡션 편집·컷 재생성 게이트가
+        // 전부 state=pending을 요구해 되살릴 방법이 없어진다.
+        this.logger.warn(
+          `V3 draft ${draft.id} claimed at non-agent stage ${String(stage)}; released`,
+        );
+        await this.release(draft, concept);
       }
     } catch (error) {
       const message = errorMessage(error).slice(0, 500);
@@ -240,9 +252,14 @@ export class PostPipelineV3Runner {
       throw new Error(
         "Image Planning requires a ready PostPlan and imageCount",
       );
-    const availableLocations = await this.repository.findAvailableLocations(
-      draft.characterId,
-    );
+    const [availableLocations, recentDrafts] = await Promise.all([
+      this.repository.findAvailableLocations(draft.characterId),
+      this.repository.findRecentVisualPlanDrafts(
+        draft.characterId,
+        draft.id,
+        8,
+      ),
+    ]);
     const input: ImagePlannerInput = {
       postPlan: { intent: postPlan.intent },
       imageCount,
@@ -251,19 +268,28 @@ export class PostPipelineV3Runner {
         appearance: draft.character.visualProfile?.appearancePrompt ?? "",
         visualStyle: draft.character.visualProfile?.stylePrompt ?? "",
         boundaries: personaContents(draft, "boundaries"),
-        relevantContext: draft.character.personas
+        capturePreferences: personaContents(draft, "capture_style"),
+        personaContext: draft.character.personas
           .filter(
             (entry) =>
+              entry.content.trim() &&
               ![
                 "voice",
-                "content_style",
+                "capture_style",
                 "boundaries",
                 "greeting",
                 "examples",
               ].includes(normalizeTitle(entry.title)),
           )
-          .map((entry) => entry.content),
+          .map((entry) => ({ title: entry.title, content: entry.content })),
       },
+      memories: draft.character.memories
+        .map((memory) => ({
+          type: memory.type,
+          content: memory.content,
+        }))
+        .filter((memory) => memory.content.trim()),
+      recentVisualHistory: recentVisualHistory(recentDrafts),
       ...(operatorRequest(concept)
         ? { operatorRequest: operatorRequest(concept) }
         : {}),
@@ -652,6 +678,25 @@ export class PostPipelineV3Runner {
     if (!saved) throw new Error("caption revision CAS lost");
   }
 
+  // 실행할 것이 없을 때 claim을 되돌린다. pause와 달리 운영자에게 물을 것이
+  // 없으므로 사유 코드도 남기지 않는다 — 화면에는 원래의 "게시 필요"가 그대로
+  // 남는다.
+  private async release(
+    draft: PlannedDraft,
+    concept: V3Concept,
+  ): Promise<void> {
+    await this.repository.persistV3Paused({
+      draftId: draft.id,
+      characterId: draft.characterId,
+      expectedStage: String(concept.pipeline.stage),
+      conceptJson: {
+        ...concept,
+        pipeline: { ...concept.pipeline, state: "pending", reasonCodes: [] },
+      } as Prisma.InputJsonValue,
+      reason: `released: ${String(concept.pipeline.stage)} is not an agent stage`,
+    });
+  }
+
   private async pause(
     draft: PlannedDraft,
     concept: V3Concept,
@@ -700,6 +745,7 @@ function personaInput(
     "lifestyle",
     "voice",
     "content_style",
+    "capture_style",
     "boundaries",
     "greeting",
     "examples",
@@ -792,6 +838,70 @@ function imagePlanReady(concept: V3Concept): ImagePlanReady | null {
   const output = artifact && isRecord(artifact.output) ? artifact.output : null;
   return output?.status === "ready" ? (output as ImagePlanReady) : null;
 }
+
+function recentVisualHistory(
+  drafts: RecentVisualPlanDraft[],
+): ImagePlannerInput["recentVisualHistory"] {
+  const history: ImagePlannerInput["recentVisualHistory"] = [];
+  let remainingShots = 12;
+  for (const draft of drafts) {
+    if (remainingShots === 0) break;
+    if (!isRecord(draft.conceptJson)) continue;
+    const artifact = isRecord(draft.conceptJson.imagePlanning)
+      ? draft.conceptJson.imagePlanning
+      : null;
+    const output =
+      artifact && isRecord(artifact.output) ? artifact.output : null;
+    if (output?.status !== "ready" || !Array.isArray(output.shots)) continue;
+    const shots = output.shots
+      .flatMap((value) => {
+        if (!isRecord(value)) return [];
+        const presentation = isRecord(value.characterPresentation)
+          ? value.characterPresentation
+          : null;
+        if (
+          typeof value.visualPurpose !== "string" ||
+          !value.visualPurpose.trim() ||
+          typeof value.scene !== "string" ||
+          !value.scene.trim() ||
+          typeof value.captureSetup !== "string" ||
+          !value.captureSetup.trim() ||
+          typeof presentation?.mode !== "string"
+        )
+          return [];
+        const relation = value.subjectCameraRelation;
+        return [
+          {
+            visualPurpose: boundedHistoryText(value.visualPurpose, 500),
+            scene: boundedHistoryText(value.scene, 1_500),
+            captureSetup: boundedHistoryText(value.captureSetup, 750),
+            characterPresentation: presentation.mode,
+            ...(relation === "unaware" ||
+            relation === "aware_unposed" ||
+            relation === "deliberately_posed" ||
+            relation === "not_applicable"
+              ? {
+                  subjectCameraRelation: relation as SubjectCameraRelation,
+                }
+              : {}),
+          },
+        ];
+      })
+      .slice(0, remainingShots);
+    if (shots.length === 0) continue;
+    remainingShots -= shots.length;
+    const premise = recentPremise(draft.conceptJson);
+    history.push({
+      publicationState: draft.publishedPostId ? "published" : "unpublished",
+      premise: premise ? boundedHistoryText(premise, 500) : null,
+      shots,
+    });
+  }
+  return history;
+}
+function boundedHistoryText(value: string, max: number): string {
+  return value.trim().slice(0, max);
+}
 function artifactRevision(value: unknown): number {
   return isRecord(value) && Number.isInteger(value.revision)
     ? (value.revision as number)
@@ -819,8 +929,10 @@ function normalizeTitle(value: string): string {
 }
 function personaContents(draft: PlannedDraft, title: string): string[] {
   return draft.character.personas
-    .filter((entry) => normalizeTitle(entry.title) === title)
-    .map((entry) => entry.content);
+    .filter(
+      (entry) => normalizeTitle(entry.title) === title && entry.content.trim(),
+    )
+    .map((entry) => entry.content.trim());
 }
 function recentPremise(value: unknown): string | null {
   if (!isRecord(value)) return null;

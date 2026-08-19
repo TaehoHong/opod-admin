@@ -34,6 +34,34 @@ function prismaMock() {
 }
 
 describe("DraftWorkerRepository", () => {
+  it("loads bounded same-character visual-plan candidates without the current draft", async () => {
+    const { prisma } = prismaMock();
+    const repository = new DraftWorkerRepository(prisma as never);
+
+    await repository.findRecentVisualPlanDrafts(
+      "character-1",
+      "current-draft",
+      8,
+    );
+
+    expect(prisma.postDraft.findMany).toHaveBeenCalledWith({
+      where: {
+        characterId: "character-1",
+        id: { not: "current-draft" },
+        draftType: "post",
+        status: { notIn: ["failed", "rejected"] },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 8,
+      select: {
+        id: true,
+        createdAt: true,
+        publishedPostId: true,
+        conceptJson: true,
+      },
+    });
+  });
+
   it("claims planned drafts with a bound lease and skip-locked ordering", async () => {
     const { prisma } = prismaMock();
     prisma.$queryRaw.mockImplementation(
@@ -112,6 +140,78 @@ describe("DraftWorkerRepository", () => {
     expect(fragmentSql).toContain("IS NULL");
     expect(fragmentSql).toContain("NOT IN");
     expect(seen).toEqual(["post-pipeline-v3", "post-pipeline-v4"]);
+  });
+
+  // ⑥ 캡션이 끝나면 stage는 publish/pending이 된다. 자동 루프가 그 초안을 다시
+  // 집으면 러너가 실행할 단계가 없어 초안을 죽인다(unknown_stage) — 게시 대기가
+  // Agent 실패로 둔갑하지 않게 claim이 Agent 단계만 집는다.
+  it("claims only agent stages in the automatic V3 loop", async () => {
+    const { prisma } = prismaMock();
+    let sql = "";
+    const seen: string[] = [];
+    prisma.$queryRaw.mockImplementation(
+      (strings: TemplateStringsArray, ...values: unknown[]) => {
+        sql = strings.join("?");
+        for (const value of values) {
+          const fragment = value as { strings?: string[]; values?: unknown[] };
+          if (
+            Array.isArray(fragment?.values) &&
+            Array.isArray(fragment.strings)
+          ) {
+            sql += fragment.strings.join("?");
+            seen.push(...fragment.values.map(String));
+          }
+        }
+        return Promise.resolve([]);
+      },
+    );
+
+    await new DraftWorkerRepository(prisma as never).claimV3Draft(120);
+
+    expect(sql).toContain("concept_json#>>'{pipeline,stage}' IN");
+    expect(seen).toEqual(
+      expect.arrayContaining([
+        "post_plan",
+        "image_plan",
+        "image_prompt",
+        "caption",
+      ]),
+    );
+    expect(seen).not.toContain("publish");
+    // 자동 경로는 절대 되감지 않고(캡션↔게시 무한 왕복), 실패도 다시 집지 않는다.
+    expect(sql).not.toContain("CASE WHEN");
+    expect(sql).toContain(`d.concept_json#>>'{pipeline,state}' = 'pending'`);
+  });
+
+  // 수동 실행은 ⑦에 서 있는 초안을 ⑥으로 되감아 집는다 — "캡션 다시 생성"이
+  // 부르는 경로라, 되감지 않으면 러너가 게시 단계를 실행하려 든다.
+  it("rewinds a publish-stage draft to the caption stage on manual run", async () => {
+    const { prisma } = prismaMock();
+    let sql = "";
+    prisma.$queryRaw.mockImplementation(
+      (strings: TemplateStringsArray, ...values: unknown[]) => {
+        sql = strings.join("?");
+        for (const value of values) {
+          const fragment = value as { strings?: string[] };
+          if (Array.isArray(fragment?.strings)) {
+            sql += fragment.strings.join("?");
+          }
+        }
+        return Promise.resolve([]);
+      },
+    );
+
+    await new DraftWorkerRepository(prisma as never).claimV3DraftNow("d", 120);
+
+    expect(sql).toContain(`THEN '"caption"'::jsonb`);
+    // 멈춰 선 초안은 사유를 가리지 않고 집는다 — 화면이 "고친 뒤 재실행하세요"라고
+    // 안내하는 상태(failed·needs_input·needs_configuration)에서 버튼이 살아 있어야
+    // 한다. 자동 루프만 pending으로 제한된다.
+    expect(sql).toContain(`concept_json#>>'{pipeline,state}' <> 'running'`);
+    expect(sql).not.toContain(`concept_json#>>'{pipeline,state}' = 'pending'`);
+    // 되감기는 캡션 산출물이 있는 V4 초안에만 — V3의 approved 게시 대기는 대상이
+    // 아니다.
+    expect(sql).toContain("concept_json->'captionBuild' IS NOT NULL");
   });
 
   it("excludes the whole V3 family from the V2 manual claim and lease sweep", async () => {

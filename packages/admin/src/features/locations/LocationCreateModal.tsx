@@ -94,10 +94,17 @@ export function LocationCreateModal({
             {...form.getInputProps("visualPrompt")}
           />
           <Textarea
-            label="네거티브 프롬프트"
+            label="네거티브 프롬프트 (컷 생성에 함께 나감)"
             rows={2}
             key={form.key("negativePrompt")}
             {...form.getInputProps("negativePrompt")}
+          />
+          <Textarea
+            label="레퍼런스 전용 네거티브"
+            description="빈 공간 레퍼런스를 만들 때만 쓰는 금지어(people, faces 등). 컷 생성 요청에는 나가지 않습니다."
+            rows={2}
+            key={form.key("referenceNegativePrompt")}
+            {...form.getInputProps("referenceNegativePrompt")}
           />
           {create.isError ? (
             <Alert color="red" role="alert" title="생성하지 못했습니다">
@@ -130,6 +137,7 @@ export function blankLocation(): LocationInput {
     description: "",
     visualPrompt: "",
     negativePrompt: "",
+    referenceNegativePrompt: "",
   };
 }
 
@@ -141,5 +149,6 @@ export function normalize(values: LocationInput): LocationInput {
     description: values.description.trim(),
     visualPrompt: values.visualPrompt.trim(),
     negativePrompt: values.negativePrompt.trim(),
+    referenceNegativePrompt: values.referenceNegativePrompt.trim(),
   };
 }

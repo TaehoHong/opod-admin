@@ -26,8 +26,21 @@ export type ImagePlannerInput = {
     appearance: string;
     visualStyle: string;
     boundaries: string[];
-    relevantContext: string[];
+    capturePreferences: string[];
+    personaContext: { title: string; content: string }[];
   };
+  memories: { type: string; content: string }[];
+  recentVisualHistory: {
+    publicationState: "published" | "unpublished";
+    premise: string | null;
+    shots: {
+      visualPurpose: string;
+      scene: string;
+      captureSetup: string;
+      characterPresentation: string;
+      subjectCameraRelation?: SubjectCameraRelation;
+    }[];
+  }[];
   operatorRequest?: string;
   identityReferences: { id: string; description: string }[];
   locations: {
@@ -37,6 +50,9 @@ export type ImagePlannerInput = {
     references: { id: string; description: string }[];
   }[];
 };
+
+export type SubjectCameraRelation =
+  "unaware" | "aware_unposed" | "deliberately_posed" | "not_applicable";
 
 export type ReferenceBinding = {
   bindingId: string;
@@ -67,6 +83,12 @@ export type ImagePlanReady = {
       faceVisible: boolean;
       identityPreservationRequired: boolean;
     };
+    // 계약 image-plan-v2. 인물이 없거나 정지한 컷은 빈 문자열이다 — 필드를
+    // 없애지 않는 이유는 "쓸 게 없다"와 "안 썼다"를 구분하기 위해서다.
+    subjectState: string;
+    motionEvidence: string;
+    notInFrame: string[];
+    subjectCameraRelation: SubjectCameraRelation;
     referenceBindings: ReferenceBinding[];
   }[];
 };
@@ -93,6 +115,12 @@ const CATEGORIES = new Set([
   "lighting",
 ]);
 const PURPOSES = new Set(["identity", "wardrobe", "framing", "environment"]);
+const CAMERA_RELATIONS = new Set<SubjectCameraRelation>([
+  "unaware",
+  "aware_unposed",
+  "deliberately_posed",
+  "not_applicable",
+]);
 const BLOCK_CODES = new Set([
   "visual_constraint_conflict",
   "unsupported_multi_location",
@@ -109,7 +137,7 @@ export class ImagePlanningAgent {
   ): Promise<{ output: ImagePlan; producerLogId: string | null }> {
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.imagePlanV3,
-      schemaName: "opod_image_plan_v1",
+      schemaName: "opod_image_plan_v3",
       schema: IMAGE_PLAN_JSON_SCHEMA as unknown as Record<string, unknown>,
       systemPrompt: IMAGE_PLANNER_SYSTEM_PROMPT,
       input,
@@ -187,6 +215,10 @@ export function parseImagePlan(
         "scene",
         "captureSetup",
         "characterPresentation",
+        "subjectState",
+        "motionEvidence",
+        "notInFrame",
+        "subjectCameraRelation",
         "referenceBindings",
       ],
       `image plan shot ${index}`,
@@ -225,6 +257,16 @@ export function parseImagePlan(
     if (cp.faceVisible && !cp.identityPreservationRequired)
       throw new Error(
         `image plan shot ${index} visible face requires identity preservation`,
+      );
+    if (
+      typeof raw.subjectCameraRelation !== "string" ||
+      !CAMERA_RELATIONS.has(
+        raw.subjectCameraRelation as SubjectCameraRelation,
+      ) ||
+      (cp.mode === "none") !== (raw.subjectCameraRelation === "not_applicable")
+    )
+      throw new Error(
+        `image plan shot ${index} subjectCameraRelation is invalid`,
       );
     if (
       !Array.isArray(raw.referenceBindings) ||
@@ -266,6 +308,24 @@ export function parseImagePlan(
         faceVisible: cp.faceVisible,
         identityPreservationRequired: cp.identityPreservationRequired,
       },
+      subjectState: optionalText(
+        raw.subjectState,
+        1_000,
+        `shot ${index} subjectState`,
+      ),
+      motionEvidence: optionalText(
+        raw.motionEvidence,
+        1_000,
+        `shot ${index} motionEvidence`,
+      ),
+      notInFrame: textArray(
+        raw.notInFrame,
+        0,
+        10,
+        300,
+        `shot ${index} notInFrame`,
+      ),
+      subjectCameraRelation: raw.subjectCameraRelation as SubjectCameraRelation,
       referenceBindings,
     };
   });
@@ -375,6 +435,13 @@ function parseBinding(
 
 function text(value: unknown, max: number, label: string): string {
   if (typeof value !== "string" || !value.trim() || value.length > max)
+    throw new Error(`${label} is invalid`);
+  return value.trim();
+}
+// 빈 문자열을 허용하는 text. 인물 없는 컷의 subjectState처럼 "해당 없음"을
+// 값으로 표현해야 하는 자리에만 쓴다.
+function optionalText(value: unknown, max: number, label: string): string {
+  if (typeof value !== "string" || value.length > max)
     throw new Error(`${label} is invalid`);
   return value.trim();
 }
