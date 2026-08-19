@@ -179,6 +179,71 @@ describe("DraftsService", () => {
     });
   });
 
+  describe("updateMemoryCandidates", () => {
+    const conceptJson = {
+      pipelineVersion: "post-pipeline-v4",
+      mode: "manual",
+      postPlanning: { hash: "sha256:current" },
+      memoryCandidates: [
+        {
+          key: "keep",
+          type: "fact",
+          content: "현재 후보",
+          selected: false,
+          sourcePostPlanHash: "sha256:current",
+        },
+        {
+          key: "stale",
+          type: "fact",
+          content: "예전 후보",
+          selected: true,
+          sourcePostPlanHash: "sha256:old",
+        },
+      ],
+    };
+
+    it("updates only candidates owned by the current post plan", async () => {
+      const repository = repositoryFake({
+        findDraftConcept: jest.fn().mockResolvedValue({ conceptJson }),
+        findDraft: jest.fn().mockResolvedValue({ ...draftRow, conceptJson }),
+      });
+      const service = makeService(repository);
+
+      await service.updateMemoryCandidates({
+        draftId: "draft-1",
+        selectedKeys: ["keep"],
+      });
+
+      expect(repository.updateEditableDraft).toHaveBeenCalledWith(
+        "draft-1",
+        ["planned", "failed"],
+        {
+          conceptJson: expect.objectContaining({
+            memoryCandidates: [
+              expect.objectContaining({ key: "keep", selected: true }),
+              expect.objectContaining({ key: "stale", selected: true }),
+            ],
+          }),
+        },
+      );
+    });
+
+    it("rejects stale or unknown candidate keys", async () => {
+      const repository = repositoryFake({
+        findDraftConcept: jest.fn().mockResolvedValue({ conceptJson }),
+      });
+      const service = makeService(repository);
+
+      await expect(
+        service.updateMemoryCandidates({
+          draftId: "draft-1",
+          selectedKeys: ["stale"],
+        }),
+      ).rejects.toThrow("current post plan");
+      expect(repository.updateEditableDraft).not.toHaveBeenCalled();
+    });
+  });
+
   it("rejects an unknown status filter before querying", async () => {
     const repository = repositoryFake();
     const service = makeService(repository);
@@ -339,6 +404,19 @@ describe("DraftsService", () => {
     expect(repository.recordActionLog).toHaveBeenCalledWith(
       expect.objectContaining({ actionType: "DRAFT_CREATED" }),
     );
+  });
+
+  it("rejects an oversized scene request before creating a draft", async () => {
+    const repository = repositoryFake();
+    const service = makeService(repository, true);
+
+    await expect(
+      service.createDraft({
+        characterId: "ai-1",
+        sceneHint: "가".repeat(2001),
+      }),
+    ).rejects.toThrow("at most 2000");
+    expect(repository.createDraft).not.toHaveBeenCalled();
   });
 
   it("pins an enabled new draft to V3 without converting legacy fields", async () => {

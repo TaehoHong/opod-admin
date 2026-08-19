@@ -548,6 +548,41 @@ describe("PostPipelineV3Runner", () => {
     );
   });
 
+  it("persists an exact structured cause when a provider request fails", async () => {
+    const current = draft({
+      pipelineVersion: "post-pipeline-v4",
+      pipeline: {
+        stage: "post_plan",
+        state: "running",
+        imageCount: null,
+        reasonCodes: [],
+      },
+    });
+    const { runner, repository, fetchMock } = setup(current);
+    fetchMock.mockResolvedValue(
+      new Response("quota exhausted", { status: 429 }),
+    );
+
+    await runner.runCurrentStage("draft-1");
+
+    expect(repository.requeueOrFailV3).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "structured agent failed (429): quota exhausted",
+        conceptJson: expect.objectContaining({
+          pipeline: expect.objectContaining({
+            state: "pending",
+            reasonCodes: ["provider_http_error"],
+            failure: expect.objectContaining({
+              code: "provider_http_error",
+              cause: "AI 제공자가 HTTP 429 오류를 반환했습니다.",
+              technicalDetail: "structured agent failed (429): quota exhausted",
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it("pauses the caption stage as needs_configuration when no media reader is wired", async () => {
     const { runner, repository, fetchMock } = setup(
       captionStageDraft(),

@@ -13,6 +13,10 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { ZoomableImage } from "../../shared/ui/ZoomableImage";
+import {
+  OperationErrorAlert,
+  operationFailure,
+} from "../../shared/ui/OperationErrorAlert";
 import type { V3ImagePlanShot } from "../posts/api";
 import { CandidateCard } from "./CandidateCard";
 import {
@@ -142,9 +146,7 @@ export function ShotCard({
           </Group>
         ) : null}
         {regenerate.isError ? (
-          <Text size="xs" c="red" role="alert">
-            {regenerate.error.message}
-          </Text>
+          <OperationErrorAlert failure={operationFailure(regenerate.error)} />
         ) : null}
       </Stack>
     </Card>
@@ -335,9 +337,20 @@ function ShotBody({ draft, shot }: { draft: Draft; shot: DraftShot }) {
   }
   if (shot.status === "failed") {
     return (
-      <Alert color="red" title="생성 실패">
+      <Stack gap="xs">
+        <OperationErrorAlert
+          failure={{
+            code: "image_generation_failed",
+            problem: "이미지 생성에 실패했습니다.",
+            cause:
+              shot.errorMessage ??
+              "이미지 제공자가 오류 이유를 반환하지 않았습니다.",
+            nextAction:
+              "프롬프트, 레퍼런스와 제공자 상태를 확인한 뒤 이 컷을 재생성하세요.",
+            technicalDetail: shot.errorMessage,
+          }}
+        />
         <Stack gap={4}>
-          <Text size="sm">{shot.errorMessage ?? "생성에 실패했습니다."}</Text>
           {/* 재생성은 needs_review·failed 초안에서만 허용된다
               (drafts.service.ts). 버튼이 없는 이유를 쓰지 않으면 운영자가
               막힌 채로 기다린다. */}
@@ -353,7 +366,7 @@ function ShotBody({ draft, shot }: { draft: Draft; shot: DraftShot }) {
             </Text>
           ) : null}
         </Stack>
-      </Alert>
+      </Stack>
     );
   }
   if (shot.outputs.length === 0) {

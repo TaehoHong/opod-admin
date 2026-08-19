@@ -12,6 +12,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CharacterSelect } from "../../shared/ui/CharacterSelect";
 import { DataPage } from "../../shared/ui/DataPage";
+import {
+  OperationErrorAlert,
+  operationFailure,
+} from "../../shared/ui/OperationErrorAlert";
 import { createDraft } from "../drafts/api";
 
 export function PostBriefCreatePage() {
@@ -28,6 +32,10 @@ export function PostBriefCreatePage() {
     },
     validate: {
       characterId: (value) => (value ? null : "캐릭터를 선택해 주세요"),
+      sceneHint: (value) =>
+        value.length <= 2000
+          ? null
+          : "장면·주제 요청은 2,000자 이하여야 합니다",
     },
   });
   const create = useMutation({
@@ -72,6 +80,7 @@ export function PostBriefCreatePage() {
             label="장면·주제 요청"
             description="선택 · Agent가 기획할 때 참고합니다."
             minRows={4}
+            maxLength={2000}
             placeholder="예: 비 오는 날 창가 카페에서 필름 카메라를 닦는 장면"
             key={form.key("sceneHint")}
             {...form.getInputProps("sceneHint")}
@@ -88,9 +97,12 @@ export function PostBriefCreatePage() {
             게시물 만들기에서 시작한 작업은 단계마다 직접 확인하고 실행합니다.
           </Alert>
           {create.isError ? (
-            <Alert color="red" role="alert" title="저장하지 못했습니다">
-              {create.error.message}
-            </Alert>
+            <OperationErrorAlert
+              failure={operationFailure(
+                create.error,
+                "브리프를 저장하지 못했습니다.",
+              )}
+            />
           ) : null}
           <Group>
             <Button type="submit" loading={create.isPending}>

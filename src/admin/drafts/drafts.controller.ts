@@ -25,6 +25,7 @@ import { RunStageDto } from "./dto/run-stage.dto";
 import { UpdateShotOutputFilterDto } from "./dto/update-shot-output-filter.dto";
 import { UpdateDraftPlanDto } from "./dto/update-draft-plan.dto";
 import { UpdateDraftPromptsDto } from "./dto/update-draft-prompts.dto";
+import { UpdateMemoryCandidatesDto } from "./dto/update-memory-candidates.dto";
 
 @Controller("api/admin/v1/drafts")
 @UseGuards(AdminJwtGuard)
@@ -106,6 +107,14 @@ export class DraftsController {
     @Body() body: UpdateOperatorRequestDto,
   ) {
     return this.draftsService.updateOperatorRequest({ draftId, ...body });
+  }
+
+  @Patch(":id/memory-candidates")
+  updateMemoryCandidates(
+    @Param("id") draftId: string,
+    @Body() body: UpdateMemoryCandidatesDto,
+  ) {
+    return this.draftsService.updateMemoryCandidates({ draftId, ...body });
   }
 
   @Patch(":id/plan")

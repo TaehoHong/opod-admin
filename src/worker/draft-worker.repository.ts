@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { PostDraft, Prisma } from "@prisma/client";
 import { PrismaService } from "../domain/database/prisma.service";
 import {
   createPostPipelineV3Concept,
@@ -70,15 +70,6 @@ const plannedDraftInclude = {
   },
 } satisfies Prisma.PostDraftInclude;
 
-const publishDraftSelect = {
-  id: true,
-  characterId: true,
-  contentType: true,
-  caption: true,
-  hashtags: true,
-  conceptJson: true,
-} satisfies Prisma.PostDraftSelect;
-
 export type AggregateDraft = Prisma.PostDraftGetPayload<{
   select: typeof aggregateDraftSelect;
 }>;
@@ -87,9 +78,16 @@ export type PlannedDraft = Prisma.PostDraftGetPayload<{
   include: typeof plannedDraftInclude;
 }>;
 
-export type PublishDraft = Prisma.PostDraftGetPayload<{
-  select: typeof publishDraftSelect;
-}>;
+export type PublishDraft = Pick<
+  PostDraft,
+  | "id"
+  | "characterId"
+  | "contentType"
+  | "caption"
+  | "hashtags"
+  | "conceptJson"
+  | "leaseExpiresAt"
+>;
 
 // v3와 v4는 같은 오케스트레이터가 돌린다. claim·sweep은 **버전 문자열 비교**라
 // 타입 검사가 못 잡는다 — 한쪽만 v4를 빠뜨리면 V4 초안이 V3 경로에서 안 잡히고
@@ -117,6 +115,17 @@ function notV3FamilySql(alias: string) {
 const AGENT_STAGES = ["post_plan", "image_plan", "image_prompt", "caption"];
 function agentStageSql(alias: string) {
   return Prisma.sql`${Prisma.raw(alias)}concept_json#>>'{pipeline,stage}' IN (${Prisma.join(AGENT_STAGES)})`;
+}
+
+function publishableSql(alias: string) {
+  return Prisma.sql`(
+    ${Prisma.raw(alias)}status = 'approved'
+    OR (
+      ${Prisma.raw(alias)}status = 'planned'
+      AND ${Prisma.raw(alias)}concept_json#>>'{pipeline,stage}' = 'publish'
+      AND ${Prisma.raw(alias)}concept_json#>>'{pipeline,state}' = 'pending'
+    )
+  )`;
 }
 
 // 게시 가능 = V2/v3의 approved, 또는 V4의 planned + pipeline.stage=publish +
@@ -239,22 +248,44 @@ export class DraftWorkerRepository {
     return claimed.count > 0;
   }
 
-  findApprovedDraft(draftId: string): Promise<PublishDraft | null> {
-    return this.prisma.postDraft.findFirst({
+  async findApprovedDraft(
+    draftId: string,
+    leaseSeconds = 120,
+  ): Promise<PublishDraft | null> {
+    const rows = await this.prisma.$queryRaw<PublishDraft[]>`
+      UPDATE opod.post_drafts d
+      SET lease_expires_at = now() + make_interval(secs => ${leaseSeconds})
+      WHERE d.id = ${draftId}::uuid
+        AND d.draft_type = 'post'
+        AND ${publishableSql("d.")}
+        AND (d.lease_expires_at IS NULL OR d.lease_expires_at < now())
+        AND EXISTS (
+          SELECT 1 FROM opod.characters c
+          WHERE c.id = d.character_id AND c.status = 'active'
+        )
+      RETURNING d.id,
+                d.character_id AS "characterId",
+                d.content_type AS "contentType",
+                d.caption,
+                d.hashtags,
+                d.concept_json AS "conceptJson",
+                d.lease_expires_at AS "leaseExpiresAt"
+    `;
+    return rows[0] ?? null;
+  }
+
+  async recordPublishError(
+    draftId: string,
+    message: string,
+    leaseExpiresAt?: Date | null,
+  ): Promise<void> {
+    await this.prisma.postDraft.updateMany({
       where: {
         id: draftId,
         AND: [PUBLISHABLE_WHERE],
-        draftType: "post",
-        character: { status: "active" },
+        ...(leaseExpiresAt ? { leaseExpiresAt } : {}),
       },
-      select: publishDraftSelect,
-    });
-  }
-
-  async recordPublishError(draftId: string, message: string): Promise<void> {
-    await this.prisma.postDraft.updateMany({
-      where: { id: draftId, AND: [PUBLISHABLE_WHERE] },
-      data: { errorMessage: message },
+      data: { errorMessage: message, leaseExpiresAt: null },
     });
   }
 
@@ -458,6 +489,7 @@ export class DraftWorkerRepository {
           ...(input.columns ?? {}),
           status: "planned",
           leaseExpiresAt: null,
+          attemptCount: 0,
           errorMessage: null,
         },
       });
@@ -568,7 +600,11 @@ export class DraftWorkerRepository {
       SET status = 'generating',
           lease_expires_at = now() + make_interval(secs => ${leaseSeconds}),
           attempt_count = attempt_count + 1,
-          concept_json = jsonb_set(concept_json, '{pipeline,state}', '"running"'::jsonb),
+          concept_json = jsonb_set(
+            concept_json #- '{pipeline,failure}',
+            '{pipeline,state}',
+            '"running"'::jsonb
+          ),
           updated_at = now()
       WHERE id = (
         SELECT d.id FROM opod.post_drafts d
@@ -606,10 +642,12 @@ export class DraftWorkerRepository {
       UPDATE opod.post_drafts
       SET status = 'generating',
           lease_expires_at = now() + make_interval(secs => ${leaseSeconds}),
-          attempt_count = attempt_count + 1,
+          attempt_count = CASE WHEN status = 'failed' THEN 1
+                               ELSE attempt_count + 1 END,
+          error_message = NULL,
           concept_json = jsonb_set(
             jsonb_set(
-              concept_json,
+              concept_json #- '{pipeline,failure}',
               '{pipeline,stage}',
               CASE WHEN concept_json#>>'{pipeline,stage}' = 'publish'
                    THEN '"caption"'::jsonb
@@ -620,7 +658,7 @@ export class DraftWorkerRepository {
           ),
           updated_at = now()
       WHERE id = ${draftId}::uuid
-        AND status = 'planned'
+        AND status IN ('planned', 'failed')
         AND draft_type = 'post'
         AND ${v3FamilySql("")}
         AND concept_json#>>'{pipeline,state}' <> 'running'
@@ -667,6 +705,7 @@ export class DraftWorkerRepository {
           conceptJson: input.conceptJson,
           status: "planned",
           leaseExpiresAt: null,
+          attemptCount: 0,
           errorMessage: null,
         },
       });
@@ -726,6 +765,7 @@ export class DraftWorkerRepository {
           locationId: input.locationId,
           conceptJson: input.conceptJson,
           leaseExpiresAt: null,
+          attemptCount: 0,
           errorMessage: null,
         },
       });
@@ -927,31 +967,63 @@ export class DraftWorkerRepository {
   ): Promise<boolean> {
     const transitioned = await this.prisma.postDraft.updateMany({
       where: { id: draftId, status: currentStatus as never },
-      data: { status: "planned", conceptJson, errorMessage: null },
+      data: {
+        status: "planned",
+        conceptJson,
+        attemptCount: 0,
+        errorMessage: null,
+      },
     });
     return transitioned.count > 0;
   }
 
-  findDueDrafts(now: Date, take: number): Promise<PublishDraft[]> {
-    return this.prisma.postDraft.findMany({
-      where: {
-        AND: [PUBLISHABLE_WHERE],
-        draftType: "post",
-        OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
-        character: { status: "active" },
-      },
-      orderBy: { scheduledAt: "asc" },
-      take,
-      select: publishDraftSelect,
-    });
+  findDueDrafts(
+    now: Date,
+    take: number,
+    leaseSeconds: number,
+    retryBefore: Date,
+  ): Promise<PublishDraft[]> {
+    return this.prisma.$queryRaw<PublishDraft[]>`
+      WITH candidates AS (
+        SELECT d.id
+        FROM opod.post_drafts d
+        JOIN opod.characters c
+          ON c.id = d.character_id AND c.status = 'active'
+        WHERE d.draft_type = 'post'
+          AND ${publishableSql("d.")}
+          AND (d.scheduled_at IS NULL OR d.scheduled_at <= ${now})
+          AND (d.concept_json->>'mode') IS DISTINCT FROM 'manual'
+          AND (d.lease_expires_at IS NULL OR d.lease_expires_at < now())
+          AND (d.error_message IS NULL OR d.updated_at <= ${retryBefore})
+        ORDER BY (d.error_message IS NOT NULL), d.scheduled_at ASC NULLS FIRST, d.id
+        LIMIT ${take}
+        FOR UPDATE OF d SKIP LOCKED
+      )
+      UPDATE opod.post_drafts d
+      SET lease_expires_at = now() + make_interval(secs => ${leaseSeconds})
+      FROM candidates
+      WHERE d.id = candidates.id
+      RETURNING d.id,
+                d.character_id AS "characterId",
+                d.content_type AS "contentType",
+                d.caption,
+                d.hashtags,
+                d.concept_json AS "conceptJson",
+                d.lease_expires_at AS "leaseExpiresAt"
+    `;
   }
 
   async recordPublishFailure(input: {
     draftId: string;
     characterId: string;
     message: string;
+    leaseExpiresAt?: Date | null;
   }): Promise<void> {
-    await this.recordPublishError(input.draftId, input.message);
+    await this.recordPublishError(
+      input.draftId,
+      input.message,
+      input.leaseExpiresAt,
+    );
     try {
       await this.prisma.serviceLog.create({
         data: {
@@ -1032,6 +1104,7 @@ export class DraftWorkerRepository {
     contentType: string;
     caption: string;
     hashtags: string[];
+    leaseExpiresAt?: Date | null;
     memoryContent?: string;
     memories?: { type: string; content: string; reason: string }[];
     media: {
@@ -1041,8 +1114,18 @@ export class DraftWorkerRepository {
   }): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const transitioned = await tx.postDraft.updateMany({
-        where: { id: input.draftId, AND: [PUBLISHABLE_WHERE] },
-        data: { status: "published", errorMessage: null },
+        where: {
+          id: input.draftId,
+          AND: [PUBLISHABLE_WHERE],
+          ...(input.leaseExpiresAt
+            ? { leaseExpiresAt: input.leaseExpiresAt }
+            : {}),
+        },
+        data: {
+          status: "published",
+          errorMessage: null,
+          leaseExpiresAt: null,
+        },
       });
       if (transitioned.count === 0) {
         throw new Error("draft left the publishable state before publish");
@@ -1195,15 +1278,38 @@ export class DraftWorkerRepository {
     characterId: string,
     scheduledAt: Date,
     pipelineV3Enabled = false,
-  ): Promise<void> {
-    await this.prisma.postDraft.create({
-      data: {
-        characterId,
-        conceptJson: pipelineV3Enabled
-          ? createPostPipelineV3Concept({ source: "scheduler", mode: "auto" })
-          : { source: "scheduler" },
-        scheduledAt,
-      },
+  ): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      // 같은 캐릭터를 여러 admin instance가 동시에 스케줄링해도 한 transaction만
+      // pending 여부를 판정한다. payment reconciliation의 기존 advisory-lock
+      // 패턴과 같은 DB-scoped 직렬화다.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${characterId}, 0))`;
+      const pending = await tx.postDraft.findFirst({
+        where: {
+          characterId,
+          status: {
+            in: [
+              "planned",
+              "generating",
+              "regenerating",
+              "needs_review",
+              "approved",
+            ],
+          },
+        },
+        select: { id: true },
+      });
+      if (pending) return false;
+      await tx.postDraft.create({
+        data: {
+          characterId,
+          conceptJson: pipelineV3Enabled
+            ? createPostPipelineV3Concept({ source: "scheduler", mode: "auto" })
+            : { source: "scheduler" },
+          scheduledAt,
+        },
+      });
+      return true;
     });
   }
 

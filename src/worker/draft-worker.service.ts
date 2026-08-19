@@ -37,6 +37,8 @@ export type DraftWorkerConfig = AppConfig["draftWorker"];
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const AGGREGATE_BATCH = 20;
 const PUBLISH_BATCH = 5;
+const PUBLISH_LEASE_SECONDS = 15 * 60;
+const PUBLISH_RETRY_BACKOFF_MS = 5 * 60 * 1000;
 
 // PostDraft 상태 머신을 굴리는 워커.
 // planned --claim--> generating(기획, lease) --잡 생성--> generating(lease 해제)
@@ -163,7 +165,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     }
     const claimed = await this.repository.claimDraftNow(
       draftId,
-      this.config.planLeaseSeconds,
+      PUBLISH_LEASE_SECONDS,
     );
     if (!claimed) {
       return { planned: false };
@@ -176,7 +178,10 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
   async publishDraftNow(
     draftId: string,
   ): Promise<{ published: boolean; reason?: string }> {
-    const draft = await this.repository.findApprovedDraft(draftId);
+    const draft = await this.repository.findApprovedDraft(
+      draftId,
+      this.config.planLeaseSeconds,
+    );
     if (!draft) {
       return { published: false };
     }
@@ -185,7 +190,11 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       return { published: true };
     } catch (error) {
       const message = errorMessage(error).slice(0, 500);
-      await this.repository.recordPublishError(draftId, message);
+      await this.repository.recordPublishError(
+        draftId,
+        message,
+        draft.leaseExpiresAt,
+      );
       return { published: false, reason: message };
     }
   }
@@ -718,12 +727,14 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
 
   private async publishDueDrafts(): Promise<void> {
     const now = new Date();
-    // 수동 진행 초안을 JS에서 걸러내므로 배치보다 넉넉히 읽는다.
     const candidates = await this.repository.findDueDrafts(
       now,
-      PUBLISH_BATCH * 4,
+      PUBLISH_BATCH,
+      PUBLISH_LEASE_SECONDS,
+      new Date(now.getTime() - PUBLISH_RETRY_BACKOFF_MS),
     );
-    // 수동 진행 초안(mode='manual')은 자동 게시하지 않는다 — "지금 게시" 버튼 전용.
+    // repository가 DB claim 전에 수동 초안을 제외한다. 이 필터는 잘못 구성된 구
+    // 데이터가 자동 게시되는 것을 막는 마지막 방어선이다.
     const due = candidates
       .filter(
         (draft) =>
@@ -742,6 +753,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           draftId: draft.id,
           characterId: draft.characterId,
           message: errorMessage(error).slice(0, 500),
+          leaseExpiresAt: draft.leaseExpiresAt,
         });
       }
     }
@@ -754,6 +766,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     caption: string;
     hashtags: string[];
     conceptJson: unknown;
+    leaseExpiresAt: Date | null;
   }): Promise<void> {
     // V4는 ⑥ 캡션 단계가 끝나야 여기 오지만, 운영자가 컬럼을 비울 수는 없어도
     // 경로가 늘어날 수 있으니 안전판을 둔다 — 본문 없는 게시물은 되돌릴 수 없다.
@@ -813,6 +826,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       contentType: draft.contentType,
       caption: draft.caption,
       hashtags,
+      leaseExpiresAt: draft.leaseExpiresAt,
       // 메모리 역반영 — 확정 세계관 캐릭터가 다음 기획에서 모순을 내지 않게 한다.
       ...(isPostPipelineV3(draft.conceptJson)
         ? { memories: selectedPublishedMemories(draft.conceptJson) }
@@ -904,11 +918,12 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         policy.hourStartKst,
         policy.hourEndKst,
       );
-      await this.repository.createScheduledDraft(
+      const created = await this.repository.createScheduledDraft(
         policy.characterId,
         scheduledAt,
         pipelineV3Enabled,
       );
+      if (!created) continue;
       await this.recordActionLog(
         policy.characterId,
         policy.characterId,

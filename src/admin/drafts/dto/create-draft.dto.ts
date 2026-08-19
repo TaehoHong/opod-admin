@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString } from "class-validator";
+import { IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
 
 export class CreateDraftDto {
   @IsString()
@@ -7,6 +7,7 @@ export class CreateDraftDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
   sceneHint?: string;
 
   @IsOptional()

@@ -1,4 +1,5 @@
 import { Alert } from "@mantine/core";
+import { OperationErrorAlert, operationFailure } from "./OperationErrorAlert";
 
 // 실행한 일이 됐는지 안 됐는지를 화면마다 다르게 알리면 운영자가 매번 결과를
 // 다시 확인해야 한다. 성공은 role="status", 실패는 role="alert"로 같은 자리에
@@ -14,13 +15,12 @@ export function MutationAlert({
 }) {
   if (mutation.isError) {
     return (
-      <Alert
-        color="red"
-        role="alert"
-        {...(errorTitle ? { title: errorTitle } : {})}
-      >
-        {mutation.error?.message}
-      </Alert>
+      <OperationErrorAlert
+        failure={operationFailure(
+          mutation.error ?? new Error("Unknown error"),
+          errorTitle ?? "요청을 처리하지 못했습니다.",
+        )}
+      />
     );
   }
   return mutation.isSuccess ? (

@@ -200,6 +200,53 @@ describe("post work stage screens", () => {
     expect(body.getByText("없음")).toBeInTheDocument();
     // 게시글 기획은 이미 지나간 단계이므로 완료로 표시되어야 한다.
     expect(body.getByText("완료")).toBeInTheDocument();
+    expect(
+      body.queryByRole("button", { name: "게시글 기획 다시 실행" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the exact problem, cause, next action and technical detail for a failed stage", async () => {
+    renderStage(
+      "post_plan",
+      { pipelineVersion: "post-pipeline-v4", source: "manual", mode: "manual" },
+      {
+        draft: { status: "failed", errorMessage: "raw provider response" },
+        item: {
+          ...v3Item,
+          operationalStatus: "failed",
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            version: "post-pipeline-v4",
+            stage: "post_plan",
+            state: "failed",
+            failure: {
+              code: "provider_http_error",
+              stage: "post_plan",
+              problem: "AI 제공자가 요청을 거부했습니다.",
+              cause: "AI 제공자가 HTTP 429 오류를 반환했습니다.",
+              nextAction: "설정을 확인한 뒤 현재 단계를 다시 실행하세요.",
+              technicalDetail: "structured agent failed (429): quota exhausted",
+              occurredAt: "2026-08-20T00:00:00.000Z",
+              retryable: true,
+            },
+          },
+        },
+      },
+    );
+
+    expect(
+      await screen.findByText("AI 제공자가 요청을 거부했습니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/AI 제공자가 HTTP 429 오류를 반환했습니다/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/설정을 확인한 뒤 현재 단계를 다시 실행하세요/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/quota exhausted/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "게시글 기획 실행" }),
+    ).toBeInTheDocument();
   });
 
   // 게시 트랜잭션(`selectedPublishedMemories`)은 selected이면서 현재 PostPlan
@@ -221,18 +268,21 @@ describe("post work stage screens", () => {
             state: "ready",
             memoryCandidates: [
               {
+                key: "memory-1",
                 type: "routine",
                 content: "월요일마다 라인 체크를 한다",
                 selected: true,
                 stale: false,
               },
               {
+                key: "memory-2",
                 type: "fact",
                 content: "새 필름 카메라를 샀다",
                 selected: false,
                 stale: false,
               },
               {
+                key: "memory-old",
                 type: "event",
                 content: "이전 기획의 잔여 후보",
                 selected: true,

@@ -1357,3 +1357,41 @@ subagent가 세션 한도로 중단되어 **설계자가 코드로 직접 검증
 | R1 측정 계획 | 유지 · 단순화 | §20.8 |
 | 회귀 spec 4개 | 유지 | 구현 계획서로 |
 | §17 "human review 제거 자동 게시 미확정" | **확정됨** | 결정 9. §17에서 이 항목을 제거하고 §20.11 위험 항목으로 이관 |
+
+## 21. 운영 복구·오류 표시 계약 (2026-08-20)
+
+게시글 생성 전 구간을 상태 전이, 게시 경쟁, 오류 설명, 수동 입력 관점에서 다시
+점검해 다음 계약을 현재 구현으로 확정했다.
+
+1. V3/V4 Agent 단계의 `attemptCount`는 단계 전체가 아니라 **현재 stage의 연속
+   실패 횟수**다. 산출물 저장·pause·prompt job 저장·캡션 대기 전환이 성공하면
+   0으로 초기화한다. 이 규칙이 없으면 앞 단계 시도가 뒤 단계 재시도 예산을
+   소진한다.
+2. 수동 실행은 `planned`뿐 아니라 terminal `failed`도 claim한다. failed 복구
+   claim은 시도 횟수를 1로 다시 시작하고, 이전 오류와 `pipeline.failure`를
+   지운다. 자동 루프는 failed를 무한 재시도하지 않는다.
+3. 일반 단계 화면은 오케스트레이터가 가리키는 **현재 stage만** 실행한다. 이미
+   완료한 앞 단계의 버튼이 같은 `/plan`을 호출하는 가짜 재실행은 제거했다.
+   임의 rewind와 downstream 산출물 무효화는 별도 설계 전까지 지원하지 않는다.
+4. Agent 예외는 `pipeline.failure`에 `code`, `stage`, `problem`, `cause`,
+   `nextAction`, `technicalDetail`, `occurredAt`, `retryable`로 저장한다. Admin은
+   반드시 `문제 → 발생 이유 → 다음 행동`을 먼저 보이고 원문은 접힌 기술 상세로
+   보존한다. 구조화 이전 오류와 게시/이미지 provider 오류도 원문을 발생 이유로
+   노출한다.
+5. 자동 게시 조회는 수동 초안을 DB에서 제외하고, 오류 난 항목에 5분 backoff를
+   둔다. 수동·자동 게시 모두 15분 lease를 원자적으로 claim하며 성공 CAS와 실패
+   기록이 같은 lease 값을 확인한다. 여러 instance가 같은 draft를 동시에
+   업로드·게시하지 못하게 하는 소유권 증거다.
+6. scheduler의 pending 확인과 draft 생성은 캐릭터별 PostgreSQL advisory lock
+   안에서 다시 판정한다. 여러 instance의 check-then-create 경쟁을 막는다.
+7. 수동 V3/V4는 현재 PostPlan hash의 memory candidate key만 선택할 수 있다.
+   선택은 stage 대기/실패 상태에서만 바뀌고, 게시 트랜잭션은 기존 규칙대로
+   `selected && sourcePostPlanHash === currentHash`만 저장한다.
+8. 최초 `sceneHint`/`operatorRequest`는 서버와 UI 모두 2,000자로 제한한다.
+   게시 완료 상세 조회 실패는 무한 loading 대신 이유와 재조회 행동을 표시한다.
+
+검증 소유자는 `draft-worker.repository.spec.ts`, `draft-worker.service.spec.ts`,
+`post-pipeline-v3.runner.spec.ts`, `pipeline-error.spec.ts`,
+`drafts.service.spec.ts`, `post-workspace.service.spec.ts`,
+`PostWorkPage.test.tsx`다. 실제 provider를 호출하는 V4 완주 E2E는 외부 비용·자격
+증명이 필요한 운영 smoke로 남고, 저장소 E2E는 DB/API 회귀를 담당한다.

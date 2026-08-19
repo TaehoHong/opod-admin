@@ -2,9 +2,12 @@ import { DraftWorkerRepository } from "./draft-worker.repository";
 
 function prismaMock() {
   const tx = {
+    $executeRaw: jest.fn().mockResolvedValue(1),
     postDraft: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       update: jest.fn().mockResolvedValue({}),
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({}),
     },
     generationJob: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -209,6 +212,9 @@ describe("DraftWorkerRepository", () => {
     // 한다. 자동 루프만 pending으로 제한된다.
     expect(sql).toContain(`concept_json#>>'{pipeline,state}' <> 'running'`);
     expect(sql).not.toContain(`concept_json#>>'{pipeline,state}' = 'pending'`);
+    expect(sql).toContain("status IN ('planned', 'failed')");
+    expect(sql).toContain("WHEN status = 'failed' THEN 1");
+    expect(sql).toContain("error_message = NULL");
     // 되감기는 캡션 산출물이 있는 V4 초안에만 — V3의 approved 게시 대기는 대상이
     // 아니다.
     expect(sql).toContain("concept_json->'captionBuild' IS NOT NULL");
@@ -244,6 +250,39 @@ describe("DraftWorkerRepository", () => {
     const repository = new DraftWorkerRepository(prisma as never);
 
     await expect(repository.findGeneratingDrafts(20)).resolves.toEqual([]);
+    expect(prisma.postDraft.findMany).not.toHaveBeenCalled();
+  });
+
+  it("claims only retry-eligible automatic publishes with a lease", async () => {
+    const { prisma } = prismaMock();
+    let sql = "";
+    prisma.$queryRaw.mockImplementation(
+      (strings: TemplateStringsArray, ...values: unknown[]) => {
+        sql = strings.join("?");
+        for (const value of values) {
+          const fragment = value as { strings?: string[] };
+          if (Array.isArray(fragment?.strings)) {
+            sql += fragment.strings.join("?");
+          }
+        }
+        return Promise.resolve([]);
+      },
+    );
+    const repository = new DraftWorkerRepository(prisma as never);
+
+    await repository.findDueDrafts(
+      new Date("2026-08-20T00:00:00.000Z"),
+      5,
+      120,
+      new Date("2026-08-19T23:55:00.000Z"),
+    );
+
+    expect(sql).toContain("FOR UPDATE OF d SKIP LOCKED");
+    expect(sql).toContain(
+      "(d.concept_json->>'mode') IS DISTINCT FROM 'manual'",
+    );
+    expect(sql).toContain("d.error_message IS NULL");
+    expect(sql).toContain("d.lease_expires_at IS NULL");
     expect(prisma.postDraft.findMany).not.toHaveBeenCalled();
   });
 
@@ -368,29 +407,49 @@ describe("DraftWorkerRepository", () => {
       }),
     ).resolves.toBe(true);
     const where = tx.postDraft.updateMany.mock.calls[0][0].where;
+    const data = tx.postDraft.updateMany.mock.calls[0][0].data;
     expect(where.AND).toHaveLength(2);
+    expect(data.attemptCount).toBe(0);
     expect(tx.characterActionLog.create).toHaveBeenCalledTimes(1);
   });
 
   it("pins scheduled V3 drafts without changing legacy scheduled drafts", async () => {
-    const { prisma } = prismaMock();
+    const { prisma, tx } = prismaMock();
     const repository = new DraftWorkerRepository(prisma as never);
     const scheduledAt = new Date("2026-08-13T03:00:00.000Z");
 
     await repository.createScheduledDraft("character-1", scheduledAt, true);
     await repository.createScheduledDraft("character-2", scheduledAt, false);
 
-    expect(
-      prisma.postDraft.create.mock.calls[0][0].data.conceptJson,
-    ).toMatchObject({
-      pipelineVersion: "post-pipeline-v4",
+    expect(tx.postDraft.create.mock.calls[0][0].data.conceptJson).toMatchObject(
+      {
+        pipelineVersion: "post-pipeline-v4",
+        source: "scheduler",
+        mode: "auto",
+        pipeline: { stage: "post_plan", state: "pending" },
+      },
+    );
+    expect(tx.postDraft.create.mock.calls[1][0].data.conceptJson).toEqual({
       source: "scheduler",
-      mode: "auto",
-      pipeline: { stage: "post_plan", state: "pending" },
     });
-    expect(prisma.postDraft.create.mock.calls[1][0].data.conceptJson).toEqual({
-      source: "scheduler",
-    });
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it("rechecks pending work under the scheduler transaction lock", async () => {
+    const { prisma, tx } = prismaMock();
+    tx.postDraft.findFirst.mockResolvedValue({ id: "already-pending" });
+    const repository = new DraftWorkerRepository(prisma as never);
+
+    await expect(
+      repository.createScheduledDraft(
+        "character-1",
+        new Date("2026-08-20T03:00:00.000Z"),
+        true,
+      ),
+    ).resolves.toBe(false);
+
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(tx.postDraft.create).not.toHaveBeenCalled();
   });
 
   it("does not create a post after an approved-state race is lost", async () => {

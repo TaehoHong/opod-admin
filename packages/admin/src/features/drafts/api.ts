@@ -187,6 +187,19 @@ export function updateOperatorRequest(
   });
 }
 
+export function updateMemoryCandidates(
+  draftId: string,
+  selectedKeys: string[],
+): Promise<Draft> {
+  return apiRequest(
+    `/drafts/${encodeURIComponent(draftId)}/memory-candidates`,
+    {
+      method: "PATCH",
+      body: { selectedKeys },
+    },
+  );
+}
+
 // 단계 실행 — 전부 갱신된 draft를 돌려주므로 호출부는 결과를 캐시에 그대로
 // 넣으면 된다.
 function draftAction(draftId: string, path: string, body?: unknown) {

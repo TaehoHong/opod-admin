@@ -390,12 +390,14 @@ describe("PostWorkspaceService", () => {
         postPlanning: { revision: 2, hash: "sha256:plan-2", output: {} },
         memoryCandidates: [
           {
+            key: "memory-1",
             type: "routine",
             content: "월요일마다 라인 체크",
             selected: true,
             sourcePostPlanHash: "sha256:plan-2",
           },
           {
+            key: "memory-old",
             type: "fact",
             content: "이전 기획의 잔여 후보",
             selected: true,
@@ -410,12 +412,14 @@ describe("PostWorkspaceService", () => {
 
     expect(item.pipelineV3?.memoryCandidates).toEqual([
       {
+        key: "memory-1",
         type: "routine",
         content: "월요일마다 라인 체크",
         selected: true,
         stale: false,
       },
       {
+        key: "memory-old",
         type: "fact",
         content: "이전 기획의 잔여 후보",
         selected: true,

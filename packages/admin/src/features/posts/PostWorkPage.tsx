@@ -2,6 +2,7 @@ import {
   Alert,
   Badge,
   Button,
+  Checkbox,
   Code,
   Group,
   Loader,
@@ -20,6 +21,10 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { DataPage } from "../../shared/ui/DataPage";
 import { CharacterName } from "../../shared/ui/EntityName";
 import { ZoomableImage } from "../../shared/ui/ZoomableImage";
+import {
+  OperationErrorAlert,
+  operationFailure,
+} from "../../shared/ui/OperationErrorAlert";
 import { DraftPlanSummary } from "../drafts/DraftPlanSummary";
 import { ShotCard } from "../drafts/ShotCard";
 import {
@@ -31,6 +36,7 @@ import {
   v4PausedAt,
   updateDraftPlan,
   updateDraftPrompts,
+  updateMemoryCandidates,
   updateOperatorRequest,
   type Draft,
 } from "../drafts/api";
@@ -127,9 +133,9 @@ export function PostWorkPage({
   }
   if (work.error) {
     return (
-      <Alert color="red" role="alert" title="게시물을 불러오지 못했습니다">
-        {work.error.message}
-      </Alert>
+      <OperationErrorAlert
+        failure={operationFailure(work.error, "게시물을 불러오지 못했습니다.")}
+      />
     );
   }
   if (!stage) {
@@ -161,9 +167,9 @@ export function PostWorkPage({
   }
   if (draft.error) {
     return (
-      <Alert color="red" role="alert" title="단계를 불러오지 못했습니다">
-        {draft.error.message}
-      </Alert>
+      <OperationErrorAlert
+        failure={operationFailure(draft.error, "단계를 불러오지 못했습니다.")}
+      />
     );
   }
 
@@ -184,6 +190,8 @@ export function PostWorkPage({
         item={work.data}
         draft={draft.data}
         post={post.data}
+        postError={post.error}
+        retryPost={() => void post.refetch()}
       />
     </DataPage>
   );
@@ -248,12 +256,22 @@ function PostWorkHeader({
           진행으로 전환됩니다.
         </Alert>
       ) : null}
-      {draft?.errorMessage ? (
-        <Alert color="red" title="현재 오류" mt="sm">
-          {draft.errorMessage}
-        </Alert>
+      {item.pipelineV3?.failure ? (
+        <OperationErrorAlert failure={item.pipelineV3.failure} mt="sm" />
+      ) : draft?.errorMessage ? (
+        <OperationErrorAlert
+          mt="sm"
+          failure={{
+            code: "unclassified_pipeline_error",
+            problem: "게시글 생성 작업에 오류가 발생했습니다.",
+            cause: draft.errorMessage,
+            nextAction: "기술 상세를 확인하고 현재 단계를 다시 실행하세요.",
+            technicalDetail: draft.errorMessage,
+          }}
+        />
       ) : null}
       {item.pipelineV3 &&
+      !item.pipelineV3.failure &&
       !["pending", "running", "ready"].includes(item.pipelineV3.state) ? (
         <Alert
           color={item.pipelineV3.state === "failed" ? "red" : "yellow"}
@@ -339,11 +357,15 @@ function StageBody({
   item,
   draft,
   post,
+  postError,
+  retryPost,
 }: {
   stage: PostWorkStage;
   item: PostWorkItem;
   draft?: Draft;
   post?: PostListItem;
+  postError?: Error | null;
+  retryPost: () => void;
 }) {
   if (!draft && stage !== "publish" && stage !== "memory") {
     return <UnavailableStage stage={stage} />;
@@ -374,7 +396,15 @@ function StageBody({
     return <V3CaptionStage item={item} draft={draft!} />;
   }
   if (stage === "publish") {
-    return <PublishStage item={item} draft={draft} post={post} />;
+    return (
+      <PublishStage
+        item={item}
+        draft={draft}
+        post={post}
+        postError={postError}
+        retryPost={retryPost}
+      />
+    );
   }
   return <MemoryStage item={item} draft={draft} />;
 }
@@ -458,12 +488,9 @@ function V3Stage({
   );
   const stageState = v3StageState(pipeline, stage);
   const current = pipeline?.stage === stage;
-  // 완료된 단계도 다시 돌릴 수 있어야 한다. 현재 단계가 아닌 뒤 단계는 이 화면에서
-  // 실행하지 않는다 — 오케스트레이터가 순서를 소유한다.
-  const runnable =
-    Boolean(item.draftId) &&
-    stageState !== "running" &&
-    (current || stageState === "done");
+  // 오케스트레이터가 가리키는 현재 단계만 실행한다. 완료 산출물 화면의 재실행은
+  // 실제 rewind가 아니므로 같은 /plan을 호출하면 엉뚱한 현재 단계가 실행된다.
+  const runnable = Boolean(item.draftId) && current && stageState !== "running";
   return (
     <StagePaper
       title={`${number} ${title}`}
@@ -1016,6 +1043,12 @@ function OperatorRequestForm({ draft }: { draft: Draft }) {
   const form = useForm({
     mode: "uncontrolled",
     initialValues: { operatorRequest: current },
+    validate: {
+      operatorRequest: (value) =>
+        value.length <= 2000
+          ? null
+          : "장면·주제 요청은 2,000자 이하여야 합니다",
+    },
   });
   const save = useDraftMutation(
     draft.id,
@@ -1041,6 +1074,7 @@ function OperatorRequestForm({ draft }: { draft: Draft }) {
           placeholder="지정 없음"
           autosize
           minRows={2}
+          maxLength={2000}
           key={form.key("operatorRequest")}
           {...form.getInputProps("operatorRequest")}
         />
@@ -1606,10 +1640,14 @@ function PublishStage({
   item,
   draft,
   post,
+  postError,
+  retryPost,
 }: {
   item: PostWorkItem;
   draft?: Draft;
   post?: PostListItem;
+  postError?: Error | null;
+  retryPost: () => void;
 }) {
   const publish = useDraftMutation(draft?.id ?? "", () =>
     runDraftStage(draft!.id, "publish"),
@@ -1629,6 +1667,19 @@ function PublishStage({
           }
         : {})}
     >
+      {postError ? (
+        <Stack gap="xs">
+          <OperationErrorAlert
+            failure={operationFailure(
+              postError,
+              "게시 결과를 불러오지 못했습니다.",
+            )}
+          />
+          <Button variant="default" onClick={retryPost}>
+            게시 결과 다시 불러오기
+          </Button>
+        </Stack>
+      ) : null}
       {/* 게시 전에도 실제로 나갈 모습을 봐야 결정할 수 있다. 게시 후에는
           post가 정본이므로 미리보기를 대체한다. */}
       {!post && draft ? <PublishPreview draft={draft} /> : null}
@@ -2055,7 +2106,19 @@ function MemoryStage({ item, draft }: { item: PostWorkItem; draft?: Draft }) {
         : {})}
     >
       {candidates ? (
-        <MemoryCandidateList candidates={candidates} published={published} />
+        draft &&
+        item.executionMode === "manual" &&
+        (draft.status === "planned" || draft.status === "failed") ? (
+          <MemorySelectionForm
+            key={candidates
+              .map((candidate) => `${candidate.key}:${candidate.selected}`)
+              .join("|")}
+            draftId={draft.id}
+            candidates={candidates}
+          />
+        ) : (
+          <MemoryCandidateList candidates={candidates} published={published} />
+        )
       ) : null}
       {published && candidates ? (
         <Text size="xs" c="dimmed">
@@ -2087,6 +2150,71 @@ function MemoryStage({ item, draft }: { item: PostWorkItem; draft?: Draft }) {
         </Alert>
       )}
     </StagePaper>
+  );
+}
+
+function MemorySelectionForm({
+  draftId,
+  candidates,
+}: {
+  draftId: string;
+  candidates: V3MemoryCandidate[];
+}) {
+  const [selected, setSelected] = useState(
+    () =>
+      new Set(
+        candidates
+          .filter((candidate) => candidate.selected)
+          .map((candidate) => candidate.key),
+      ),
+  );
+  const save = useDraftMutation(draftId, (selectedKeys: string[]) =>
+    updateMemoryCandidates(draftId, selectedKeys),
+  );
+  return (
+    <Paper p="md" component="section">
+      <Stack gap="sm">
+        <Text fw={600} size="sm">
+          게시 후 저장할 기억 선택
+        </Text>
+        {candidates.map((candidate) => (
+          <Checkbox
+            key={candidate.key}
+            checked={!candidate.stale && selected.has(candidate.key)}
+            disabled={candidate.stale || save.isPending}
+            label={`${candidate.type} · ${candidate.content}${candidate.stale ? " (무효)" : ""}`}
+            onChange={(event) => {
+              const next = new Set(selected);
+              if (event.currentTarget.checked) next.add(candidate.key);
+              else next.delete(candidate.key);
+              setSelected(next);
+            }}
+          />
+        ))}
+        {save.isError ? <MutationError error={save.error} /> : null}
+        <Group>
+          <Button
+            variant="default"
+            loading={save.isPending}
+            onClick={() =>
+              save.mutate(
+                candidates
+                  .filter(
+                    (candidate) =>
+                      !candidate.stale && selected.has(candidate.key),
+                  )
+                  .map((candidate) => candidate.key),
+              )
+            }
+          >
+            기억 선택 저장
+          </Button>
+          <Text size="xs" c="dimmed">
+            선택한 후보만 게시 트랜잭션에서 캐릭터 메모리로 저장됩니다.
+          </Text>
+        </Group>
+      </Stack>
+    </Paper>
   );
 }
 
@@ -2199,11 +2327,7 @@ function Meta({
 }
 
 function MutationError({ error }: { error: Error }) {
-  return (
-    <Alert color="red" role="alert" title="처리하지 못했습니다">
-      {error.message}
-    </Alert>
-  );
+  return <OperationErrorAlert failure={operationFailure(error)} />;
 }
 
 // V3 Agent의 실제 산출물은 scoresJson(_meta + result)에 통째로 들어 있다.

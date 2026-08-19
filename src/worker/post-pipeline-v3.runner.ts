@@ -49,7 +49,8 @@ import {
   PostPlanReady,
 } from "./post-planner";
 import { StrictJsonAgentClient } from "./strict-json-agent";
-import { errorMessage, isRecord } from "./value-utils";
+import { isRecord } from "./value-utils";
+import { pipelineFailure } from "./pipeline-error";
 
 type V3Concept = Record<string, unknown> & {
   pipelineVersion: "post-pipeline-v3" | "post-pipeline-v4";
@@ -121,7 +122,8 @@ export class PostPipelineV3Runner {
         await this.release(draft, concept);
       }
     } catch (error) {
-      const message = errorMessage(error).slice(0, 500);
+      const failure = pipelineFailure(error, stage);
+      const message = failure.technicalDetail;
       const terminal =
         draft.attemptCount >= this.config.draftWorker.maxAttempts;
       await this.repository.requeueOrFailV3({
@@ -131,7 +133,8 @@ export class PostPipelineV3Runner {
           pipeline: {
             ...concept.pipeline,
             state: terminal ? "failed" : "pending",
-            reasonCodes: ["stage_execution_failed"],
+            reasonCodes: [failure.code],
+            failure,
           },
         } as Prisma.InputJsonValue,
         message,

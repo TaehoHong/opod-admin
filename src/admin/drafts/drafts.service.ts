@@ -406,6 +406,11 @@ export class DraftsService {
     }
     const scheduledAt = this.parseOptionalDate(input.scheduledAt);
     const sceneHint = input.sceneHint?.trim();
+    if (sceneHint && sceneHint.length > OPERATOR_REQUEST_MAX_LENGTH) {
+      throw new BadRequestException(
+        `Scene hint must be at most ${OPERATOR_REQUEST_MAX_LENGTH} characters`,
+      );
+    }
     const pipelineV3 = await this.settings.resolvePipelineV3();
 
     const draft = await this.repository.createDraft({
@@ -693,6 +698,62 @@ export class DraftsService {
     if (!transitioned) {
       throw new BadRequestException(
         "Only drafts waiting for a stage run can change the operator request",
+      );
+    }
+    await this.repository.markManual(input.draftId);
+    return this.getDraft(input.draftId);
+  }
+
+  async updateMemoryCandidates(input: {
+    draftId: string;
+    selectedKeys: string[];
+  }): Promise<AdminDraft> {
+    const existing = await this.repository.findDraftConcept(input.draftId);
+    if (!existing) throw new BadRequestException("Draft not found");
+    const concept = this.record(existing.conceptJson);
+    if (!isPostPipelineV3(concept) || concept.mode !== "manual") {
+      throw new BadRequestException(
+        "Only manual post-pipeline-v3/v4 drafts can select memory candidates",
+      );
+    }
+    const postPlanHash = this.record(concept.postPlanning).hash;
+    const candidates = Array.isArray(concept.memoryCandidates)
+      ? concept.memoryCandidates
+      : [];
+    const currentKeys = new Set(
+      candidates.flatMap((value) => {
+        const candidate = this.record(value);
+        return typeof candidate.key === "string" &&
+          candidate.sourcePostPlanHash === postPlanHash
+          ? [candidate.key]
+          : [];
+      }),
+    );
+    if (input.selectedKeys.some((key) => !currentKeys.has(key))) {
+      throw new BadRequestException(
+        "Selected memory candidates must belong to the current post plan",
+      );
+    }
+    const selected = new Set(input.selectedKeys);
+    const nextCandidates = candidates.map((value) => {
+      const candidate = this.record(value);
+      return typeof candidate.key === "string" && currentKeys.has(candidate.key)
+        ? { ...candidate, selected: selected.has(candidate.key) }
+        : candidate;
+    });
+    const transitioned = await this.repository.updateEditableDraft(
+      input.draftId,
+      OPERATOR_REQUEST_EDITABLE_STATUSES,
+      {
+        conceptJson: {
+          ...concept,
+          memoryCandidates: nextCandidates,
+        } as Prisma.InputJsonValue,
+      },
+    );
+    if (!transitioned) {
+      throw new BadRequestException(
+        "Memory candidates can only change while the current stage is waiting or failed",
       );
     }
     await this.repository.markManual(input.draftId);

@@ -55,6 +55,16 @@ export type PostPipelineV3ReadModel = {
   imageCount: number | null;
   reasonCodes: string[];
   nextAction: string;
+  failure?: {
+    code: string;
+    stage: string;
+    problem: string;
+    cause: string;
+    nextAction: string;
+    technicalDetail: string;
+    occurredAt: string;
+    retryable: boolean;
+  };
   // 게시 시 실제로 읽는 후보 목록(concept 최상위). 산출물이 아니라 파이프라인이
   // 소유하는 상태라 artifacts 밖에 둔다.
   memoryCandidates?: V3MemoryCandidate[];
@@ -134,6 +144,7 @@ export type PostPipelineV3ReadModel = {
 // 후보의 "저장됨" 여부는 draft 상태와 합쳐야 나오므로 여기서는 게시 로직
 // (`selectedPublishedMemories`)이 실제로 거르는 두 조건만 내린다.
 export type V3MemoryCandidate = {
+  key: string;
   type: string;
   content: string;
   selected: boolean;
@@ -515,7 +526,7 @@ function statusForDraft(
 
 function v3ReadModel(
   concept: Record<string, unknown>,
-  draft: Pick<PostWorkDraft, "caption">,
+  draft: Pick<PostWorkDraft, "caption" | "errorMessage" | "updatedAt">,
   latestJobs: PostWorkDraft["jobs"],
 ): PostPipelineV3ReadModel | undefined {
   if (!isPostPipelineV3(concept)) return undefined;
@@ -546,6 +557,7 @@ function v3ReadModel(
         (value): value is string => typeof value === "string",
       )
     : [];
+  const failure = v3Failure(pipeline.failure, draft);
   const postPlanning = record(concept.postPlanning);
   const postOutput = record(postPlanning.output);
   const postIntent = record(postOutput.intent);
@@ -566,6 +578,7 @@ function v3ReadModel(
     imageCount,
     reasonCodes,
     nextAction: v3StateCopy(state).nextAction,
+    ...(failure ? { failure } : {}),
     ...(Array.isArray(concept.memoryCandidates)
       ? {
           memoryCandidates: v3MemoryCandidates(
@@ -765,6 +778,44 @@ function v3ReadModel(
   };
 }
 
+function v3Failure(
+  value: unknown,
+  draft: Pick<PostWorkDraft, "errorMessage" | "updatedAt">,
+): PostPipelineV3ReadModel["failure"] | undefined {
+  const failure = record(value);
+  if (
+    typeof failure.code === "string" &&
+    typeof failure.stage === "string" &&
+    typeof failure.problem === "string" &&
+    typeof failure.cause === "string" &&
+    typeof failure.nextAction === "string" &&
+    typeof failure.technicalDetail === "string" &&
+    typeof failure.occurredAt === "string"
+  ) {
+    return {
+      code: failure.code,
+      stage: failure.stage,
+      problem: failure.problem,
+      cause: failure.cause,
+      nextAction: failure.nextAction,
+      technicalDetail: failure.technicalDetail,
+      occurredAt: failure.occurredAt,
+      retryable: failure.retryable !== false,
+    };
+  }
+  if (!draft.errorMessage) return undefined;
+  return {
+    code: "unclassified_pipeline_error",
+    stage: "unknown",
+    problem: "게시글 생성 작업에 오류가 발생했습니다.",
+    cause: draft.errorMessage,
+    nextAction: "기술 상세를 확인하고 현재 단계를 다시 실행하세요.",
+    technicalDetail: draft.errorMessage,
+    occurredAt: draft.updatedAt.toISOString(),
+    retryable: true,
+  };
+}
+
 // 산출물 계보. artifact에는 실행 시각이 없으므로 revision/hash/버전만 내린다.
 // 어느 프롬프트 버전이 실제로 쓰였는지는 프롬프트 실험 관측의 1차 증거다.
 // PromptSet은 같은 정보를 commonPromptVersion 키로 기록하므로 둘 다 읽는다.
@@ -794,12 +845,14 @@ function v3MemoryCandidates(
   return raw.flatMap((value) => {
     const candidate = record(value);
     if (
+      typeof candidate.key !== "string" ||
       typeof candidate.type !== "string" ||
       typeof candidate.content !== "string"
     )
       return [];
     return [
       {
+        key: candidate.key,
         type: candidate.type,
         content: candidate.content,
         selected: candidate.selected === true,

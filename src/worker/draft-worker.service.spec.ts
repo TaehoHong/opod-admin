@@ -51,7 +51,7 @@ function repositoryFake() {
     findPendingDraft: jest.fn().mockResolvedValue(null),
     findLastDraft: jest.fn().mockResolvedValue(null),
     findLastPost: jest.fn().mockResolvedValue(null),
-    createScheduledDraft: jest.fn().mockResolvedValue(undefined),
+    createScheduledDraft: jest.fn().mockResolvedValue(true),
     recordActionLog: jest.fn().mockResolvedValue(undefined),
   };
 }
@@ -915,6 +915,7 @@ describe("DraftWorkerService publishing", () => {
 
   it("records the reason when immediate publishing fails", async () => {
     const repository = repositoryFake();
+    const leaseExpiresAt = new Date("2026-08-20T00:02:00.000Z");
     repository.findApprovedDraft.mockResolvedValue({
       id: "draft-1",
       characterId: "character-1",
@@ -922,6 +923,7 @@ describe("DraftWorkerService publishing", () => {
       caption: "now",
       hashtags: [],
       conceptJson: {},
+      leaseExpiresAt,
     });
     repository.findPublishJobs.mockResolvedValue([]);
     const service = makeService(repository);
@@ -933,6 +935,7 @@ describe("DraftWorkerService publishing", () => {
     expect(repository.recordPublishError).toHaveBeenCalledWith(
       "draft-1",
       "draft has no generated media to publish",
+      leaseExpiresAt,
     );
   });
 });
