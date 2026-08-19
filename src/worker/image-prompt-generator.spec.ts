@@ -21,6 +21,10 @@ const imagePlan: ImagePlanReady = {
         faceVisible: true,
         identityPreservationRequired: true,
       },
+      subjectState: "",
+      motionEvidence: "",
+      notInFrame: [],
+      subjectCameraRelation: "deliberately_posed",
       referenceBindings: [
         {
           bindingId: "binding-private",
@@ -37,6 +41,30 @@ const imagePlan: ImagePlanReady = {
 const promptPackage = buildPromptPackage({
   targetModelId: "fal-ai/nano-banana-pro/edit",
   imagePlan,
+  appearance: "black bob hair",
+});
+const fluxImagePlan: ImagePlanReady = {
+  ...imagePlan,
+  shots: [
+    {
+      ...imagePlan.shots[0],
+      referenceBindings: [
+        imagePlan.shots[0].referenceBindings[0],
+        {
+          bindingId: "environment-private",
+          id: "media-2",
+          source: "environment",
+          semanticPurposes: ["environment"],
+          preserve: ["cream plaster walls", "window placement"],
+          avoidCopying: ["people", "camera viewpoint"],
+        },
+      ],
+    },
+  ],
+};
+const fluxPromptPackage = buildPromptPackage({
+  targetModelId: "black-forest-labs/FLUX.1-Kontext-dev",
+  imagePlan: fluxImagePlan,
   appearance: "black bob hair",
 });
 
@@ -96,6 +124,55 @@ describe("Image Prompt Generation Agent contract", () => {
         shotSortOrder: 0,
         promptPackage,
         referenceMediaIds: ["wrong-media"],
+      }),
+    ).toThrow("slot/asset order mismatch");
+  });
+
+  it("enforces FLUX.1 Kontext reference labels", () => {
+    expect(
+      parsePromptSet(
+        {
+          shots: [
+            {
+              sortOrder: 0,
+              prompt:
+                "Create a natural photograph. Reference image 1 supplies only the main character identity. Reference image 2 supplies only the cream plaster walls and window placement. Show the person seated by the window.",
+              negativePrompt: null,
+            },
+          ],
+        },
+        fluxPromptPackage,
+      ),
+    ).toMatchObject({ shots: [{ negativePrompt: null }] });
+
+    expect(() =>
+      parsePromptSet(
+        {
+          shots: [
+            {
+              sortOrder: 0,
+              prompt:
+                "Create a natural photograph. Reference image 1 supplies only the main character identity. Show the person by the window.",
+              negativePrompt: null,
+            },
+          ],
+        },
+        fluxPromptPackage,
+      ),
+    ).toThrow("omitted Reference image 2");
+
+    expect(() =>
+      assertProviderReferenceOrder({
+        shotSortOrder: 0,
+        promptPackage: fluxPromptPackage,
+        referenceMediaIds: ["media-1", "media-2"],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertProviderReferenceOrder({
+        shotSortOrder: 0,
+        promptPackage: fluxPromptPackage,
+        referenceMediaIds: ["media-2", "media-1"],
       }),
     ).toThrow("slot/asset order mismatch");
   });

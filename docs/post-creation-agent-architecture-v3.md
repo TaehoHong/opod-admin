@@ -621,6 +621,8 @@ capability probe와 같은 가짜 통과를 만들 위험이 크다 — 모델�
 | 18 | 첫 V4 완주(서린 `01a0089b…`) 캡션에 운영자 정정 4건 — 그중 2건의 씨앗은 ② premise(v2에서 "충분히 구체적으로" 요구 → 147자 사연 지어냄), 2건은 ⑥ 연어. **모든 프롬프트 변경이 서린 1캐릭터 사례에서 나왔다**는 지적 | (a) post-planner-v2의 그 문장 삭제 예정(제약 빼기), (b) 한소이로 V4 첫 실행 → 즉시 ⑤ 실패: V2 가드 "보이면 인물 레퍼런스 필수"가 손만 보이는 컷을 막음. 서린은 항상 체형 레퍼런스를 묶어 5건 내내 우연히 통과 | 가드를 계약(`identityPreservationRequired`)으로 교체 `f304dd3`. **한 캐릭터로 검증한 가정이 두 번째 캐릭터에서 깨진 첫 사례** | research-log caption-writer-v1 관측 1, §19.2 "표본이 캐릭터 1개" |
 | 19 | 한소이 V4(`01a0093b…`) 손 컷이 **누가 뒤에서 찍은 3인칭**으로 렌더 — 혼자인 캐릭터에 촬영자가 있다. 기획이 "양손 화면 안 + 손으로 든 카메라"를 냈고 기획 평가 `capture_plausibility` 5, 이미지 평가 `character_presentation` 5 (가짜 초록불 2건) | 원인 추적: 한소이 `content_style`에 "뒤에서 따라 찍는 구도 금지·혼자면 셀프타이머·기본은 소이 시점 손 디테일"이 **있는데 ③ 입력에서 그 블록을 뺀다**(글쓰기 프로필로 분류). 어블레이션 15장: 촬영 문구 수정 0/6, 장면 계약 수정 6/6 | (미적용) 처방 후보는 규칙 추가가 아니라 입력 한 줄 — ③에 `content_style` 전달. 프롬프트 불변. §19.2 "규칙은 있는데 입력이 없다" | research-log `image-planner-v3` 관측 3 |
 | 20 | 같은 초안 캡션 "자연스럽지 않다" — 규칙(문장 수·마침표·이모지·해시태그·근거)은 전부 통과. premise의 문어체("꺼내어…첫 기록")가 캡션에 그대로 새고(② → ⑥ 누출 **n=2**), "시적"을 예시(명사형 한 줄)가 아니라 의인화 은유로 해석, 두 줄에 명사 7개 | (미적용) 후보 `caption-writer-v2` = 예시가 형용사보다 권위, premise는 사실 기록이지 문장 재료가 아님. 부수: 이전 파이프라인이 게시한 과장 캡션이 recentPosts로 되먹임 | 관측만(운영자 결정 대기) | research-log caption-writer-v1 관측 2 |
+| 21 | 서린 V4 초안이 ⑦ 게시에서 `unknown_stage`로 실패하고, 그 뒤로는 **재실행·게시·캡션 편집·컷 재생성이 전부 400**. 화면에는 ⑥ 완료 / ⑦ 실패 | 원인은 claim이 `stage`를 안 보는 것 — ⑥이 끝나면 `publish/pending`이 되는데 `POST /drafts/:id/plan`(=캡션 다시 생성)이 그대로 집어 러너에 넘겼고, 러너에는 publish 분기가 없다. 자동 모드는 더 나빠서 `planClaimedV3Drafts`의 `for(;;)`가 같은 tick에 다시 집어 `publishDueDrafts` 차례가 오기 전에 죽였다 | claim 두 곳에 Agent 단계 술어 추가 + 수동만 `publish→caption` 되감기, 수동 claim은 `state <> 'running'`(멈춘 초안 재실행 허용), 러너 else는 fail 대신 release. 회귀 테스트 3건 | §20.4, `draft-worker.repository.ts` `agentStageSql`, §19.2 "실패 상태가 복구 경로까지 잠근다" |
+| 22 | 3캐릭터 5컷 동시 관측 — 계약에 **적힌 것**은 화이트보드 기록·타이머 일치까지 지켜지는데, 안 적힌 칸이 정적 기본값으로 채워진다(마른 머리, 걷는 자세, 프레임 안 카메라, 마루 위 신발) | 원인 분해: 촬영 문법이 `content_style`에 갇혀 ③에 안 감(서린은 다른 블록에 중복돼 우연히 통과, 권도건은 아예 없음) · `captureSetup`이 기하 전용이라 픽셀에 안 내려감 · 장소 네거티브가 컷 유형과 무관하게 병합돼 인물 컷과 정면 모순 | 페르소나 `capture_style` 블록 신설 + ③ 전용 입력 · ③ 계약에 `subjectState`·`motionEvidence`·`notInFrame` 필수 필드(`image-plan-v2`/`image-planner-v4`) + ④가 번역(`v2`) · 장소 네거티브를 `reference_negative_prompt`로 분리 | research-log 관측 4, 계획 `2026-08-18-capture-contract-gaps.md` |
 
 ### 19.2 되풀이된 실패 유형
 
@@ -696,6 +698,20 @@ capability probe(#3)와, 한국어 연어 부자연스러움에 만점을 준 �
 확인하고, 입력이 있었을 때만 프롬프트를 의심한다. 어블레이션도 같은 방향을
 가리켰다 — 촬영 문구 수정 0/6, 장면 계약(입력) 수정 6/6.
 
+**실패 상태가 복구 경로까지 잠근다.** #21. `pipeline.state`는 두 일을 겸한다 —
+"다음에 무엇을 할 수 있는가"(진행 게이트)와 "지금 무슨 일이 났는가"(표시). 그래서
+게이트 넷(claim·`PUBLISHABLE_WHERE`·`v4PausedAt`(서버)·`v4PausedAt`(화면))이 전부
+`state=pending`을 요구하고, `pause(..., "failed")` 한 번이 그 넷을 동시에 닫는다.
+버튼이 하나도 안 뜨는 초안이 되고, lease sweep은 `status=generating`만 보므로
+회수도 안 된다. **DB를 직접 고치는 것 말고 복구 경로가 없었다.** 교훈 둘:
+(a) 실패는 그 단계를 소유한 주체만 만들 수 있어야 한다 — 러너가 자기 단계가
+아닌 것을 집어 실패시키면 남의 단계를 잠근다. 그래서 디스패치 else를 release로
+바꿨다. (b) 잠기는 상태를 새로 만들 때는 **탈출 전이를 같이 만든다.**
+`failed → pending`을 쓰는 코드가 하나도 없다는 사실이 이 결함의 크기였다 —
+수동 claim을 `state <> 'running'`으로 넓혀 "현재 단계 재실행"이 그 전이가 되게
+했다. 화면 문구가 이미 그렇게 안내하고 있었다는 점이 방증이다: **안내가 시키는
+동작을 게이트가 막고 있으면, 둘 중 하나는 틀린 것이고 보통은 게이트다.**
+
 **진단은 정확한데 처방 경로가 없다.** #9. 평가자는 설계상 진단 전용
 (`Diagnose only`)이고 러너는 평가를 읽지 않는다. 정확한 지적이 나와도 되먹일 수
 없어 프롬프트를 전역으로 바꾸고 주사위를 다시 굴리는 것 외에 할 게 없었다.
@@ -709,9 +725,15 @@ capability probe(#3)와, 한국어 연어 부자연스러움에 만점을 준 �
 - **표본 1건으로 판정하지 않는다.** LLM이 비결정적이라 규칙 없이도 우연히 맞는다.
   research-log의 판정에는 표본 수를 명시한다.
 - **1차 증거는 DB에 있다.** artifact의 `promptVersion`으로 어느 프롬프트가 실제로
-  쓰였는지, `draft_evaluations.scores_json._meta.targetHash`로 평가가 어느
-  리비전을 봤는지, `generation_jobs.prompt`와 `params_json`으로 provider에 실제로
-  간 것을 확인한다.
+  쓰였는지, `generation_jobs.prompt`와 `params_json`으로 provider에 실제로 간
+  것을 확인한다.
+  - 정정(2026-08-18): 이 규정은 한동안 **틀려 있었다.** `generation_jobs.prompt`는
+    ④의 산출이었고, 프로바이더가 제출 직전에 프로필·장소 네거티브를
+    `Do not include: …`로 본문 뒤에 덧붙였다(서린 기준 전송본의 24% 이상이 ④가
+    쓰지 않은 텍스트였다). 같은 날 프로바이더가 **실제로 보낸 문자열을 잡에
+    기록**하도록 고쳐 규정이 다시 참이 됐다.
+  - `draft_evaluations`는 더 이상 쓰지 않는다 — 평가 Agent는 2026-08-18에
+    제거됐다(§19.7). 테이블과 과거 행은 남아 있다.
 
 ### 19.4 아직 검증되지 않은 것
 
@@ -779,6 +801,13 @@ method를 추가하지 말라"는 범위에 묶여 있어 모델이 실제로 �
 (1) 도착하지 않고 (2) 모델이 읽는 어휘로 쓰이지 않고 (3) 레퍼런스에 밀리고
 (4) 틀려도 아무도 모르기** 때문에 난다.
 
+**처방 진행 상태(2026-08-18).** 아래 (a)(b)는 착수했다 — (a)는 페르소나
+`capture_style` 블록 신설로, (b)는 ③ 계약의 `notInFrame`·`subjectState`·
+`motionEvidence` 필수 필드로. (c) 레퍼런스 시점 태그와 (d) 구도 축 평가는 그대로
+미착수다. 추가로 이번에 드러난 다섯째 원인이 있다 — **장소 네거티브가 컷 유형과
+무관하게 병합돼 인물 컷과 모순된다**(§19.1 #22). `reference_negative_prompt`
+분리로 닫았다.
+
 **구조적 처방 방향(결정 아님, 운영자 판단용).** (a) 촬영 문법을 자유 텍스트가
 아니라 계약 필드로 — 캐릭터별 허용 촬영 방식(본인 시점 손 / 고정면 셀프타이머 /
 거울 / 동행자:이름)을 ③이 컷마다 하나 고르게 하면 "확립된 동행자 없는 3인칭"은
@@ -789,6 +818,153 @@ POV)를 두고 1인칭 컷에는 와이드뷰를 보내지 않는 정책. (d) �
 점수 대신 체크리스트(누가 찍었나, 노출 부위가 계약과 같나)로 — 또는 이 축은
 평가자가 못 본다고 인정하고 운영자 판정에 맡긴다. 어느 것도 프롬프트에 문장을
 더하는 방식이 아니다.
+
+### 19.6 "사람이 찍은 사진 같지 않다" — 어느 단계가 담을 수 있나 (2026-08-18)
+
+운영자 지시: 기획이 더 자연스러운 사진을 내게 하고 싶다. §19.5가 "구도가 왜
+무너지나"였다면 여기는 **②③④가 그 의도를 애초에 담을 수 있는가**를 본다.
+근거는 §19.1 #22의 5컷.
+
+**②는 담당이 아니다.** `Do not decide … composition, capture setup, character
+visibility`로 촬영 언급이 금지돼 있고 그게 맞다. 권도건 premise는 러닝+링
+머슬업이라는 역동적 사건을 이미 냈다. ②에 손대면 ③의 일을 하게 된다.
+
+**④는 ③를 넘을 수 없다.** `Allowed elaboration`이 composition·crop·capture
+method 추가를 금지한다. ③가 안 쓴 칸은 ④가 못 채운다. 그리고 채울 때도 축소
+번역이 일어난다 — ③의 "한 명의 촬영자가 스마트폰을 가슴 높이로 들고 레인을 따라
+촬영"이 ④에서 `a smartphone rear camera held at chest height, positioned about
+4 m`가 됐다. **사람이 찍는다는 사실이 카메라 좌표로 증발한다.**
+
+> **정정 (2026-08-18, ④ 리뷰).** 위 문단은 "④ 잘못이 아니라 ③가 좌표만 줬기
+> 때문"이라고 적었었다. 틀렸다 — 같은 표본에 반례가 있다. ③는 좌표만 준 게
+> 아니라 `한 명의 촬영자가 … 들고`라고 **주체를 명시**했고 ④가 3/3 삭제했다.
+> 반대로 고유 장치명(`Canon AE-1 … 삼각대`)은 2/2 살려 렌더 가능한 명사로 옮겼고
+> 그게 프레임에 들어왔다. 원인은 `image-prompt-generator.ts`의 한 줄이 촬영
+> 기계를 "보존하라"와 "프레임에 넣지 마라"만 말하고 **어떤 어휘로 옮길지를 안
+> 준 것**이다. 같은 날 그 줄을 교체했다(`image-prompt-generator-v3`): 촬영 주체와
+> 지지 장치는 이름 대신 시점으로만 옮기고, "다른 사람이 찍었다"는 사실은 그것이
+> 사진에 남기는 것(렌즈를 보지 않는 피사체, 연출되지 않은 순간, 완벽하지 않은
+> 프레임)으로 옮긴다.
+
+**병목은 ③ 하나다.** 세 가지가 겹친다.
+
+1. *있는 칸을 안 쓴다.* scene의 계약 정의는 `final-frame visible people,
+   actions, objects, space, framing, and crop`이다. 프레이밍·크롭을 쓴 컷은
+   한소이 2·서린 1이고 전부 자연스러웠다. 안 쓴 컷은 권도건 2뿐이고 둘 다
+   화보가 됐다(5/5 일치).
+2. *없는 칸이 있다.* 피사체가 렌즈를 인지하는가(posed/candid)를 적을 자리가
+   없다. 권도건 shot 1은 scene 문장에 "카메라를 향해"라고 섞어 썼고 shot 0은
+   안 썼다 — 필드가 없으니 매번 임의다.
+3. *사람을 적극적으로 지운다.* 권도건 shot 0 scene 원문이 `비어 있는 중앙 훈련
+   레인`이다. 크로스핏 박스인데 혼자 운동하는 장면을 골랐다. 계약의 blocked
+   사유에 `unsupported_secondary_identity`가 있어 **두 번째 사람이 계획을 막을
+   수 있는 위험 신호**로 취급된다. 얼굴 없는 배경 인물과 두 번째 인물의 정체성
+   처리는 전혀 다른 일인데 계약이 구분하지 않는다.
+
+**레퍼런스가 자세를 지배한다(§19.5 원인 3의 재확인).** 인물 정체성 레퍼런스를
+쓴 3컷(권도건 2·서린 1)은 전부 정면·정지·렌즈 응시였고, 안 쓴 2컷(한소이,
+사물·손 컷)만 자연스러웠다. 권도건 레퍼런스 4장은 전부 정면 상반신·전신·탈의
+정면·후면의 **스튜디오 중립 기준컷**이다. ③가 `avoidCopying: 참조 이미지의
+자세와 화면 구도`를 써 넣었는데도 안 먹혔다 — 텍스트는 픽셀을 못 이긴다(#12,
+관측 3에서 이미 확인).
+
+**도달점 — 입력의 비대칭.** 글 쪽은 목표를 예시로 알려준다: 페르소나 `examples`
+블록, `voice`의 예시 문장, `recentPosts`. ⑥ 캡션은 "이런 문장"을 실물로 본다.
+이미지 쪽에서 ③가 받는 것은 `appearance`(생김새), `visualStyle`(형용사 한 줄),
+`identityReferences`(정면 기준컷), `locations`(빈 공간)뿐이다. **"이 계정의 사진은
+실제로 이렇게 생겼다"에 해당하는 입력이 없다.** 그래서 ③는 형용사 한 줄에서
+사진을 상상하고, 픽셀로 주어진 유일한 것(정면 기준컷)의 자세를 따라간다.
+
+**처방 방향(미결).** 정체성용도 장소용도 아닌 **제3의 레퍼런스** — 이 캐릭터
+계정의 사진이 어떤 register인지 보여주는 몇 장. 남은 질문은 ③가 그것을 어떻게
+쓰게 하느냐다: (a) 참고 예시로만 보여줄지, (b) 컷마다 하나를 골라 그 register를
+따르게 할지, (c) 정체성 레퍼런스의 지배를 어떻게 상쇄할지(개수·가중치·얼굴이
+필요 없는 컷은 미사용).
+
+**방법론 메모 — 이 절을 쓰다 한 번 미끄러졌다.** 운영자가 참고용으로 준 실제
+게시물 사진 한 장에서 축을 뽑아(배경 인물·시선·심도) 그대로 계약 필드로 만들려
+했다. 운영자가 "이 예시로 튜닝하지 말라"고 미리 못 박았는데도 그랬다. §19.2
+"사례는 고쳐지고 원칙은 일반화되지 않는다"의 재발이고, 사례에서 필드를 뽑는 것은
+프롬프트에 금지 문장을 더하는 것과 같은 실패다. **레퍼런스 사진은 계약 설계의
+근거가 아니라 입력 슬롯에 넣을 데이터다** — 위 처방 방향은 그 구분에서 나왔다.
+
+### 19.6.1 자연스러운 다양성의 역할 계약 (2026-08-18)
+
+운영자 결정: 캐릭터별 선호 촬영 방식은 존재하지만 허용 목록이나 고정 템플릿이
+아니다. 어떤 캐릭터는 다양한 포즈·구도를 자주 쓰고 어떤 캐릭터는 시그니처를 더
+반복한다. ③은 이를 성격만 보고 임의 분류하지 않고 페르소나·메모리의 명시적
+근거에서 판단하며, 근거가 없으면 moderate를 기본으로 한다.
+
+- ② Post Planner는 사건·장소 의미·관계·게시 목적만 소유한다. pose, composition,
+  capture setup을 결정하지 않는다. 미게시 premise 반복은 별도 입력 결함으로 남긴다.
+- ③ Image Planner가 visible action/pose/framing/crop, off-frame capture geometry,
+  lens awareness와 posedness를 유일하게 결정한다. `capture_style` 데이터는
+  `capturePreferences`라는 soft prior로 들어가고 금지는 `boundaries`만 소유한다.
+- 최근 시각 이력은 장기 memory가 아니라 repetition ledger다. 현재 draft 제외,
+  같은 캐릭터, failed/rejected와 blocked/malformed 제외, 최신 8 draft·총 12 shot
+  상한이다. 게시·미게시를 구분하고 pixels, final prompts, reference IDs는 전달하지
+  않는다. 새로움은 물리적 자연스러움과 캐릭터 적합성보다 낮은 우선순위다.
+- `image-plan-v3`의 `subjectCameraRelation`은 `unaware`, `aware_unposed`,
+  `deliberately_posed`, `not_applicable` 중 하나이며 lens awareness/posedness의 단일
+  소유자다. scene과 captureSetup의 자유문장에서 ④가 이를 재추론하지 않는다.
+- ④ Prompt Generator는 compiler다. `image-prompt-generator-v4`부터 “다른 사람이
+  촬영”을 자동으로 candid·렌즈 비응시·불완전 프레임으로 바꾸지 않는다. 구
+  ImagePlan에 필드가 없으면 해당 축을 unspecified로 둔다.
+- `visualStyle`은 finish/medium/color/texture만 소유한다. 그 안의 pose, crop,
+  viewpoint, capture 지시는 ImagePlan을 덮지 못한다. 개발서버의 기존 stylePrompt
+  데이터 정리는 별도 승인 작업이다.
+- Nano Banana policy v2는 identity reference의 face/hair/skin/natural body identity만
+  보존하고 reference pose/crop/background/camera geometry는 복제하지 않도록 한다.
+- FLUX.1 Kontext-dev는 별도 호출 계약이 아니라 Model Policy 변형으로 다룬다. 공식
+  model ID `black-forest-labs/FLUX.1-Kontext-dev`에서 최대 5개 binding을 실제 asset
+  순서대로 `Reference image N`에 매핑한다. 각 identity/person reference는 같은
+  주인공의 정체성 증거로 합치고 한 장당 한 사람을 만들지 않는다. environment
+  reference는 지정된 공간·재질·조명만 보존하며 사람·시점·crop·composition을
+  가져오지 않는다. ④는 각 reference의 `semanticPurposes`, `preserve`,
+  `avoidCopying`을 개별 계약으로 쓴 뒤 ImagePlan의 최종 장면을 영어 자연어로
+  표현한다. provider endpoint, 인증, payload와 generation parameter는 Executor의
+  별도 구현 범위다. 공개 upstream의 multi-reference capability를 가정하지 않으며,
+  ordered multi-reference conditioning을 보장하는 custom adapter와 capability test가
+  완료되기 전에는 이 exact model ID를 운영 설정에서 활성화하지 않는다.
+
+새 Agent, 새 테이블, 전역 novelty score, 구도 family enum은 추가하지 않는다.
+관리자 화면은 새 camera relation을 표시하되 구 artifact는 optional로 읽는다.
+결정론 검증 뒤 실제 18 ImagePlan/9 render 표본은 외부 비용 승인을 받아 별도로 한다.
+
+### 19.7 평가 Agent 제거 (2026-08-18)
+
+운영자 결정으로 ②③④⑤ 평가 Agent 4종과 평가 워커·화면·설정을 **전부 제거**했다.
+파이프라인 진행에는 영향이 없다 — 평가는 원래 비차단이고 러너가 읽지 않았다
+(§19.2 "진단은 정확한데 처방 경로가 없다").
+
+**근거는 "부족"이 아니라 "오작동"이었다.** ④ 리뷰가 검사 장치 4개 중 3개의 결함을
+실측했다.
+
+| 장치 | 상태 |
+|---|---|
+| `negative_prompt_safety` | 정책상 `negativePrompt`가 항상 null이라 **평가 대상이 없다**. 실제 나가는 네거티브(본문 tail)는 어느 차원도 소유하지 않았다 |
+| `meta_leak` 사전 | ④가 실제로 쓴 `the camera remains outside the frame`을 못 잡는다. 5컷 전부 0건 — 이번 관측 최대 결함(장치 프레임 침입 2/2)이 그대로 통과했다 |
+| `unmanned_person_leak` | `Do not include … selfie` 같은 **배제 문장을 위반으로 오탐**한다. 모델 정책을 지킨 결과가 감점된다 |
+| `length_bounds` | #14가 기각한 "길이가 지렛대다" 가설의 상한(350 words)을 강제한다. 권도건 2컷 모두 초과 |
+
+여기에 ③ 리뷰의 두 발견이 겹친다. ⑤ `style_fidelity`는 `visualStyle` 준수를
+재므로 **권도건 화보는 위반이 아니라 준수**였고, "카탈로그처럼 보이지 않는가"를
+보던 유일한 문장(V2 `image-evaluator.ts`의 `non-catalog imperfection`)은 V3
+전환에서 유실돼 있었다.
+
+**왜 고쳐 쓰지 않았나.** §18.7과 §19.2가 이미 판정한 것이 있다 — "평가 프롬프트에
+'자연스러운지 보라'를 추가하는 접근은 같은 실패(가짜 초록불)를 재생산한다".
+차원을 고쳐 되살리면 그 경로로 돌아간다. §19.5(d)의 두 선택지 중 **"이 축은
+평가자가 못 본다고 인정하고 운영자 판정에 맡긴다"**를 택했다.
+
+**남긴 것.** `DraftEvaluation`·`EvaluationReport` 테이블과 기존 행, 저장된
+`evaluator.*` 설정 값, `src/worker/prompt-lint.ts`(호출처 없음 — 결정적 체크를
+다시 넣을 때의 출발점. 다만 위 표의 오작동 2건이 이 사전에 있으므로 그대로 쓰면
+안 된다). 코드는 git에, 데이터는 DB에 남아 되돌릴 수 있다.
+
+**남은 위험.** 이제 **운영자 판정이 유일한 검증**이다. 결함이 지표로 잡히지 않고
+사람이 눈으로 발견해야 한다. 이는 §19.5 원인 4("이 축을 보는 눈이 없다")를 해소한
+것이 아니라, 없는 눈을 없다고 인정한 것이다.
 
 ## 20. V4 설계 — 캡션 Agent 후치 (2026-08-15)
 
@@ -868,6 +1044,24 @@ caption → publish → memory`. 기존 `review`가 `caption`으로 바뀐다.
 남긴다(enum 삭제 없음). 단계 사이의 정지 상태는 지금과 같다 — `status=planned`,
 `pipeline.state=pending`, 자동 모드는 워커가 집어가고 수동 모드는 버튼이 집어간다
 (`claimV3DraftNow` 그대로).
+
+**claim은 Agent 단계만 집는다 (2026-08-16 수정).** 위 문단의 "`claimV3DraftNow`
+그대로"가 결함이었다 — claim 술어가 `state=pending`만 보고 `stage`를 보지 않아,
+⑥ 캡션이 끝나 `publish/pending`이 된 초안을 러너가 다시 집어 실행할 단계가
+없다며 죽였다(`unknown_stage`). 이제 claim 두 곳이 `stage IN (post_plan,
+image_plan, image_prompt, caption)`을 함께 본다. 예외는 수동 실행 하나다 —
+`stage=publish`이고 `captionBuild`가 있으면 단계를 `caption`으로 **되감아** 집는다
+(⑥의 "캡션 다시 생성"이 부르는 경로가 `POST /drafts/:id/plan`이라, 되감지 않으면
+러너가 게시 단계를 실행하려 든다). 자동 claim은 절대 되감지 않는다 — 캡션↔게시를
+무한히 왕복한다. 러너의 디스패치 else는 실패가 아니라 **release**(집기 전
+`pending`으로 복원)로 두어, 게이트가 뚫려도 게시 대기 초안이 failed가 되지 않게
+한다.
+
+같은 이유로 수동 claim의 상태 조건을 `state = 'pending'`에서 `state <> 'running'`
+으로 넓혔다. 화면은 `failed`·`needs_input`·`needs_configuration`에 "고친 뒤 현재
+단계를 재실행하세요"라고 안내하는데 claim이 `pending`만 집으면 그 버튼이 400을
+낸다 — **실패 상태가 유일한 복구 경로까지 잠근다**(§19.2). 자동 루프는 그대로
+`pending`만 집는다: 실패를 무한 재시도하지 않는다. 근거는 §19.1 #21.
 
 ⑤→⑥ 전이: 컷별 잡이 전부 completed이면 지금은 `needs_review`로 갔다
 (`markDraftNeedsReview`). V4는 `planned` + `stage=caption, state=pending`으로 간다.

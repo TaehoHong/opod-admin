@@ -891,3 +891,127 @@ Agent의 입력에서 사라졌고, 캡션 평가 Agent는 만들지 않는다. 
   났으므로 이 초안은 게시하지 않고 새 초안으로 다시 돈다 — 캡션 편집 지표는 이
   초안에서 나오지 않는다.
 
+
+## image-planner-v4 / image-prompt-generator-v2 — 계약의 빈칸 (2026-08-18)
+
+- 버전: `image-planner-v3` → **v4**, 계약 `image-plan-v1` → **v2**,
+  `image-prompt-generator-v1` → **v2** (프롬프트 문장 추가가 아니라 **필수 필드
+  추가**다 — 이 구분이 이 실험의 전제다).
+- 발단: 3캐릭터 동시 관측(아래 관측 4). 5컷 중 4컷에서 `captureSetup`의 기하가
+  픽셀에 안 내려갔고, 운동 직후 컷의 신체 상태와 동작 증거가 계약에 아예 없었다.
+- 가설: 지금까지 실패한 것은 **금지 문장 추가**(#8·#15·#19에서 사례만 잡히고
+  일반화 실패)였다. strict JSON의 required 필드는 확률적으로 무시할 수 없으므로,
+  같은 정보를 "규칙"이 아니라 "빈칸"으로 요구하면 층이 달라진다.
+- 변경
+  - ③ shot에 `subjectState`(인물의 보이는 상태 — 땀·젖은 머리·홍조·호흡),
+    `motionEvidence`(정지 화면에서 동작을 읽히게 하는 흔적), `notInFrame`(프레임에
+    없어야 할 구체 사물). 셋 다 required, 앞 둘은 해당 없을 때 빈 문자열.
+  - `characterVisualContext.captureStyle` 신설 — 촬영 문법의 authoritative 입력.
+    페르소나 `capture_style` 블록이 주인이고 `relevantContext`에서는 제외한다.
+  - ④에 세 필드의 번역 책임 명시. `notInFrame`은 정책의 네거티브 수단이 무엇이든
+    그 사물의 배제로 표현하고 문구 선호보다 우선한다.
+- 예측(다음 관측에서 볼 것)
+  1. 삼각대·카메라가 프레임에 들어오는 컷이 사라진다(`notInFrame`).
+  2. 운동 직후 컷에 젖은 머리·상기된 피부가 나타난다(`subjectState`).
+  3. "달린다"가 걷는 렌더로 떨어지지 않는다(`motionEvidence`).
+- 한계: 세 필드를 **동시에** 넣었으므로 개별 기여도는 이번 관측으로 판정할 수
+  없다(운영자 결정, 속도 우선). 어느 하나가 무효여도 표에서 안 보인다.
+
+## image-planner-v5 / image-plan-v3 / image-prompt-generator-v4 — 선호는 규칙이 아니다 (2026-08-18)
+
+- 가설: 반복되는 정면·정지·렌즈 응시는 이미지 모델의 단독 실패가 아니라 ③이
+  캐릭터 memory와 미게시 시각 이력을 못 보고, `captureStyle`과 `visualStyle`을
+  hard template처럼 읽으며, ④가 촬영 주체에서 candidness를 새로 발명한 결과다.
+- 변경:
+  1. ③ 입력에 제목을 보존한 persona context, typed memories,
+     `capturePreferences`, 최근 published/unpublished ready ImagePlan을 추가했다.
+     current draft와 failed/rejected/blocked/malformed는 제외하고 8 draft/12 shot으로
+     제한했다. 이력은 premise·scene·captureSetup·presentation·camera relation만
+     가지며 이미지·최종 prompt·reference ID는 없다.
+  2. capture preference는 weighted tendency이고 금지가 아니라고 명시했다. 최근
+     조합 회피보다 물리적 자연스러움과 캐릭터 적합성이 먼저이며, 다양성 근거가
+     없으면 moderate를 기본으로 한다.
+  3. `subjectCameraRelation` 필수 enum을 추가했다. ④는 이 필드만 번역하고
+     another-person capture를 자동으로 unposed/not-looking/imperfect로 바꾸지 않는다.
+  4. `visualStyle`의 권한을 finish/medium/color/texture로 제한하고, pose/crop/
+     viewpoint/capture가 ImagePlan을 덮지 못하게 했다. Nano Banana policy v2는
+     identity reference의 pose/crop/background/camera geometry 복제를 금지했다.
+  5. 관리자 ImagePlan 카드에 camera relation을 표시하고 구 artifact는 optional로
+     읽는다.
+- 결정론 결과: repository/runner/schema/compiler/model-policy/read-model focused
+  6 suites 48 tests 통과, 전체 Jest 46 suites 415 tests 통과, admin
+  typecheck+16 files 49 tests 통과, format/lint/build/diff-check 통과. 이는 입력·계약
+  배선과 호환성의 증거이지 생성 품질 개선의 증거는 아니다.
+- 판정: **코드 유지, 품질 관측 대기.** 개발서버 persona/stylePrompt 데이터 변경과
+  외부 LLM·유료 렌더는 이번 승인 범위에서 제외했다. 다음 gate는 별도 승인 후
+  3캐릭터×6 ImagePlan(18건), 이어 3캐릭터×3 render(9장)이며 자연스러움·캐릭터
+  적합성·최근 조합 중복·identity-reference pose leakage를 운영자가 판정한다.
+
+## flux-kontext-policy-v1 — 다중 레퍼런스 역할 계약 (2026-08-19)
+
+- 가설: Nano Banana용 `Image N` 문법을 그대로 재사용하면, 여러 identity와
+  environment reference가 각각 무엇을 보존하는지보다 픽셀 전체를 섞는 방향으로
+  해석될 수 있다. 이 문제는 ImagePlan을 다시 기획하거나 provider 호출 예시를
+  추가할 일이 아니라 Model Policy의 문법·slot 계약 문제다.
+- 변경:
+  1. 공식 model ID `black-forest-labs/FLUX.1-Kontext-dev`에 전용 policy v1을
+     등록하고 기존 ImagePlan 상한과 같은 컷당 5개 reference를 허용했다.
+  2. asset 순서를 `Reference image N`으로 고정했다. identity/person reference
+     여러 장은 동일한 주인공의 보조 정체성 증거이며 한 장당 한 사람을 만들지
+     않는다. environment reference는 지정된 공간·재질·조명만 보존한다.
+  3. prompt는 최종 사진 의도 → reference별 역할·보존·복제 금지 → ImagePlan의
+     행동·pose·gaze·composition·viewpoint → light/color/finish 순서의 영어
+     자연어로 쓴다. tag stack, weight, generic quality token과 별도 negative
+     prompt는 쓰지 않는다.
+  4. PromptSet JSON, ImagePlan, provider 요청과 generation parameter는 변경하지
+     않았다. custom server adapter는 ordered assets를 이 logical model ID에
+     연결하는 후속 범위다. 그 adapter와 capability test가 완료되기 전에는 운영
+     설정에서 이 model ID를 활성화하지 않는다.
+- 검증 기준: Nano의 `Image N`이 회귀하지 않고, FLUX package가 identity와
+  environment의 source/preserve를 유지한 `Reference image 1/2`를 만들며, ④ 결과가
+  해당 label을 하나라도 빠뜨리면 거부돼야 한다. 결정론 테스트는 배선과 계약의
+  증거일 뿐 실제 모델의 합성 품질 증거는 아니다.
+- 결정론 결과: policy/prompt-generator focused 2 suites 9 tests, 전체 Jest
+  46 suites 417 tests, format/lint/build/diff-check 통과. 첫 전체 Jest는 sandbox의
+  local port 차단으로 `listen EPERM`이 났고 동일 명령을 port 허용 환경에서
+  재실행해 통과했다.
+- 판정: **정책과 배선 유지, provider 연동·실제 렌더 관측 대기.**
+
+### 관측 4 (2026-08-18, 캐릭터 3개 동시 — 서린 `01a0089b` 1컷 · 권도건 `01a01019` 2컷 · 한소이 `01a01233` 2컷)
+
+**표본이 캐릭터 1개**(§19.2) 문제의 첫 다캐릭터 자료다. 촬영 문법이 페르소나
+어디에 적혀 있느냐로 결과가 갈렸다.
+
+> **정정 (2026-08-18, ③ 리뷰).** 아래 표는 처음에 서린이 통과한 이유를 "페르소나
+> 블록 중복"으로만 적었다. 더 큰 원인이 있다 — 서린 `visualProfile.stylePrompt`에
+> **촬영 매뉴얼이 통째로 들어 있다**: `Favor full-body mirror shots with the phone
+> covering part of the face`, `head or chin casually cut off`, `Use slight
+> off-center composition`, `minimal headroom`, `Pose with a subtle
+> 15-to-30-degree torso turn`. ③가 낸 "몸통 15도"와 "비대칭 미러 셀피 프레이밍"은
+> ③의 연출이 아니라 그 문자열의 복사다. 즉 register의 실질 소유자는 ③가 아니라
+> 캐릭터 전역 설정 한 줄이고, 권도건의 그 줄에는 `editorial photography`가 박혀
+> 있다 — 화보는 위반이 아니라 준수였다.
+
+| 캐릭터 | 촬영 문법 위치 | ③ 도착 | 결과 |
+|---|---|---|---|
+| 서린 | `content_style` + `identity`·`world`에 중복, **그리고 `visualProfile.stylePrompt`에 촬영 매뉴얼 통째로** | 우연히 도착 | 미러 셀피·15도 틀기까지 계약에 정확히 반영 |
+| 한소이 | `content_style`(고정면+셀프타이머) + `preferences`(손만) | 절반 | 손 컷 선택은 맞고, 규칙을 못 받아 **삼각대를 발명** |
+| 권도건 | 없음 | ✗ | 익명 촬영자 지정. **운영자 판정: 이 기획에서는 허용**(크로스핏 박스에 크루·회원이 실재) |
+
+- 계약 충실도는 지금까지 중 최고다. 화이트보드 `Dogeon 8:58`과 바닥 타이머
+  `08:58`이 일치했고, 봉투의 "해든현상소" 한글까지 렌더됐다.
+- 무너진 것은 전부 **기하와 미기재**다: "카메라는 프레임 밖"이 5컷 중 4컷에서
+  무시(AE-1과 삼각대가 프레임 안, 서린 반사 구조 불성립), 운동 직후인데 머리가
+  마름(땀을 의상에만 지시), "조깅 페이스로 달린다"가 걷는 렌더.
+- **마루 위 운동화(#13) 재발.** 이번엔 원인이 더 선명하다 — 서린 현관 장소의
+  네거티브에 `shoes`가 **이미 있는데도** 났다. 같은 목록에 `people, body parts,
+  faces, silhouettes, human reflection`이 함께 있어 인물이 나와야 하는 컷과 정면
+  모순이었고, 모델은 본문을 택하며 목록 전체의 구속력을 떨어뜨렸다. 처방은
+  네거티브 문구 추가가 아니라 **목록 분리**(`reference_negative_prompt` 신설).
+- 부수 확인: `generation_jobs.prompt`(DB)와 fal 전송본은 다르다. provider가
+  네거티브를 `Do not include: …`로 본문 뒤에 덧붙인다
+  (`image-generation.provider.ts`). ④ 평가자가 보는 것은 앞의 것이다 — #19 부수
+  발견의 재현.
+- ②의 반복 기획도 같이 관측됐다: 서린 V3/V4 초안 5건 중 4건이 "필라테스 후
+  핏체크", 한소이 2건이 같은 사건. `recentPosts`가 **게시된 post만** 보고 초안은
+  서로를 모른다. 이 축은 프롬프트가 아니라 입력이라 별건으로 분리했다.

@@ -69,7 +69,7 @@ export function buildPromptPackage(input: {
         shotSortOrder: shot.sortOrder,
         bindingId: binding.bindingId,
         referenceId: binding.id,
-        slot: `Image ${index + 1}`,
+        slot: `${policy.referenceSlotPrefix} ${index + 1}`,
         source: binding.source,
         semanticPurposes: binding.semanticPurposes,
         preserve: binding.preserve,
