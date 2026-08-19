@@ -81,7 +81,10 @@ export function PostDetailModal({
           {post.error.message}
         </Alert>
       ) : post.data ? (
-        <Stack gap="lg">
+        <Stack
+          gap="lg"
+          style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+        >
           <Group gap="xs">
             <Badge variant="light">{post.data.contentType}</Badge>
             <Text size="sm" c="dimmed">

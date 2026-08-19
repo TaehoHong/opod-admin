@@ -933,7 +933,12 @@ function StagePaper({
   children: React.ReactNode;
 }) {
   return (
-    <Paper p="lg" component="section" aria-labelledby="stage-title">
+    <Paper
+      p="lg"
+      component="section"
+      aria-labelledby="stage-title"
+      style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+    >
       <Stack>
         <Stack gap={2}>
           <Group gap="sm" align="center" wrap="wrap">
