@@ -671,7 +671,6 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     }
     if (statuses.every((status) => status === "completed")) {
       // V4: 검수 없음 — 컷이 다 나오면 ⑥ 캡션 단계(planned+pending)로 간다.
-      // 액션 로그는 생성 이미지 평가의 트리거이기도 하다(evaluation.repository).
       if (isPostPipelineV4(draft.conceptJson)) {
         const concept = draft.conceptJson as Record<string, unknown>;
         const pipeline = isRecord(concept.pipeline) ? concept.pipeline : {};

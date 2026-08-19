@@ -112,27 +112,6 @@ export type Draft = {
   updatedAt: string;
 };
 
-export type DraftEvaluationKind = "plan" | "image_plan" | "prompt" | "image";
-export type DraftEvaluationStatus = "pending" | "completed" | "failed";
-
-export type DraftEvaluation = {
-  id: string;
-  draftId: string;
-  kind: DraftEvaluationKind;
-  attempt: number;
-  status: DraftEvaluationStatus;
-  evaluatorName?: string | null;
-  rubricVersion: string;
-  contentLanguage: string;
-  overallScore?: number | null;
-  scoresJson?: unknown;
-  issuesJson?: unknown;
-  suggestionsJson?: unknown;
-  errorMessage?: string | null;
-  createdAt: string;
-  completedAt?: string | null;
-};
-
 export function fetchDrafts(params: {
   status?: string;
   characterId?: string;
@@ -144,12 +123,6 @@ export function fetchDrafts(params: {
 
 export function fetchDraft(draftId: string): Promise<Draft> {
   return apiRequest(`/drafts/${encodeURIComponent(draftId)}`);
-}
-
-export function fetchDraftEvaluations(
-  draftId: string,
-): Promise<{ items: DraftEvaluation[] }> {
-  return apiRequest(`/drafts/${encodeURIComponent(draftId)}/evaluations`);
 }
 
 export function createDraft(body: {

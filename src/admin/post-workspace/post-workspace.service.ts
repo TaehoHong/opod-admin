@@ -31,7 +31,6 @@ export type PostWorkStage =
   | "post_plan"
   | "image_plan"
   | "prompt"
-  | "evaluation"
   | "generation"
   | "review"
   | "caption"
@@ -154,6 +153,11 @@ export type V3ImagePlanShot = {
   visualPurpose?: string;
   scene?: string;
   captureSetup?: string;
+  // 계약 image-plan-v2/v3. 옛 초안에는 없다 — 전부 optional로 읽는다.
+  subjectState?: string;
+  motionEvidence?: string;
+  notInFrame?: string[];
+  subjectCameraRelation?: string;
   presentation?: {
     mode: string;
     visibleParts: string[];
@@ -197,7 +201,6 @@ const STAGES: PostWorkStage[] = [
   "brief",
   "plan",
   "prompt",
-  "evaluation",
   "generation",
   "review",
   "publish",
@@ -439,9 +442,7 @@ function stageForDraft(
       ? "review"
       : "generation";
   }
-  return jobs.every((job) => job.prompt.trim().length > 0)
-    ? "evaluation"
-    : "prompt";
+  return "prompt";
 }
 
 function statusForDraft(
@@ -503,7 +504,6 @@ function statusForDraft(
     post_plan: "게시글 기획 실행 필요",
     image_plan: "이미지 기획 실행 필요",
     prompt: "프롬프트 생성 필요",
-    evaluation: "평가 확인 후 생성",
     generation: "이미지 생성 필요",
     review: "검수 필요",
     caption: "캡션 생성 필요",
@@ -871,6 +871,19 @@ function v3ImagePlanShot(raw: unknown): V3ImagePlanShot {
     ...(typeof shot.scene === "string" ? { scene: shot.scene } : {}),
     ...(typeof shot.captureSetup === "string"
       ? { captureSetup: shot.captureSetup }
+      : {}),
+    ...(typeof shot.subjectState === "string" && shot.subjectState.trim()
+      ? { subjectState: shot.subjectState }
+      : {}),
+    ...(typeof shot.motionEvidence === "string" && shot.motionEvidence.trim()
+      ? { motionEvidence: shot.motionEvidence }
+      : {}),
+    ...(Array.isArray(shot.notInFrame) && shot.notInFrame.length
+      ? { notInFrame: strings(shot.notInFrame) }
+      : {}),
+    ...(typeof shot.subjectCameraRelation === "string" &&
+    shot.subjectCameraRelation.trim()
+      ? { subjectCameraRelation: shot.subjectCameraRelation }
       : {}),
     ...(typeof presentation.mode === "string"
       ? {

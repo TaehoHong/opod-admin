@@ -94,22 +94,8 @@ export class AdminSettingsController {
       ...("agentEmbeddingModel" in body
         ? { agentEmbeddingModel: body.agentEmbeddingModel ?? null }
         : {}),
-      ...("evaluatorLlmApiUrl" in body
-        ? { evaluatorLlmApiUrl: body.evaluatorLlmApiUrl ?? null }
-        : {}),
-      ...("evaluatorLlmApiKey" in body
-        ? { evaluatorLlmApiKey: body.evaluatorLlmApiKey ?? null }
-        : {}),
-      ...("evaluatorLlmModel" in body
-        ? { evaluatorLlmModel: body.evaluatorLlmModel ?? null }
-        : {}),
       ...("workerEnabled" in body
         ? { workerEnabled: toStoredFlag(body.workerEnabled) }
-        : {}),
-      ...("evaluationWorkerEnabled" in body
-        ? {
-            evaluationWorkerEnabled: toStoredFlag(body.evaluationWorkerEnabled),
-          }
         : {}),
       ...("pipelineV3Enabled" in body
         ? { pipelineV3Enabled: toStoredFlag(body.pipelineV3Enabled) }
@@ -145,7 +131,6 @@ export class AdminSettingsController {
       resolved,
       plannerResolved,
       chat,
-      evaluator,
       toggles,
       names,
       todaySpend,
@@ -155,7 +140,6 @@ export class AdminSettingsController {
       this.settings.resolveProviderSettings(),
       this.settings.resolvePlannerSettings(),
       this.settings.resolveChatSettings(),
-      this.settings.resolveEvaluatorSettings(),
       this.settings.resolveWorkerToggles(),
       this.settings.resolveProviderNames(),
       this.audit.sumGenerationCostSince(startOfKstDay()),
@@ -198,22 +182,6 @@ export class AdminSettingsController {
           overridden: chat.overridden,
         },
       },
-      // 평가 LLM — 채팅 LLM과 같은 구조. env 폴백이 없어 상속 아니면 DB다.
-      evaluator: {
-        overrides: {
-          apiUrl: saved.evaluatorLlmApiUrl ?? null,
-          apiKey: saved.evaluatorLlmApiKey
-            ? { set: true, last4: saved.evaluatorLlmApiKey.slice(-4) }
-            : { set: false },
-          model: saved.evaluatorLlmModel ?? null,
-        },
-        effective: {
-          apiUrl: evaluator.apiUrl ?? null,
-          apiKeyLast4: evaluator.apiKey ? evaluator.apiKey.slice(-4) : null,
-          model: evaluator.model ?? null,
-          overridden: evaluator.overridden,
-        },
-      },
       resolved: {
         t2iProvider: names.t2i,
         editProvider: names.edit,
@@ -243,10 +211,6 @@ export class AdminSettingsController {
         dailyBudgetUsd: worker.dailyBudgetUsd ?? null,
         jobCostEstimateUsd: worker.jobCostEstimateUsd,
         todaySpendUsd: Number(todaySpend ?? 0),
-        evaluation: {
-          enabled: toggles.evaluation.enabled,
-          enabledSource: toggles.evaluation.source,
-        },
       },
     };
   }

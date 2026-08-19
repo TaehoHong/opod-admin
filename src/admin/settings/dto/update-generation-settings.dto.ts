@@ -87,34 +87,11 @@ export class UpdateGenerationSettingsDto {
   @MaxLength(200)
   agentEmbeddingModel?: string | null;
 
-  // 평가 워커 LLM — 채팅 LLM과 같은 규칙이고 env 폴백은 없다.
-  @IsOptional()
-  @IsString()
-  @Matches(/^$|^https?:\/\//, {
-    message: "evaluatorLlmApiUrl must start with http:// or https://",
-  })
-  @MaxLength(500)
-  evaluatorLlmApiUrl?: string | null;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  evaluatorLlmApiKey?: string | null;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  evaluatorLlmModel?: string | null;
-
   // 워커 자동 루프 on/off. null = 삭제(env 기본값 복귀).
   // workerEnabled는 생성 워커와 draft 워커를 함께 제어한다.
   @IsOptional()
   @IsBoolean()
   workerEnabled?: boolean | null;
-
-  @IsOptional()
-  @IsBoolean()
-  evaluationWorkerEnabled?: boolean | null;
 
   // 신규 draft만 V3 계약으로 pin한다. true 저장은 controller가 현재 기획
   // LLM의 strict JSON schema capability를 실제 확인한 뒤에만 허용한다.

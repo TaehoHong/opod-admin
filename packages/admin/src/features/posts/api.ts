@@ -142,6 +142,10 @@ export type V3ImagePlanShot = {
   visualPurpose?: string;
   scene?: string;
   captureSetup?: string;
+  subjectState?: string;
+  motionEvidence?: string;
+  notInFrame?: string[];
+  subjectCameraRelation?: string;
   presentation?: {
     mode: string;
     visibleParts: string[];

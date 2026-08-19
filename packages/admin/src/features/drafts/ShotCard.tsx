@@ -15,14 +15,12 @@ import { useForm } from "@mantine/form";
 import { ZoomableImage } from "../../shared/ui/ZoomableImage";
 import type { V3ImagePlanShot } from "../posts/api";
 import { CandidateCard } from "./CandidateCard";
-import { EvaluationChips } from "./EvaluationChips";
 import {
   generateShot,
   regenerateShot,
   runQueuedShot,
   v4PausedAt,
   type Draft,
-  type DraftEvaluation,
   type DraftReference,
   type DraftShot,
   type GenerationTrace,
@@ -33,14 +31,10 @@ import { useDraftMutation } from "./useDraftMutation";
 export function ShotCard({
   draft,
   shot,
-  evaluation,
-  imageEvaluation,
   planned,
 }: {
   draft: Draft;
   shot: DraftShot;
-  evaluation?: DraftEvaluation;
-  imageEvaluation?: DraftEvaluation;
   // V3 이미지 기획의 컷 원문. 검수에서 "기획한 대로 나왔는가"를 화면을 떠나지
   // 않고 대조하기 위한 것이라 생성 단계에서는 넘기지 않는다.
   planned?: V3ImagePlanShot;
@@ -94,18 +88,9 @@ export function ShotCard({
         ) : null}
 
         {planned ? <PlannedShotPanel planned={planned} /> : null}
-
-        <EvaluationChips
-          evaluation={evaluation}
-          shotSortOrder={shot.sortOrder}
-        />
         {/* V3 생성 이미지 평가는 컷의 선택된 한 장을 본다 — 후보가 아니라 컷
             단위 자리에 붙인다. V2 이미지 평가는 컷 단위 점수가 없어 아무것도
             렌더하지 않는다. */}
-        <EvaluationChips
-          evaluation={imageEvaluation}
-          shotSortOrder={shot.sortOrder}
-        />
 
         {shot.generationTrace ? (
           <GenerationTracePanel trace={shot.generationTrace} />
@@ -134,7 +119,7 @@ export function ShotCard({
           </Text>
         )}
 
-        <ShotBody draft={draft} shot={shot} imageEvaluation={imageEvaluation} />
+        <ShotBody draft={draft} shot={shot} />
 
         {canRegenerate && shot.status !== "draft" ? (
           <Group gap="xs">
@@ -333,15 +318,7 @@ function GenerationTracePanel({ trace }: { trace: GenerationTrace }) {
   );
 }
 
-function ShotBody({
-  draft,
-  shot,
-  imageEvaluation,
-}: {
-  draft: Draft;
-  shot: DraftShot;
-  imageEvaluation?: DraftEvaluation;
-}) {
+function ShotBody({ draft, shot }: { draft: Draft; shot: DraftShot }) {
   if (shot.status === "draft") {
     return <GenerateShotForm draft={draft} shot={shot} />;
   }
@@ -394,8 +371,6 @@ function ShotBody({
           draft={draft}
           jobId={shot.jobId}
           output={output}
-          shotSortOrder={shot.sortOrder}
-          imageEvaluation={imageEvaluation}
         />
       ))}
     </SimpleGrid>

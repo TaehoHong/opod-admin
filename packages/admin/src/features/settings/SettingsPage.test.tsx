@@ -42,15 +42,6 @@ function settingsView(
         },
       },
     },
-    evaluator: {
-      overrides: { apiUrl: null, apiKey: { set: false }, model: null },
-      effective: {
-        apiUrl: null,
-        apiKeyLast4: null,
-        model: null,
-        overridden: { apiUrl: false, apiKey: false, model: false },
-      },
-    },
     resolved: {
       t2iProvider: null,
       editProvider: null,
@@ -80,7 +71,6 @@ function settingsView(
       dailyBudgetUsd: null,
       jobCostEstimateUsd: 0.2,
       todaySpendUsd: 0,
-      evaluation: { enabled: false, enabledSource: "env" },
       ...overrides,
     },
   };
@@ -128,93 +118,5 @@ describe("settings worker card", () => {
 
     await waitFor(() => expect(saved).toEqual([{ pipelineV3Enabled: true }]));
     await waitFor(() => expect(rollout).toBeChecked());
-  });
-
-  it("saves the evaluation worker switch as a boolean and reflects the new state", async () => {
-    let view = settingsView();
-    const saved: unknown[] = [];
-
-    server.use(
-      ...stubReads(() => view),
-      http.put("/api/admin/v1/settings/generation", async ({ request }) => {
-        const body = await request.json();
-        saved.push(body);
-        view = settingsView({
-          evaluation: { enabled: true, enabledSource: "db" },
-        });
-        return HttpResponse.json(view);
-      }),
-    );
-
-    render(
-      <AppProviders>
-        <SettingsPage />
-      </AppProviders>,
-    );
-
-    const evaluationSwitch = await screen.findByRole("switch", {
-      name: "평가 워커 자동 루프",
-    });
-    expect(evaluationSwitch).not.toBeChecked();
-    // DB에 저장된 적이 없으면 env 기본값을 쓰는 중임을 알려야 한다.
-    expect(screen.getByText("env 기본값")).toBeInTheDocument();
-
-    await userEvent.click(evaluationSwitch);
-
-    await waitFor(() =>
-      expect(saved).toEqual([{ evaluationWorkerEnabled: true }]),
-    );
-    await waitFor(() =>
-      expect(
-        screen.getByRole("switch", { name: "평가 워커 자동 루프" }),
-      ).toBeChecked(),
-    );
-    expect(screen.queryByText("env 기본값")).not.toBeInTheDocument();
-  });
-
-  it("runs a pending evaluation manually and reports what actually ran", async () => {
-    server.use(
-      ...stubReads(() => settingsView()),
-      http.post("/api/admin/v1/evaluations/worker/run", () =>
-        HttpResponse.json({ evaluated: ["plan"] }),
-      ),
-    );
-
-    render(
-      <AppProviders>
-        <SettingsPage />
-      </AppProviders>,
-    );
-
-    await userEvent.click(
-      await screen.findByRole("button", { name: "대기 평가 실행" }),
-    );
-
-    expect(
-      await screen.findByText("게시글 기획 평가를 실행했습니다."),
-    ).toBeInTheDocument();
-  });
-
-  it("tells the operator when nothing was pending instead of implying success", async () => {
-    server.use(
-      ...stubReads(() => settingsView()),
-      http.post("/api/admin/v1/evaluations/worker/run", () =>
-        HttpResponse.json({ evaluated: [] }),
-      ),
-    );
-
-    render(
-      <AppProviders>
-        <SettingsPage />
-      </AppProviders>,
-    );
-
-    await userEvent.click(
-      await screen.findByRole("button", { name: "대기 평가 실행" }),
-    );
-
-    expect(
-      await screen.findByText("대기 중인 평가가 없습니다."),
-    ).toBeInTheDocument();
   });
 });

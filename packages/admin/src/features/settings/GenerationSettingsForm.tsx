@@ -83,9 +83,6 @@ export function GenerationSettingsForm({
       agentLlmApiUrl: settings.chat.overrides.apiUrl ?? "",
       agentLlmModel: settings.chat.overrides.model ?? "",
       agentEmbeddingModel: settings.chat.overrides.embeddingModel ?? "",
-      evaluatorLlmApiKey: "",
-      evaluatorLlmApiUrl: settings.evaluator.overrides.apiUrl ?? "",
-      evaluatorLlmModel: settings.evaluator.overrides.model ?? "",
       aspectRatioFeed: settings.aspectRatios.overrides.feed ?? "",
       aspectRatioStory: settings.aspectRatios.overrides.story ?? "",
       aspectRatioReel: settings.aspectRatios.overrides.reel ?? "",
@@ -94,7 +91,6 @@ export function GenerationSettingsForm({
       opodFluxApiBaseUrl: httpsUrlOrEmpty,
       llmApiUrl: httpUrlOrEmpty,
       agentLlmApiUrl: httpUrlOrEmpty,
-      evaluatorLlmApiUrl: httpUrlOrEmpty,
       aspectRatioFeed: aspectRatioOrEmpty,
       aspectRatioStory: aspectRatioOrEmpty,
       aspectRatioReel: aspectRatioOrEmpty,
@@ -358,54 +354,11 @@ export function GenerationSettingsForm({
             {...form.getInputProps("agentEmbeddingModel")}
           />
 
-          <Divider />
-          {sectionHeader("평가 LLM (평가 워커)", "evaluator")}
-          <Group gap="xs" align="flex-end" wrap="nowrap">
-            <PasswordInput
-              label="API 키"
-              placeholder="평가 전용 키로 바꿀 때만 입력"
-              autoComplete="off"
-              flex={1}
-              key={form.key("evaluatorLlmApiKey")}
-              {...form.getInputProps("evaluatorLlmApiKey")}
-            />
-            <InheritedKeyBadge
-              override={settings.evaluator.overrides.apiKey}
-              effectiveLast4={settings.evaluator.effective.apiKeyLast4}
-            />
-            {settings.evaluator.overrides.apiKey.set ? (
-              <ClearKeyButton
-                label="평가 LLM 키 삭제"
-                description="평가 전용 키를 지우고 기획 LLM 키를 다시 사용합니다."
-                loading={save.isPending}
-                onConfirm={() => clearKey("evaluatorLlmApiKey")}
-              />
-            ) : null}
-          </Group>
-          <TextInput
-            label="API URL"
-            placeholder={
-              settings.evaluator.effective.apiUrl ??
-              "https://api.openai.com/v1/chat/completions"
-            }
-            description="비우면 기획 LLM 값을 상속합니다"
-            key={form.key("evaluatorLlmApiUrl")}
-            {...form.getInputProps("evaluatorLlmApiUrl")}
-          />
-          <TextInput
-            label="모델"
-            placeholder={settings.evaluator.effective.model ?? "모델명"}
-            description="기획과 다른 모델을 쓰면 자기 평가 편향이 줄어듭니다"
-            key={form.key("evaluatorLlmModel")}
-            {...form.getInputProps("evaluatorLlmModel")}
-          />
-
           <Text size="xs" c="dimmed">
-            이미지·기획 설정은 DB 값이 env보다 우선하고, 채팅·평가 LLM은 DB
-            전용이라 비운 필드는 기획 LLM을 상속합니다. 저장하면 다음
-            잡·기획·대화·평가부터 적용됩니다. 모델과 URL은 비우고 저장하면 상위
-            값으로 복귀하지만, API 키는 비워도 유지되고 삭제는 키 삭제
-            버튼으로만 합니다.
+            이미지·기획 설정은 DB 값이 env보다 우선하고, 채팅 LLM은 DB 전용이라
+            비운 필드는 기획 LLM을 상속합니다. 저장하면 다음 잡·기획·대화부터
+            적용됩니다. 모델과 URL은 비우고 저장하면 상위 값으로 복귀하지만, API
+            키는 비워도 유지되고 삭제는 키 삭제 버튼으로만 합니다.
           </Text>
 
           {testResult ? (

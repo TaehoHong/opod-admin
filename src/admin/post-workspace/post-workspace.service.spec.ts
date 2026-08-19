@@ -24,7 +24,6 @@ const draft = {
       outputs: [],
     },
   ],
-  evaluations: [],
 };
 
 const post = {
@@ -57,8 +56,8 @@ describe("PostWorkspaceService", () => {
       expect.objectContaining({
         id: "draft-1",
         kind: "draft",
-        currentStage: "evaluation",
-        stageIndex: 4,
+        currentStage: "prompt",
+        stageIndex: 3,
         operationalStatus: "needs_action",
         executionMode: "manual",
       }),
@@ -135,6 +134,39 @@ describe("PostWorkspaceService", () => {
         }),
       }),
     );
+  });
+
+  it("reads the optional subject-camera relation from new image plans", async () => {
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v4",
+        source: "manual",
+        mode: "manual",
+        pipeline: { stage: "image_prompt", state: "pending", imageCount: 1 },
+        imagePlanning: {
+          revision: 1,
+          output: {
+            status: "ready",
+            shots: [
+              {
+                sortOrder: 0,
+                scene: "창가에 선 인물",
+                subjectCameraRelation: "aware_unposed",
+                characterPresentation: { mode: "full" },
+              },
+            ],
+          },
+        },
+      },
+      jobs: [],
+    } as never);
+
+    const item = await service.get("draft-1");
+
+    expect(
+      item.pipelineV3?.artifacts.imagePlan?.shots?.[0].subjectCameraRelation,
+    ).toBe("aware_unposed");
   });
 
   // 기획이 이상할 때 프롬프트를 의심하기 전에 Agent가 실제로 본 입력을 확인할

@@ -31,16 +31,6 @@ const draftWorkItemInclude = {
       },
     },
   },
-  evaluations: {
-    orderBy: [{ attempt: "desc" as const }, { createdAt: "desc" as const }],
-    select: {
-      kind: true,
-      status: true,
-      overallScore: true,
-      createdAt: true,
-      completedAt: true,
-    },
-  },
 } satisfies Prisma.PostDraftInclude;
 
 const standalonePostInclude = {

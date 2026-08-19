@@ -1,3 +1,8 @@
+// 2026-08-18 평가 Agent 제거로 **현재 호출처가 없다.** 지우지 않는 이유는
+// 결정적(비-LLM) 프롬프트 체크를 다시 넣을 때의 출발점이기 때문이다. 다만
+// 그때 이 사전을 그대로 쓰면 안 된다 — 리뷰에서 오작동 2건이 확인됐다:
+// ④가 실제로 쓴 'the camera remains outside the frame'을 못 잡고(5컷 0건),
+// 'Do not include … selfie' 같은 배제 문장을 위반으로 오탐한다.
 // 이미지 프롬프트 정적 린트 (Layer 1) — LLM 없이 결정적으로 잡히는 결함을
 // 검출한다. 순수 함수만 두고 상태·IO를 갖지 않는다.
 // docs/image-prompt-evaluation-agent.md 3절. 심사(Layer 2)는

@@ -2,7 +2,6 @@ import {
   Alert,
   Badge,
   Button,
-  Divider,
   Group,
   Paper,
   Stack,
@@ -11,9 +10,7 @@ import {
   Title,
 } from "@mantine/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MutationAlert } from "../../shared/ui/MutationAlert";
 import {
-  runEvaluationWorkerOnce,
   runWorkerOnce,
   updateGenerationSettings,
   type GenerationSettingsUpdate,
@@ -40,10 +37,6 @@ export function WorkerCard({
     onSuccess: invalidate,
   });
   const run = useMutation({ mutationFn: runWorkerOnce, onSuccess: invalidate });
-  const runEvaluation = useMutation({
-    mutationFn: runEvaluationWorkerOnce,
-    onSuccess: invalidate,
-  });
 
   const { worker, resolved } = settings;
   const spend = worker.todaySpendUsd.toFixed(2);
@@ -130,59 +123,6 @@ export function WorkerCard({
             {queuedCount > 0 ? ` (${queuedCount}건 대기)` : ""}
           </Button>
         </Group>
-
-        <Divider />
-        <Title order={6}>평가 워커</Title>
-        <Row label="자동 루프">
-          <LoopSwitch
-            label="평가 워커 자동 루프"
-            enabled={worker.evaluation.enabled}
-            source={worker.evaluation.enabledSource}
-            pending={
-              toggle.isPending &&
-              toggle.variables?.evaluationWorkerEnabled !== undefined
-            }
-            onChange={(evaluationWorkerEnabled) =>
-              toggle.mutate({ evaluationWorkerEnabled })
-            }
-          />
-        </Row>
-
-        <Text size="xs" c="dimmed">
-          평가는 기획·프롬프트 품질 신호만 남기고 게시 파이프라인을 막지
-          않습니다. 꺼두면 평가 결과가 쌓이지 않을 뿐 이미지 생성은 그대로
-          진행됩니다.
-        </Text>
-
-        {runEvaluation.isError ? (
-          <Alert color="red" role="alert" title="실행하지 못했습니다">
-            {runEvaluation.error.message}
-          </Alert>
-        ) : null}
-        {runEvaluation.isSuccess ? (
-          <Alert
-            color={runEvaluation.data.evaluated.length > 0 ? "teal" : "ink"}
-            role="status"
-          >
-            {evaluationRunMessage(runEvaluation.data.evaluated)}
-          </Alert>
-        ) : null}
-
-        <Group>
-          <Button
-            variant="default"
-            loading={runEvaluation.isPending}
-            onClick={() => runEvaluation.mutate()}
-          >
-            대기 평가 실행
-          </Button>
-        </Group>
-
-        <MutationAlert
-          mutation={toggle}
-          success="워커 설정을 저장했습니다."
-          errorTitle="저장하지 못했습니다"
-        />
       </Stack>
     </Paper>
   );
@@ -190,24 +130,6 @@ export function WorkerCard({
 
 // 실행 결과는 "무엇이 돌았는지"를 그대로 말한다 — 대기 건이 없었던 것과
 // 실행한 것을 운영자가 구분해야 한다.
-function evaluationRunMessage(
-  evaluated: ("plan" | "image_plan" | "prompt" | "image")[],
-): string {
-  if (evaluated.length === 0) {
-    return "대기 중인 평가가 없습니다.";
-  }
-  const names = evaluated.map((kind) =>
-    kind === "plan"
-      ? "게시글 기획"
-      : kind === "image_plan"
-        ? "이미지 기획"
-        : kind === "prompt"
-          ? "프롬프트"
-          : "이미지",
-  );
-  return `${names.join("·")} 평가를 실행했습니다.`;
-}
-
 function LoopSwitch({
   label,
   enabled,

@@ -42,8 +42,4 @@ export class AppConfigService {
   get draftWorker(): AppConfig["draftWorker"] {
     return this.config.draftWorker;
   }
-
-  get evaluationWorker(): AppConfig["evaluationWorker"] {
-    return this.config.evaluationWorker;
-  }
 }

@@ -22,9 +22,6 @@ const empty: SettingsFormValues = {
   agentLlmApiUrl: "",
   agentLlmModel: "",
   agentEmbeddingModel: "",
-  evaluatorLlmApiKey: "",
-  evaluatorLlmApiUrl: "",
-  evaluatorLlmModel: "",
   aspectRatioFeed: "",
   aspectRatioStory: "",
   aspectRatioReel: "",
@@ -42,8 +39,6 @@ describe("toSettingsUpdate", () => {
       agentLlmApiUrl: null,
       agentLlmModel: null,
       agentEmbeddingModel: null,
-      evaluatorLlmApiUrl: null,
-      evaluatorLlmModel: null,
       // 비운 종횡비는 삭제 = 코드 기본값 복귀다. 생략(유지)이 아니다.
       aspectRatioFeed: null,
       aspectRatioStory: null,
@@ -58,7 +53,6 @@ describe("toSettingsUpdate", () => {
         falApiKey: "  fal-secret  ",
         llmApiKey: "sk-secret",
         agentLlmApiKey: "sk-chat",
-        evaluatorLlmApiKey: "sk-eval",
         llmModel: " gpt-5-mini ",
         aspectRatioFeed: " 4:5 ",
       }),
@@ -75,9 +69,6 @@ describe("toSettingsUpdate", () => {
       agentLlmApiUrl: null,
       agentLlmModel: null,
       agentEmbeddingModel: null,
-      evaluatorLlmApiKey: "sk-eval",
-      evaluatorLlmApiUrl: null,
-      evaluatorLlmModel: null,
       aspectRatioFeed: "4:5",
       aspectRatioStory: null,
       aspectRatioReel: null,
@@ -125,22 +116,6 @@ describe("toConnectionTestBody", () => {
       target: "chat",
       llmModel: "chat-model",
       llmApiKey: "sk-chat",
-    });
-  });
-
-  it("maps evaluator section inputs onto the shared llm test fields", () => {
-    expect(
-      toConnectionTestBody("evaluator", {
-        ...empty,
-        llmModel: "planner-model",
-        agentLlmModel: "chat-model",
-        evaluatorLlmModel: "eval-model",
-        evaluatorLlmApiKey: "sk-eval",
-      }),
-    ).toEqual({
-      target: "evaluator",
-      llmModel: "eval-model",
-      llmApiKey: "sk-eval",
     });
   });
 });

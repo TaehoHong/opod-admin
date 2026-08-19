@@ -11,19 +11,13 @@ import {
   createGeneratedMediaStore,
   createReferenceUrlSigner,
 } from "./generated-media-store";
-import { EvaluationRepository } from "./evaluation.repository";
-import { EvaluationWorkerService } from "./evaluation-worker.service";
 import { GenerationWorkerService } from "./generation-worker.service";
 import { GenerationJobRepository } from "./generation-job.repository";
 import { resolveImageGenerationProviders } from "./image-generation.provider";
 import { resolveImagePromptBuilder } from "./image-prompt-builder";
-import { resolvePlanEvaluator } from "./plan-evaluator";
-import { resolvePromptEvaluator } from "./prompt-evaluator";
-import { resolveImageEvaluator } from "./image-evaluator";
 import { createMediaBytesReader } from "./reference-captioner";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 import { PostPipelineV3Runner } from "./post-pipeline-v3.runner";
-import { StrictJsonAgentClient } from "./strict-json-agent";
 
 function storageEnv(config: S3Config | undefined) {
   return config
@@ -168,74 +162,9 @@ function storageEnv(config: S3Config | undefined) {
         PostPipelineV3Runner,
       ],
     },
-    EvaluationRepository,
-    {
-      provide: EvaluationWorkerService,
-      // 평가자도 실행 시마다 재해석 — evaluator.* 설정(DB) 우선, 미설정은
-      // 플래너 상속. 파이프라인 비차단이므로 admin 역참조도 상태 전이도 없다.
-      useFactory: (
-        evaluations: EvaluationRepository,
-        settings: GenerationSettingsService,
-        llmLogs: LlmLogService,
-        config: AppConfigService,
-      ) =>
-        new EvaluationWorkerService(
-          evaluations,
-          async () =>
-            resolvePlanEvaluator(
-              await settings.resolveEvaluatorSettings(),
-              fetch,
-              llmLogs,
-            ),
-          async () =>
-            resolvePromptEvaluator(
-              await settings.resolveEvaluatorSettings(),
-              fetch,
-              llmLogs,
-            ),
-          async () =>
-            resolveImageEvaluator(
-              await settings.resolveEvaluatorSettings(),
-              createMediaBytesReader(config.s3),
-              fetch,
-              llmLogs,
-            ),
-          async () =>
-            (await settings.resolveWorkerToggles()).evaluation.enabled,
-          config.evaluationWorker,
-          async () => {
-            const resolved = await settings.resolveEvaluatorSettings();
-            return resolved.apiUrl && resolved.apiKey && resolved.model
-              ? new StrictJsonAgentClient(
-                  {
-                    apiUrl: resolved.apiUrl,
-                    apiKey: resolved.apiKey,
-                    model: resolved.model,
-                  },
-                  fetch,
-                  llmLogs,
-                )
-              : null;
-          },
-          createMediaBytesReader(config.s3),
-        ),
-      inject: [
-        EvaluationRepository,
-        GenerationSettingsService,
-        LlmLogService,
-        AppConfigService,
-      ],
-    },
   ],
   // admin의 수동 실행이 주입해 쓴다 — 생성(generation/worker/run), draft 즉시
-  // 기획/게시(drafts/:id/plan, drafts/:id/publish), 평가
-  // (evaluations/worker/run).
-  // EvaluationRepository는 admin 평가 조회·리포트 집계가 함께 쓴다.
-  exports: [
-    GenerationWorkerService,
-    DraftWorkerService,
-    EvaluationWorkerService,
-    EvaluationRepository,
-  ],
+  // 기획/게시(drafts/:id/plan, drafts/:id/publish).
+  exports: [GenerationWorkerService, DraftWorkerService],
 })
 export class WorkerModule {}

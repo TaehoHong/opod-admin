@@ -18,17 +18,14 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { DraftPlanSummary } from "./DraftPlanSummary";
 import { DraftStage, MetaRow, StageNote, type StageTone } from "./DraftStage";
-import { EvaluationChips } from "./EvaluationChips";
 import { ShotCard } from "./ShotCard";
 import {
   fetchDraft,
-  fetchDraftEvaluations,
   rejectDraft,
   runDraftStage,
   updateDraft,
   type Draft,
   type DraftConcept,
-  type DraftEvaluation,
   type DraftStageAction,
 } from "./api";
 import { DRAFT_STATUS_COLOR, DRAFT_STATUS_LABEL } from "./labels";
@@ -55,14 +52,6 @@ export function DraftDetailPanel({ draftId }: { draftId: string }) {
         ? false
         : POLL_INTERVAL_MS,
   });
-  const evaluations = useQuery({
-    queryKey: [...draftDetailKey(draftId), "evaluations"],
-    queryFn: () => fetchDraftEvaluations(draftId),
-    refetchInterval: (query) =>
-      query.state.data && draft.data && TERMINAL.includes(draft.data.status)
-        ? false
-        : POLL_INTERVAL_MS,
-  });
 
   if (draft.isPending) return <Loader aria-label="초안 불러오는 중" />;
   if (draft.error) {
@@ -75,34 +64,16 @@ export function DraftDetailPanel({ draftId }: { draftId: string }) {
 
   // 다른 초안으로 바꿔 열면 캡션·사유 폼을 새로 시작해야 한다. uncontrolled
   // form은 mount 시점의 initialValues만 쓰기 때문이다.
-  return (
-    <DraftTimeline
-      key={draft.data.id}
-      draft={draft.data}
-      evaluations={evaluations.data?.items ?? []}
-      evaluationError={evaluations.error?.message}
-    />
-  );
+  return <DraftTimeline key={draft.data.id} draft={draft.data} />;
 }
 
-function DraftTimeline({
-  draft,
-  evaluations,
-  evaluationError,
-}: {
-  draft: Draft;
-  evaluations: DraftEvaluation[];
-  evaluationError?: string;
-}) {
+function DraftTimeline({ draft }: { draft: Draft }) {
   const concept = draft.conceptJson ?? {};
   const mode = concept.mode === "manual" ? "manual" : "auto";
 
   const stage = useDraftMutation(draft.id, (action: DraftStageAction) =>
     runDraftStage(draft.id, action),
   );
-  const planEvaluation = latestEvaluation(evaluations, "plan");
-  const promptEvaluation = latestEvaluation(evaluations, "prompt");
-  const imageEvaluation = latestEvaluation(evaluations, "image");
 
   return (
     <Paper p="md" component="section">
@@ -134,33 +105,17 @@ function DraftTimeline({
             {stage.error.message}
           </Alert>
         ) : null}
-        {evaluationError ? (
-          <Alert color="yellow" title="평가를 불러오지 못했습니다">
-            초안 검수는 계속할 수 있습니다. {evaluationError}
-          </Alert>
-        ) : null}
 
         <Stack gap={0} mt="xs">
           <StageCreated draft={draft} concept={concept} mode={mode} />
-          <StagePlan
-            draft={draft}
-            concept={concept}
-            stage={stage}
-            evaluation={planEvaluation}
-          />
+          <StagePlan draft={draft} concept={concept} stage={stage} />
           <StageShots
             draft={draft}
             concept={concept}
             mode={mode}
             stage={stage}
-            evaluation={promptEvaluation}
-            imageEvaluation={imageEvaluation}
           />
-          <StageReview
-            draft={draft}
-            stage={stage}
-            imageEvaluation={imageEvaluation}
-          />
+          <StageReview draft={draft} stage={stage} />
           <StagePublish draft={draft} stage={stage} />
         </Stack>
 
@@ -178,15 +133,6 @@ function DraftTimeline({
       </Stack>
     </Paper>
   );
-}
-
-function latestEvaluation(
-  evaluations: DraftEvaluation[],
-  kind: DraftEvaluation["kind"],
-) {
-  return evaluations
-    .filter((evaluation) => evaluation.kind === kind)
-    .sort((left, right) => right.attempt - left.attempt)[0];
 }
 
 function formatMoment(value?: string, fallback = "—"): string {
@@ -233,19 +179,16 @@ function StagePlan({
   draft,
   concept,
   stage,
-  evaluation,
 }: {
   draft: Draft;
   concept: DraftConcept;
   stage: StageMutation;
-  evaluation?: DraftEvaluation;
 }) {
   const label = "② 기획 · LLM";
 
   if (concept.plan) {
     return (
       <DraftStage step={2} tone="done" label={label} status="완료">
-        <EvaluationChips evaluation={evaluation} />
         <DraftPlanSummary concept={concept} />
       </DraftStage>
     );
@@ -297,15 +240,11 @@ function StageShots({
   concept,
   mode,
   stage,
-  evaluation,
-  imageEvaluation,
 }: {
   draft: Draft;
   concept: DraftConcept;
   mode: string;
   stage: StageMutation;
-  evaluation?: DraftEvaluation;
-  imageEvaluation?: DraftEvaluation;
 }) {
   const shots = draft.shots ?? [];
   const planShots = concept.plan?.shots ?? [];
@@ -361,20 +300,13 @@ function StageShots({
         <StageNote>기획이 완료되면 컷이 생성됩니다.</StageNote>
       ) : (
         <Stack gap="sm">
-          <EvaluationChips evaluation={evaluation} />
           {concept.builderName ? (
             <Text size="xs" c="dimmed">
               빌더: {concept.builderName}
             </Text>
           ) : null}
           {shots.map((shot) => (
-            <ShotCard
-              key={shot.jobId}
-              draft={draft}
-              shot={shot}
-              evaluation={evaluation}
-              imageEvaluation={imageEvaluation}
-            />
+            <ShotCard key={shot.jobId} draft={draft} shot={shot} />
           ))}
         </Stack>
       )}
@@ -382,15 +314,7 @@ function StageShots({
   );
 }
 
-function StageReview({
-  draft,
-  stage,
-  imageEvaluation,
-}: {
-  draft: Draft;
-  stage: StageMutation;
-  imageEvaluation?: DraftEvaluation;
-}) {
+function StageReview({ draft, stage }: { draft: Draft; stage: StageMutation }) {
   const shots = draft.shots ?? [];
   const reviewable = draft.status === "needs_review";
   const editable = reviewable || draft.status === "approved";
@@ -450,7 +374,6 @@ function StageReview({
       action={action}
     >
       <Stack gap="sm">
-        <EvaluationChips evaluation={imageEvaluation} />
         {reviewable && !selectionComplete ? (
           <Alert color="attention">
             게시 이미지 {selectedShots}/{shots.length} 선택 · 컷마다 한 장을

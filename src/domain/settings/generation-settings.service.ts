@@ -39,14 +39,10 @@ export const GENERATION_SETTING_KEYS = {
   agentEmbeddingModel: "agent.embeddingModel",
   // 평가 워커 LLM — 미설정 필드는 planner.*를 상속 (chat과 같은 규칙).
   // 플래너와 다른 모델을 지정해 자기 평가 편향을 줄일 수 있다.
-  evaluatorLlmApiUrl: "evaluator.llmApiUrl",
-  evaluatorLlmApiKey: "evaluator.llmApiKey",
-  evaluatorLlmModel: "evaluator.llmModel",
   // 워커 자동 루프 on/off. 워커가 tick마다 재해석하므로 프로세스 재시작 없이
   // 설정 화면에서 켜고 끈다. worker.enabled는 생성 워커와 draft 워커를 함께
   // 게이트한다 (env WORKER_ENABLED와 같은 범위).
   workerEnabled: "worker.enabled",
-  evaluationWorkerEnabled: "evaluator.workerEnabled",
   pipelineV3Enabled: "pipeline.v3Enabled",
   // 생성 이미지 종횡비. 게시 포맷마다 다르므로 캐릭터가 아니라 여기서 정한다 —
   // 비주얼 프로필에 넣으면 같은 캐릭터의 피드와 스토리가 같은 비율로 나온다.
@@ -118,7 +114,7 @@ type SettingsEnv = Record<string, string | undefined>;
 
 // 연결 테스트 — 폼의 미저장 입력을 실효 설정 위에 덮어 검증한다.
 export type ConnectionTestInput = {
-  target: "image" | "planner" | "chat" | "evaluator";
+  target: "image" | "planner" | "chat";
   imageProvider?: "fal" | "opod-flux";
   falApiKey?: string;
   opodFluxApiBaseUrl?: string;
@@ -146,28 +142,19 @@ const ENV_KEYS: Partial<Record<GenerationSettingField, string>> = {
   llmApiUrl: "LLM_API_URL",
   llmApiKey: "LLM_API_KEY",
   llmModel: "LLM_MODEL",
-  // agent.*와 evaluator.*는 env 폴백이 없다 — DB 아니면 planner 상속이다.
+  // agent.*는 env 폴백이 없다 — DB 아니면 planner 상속이다.
   // 평가 LLM 키를 .env로 관리하지 않기로 했다(2026-08-10).
   // 워커 토글만 기존 배포 호환을 위해 env를 초기 기본값으로 남긴다.
   workerEnabled: "WORKER_ENABLED",
-  evaluationWorkerEnabled: "EVALUATION_WORKER_ENABLED",
   pipelineV3Enabled: "POST_PIPELINE_V3_ENABLED",
 };
 
 const CHAT_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
 
-// 평가 LLM 실효 설정 — evaluator.* 오버라이드(DB 전용), 없으면 planner 상속.
-export type ResolvedEvaluatorSettings = PlannerProviderSettings & {
-  overridden: { apiUrl: boolean; apiKey: boolean; model: boolean };
-};
-
 // 워커 자동 루프 상태. source는 화면이 "env 기본값을 쓰는 중"을 알리는 데 쓴다.
 export type ResolvedWorkerToggle = { enabled: boolean; source: Source };
 
-export type ResolvedWorkerToggles = {
-  generation: ResolvedWorkerToggle;
-  evaluation: ResolvedWorkerToggle;
-};
+export type ResolvedWorkerToggles = { generation: ResolvedWorkerToggle };
 
 export type ResolvedPipelineV3 = ResolvedWorkerToggle;
 
@@ -279,35 +266,13 @@ export class GenerationSettingsService {
     };
   }
 
-  // 평가 워커 LLM 실효 설정 — 필드 단위로 evaluator.*(DB 전용) 오버라이드,
-  // 미설정은 planner 실효값 상속 (resolveChatSettings와 같은 규칙).
-  async resolveEvaluatorSettings(
-    env: SettingsEnv = process.env,
-  ): Promise<ResolvedEvaluatorSettings> {
-    const db = await this.getSettings();
-    const planner = await this.resolvePlannerSettings(env);
-    return {
-      apiUrl: db.evaluatorLlmApiUrl ?? planner.apiUrl,
-      apiKey: db.evaluatorLlmApiKey ?? planner.apiKey,
-      model: db.evaluatorLlmModel ?? planner.model,
-      overridden: {
-        apiUrl: db.evaluatorLlmApiUrl !== undefined,
-        apiKey: db.evaluatorLlmApiKey !== undefined,
-        model: db.evaluatorLlmModel !== undefined,
-      },
-    };
-  }
-
   // 워커 자동 루프 on/off — 워커가 tick마다 호출한다. DB에 값이 없을 때만
   // env를 초기 기본값으로 쓰므로, UI에서 한 번 저장하면 env는 무시된다.
   async resolveWorkerToggles(
     env: SettingsEnv = process.env,
   ): Promise<ResolvedWorkerToggles> {
     const db = await this.getSettings();
-    return {
-      generation: toggle(pick(db, env, "workerEnabled")),
-      evaluation: toggle(pick(db, env, "evaluationWorkerEnabled")),
-    };
+    return { generation: toggle(pick(db, env, "workerEnabled")) };
   }
 
   async resolvePipelineV3(
@@ -580,9 +545,7 @@ export class GenerationSettingsService {
       const resolved =
         input.target === "chat"
           ? await this.resolveChatSettings(env)
-          : input.target === "evaluator"
-            ? await this.resolveEvaluatorSettings(env)
-            : await this.resolvePlannerSettings(env);
+          : await this.resolvePlannerSettings(env);
       const apiUrl = input.llmApiUrl?.trim() || resolved.apiUrl;
       const apiKey = input.llmApiKey?.trim() || resolved.apiKey;
       const model = input.llmModel?.trim() || resolved.model;
@@ -700,7 +663,6 @@ export function settingsChangeEntries(
     "opodFluxApiKey",
     "llmApiKey",
     "agentLlmApiKey",
-    "evaluatorLlmApiKey",
   ];
   const entries: {
     target: string;

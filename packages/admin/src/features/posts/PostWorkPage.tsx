@@ -1,6 +1,5 @@
 import {
   Alert,
-  Anchor,
   Badge,
   Button,
   Code,
@@ -22,11 +21,9 @@ import { DataPage } from "../../shared/ui/DataPage";
 import { CharacterName } from "../../shared/ui/EntityName";
 import { ZoomableImage } from "../../shared/ui/ZoomableImage";
 import { DraftPlanSummary } from "../drafts/DraftPlanSummary";
-import { EvaluationChips } from "../drafts/EvaluationChips";
 import { ShotCard } from "../drafts/ShotCard";
 import {
   fetchDraft,
-  fetchDraftEvaluations,
   isPipelineV4,
   rejectDraft,
   runDraftStage,
@@ -36,7 +33,6 @@ import {
   updateDraftPrompts,
   updateOperatorRequest,
   type Draft,
-  type DraftEvaluation,
 } from "../drafts/api";
 import { DRAFT_STATUS_COLOR, DRAFT_STATUS_LABEL } from "../drafts/labels";
 import { draftDetailKey, useDraftMutation } from "../drafts/useDraftMutation";
@@ -60,7 +56,6 @@ const LEGACY_STAGES: { id: PostWorkStage; label: string }[] = [
   { id: "brief", label: "브리프" },
   { id: "plan", label: "기획" },
   { id: "prompt", label: "프롬프트" },
-  { id: "evaluation", label: "평가" },
   { id: "generation", label: "이미지 생성" },
   { id: "review", label: "검수" },
   { id: "publish", label: "게시" },
@@ -121,12 +116,6 @@ export function PostWorkPage({
     enabled: Boolean(draftId),
     refetchInterval: POLL_INTERVAL_MS,
   });
-  const evaluations = useQuery({
-    queryKey: [...draftDetailKey(draftId ?? ""), "evaluations"],
-    queryFn: () => fetchDraftEvaluations(draftId!),
-    enabled: Boolean(draftId),
-    refetchInterval: POLL_INTERVAL_MS,
-  });
   const post = useQuery({
     queryKey: ["posts", "detail", postId],
     queryFn: () => fetchPost(postId!),
@@ -159,7 +148,7 @@ export function PostWorkPage({
       />
     );
   }
-  if (work.data.pipelineV3 && (stage === "plan" || stage === "evaluation")) {
+  if (work.data.pipelineV3 && stage === "plan") {
     return (
       <Navigate
         to={`/posts/${encodeURIComponent(workId)}/${stage === "plan" ? "post_plan" : "prompt"}`}
@@ -190,16 +179,10 @@ export function PostWorkPage({
     >
       <PostWorkHeader item={work.data} draft={draft.data} />
       <StageRail item={work.data} activeStage={stage} />
-      {evaluations.error ? (
-        <Alert color="yellow" title="평가를 불러오지 못했습니다">
-          다른 단계는 계속 진행할 수 있습니다. {evaluations.error.message}
-        </Alert>
-      ) : null}
       <StageBody
         stage={stage}
         item={work.data}
         draft={draft.data}
-        evaluations={evaluations.data?.items ?? []}
         post={post.data}
       />
     </DataPage>
@@ -355,13 +338,11 @@ function StageBody({
   stage,
   item,
   draft,
-  evaluations,
   post,
 }: {
   stage: PostWorkStage;
   item: PostWorkItem;
   draft?: Draft;
-  evaluations: DraftEvaluation[];
   post?: PostListItem;
 }) {
   if (!draft && stage !== "publish" && stage !== "memory") {
@@ -369,30 +350,25 @@ function StageBody({
   }
   if (stage === "brief") return <BriefStage item={item} draft={draft!} />;
   if (stage === "post_plan") {
-    return <V3PostPlanStage item={item} evaluations={evaluations} />;
+    return <V3PostPlanStage item={item} />;
   }
   if (stage === "image_plan") {
-    return <V3ImagePlanStage item={item} evaluations={evaluations} />;
+    return <V3ImagePlanStage item={item} />;
   }
   if (stage === "plan")
     return <PlanStage key={draft!.updatedAt} draft={draft!} />;
   if (stage === "prompt") {
     return item.pipelineV3 ? (
-      <V3PromptStage item={item} evaluations={evaluations} />
+      <V3PromptStage item={item} />
     ) : (
       <PromptStage key={draft!.updatedAt} draft={draft!} />
     );
   }
-  if (stage === "evaluation") {
-    return <EvaluationStage draft={draft!} evaluations={evaluations} />;
-  }
   if (stage === "generation") {
-    return (
-      <GenerationStage item={item} draft={draft!} evaluations={evaluations} />
-    );
+    return <GenerationStage item={item} draft={draft!} />;
   }
   if (stage === "review") {
-    return <ReviewStage item={item} draft={draft!} evaluations={evaluations} />;
+    return <ReviewStage item={item} draft={draft!} />;
   }
   if (stage === "caption") {
     return <V3CaptionStage item={item} draft={draft!} />;
@@ -403,18 +379,11 @@ function StageBody({
   return <MemoryStage item={item} draft={draft} />;
 }
 
-function V3PostPlanStage({
-  item,
-  evaluations,
-}: {
-  item: PostWorkItem;
-  evaluations: DraftEvaluation[];
-}) {
+function V3PostPlanStage({ item }: { item: PostWorkItem }) {
   const artifact = item.pipelineV3?.artifacts.postPlan;
   return (
     <V3Stage
       item={item}
-      evaluations={evaluations}
       stage="post_plan"
       number="②"
       title="게시글 기획"
@@ -423,8 +392,6 @@ function V3PostPlanStage({
           ? "캐릭터 맥락을 바탕으로 게시글 의도와 새 기억 후보를 확정합니다. 캡션은 ⑥에서 이미지를 보고 씁니다."
           : "캐릭터 맥락을 바탕으로 게시글 의도와 문안을 확정합니다."
       }
-      evaluationKind="plan"
-      evaluationLabel="게시글 평가"
       runLabel="게시글 기획"
       lineage={artifact}
       status={artifact?.status}
@@ -434,24 +401,15 @@ function V3PostPlanStage({
   );
 }
 
-function V3ImagePlanStage({
-  item,
-  evaluations,
-}: {
-  item: PostWorkItem;
-  evaluations: DraftEvaluation[];
-}) {
+function V3ImagePlanStage({ item }: { item: PostWorkItem }) {
   const artifact = item.pipelineV3?.artifacts.imagePlan;
   return (
     <V3Stage
       item={item}
-      evaluations={evaluations}
       stage="image_plan"
       number="③"
       title="이미지 기획"
       description="확정된 게시글을 몇 장의 이미지로 보여줄지 구성합니다."
-      evaluationKind="image_plan"
-      evaluationLabel="이미지 기획 평가"
       runLabel="이미지 기획"
       lineage={artifact}
       status={artifact?.status}
@@ -470,26 +428,20 @@ function V3ImagePlanStage({
 // 모든 단계가 같은 자리에 둔다. 단계를 옮길 때마다 읽는 법이 달라지지 않게 한다.
 function V3Stage({
   item,
-  evaluations,
   stage,
   number,
   title,
   description,
-  evaluationKind,
-  evaluationLabel,
   runLabel,
   lineage,
   status,
   children,
 }: {
   item: PostWorkItem;
-  evaluations: DraftEvaluation[];
   stage: V3PipelineStage;
   number: string;
   title: string;
   description: string;
-  evaluationKind: DraftEvaluation["kind"];
-  evaluationLabel: string;
   runLabel: string;
   lineage?: {
     revision: number;
@@ -501,7 +453,6 @@ function V3Stage({
   children?: React.ReactNode;
 }) {
   const pipeline = item.pipelineV3;
-  const evaluation = latestEvaluation(evaluations, evaluationKind);
   const run = useDraftMutation(item.draftId ?? "", () =>
     runDraftStage(item.draftId!, "plan"),
   );
@@ -529,7 +480,6 @@ function V3Stage({
         <Alert color="gray">아직 이 단계의 산출물이 없습니다.</Alert>
       )}
       {lineage ? <Lineage lineage={lineage} status={status} /> : null}
-      <EvaluationBlock label={evaluationLabel} evaluation={evaluation} />
       {current && pipeline ? (
         <Alert color="blue">다음 행동 · {pipeline.nextAction}</Alert>
       ) : null}
@@ -654,6 +604,13 @@ const PRESENTATION_MODE: Record<string, string> = {
   silhouette: "실루엣",
 };
 
+const SUBJECT_CAMERA_RELATION: Record<string, string> = {
+  unaware: "렌즈 비인지",
+  aware_unposed: "렌즈 인지 · 비연출",
+  deliberately_posed: "의도적 포즈",
+  not_applicable: "해당 없음",
+};
+
 function ImagePlanArtifact({
   artifact,
   imageCount,
@@ -752,6 +709,23 @@ function ImagePlanArtifact({
             {shot.scene ? <Meta label="장면">{shot.scene}</Meta> : null}
             {shot.captureSetup ? (
               <Meta label="촬영">{shot.captureSetup}</Meta>
+            ) : null}
+            {/* 계약 image-plan-v2/v3. 비어 있으면 렌더가 정적 기본값으로
+                채워질 수 있어 화면에 그대로 노출해 눈으로 잡게 한다. */}
+            {shot.subjectState ? (
+              <Meta label="인물 상태">{shot.subjectState}</Meta>
+            ) : null}
+            {shot.motionEvidence ? (
+              <Meta label="동작 증거">{shot.motionEvidence}</Meta>
+            ) : null}
+            {shot.notInFrame?.length ? (
+              <Meta label="프레임에 없어야">{shot.notInFrame.join(", ")}</Meta>
+            ) : null}
+            {shot.subjectCameraRelation ? (
+              <Meta label="카메라 관계">
+                {SUBJECT_CAMERA_RELATION[shot.subjectCameraRelation] ??
+                  shot.subjectCameraRelation}
+              </Meta>
             ) : null}
             {shot.presentation?.visibleParts.length ? (
               <Meta label="보이는 부위">
@@ -856,24 +830,15 @@ function Lineage({
   );
 }
 
-function V3PromptStage({
-  item,
-  evaluations,
-}: {
-  item: PostWorkItem;
-  evaluations: DraftEvaluation[];
-}) {
+function V3PromptStage({ item }: { item: PostWorkItem }) {
   const artifact = item.pipelineV3?.artifacts.promptBuild;
   return (
     <V3Stage
       item={item}
-      evaluations={evaluations}
       stage="image_prompt"
       number="④"
       title="프롬프트"
       description="확정된 이미지 기획과 모델 정책을 컷별 이미지 프롬프트로 변환합니다."
-      evaluationKind="prompt"
-      evaluationLabel="프롬프트 평가"
       runLabel="이미지 프롬프트"
       lineage={artifact}
     >
@@ -1408,115 +1373,15 @@ function PromptStage({ draft }: { draft: Draft }) {
   );
 }
 
-function EvaluationStage({
-  draft,
-  evaluations,
-}: {
-  draft: Draft;
-  evaluations: DraftEvaluation[];
-}) {
-  const plan = latestEvaluation(evaluations, "plan");
-  const prompt = latestEvaluation(evaluations, "prompt");
-  return (
-    <StagePaper
-      title="④ 평가"
-      description="기획과 프롬프트의 품질 신호입니다. 평가가 늦거나 실패해도 다음 단계는 막지 않습니다."
-    >
-      {!plan && !prompt ? (
-        <Alert color="gray">
-          아직 평가 결과가 없습니다. 평가 워커가 꺼져 있어도 이미지 생성을
-          계속할 수 있습니다. 켜거나 지금 한 건만 돌리려면{" "}
-          <Anchor component={Link} to="/settings">
-            설정 &gt; 평가 워커
-          </Anchor>
-          로 가세요.
-        </Alert>
-      ) : null}
-      <EvaluationBlock label="기획 평가" evaluation={plan} />
-      <EvaluationBlock label="프롬프트 평가" evaluation={prompt} />
-      <Group>
-        <Button component={Link} to={`/posts/${draft.id}/generation`}>
-          이미지 생성으로
-        </Button>
-      </Group>
-    </StagePaper>
-  );
-}
-
-function EvaluationBlock({
-  label,
-  evaluation,
-}: {
-  label: string;
-  evaluation?: DraftEvaluation;
-}) {
-  // 평가 행이 없는 것과 대기 중인 것과 실패한 것은 운영자에게 서로 다른 상황이다.
-  // 아무것도 렌더하지 않으면 셋을 구분할 수 없다.
-  if (!evaluation) {
-    return (
-      <Paper p="md" component="section">
-        <Stack gap="xs">
-          <Text fw={600}>{label}</Text>
-          <Text size="sm" c="dimmed">
-            아직 평가 결과가 없습니다. 평가는 비차단 신호라 꺼져 있어도 다음
-            단계를 진행할 수 있습니다. 켜거나 지금 한 건만 돌리려면{" "}
-            <Anchor component={Link} to="/settings">
-              설정 &gt; 평가 워커
-            </Anchor>
-            로 가세요.
-          </Text>
-        </Stack>
-      </Paper>
-    );
-  }
-  return (
-    <Paper p="md" component="section">
-      <Stack gap="xs">
-        <Group justify="space-between">
-          <Text fw={600}>{label}</Text>
-          <Text size="xs" c="dimmed">
-            시도 {evaluation.attempt}
-            {evaluationDuration(evaluation)}
-            {evaluation.evaluatorName ? ` · ${evaluation.evaluatorName}` : ""}
-          </Text>
-        </Group>
-        {evaluation.status === "pending" ? (
-          <Group gap="xs" role="status">
-            <Loader size="xs" />
-            <Text size="sm">평가 대기 중…</Text>
-          </Group>
-        ) : null}
-        <EvaluationChips evaluation={evaluation} />
-        {evaluation.errorMessage ? (
-          <Alert color="red" title="평가 실패">
-            {evaluation.errorMessage}
-          </Alert>
-        ) : null}
-        {rawEvaluation(evaluation) ? (
-          <Spoiler maxHeight={0} showLabel="평가 원문 보기" hideLabel="접기">
-            <Code block>
-              {JSON.stringify(rawEvaluation(evaluation), null, 2)}
-            </Code>
-          </Spoiler>
-        ) : null}
-      </Stack>
-    </Paper>
-  );
-}
-
 function GenerationStage({
   item,
   draft,
-  evaluations,
 }: {
   item: PostWorkItem;
   draft: Draft;
-  evaluations: DraftEvaluation[];
 }) {
   const navigate = useNavigate();
   const shots = draft.shots ?? [];
-  const evaluation = latestEvaluation(evaluations, "prompt");
-  const imageEvaluation = latestEvaluation(evaluations, "image");
   const aggregate = useDraftMutation(draft.id, () =>
     runDraftStage(draft.id, "aggregate"),
   );
@@ -1554,22 +1419,8 @@ function GenerationStage({
         </Group>
       )}
       {shots.map((shot) => (
-        <ShotCard
-          key={shot.jobId}
-          draft={draft}
-          shot={shot}
-          evaluation={evaluation}
-          imageEvaluation={imageEvaluation}
-        />
+        <ShotCard key={shot.jobId} draft={draft} shot={shot} />
       ))}
-      {/* 생성 이미지 평가는 이 단계의 산출물을 심사한다 — 컷별 점수·지적은 각
-          컷 카드에, 총점·판정·세트 차원과 원문은 여기에 둔다. */}
-      {imageEvaluation ? (
-        <EvaluationBlock
-          label="생성 이미지 평가"
-          evaluation={imageEvaluation}
-        />
-      ) : null}
       {aggregate.isError ? <MutationError error={aggregate.error} /> : null}
       {allCompleted &&
       (draft.status === "generating" || draft.status === "regenerating") ? (
@@ -1593,18 +1444,8 @@ function GenerationStage({
   );
 }
 
-function ReviewStage({
-  item,
-  draft,
-  evaluations,
-}: {
-  item: PostWorkItem;
-  draft: Draft;
-  evaluations: DraftEvaluation[];
-}) {
+function ReviewStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
   const shots = draft.shots ?? [];
-  const promptEvaluation = latestEvaluation(evaluations, "prompt");
-  const imageEvaluation = latestEvaluation(evaluations, "image");
   const approve = useDraftMutation(draft.id, () =>
     runDraftStage(draft.id, "approve"),
   );
@@ -1627,8 +1468,6 @@ function ReviewStage({
           }
         : {})}
     >
-      <EvaluationChips evaluation={promptEvaluation} />
-      <EvaluationChips evaluation={imageEvaluation} />
       {draft.status === "needs_review" && !ready ? (
         <Alert color="attention">
           게시 이미지 {selected}/{shots.length} 선택 · 컷마다 한 장을 선택해
@@ -1646,8 +1485,6 @@ function ReviewStage({
             key={shot.jobId}
             draft={draft}
             shot={shot}
-            evaluation={promptEvaluation}
-            imageEvaluation={imageEvaluation}
             {...(planned ? { planned } : {})}
           />
         );
@@ -2369,44 +2206,8 @@ function MutationError({ error }: { error: Error }) {
 // 두 컬럼만 덤프하면 지적이 없는 평가는 `{"issues": [], "suggestions": null}`
 // 이라는 빈 껍데기가 된다. V2 평가는 반대로 scoresJson에 점수만 있으므로
 // 기존 두 컬럼이 원문이다.
-function rawEvaluation(evaluation: DraftEvaluation): unknown {
-  const scores = evaluation.scoresJson;
-  if (
-    typeof scores === "object" &&
-    scores !== null &&
-    !Array.isArray(scores) &&
-    "result" in scores
-  )
-    return scores;
-  return evaluation.issuesJson || evaluation.suggestionsJson
-    ? {
-        issues: evaluation.issuesJson,
-        suggestions: evaluation.suggestionsJson,
-      }
-    : undefined;
-}
-
 // 평가에는 artifact와 달리 실제 시각이 있다. 얼마나 걸렸는지가 "돌긴 돌았나"를
 // 판단하는 가장 싼 신호다.
-function evaluationDuration(evaluation: DraftEvaluation) {
-  if (!evaluation.completedAt) return "";
-  const seconds = Math.round(
-    (new Date(evaluation.completedAt).getTime() -
-      new Date(evaluation.createdAt).getTime()) /
-      1000,
-  );
-  return seconds >= 0 ? ` · ${seconds}초` : "";
-}
-
-function latestEvaluation(
-  evaluations: DraftEvaluation[],
-  kind: DraftEvaluation["kind"],
-) {
-  return evaluations
-    .filter((evaluation) => evaluation.kind === kind)
-    .sort((left, right) => right.attempt - left.attempt)[0];
-}
-
 function isStage(value: string): value is PostWorkStage {
   return [...V3_STAGES, ...V4_STAGES, ...LEGACY_STAGES].some(
     (stage) => stage.id === value,

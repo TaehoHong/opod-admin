@@ -252,57 +252,6 @@ describe("post work stage screens", () => {
     expect(body.getAllByText("저장됨")).toHaveLength(1);
   });
 
-  // V3는 지적이 없으면 issuesJson이 []이고 suggestionsJson은 항상 null이다.
-  // 그 두 컬럼만 덤프하면 "원문 보기"가 빈 껍데기를 보여준다 — Agent가 실제로
-  // 무엇을 근거로 통과시켰는지 확인할 길이 사라진다.
-  it("shows the V3 agent output as the raw evaluation, not the empty legacy columns", async () => {
-    renderStage(
-      "post_plan",
-      { pipelineVersion: "post-pipeline-v3", source: "manual", mode: "manual" },
-      {
-        evaluations: [
-          {
-            id: "evaluation-1",
-            draftId: "draft-1",
-            kind: "plan",
-            attempt: 1,
-            status: "completed",
-            rubricVersion: "v1",
-            contentLanguage: "ko",
-            evaluatorName: "post-evaluator-v1",
-            overallScore: 5,
-            scoresJson: {
-              _meta: {
-                evaluatorVersion: "post-evaluator-v1",
-                targetHash: "sha256:3226b8b",
-              },
-              result: {
-                status: "evaluated_ready",
-                verdict: "pass",
-                scores: { voice_fit: 5 },
-                issues: [],
-              },
-            },
-            // V3가 실제로 저장하는 모양 — 지적이 없으면 둘 다 비어 있다.
-            issuesJson: [],
-            suggestionsJson: null,
-            createdAt: "2026-08-13T01:15:00.000Z",
-            completedAt: "2026-08-13T01:15:04.000Z",
-          },
-        ],
-      },
-    );
-
-    // Spoiler는 jsdom에서 높이를 0으로 보고 접지 않으므로 본문이 바로 붙는다.
-    const raw = await screen.findByText(/evaluated_ready/);
-    expect(raw).toHaveTextContent("sha256:3226b8b");
-    expect(raw).toHaveTextContent("post-evaluator-v1");
-    // 예전에는 이 자리에 빈 껍데기만 나왔다.
-    expect(raw.textContent).not.toBe(
-      JSON.stringify({ issues: [], suggestions: null }, null, 2),
-    );
-  });
-
   it("shows the planning input snapshot the agent actually received", async () => {
     renderStage(
       "brief",
@@ -344,6 +293,41 @@ describe("post work stage screens", () => {
     expect(
       screen.getByText("짧게 끊어 쓰고 이모지를 쓰지 않는다"),
     ).toBeInTheDocument();
+  });
+
+  it("shows how the planned subject relates to the camera", async () => {
+    renderStage(
+      "image_plan",
+      { pipelineVersion: "post-pipeline-v4", source: "manual", mode: "manual" },
+      {
+        item: {
+          ...v3Item,
+          currentStage: "image_plan",
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            version: "post-pipeline-v4",
+            artifacts: {
+              imagePlan: {
+                revision: 1,
+                status: "ready",
+                hash: "sha256:image",
+                contractVersion: "image-plan-v3",
+                shots: [
+                  {
+                    sortOrder: 0,
+                    scene: "창가에 서서 빗물을 턴다",
+                    subjectCameraRelation: "aware_unposed",
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    );
+
+    expect(await screen.findByText("카메라 관계")).toBeInTheDocument();
+    expect(screen.getByText("렌즈 인지 · 비연출")).toBeInTheDocument();
   });
 
   // V4(검수 없음): 레일 ⑥이 검수가 아니라 캡션이다. v3 초안(배포 전 것)은 그대로
@@ -566,76 +550,5 @@ describe("post work stage screens", () => {
     const body = within(await screen.findByRole("region"));
     expect(body.getByText("⑥ 캡션")).toBeInTheDocument();
     expect(screen.queryByText("생성 이미지 평가")).not.toBeInTheDocument();
-  });
-
-  it("shows the image findings on the generation stage without opening the raw output", async () => {
-    const imageEvaluation = {
-      id: "eval-image",
-      draftId: "draft-1",
-      kind: "image",
-      attempt: 1,
-      status: "completed",
-      rubricVersion: "v1",
-      contentLanguage: "ko",
-      createdAt: "2026-08-16T01:00:00.000Z",
-      // 수집기 버그로 0이 저장된 행 — 화면은 차원 점수의 평균을 계산해 보인다.
-      overallScore: 0,
-      scoresJson: {
-        result: {
-          verdict: "pass",
-          shots: [
-            {
-              sortOrder: 0,
-              dimensions: {
-                scene_fidelity: { applicable: true, score: 5 },
-                reference_adherence: { applicable: true, score: 4 },
-              },
-              issues: [
-                {
-                  dimension: "reference_adherence",
-                  severity: "minor",
-                  detail: "벤치가 신발장 앞이 아니라 뒤에 있다",
-                },
-              ],
-            },
-          ],
-          setDimensions: {},
-          setIssues: [],
-        },
-      },
-    };
-
-    renderStage(
-      "generation",
-      {
-        pipelineVersion: "post-pipeline-v4",
-        source: "manual",
-        mode: "manual",
-        pipeline: { stage: "generation", state: "ready" },
-      },
-      {
-        item: {
-          ...v3Item,
-          currentStage: "generation",
-          stageIndex: 5,
-          pipelineV3: {
-            ...v3Item.pipelineV3,
-            version: "post-pipeline-v4",
-            stage: "generation",
-            artifacts: {},
-          },
-        },
-        draft: { status: "generating", shots: [] },
-        evaluations: [imageEvaluation],
-      },
-    );
-
-    expect(await screen.findByText("생성 이미지 평가")).toBeInTheDocument();
-    expect(screen.getByText("이미지 심사 4.5/5")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /경미 · 레퍼런스 준수 · 벤치가 신발장 앞이 아니라 뒤에 있다/,
-      ),
-    ).toBeInTheDocument();
   });
 });

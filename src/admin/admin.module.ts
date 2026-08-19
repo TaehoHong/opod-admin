@@ -35,8 +35,6 @@ import { TokenUsageService } from "./llm-logs/token-usage.service";
 import { LocationsController } from "./locations/locations.controller";
 import { LocationsRepository } from "./locations/locations.repository";
 import { LocationsService } from "./locations/locations.service";
-import { EvaluationsController } from "./evaluations/evaluations.controller";
-import { EvaluationsService } from "./evaluations/evaluations.service";
 import { PostWorkspaceController } from "./post-workspace/post-workspace.controller";
 import { PostWorkspaceRepository } from "./post-workspace/post-workspace.repository";
 import { PostWorkspaceService } from "./post-workspace/post-workspace.service";
@@ -70,7 +68,6 @@ function storageEnv(config: S3Config | undefined) {
     FilmFinishController,
     LlmLogsController,
     LocationsController,
-    EvaluationsController,
     PostWorkspaceController,
   ],
   providers: [
@@ -88,7 +85,6 @@ function storageEnv(config: S3Config | undefined) {
     TokenUsageRepository,
     LocationsService,
     LocationsRepository,
-    EvaluationsService,
     PostWorkspaceService,
     PostWorkspaceRepository,
     {

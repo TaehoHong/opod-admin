@@ -8,11 +8,9 @@ import {
   selectShotOutput,
   updateShotOutputFilter,
   type Draft,
-  type DraftEvaluation,
   type DraftShotOutput,
   type FinishPreset,
 } from "./api";
-import { EvaluationChips } from "./EvaluationChips";
 import { FINISH_LABEL, FINISH_OPTIONS } from "./labels";
 import { useDraftMutation } from "./useDraftMutation";
 
@@ -23,14 +21,10 @@ export function CandidateCard({
   draft,
   jobId,
   output,
-  shotSortOrder,
-  imageEvaluation,
 }: {
   draft: Draft;
   jobId: string;
   output: DraftShotOutput;
-  shotSortOrder: number;
-  imageEvaluation?: DraftEvaluation;
 }) {
   const preset = outputFinishPreset(draft, output);
   const editable = draft.status !== "published" && draft.status !== "rejected";
@@ -86,12 +80,6 @@ export function CandidateCard({
           미리보기 없음
         </Text>
       )}
-
-      <EvaluationChips
-        evaluation={imageEvaluation}
-        shotSortOrder={shotSortOrder}
-        candidateIndex={output.candidateIndex}
-      />
 
       {output.selected ? (
         <Badge color="accent">✓ 게시 이미지</Badge>

@@ -14,9 +14,6 @@ export type SettingsFormValues = {
   agentLlmApiUrl: string;
   agentLlmModel: string;
   agentEmbeddingModel: string;
-  evaluatorLlmApiKey: string;
-  evaluatorLlmApiUrl: string;
-  evaluatorLlmModel: string;
   aspectRatioFeed: string;
   aspectRatioStory: string;
   aspectRatioReel: string;
@@ -44,9 +41,6 @@ export function toSettingsUpdate(
     agentLlmApiUrl: values.agentLlmApiUrl.trim() || null,
     agentLlmModel: values.agentLlmModel.trim() || null,
     agentEmbeddingModel: values.agentEmbeddingModel.trim() || null,
-    ...secret("evaluatorLlmApiKey", values.evaluatorLlmApiKey),
-    evaluatorLlmApiUrl: values.evaluatorLlmApiUrl.trim() || null,
-    evaluatorLlmModel: values.evaluatorLlmModel.trim() || null,
     aspectRatioFeed: values.aspectRatioFeed.trim() || null,
     aspectRatioStory: values.aspectRatioStory.trim() || null,
     aspectRatioReel: values.aspectRatioReel.trim() || null,
@@ -93,17 +87,11 @@ export function toConnectionTestBody(
           llmApiUrl: values.agentLlmApiUrl,
           llmModel: values.agentLlmModel,
         }
-      : target === "evaluator"
-        ? {
-            llmApiKey: values.evaluatorLlmApiKey,
-            llmApiUrl: values.evaluatorLlmApiUrl,
-            llmModel: values.evaluatorLlmModel,
-          }
-        : {
-            llmApiKey: values.llmApiKey,
-            llmApiUrl: values.llmApiUrl,
-            llmModel: values.llmModel,
-          };
+      : {
+          llmApiKey: values.llmApiKey,
+          llmApiUrl: values.llmApiUrl,
+          llmModel: values.llmModel,
+        };
   return {
     target,
     ...Object.fromEntries(
