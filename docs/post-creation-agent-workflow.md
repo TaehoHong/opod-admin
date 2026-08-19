@@ -21,7 +21,7 @@ flowchart LR
     A["🗓️ DraftWorker<br/><b>스케줄링</b><br/><br/>게시 주기 도래한<br/>캐릭터의 초안 생성"]
     B["🧠 DraftWorker<br/>+ 기획 LLM<br/><b>기획</b><br/><br/>캡션·해시태그·<br/>컷 구성 결정"]
     C["✍️ DraftWorker<br/>+ 프롬프트 LLM<br/><b>프롬프트 빌드</b><br/><br/>컷별 영어<br/>프롬프트 변환"]
-    D["🎨 GenerationWorker<br/>+ fal.ai<br/><b>이미지 생성</b><br/><br/>컷별 생성 → S3<br/>(후보 여러 장)"]
+    D["🎨 GenerationWorker<br/>+ Image Provider<br/><b>이미지 생성</b><br/><br/>컷별 생성 → S3<br/>(후보 여러 장)"]
     E["📊 DraftWorker<br/><b>집계</b><br/><br/>전 컷 완료 확인<br/>→ 검수 대기"]
     F["👤 운영자<br/><b>검수</b><br/><br/>후보 선택·수정<br/>후 승인"]
     G["🚀 DraftWorker<br/><b>게시 + 기억</b><br/><br/>Post 발행 +<br/>캐릭터 메모리 기록"]
@@ -32,15 +32,15 @@ flowchart LR
     G -.-> FB
 ```
 
-| 순서 | 담당 | 작업 | 산출물 |
-|---|---|---|---|
-| 1 | DraftWorker | 스케줄링 — 게시 주기 도래한 캐릭터의 초안 생성 | `PostDraft(planned)` |
-| 2 | DraftWorker + LLM | 기획 — 무엇을 올릴지 결정 | 캡션·해시태그·컷 구성 |
-| 3 | DraftWorker + LLM | 프롬프트 빌드 — 컷별 이미지 프롬프트 작성 | 컷당 `GenerationJob` |
-| 4 | GenerationWorker + fal.ai | 이미지 생성 — 컷별 실행, S3 저장 | `Media` 후보 N장 |
-| 5 | DraftWorker | 집계 — 전 컷 완료 확인 | `needs_review` |
-| 6 | 운영자 (사람) | 검수 — 후보 선택·수정·승인 | `approved` |
-| 7 | DraftWorker | 게시 — Post 발행 + 캐릭터 메모리 기록 | `Post` + `CharacterMemory` |
+| 순서 | 담당                              | 작업                                           | 산출물                     |
+| ---- | --------------------------------- | ---------------------------------------------- | -------------------------- |
+| 1    | DraftWorker                       | 스케줄링 — 게시 주기 도래한 캐릭터의 초안 생성 | `PostDraft(planned)`       |
+| 2    | DraftWorker + LLM                 | 기획 — 무엇을 올릴지 결정                      | 캡션·해시태그·컷 구성      |
+| 3    | DraftWorker + LLM                 | 프롬프트 빌드 — 컷별 이미지 프롬프트 작성      | 컷당 `GenerationJob`       |
+| 4    | GenerationWorker + Image Provider | 이미지 생성 — 컷별 실행, S3 저장               | `Media` 후보 N장           |
+| 5    | DraftWorker                       | 집계 — 전 컷 완료 확인                         | `needs_review`             |
+| 6    | 운영자 (사람)                     | 검수 — 후보 선택·수정·승인                     | `approved`                 |
+| 7    | DraftWorker                       | 게시 — Post 발행 + 캐릭터 메모리 기록          | `Post` + `CharacterMemory` |
 
 ---
 
@@ -73,7 +73,7 @@ flowchart LR
 
     subgraph EXT["외부 시스템"]
         LLM["LLM API<br/>(OpenAI-compatible)"]
-        FAL["fal.ai Queue<br/>이미지 생성"]
+        IMAGE_PROVIDER["fal.ai 또는 opod-flux<br/>이미지 생성"]
         S3["AWS S3<br/>미디어 저장"]
         BE["opod-service-backend<br/>동일 DB 공유·스키마 소유"]
     end
@@ -86,7 +86,7 @@ flowchart LR
     DW --> CP & PB
     DW --> GW
     CP & PB --> LLM
-    GW --> FAL
+    GW --> IMAGE_PROVIDER
     GW --> S3
     WORKER --> SET & LOG & PR
     ADMIN --> PR
@@ -124,7 +124,7 @@ flowchart TD
     EVAL -. "생성 진행을 막지 않음" .-> MODE
     GATE -->|예| WAIT["대기 (다음 tick)"]
     WAIT --> GATE
-    GATE -->|아니오| GEN["⑤ 이미지 생성 (잡별)<br/>fal.ai 제출→폴링→다운로드→S3 업로드<br/>→ Media + 후보 N장 저장"]
+    GATE -->|아니오| GEN["⑤ 이미지 생성 (잡별)<br/>provider 제출→폴링→다운로드→S3 업로드<br/>→ Media + 후보 N장 저장"]
     MANUAL_GEN --> GEN
 
     GEN --> AGG{"컷별 최신 잡 상태 집계"}
@@ -156,7 +156,7 @@ sequenceDiagram
     participant DB as PostgreSQL (Prisma)
     participant LLM as LLM API
     participant GW as GenerationWorkerService
-    participant FAL as fal.ai
+    participant IMAGE_PROVIDER as Image Provider
     participant S3 as S3
 
     Note over DW: tick() 15초 폴링
@@ -172,11 +172,11 @@ sequenceDiagram
 
     Note over GW: tick() — 예산·서킷브레이커 통과 시
     GW->>DB: 잡 클레임 (FOR UPDATE SKIP LOCKED + lease)
-    GW->>FAL: ④ submit (t2i 또는 edit 라우팅,<br/>레퍼런스는 S3 presigned URL)
+    GW->>IMAGE_PROVIDER: ④ submit (scene 또는 identity 라우팅,<br/>레퍼런스는 S3 presigned URL)
     loop 폴링
-        GW->>FAL: poll status
+        GW->>IMAGE_PROVIDER: poll status
     end
-    FAL-->>GW: 결과 이미지 N장
+    IMAGE_PROVIDER-->>GW: 결과 이미지 N장
     GW->>S3: 업로드
     GW->>DB: persistSuccess (Media + 후보 Output + completed)
 
@@ -221,12 +221,12 @@ stateDiagram-v2
 
 ## 아키텍처 결정 포인트 요약
 
-| 결정 | 내용 |
-|---|---|
-| 큐 | 별도 큐 인프라 없음 — Postgres `FOR UPDATE SKIP LOCKED` + lease가 큐 역할 |
-| 복구 | 3계층: draft 재큐(≤3회) / 잡 재시도(≤3회, 폴링 재개) / 전역 게이트(서킷브레이커·일일 예산) |
-| 휴먼 게이트 | `needs_review` 승인 필수 (현재 POC 제약, 최종 목표는 완전 자동) |
-| 수동/자동 | 운영자 생성은 항상 manual. 스케줄러 생성은 auto이며 콘텐츠 수정·후보 교체·재생성 시 해당 draft만 manual로 전환 |
-| 평가 | UI에는 독립 선형 단계로 보이지만 상태 머신과 후속 생성을 차단하지 않음 |
-| 관측성 | 모든 LLM·이미지 호출 → `LlmLog`, 모든 상태 전이 → `CharacterActionLog` |
-| 피드백 루프 | 게시 시 `CharacterMemory` 기록 → 다음 기획 LLM의 입력으로 재사용 |
+| 결정        | 내용                                                                                                           |
+| ----------- | -------------------------------------------------------------------------------------------------------------- |
+| 큐          | 별도 큐 인프라 없음 — Postgres `FOR UPDATE SKIP LOCKED` + lease가 큐 역할                                      |
+| 복구        | 3계층: draft 재큐(≤3회) / 잡 재시도(≤3회, 폴링 재개) / 전역 게이트(서킷브레이커·일일 예산)                     |
+| 휴먼 게이트 | `needs_review` 승인 필수 (현재 POC 제약, 최종 목표는 완전 자동)                                                |
+| 수동/자동   | 운영자 생성은 항상 manual. 스케줄러 생성은 auto이며 콘텐츠 수정·후보 교체·재생성 시 해당 draft만 manual로 전환 |
+| 평가        | UI에는 독립 선형 단계로 보이지만 상태 머신과 후속 생성을 차단하지 않음                                         |
+| 관측성      | 모든 LLM·이미지 호출 → `LlmLog`, 모든 상태 전이 → `CharacterActionLog`                                         |
+| 피드백 루프 | 게시 시 `CharacterMemory` 기록 → 다음 기획 LLM의 입력으로 재사용                                               |

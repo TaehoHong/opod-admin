@@ -7,9 +7,23 @@ export class TestGenerationSettingsDto {
   target!: "image" | "planner" | "chat" | "evaluator";
 
   @IsOptional()
+  @IsIn(["fal", "opod-flux"])
+  imageProvider?: "fal" | "opod-flux";
+
+  @IsOptional()
   @IsString()
   @MaxLength(500)
   falApiKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  opodFluxApiBaseUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  opodFluxApiKey?: string;
 
   @IsOptional()
   @IsString()

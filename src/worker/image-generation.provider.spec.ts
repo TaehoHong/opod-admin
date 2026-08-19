@@ -1,6 +1,7 @@
 import {
   createFalImageGenerationProvider,
   createImageGenerationProviders,
+  createOpodFluxImageGenerationProvider,
   falQueueUrls,
   falSupportsNegativePrompt,
   ImageGenerationConfigError,
@@ -19,8 +20,10 @@ function baseRequest(
   overrides: Partial<ImageGenerationRequest> = {},
 ): ImageGenerationRequest {
   return {
+    idempotencyKey: "job-1",
+    profile: "photoreal_scene_v1",
     prompt: "film photo of a beach",
-    referenceImageUrls: [],
+    references: [],
     candidateCount: 2,
     ...overrides,
   };
@@ -86,12 +89,23 @@ describe("createFalImageGenerationProvider", () => {
     const submitted = await provider.submit(
       baseRequest({
         negativePrompt: "blurry",
-        referenceImageUrls: ["https://cdn.local/ref.png"],
+        references: [
+          {
+            id: "ref-1",
+            role: "identity",
+            primary: true,
+            url: "https://cdn.local/ref.png",
+          },
+        ],
         extraParams: { aspect_ratio: "4:5" },
       }),
     );
 
-    expect(submitted).toEqual({ requestId: "req-1" });
+    // 전송본(네거티브가 합쳐진 최종 문자열)을 그대로 돌려줘야 잡에 기록된다.
+    expect(submitted).toEqual({
+      requestId: "req-1",
+      sentPrompt: "film photo of a beach Do not include: blurry.",
+    });
     const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://queue.fal.run/fal-ai/nano-banana/edit");
     expect((init.headers as Record<string, string>).authorization).toBe(
@@ -131,7 +145,7 @@ describe("createFalImageGenerationProvider", () => {
       inputMediaIds: ["media-1"],
     });
 
-    await expect(provider.submit(baseRequest())).resolves.toEqual({
+    await expect(provider.submit(baseRequest())).resolves.toMatchObject({
       requestId: "req-1",
     });
     await expect(provider.poll("req-1")).resolves.toEqual({
@@ -171,7 +185,14 @@ describe("createFalImageGenerationProvider", () => {
 
     await provider.submit(
       baseRequest({
-        referenceImageUrls: ["https://cdn.local/ref.png"],
+        references: [
+          {
+            id: "ref-1",
+            role: "identity",
+            primary: true,
+            url: "https://cdn.local/ref.png",
+          },
+        ],
         extraParams: {
           prompt: "wrong prompt",
           image_urls: ["https://wrong.local/ref.png"],
@@ -288,6 +309,248 @@ describe("createFalImageGenerationProvider", () => {
       "https://queue.fal.run/fal-ai/nano-banana/requests/req-1/cancel",
     );
     expect((fetchFn.mock.calls[1][1] as RequestInit).method).toBe("PUT");
+  });
+});
+
+describe("createOpodFluxImageGenerationProvider", () => {
+  const config = {
+    apiBaseUrl: "https://opod-flux.internal/v1",
+    apiKey: "flux-secret",
+  };
+
+  it("submits the approved v1 request with caller auth and idempotency", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          generation_id: "gen-1",
+          status: "queued",
+          created_at: "2026-08-19T05:30:00Z",
+        },
+        202,
+      ),
+    );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await expect(
+      provider.submit({
+        idempotencyKey: "generation-job-1",
+        profile: "photoreal_identity_v1",
+        prompt: "film photo of a beach",
+        negativePrompt: "blurry",
+        references: [
+          {
+            id: "face-front",
+            role: "identity",
+            primary: true,
+            url: "https://cdn.local/ref.png",
+          },
+        ],
+        candidateCount: 2,
+        extraParams: {
+          aspect_ratio: "4:5",
+          long_edge: 2048,
+          format: "jpeg",
+          quality: 95,
+          seed: 1729,
+        },
+        metadata: { character_id: "character-1" },
+      }),
+    ).resolves.toEqual({
+      requestId: "gen-1",
+      sentPrompt: "film photo of a beach",
+    });
+
+    const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://opod-flux.internal/v1/generations");
+    expect(init.headers).toMatchObject({
+      authorization: "Bearer flux-secret",
+      "content-type": "application/json",
+      "idempotency-key": "generation-job-1",
+    });
+    expect(JSON.parse(init.body as string)).toEqual({
+      profile: "photoreal_identity_v1",
+      prompt: "film photo of a beach",
+      negative_prompt: "blurry",
+      references: [
+        {
+          id: "face-front",
+          role: "identity",
+          primary: true,
+          source: { type: "url", url: "https://cdn.local/ref.png" },
+        },
+      ],
+      output: {
+        count: 2,
+        aspect_ratio: "4:5",
+        long_edge: 2048,
+        format: "jpeg",
+        quality: 95,
+      },
+      controls: { seed: 1729, identity_strict: true },
+      metadata: { character_id: "character-1" },
+    });
+  });
+
+  it("marks semantic create failures as permanent without consuming a job", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          error: {
+            code: "VALIDATION_FAILED",
+            message: "identity primary is required",
+          },
+        },
+        422,
+      ),
+    );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await expect(
+      provider.submit({
+        ...baseRequest({
+          profile: "photoreal_identity_v1",
+          extraParams: { aspect_ratio: "4:5" },
+        }),
+        references: [],
+      }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("VALIDATION_FAILED"),
+      permanent: true,
+    });
+  });
+
+  it("maps status and authenticated output downloads", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ status: "running" }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          generation_id: "gen-1",
+          status: "succeeded",
+          outputs: [
+            {
+              id: "out-0",
+              index: 0,
+              content_type: "image/jpeg",
+              width: 1365,
+              height: 2048,
+              sha256: "abcd",
+              download_url:
+                "https://opod-flux.internal/v1/generations/gen-1/outputs/out-0",
+            },
+          ],
+        }),
+      );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await expect(provider.poll("gen-1")).resolves.toEqual({
+      status: "pending",
+    });
+    await expect(provider.poll("gen-1")).resolves.toEqual({
+      status: "completed",
+      images: [
+        {
+          url: "https://opod-flux.internal/v1/generations/gen-1/outputs/out-0",
+          contentType: "image/jpeg",
+          width: 1365,
+          height: 2048,
+          sha256: "abcd",
+          downloadHeaders: { authorization: "Bearer flux-secret" },
+        },
+      ],
+    });
+  });
+
+  it("treats a succeeded response without outputs as a permanent protocol failure", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValue(jsonResponse({ status: "succeeded", outputs: [] }));
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await expect(provider.poll("gen-1")).resolves.toEqual({
+      status: "failed",
+      errorMessage: "opod-flux result contained no outputs",
+      permanent: true,
+    });
+  });
+
+  it("rejects output URLs that would send the API key to another origin", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(
+      jsonResponse({
+        status: "succeeded",
+        outputs: [
+          {
+            download_url: "https://attacker.example/collect",
+          },
+        ],
+      }),
+    );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await expect(provider.poll("gen-1")).resolves.toEqual({
+      status: "failed",
+      errorMessage: "opod-flux result contained no outputs",
+      permanent: true,
+    });
+  });
+
+  it("maps terminal retryability and sends best-effort cancellation", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "failed",
+          error: {
+            code: "IDENTITY_THRESHOLD_NOT_MET",
+            message: "identity check failed",
+            retryable: false,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ status: "cancelling" }, 202));
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await expect(provider.poll("gen-1")).resolves.toEqual({
+      status: "failed",
+      errorMessage: "IDENTITY_THRESHOLD_NOT_MET: identity check failed",
+      permanent: true,
+    });
+    await expect(provider.cancel?.("gen-1")).resolves.toBeUndefined();
+    expect(fetchFn.mock.calls[1][0]).toBe(
+      "https://opod-flux.internal/v1/generations/gen-1/cancel",
+    );
+    expect((fetchFn.mock.calls[1][1] as RequestInit).method).toBe("POST");
+  });
+
+  it("keeps transient status HTTP failures on the same generation id", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValue(jsonResponse({ error: { code: "BUSY" } }, 503));
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await expect(provider.poll("gen-1")).rejects.toThrow("opod-flux 503 BUSY");
+  });
+
+  it("ends the current admin job for a retryable terminal generation", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(
+      jsonResponse({
+        status: "failed",
+        error: {
+          code: "IDENTITY_THRESHOLD_NOT_MET",
+          message: "try a new generation",
+          retryable: true,
+        },
+      }),
+    );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    // opod-flux의 retryable은 "새 idempotency key로 새 generation 생성 가능"이다.
+    // 같은 admin job id 재제출은 기존 실패를 replay하므로 현재 job은 끝낸다.
+    await expect(provider.poll("gen-1")).resolves.toEqual({
+      status: "failed",
+      errorMessage: "IDENTITY_THRESHOLD_NOT_MET: try a new generation",
+      permanent: true,
+    });
   });
 });
 

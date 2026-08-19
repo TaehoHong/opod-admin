@@ -6,6 +6,7 @@ import {
   Group,
   Paper,
   PasswordInput,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -39,6 +40,12 @@ function httpUrlOrEmpty(value: string): string | null {
     : "http:// 또는 https:// 로 시작해야 합니다";
 }
 
+function httpsUrlOrEmpty(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return /^https:\/\//.test(trimmed) ? null : "https:// 로 시작해야 합니다";
+}
+
 // 비우면 기본값으로 돌아간다. 형식이 어긋난 값은 프로바이더가 422로 거절하므로
 // 저장 전에 막는다.
 function aspectRatioOrEmpty(value: string): string | null {
@@ -58,13 +65,17 @@ export function GenerationSettingsForm({
   const [testResult, setTestResult] = useState<
     (ConnectionTestResult & { target: ConnectionTestTarget }) | null
   >(null);
+  const [imageProvider, setImageProvider] = useState(settings.imageProvider);
 
   const form = useForm<SettingsFormValues>({
     mode: "uncontrolled",
     initialValues: {
+      imageProvider: settings.imageProvider,
       falApiKey: "",
       falImageModel: settings.falImageModel ?? "",
       falImageT2iModel: settings.falImageT2iModel ?? "",
+      opodFluxApiBaseUrl: settings.opodFluxApiBaseUrl ?? "",
+      opodFluxApiKey: "",
       llmApiKey: "",
       llmApiUrl: settings.llmApiUrl ?? "",
       llmModel: settings.llmModel ?? "",
@@ -80,6 +91,7 @@ export function GenerationSettingsForm({
       aspectRatioReel: settings.aspectRatios.overrides.reel ?? "",
     },
     validate: {
+      opodFluxApiBaseUrl: httpsUrlOrEmpty,
       llmApiUrl: httpUrlOrEmpty,
       agentLlmApiUrl: httpUrlOrEmpty,
       evaluatorLlmApiUrl: httpUrlOrEmpty,
@@ -133,44 +145,99 @@ export function GenerationSettingsForm({
         )}
       >
         <Stack gap="sm">
-          {sectionHeader("이미지 생성 (fal.ai)", "image")}
-          <Group gap="xs" align="flex-end" wrap="nowrap">
-            <PasswordInput
-              label="fal.ai API 키"
-              placeholder={
-                settings.falApiKey.set
-                  ? "변경할 때만 입력"
-                  : "fal.ai 대시보드에서 발급한 키"
-              }
-              autoComplete="off"
-              flex={1}
-              key={form.key("falApiKey")}
-              {...form.getInputProps("falApiKey")}
-            />
-            <SecretStatusBadge
-              status={settings.falApiKey}
-              envSource={settings.resolved.sources.apiKey}
-              missingLabel="키 없음 — 이미지 생성 불가"
-            />
-            {settings.falApiKey.set ? (
-              <ClearKeyButton
-                label="fal.ai API 키 삭제"
-                description="저장된 fal.ai 키를 지우고 env 값으로 되돌립니다. env에도 키가 없으면 이미지 생성이 중단됩니다."
-                loading={save.isPending}
-                onConfirm={() => clearKey("falApiKey")}
+          {sectionHeader("이미지 생성", "image")}
+          <Select
+            label="실행 provider"
+            data={[
+              { value: "opod-flux", label: "opod-flux v1" },
+              { value: "fal", label: "fal.ai" },
+            ]}
+            allowDeselect={false}
+            value={imageProvider}
+            onChange={(value) => {
+              const next = value === "opod-flux" ? "opod-flux" : "fal";
+              form.setFieldValue("imageProvider", next);
+              setImageProvider(next);
+            }}
+          />
+          {imageProvider === "opod-flux" ? (
+            <>
+              <TextInput
+                label="opod-flux API Base URL"
+                placeholder="https://opod-flux.internal/v1"
+                description={sourceNote(
+                  settings.resolved.sources.opodFluxApiBaseUrl,
+                )}
+                key={form.key("opodFluxApiBaseUrl")}
+                {...form.getInputProps("opodFluxApiBaseUrl")}
               />
-            ) : null}
-          </Group>
+              <Group gap="xs" align="flex-end" wrap="nowrap">
+                <PasswordInput
+                  label="opod-flux API 키"
+                  placeholder={
+                    settings.opodFluxApiKey.set
+                      ? "변경할 때만 입력"
+                      : "Bearer API 키"
+                  }
+                  autoComplete="off"
+                  flex={1}
+                  key={form.key("opodFluxApiKey")}
+                  {...form.getInputProps("opodFluxApiKey")}
+                />
+                <SecretStatusBadge
+                  status={settings.opodFluxApiKey}
+                  envSource={settings.resolved.sources.opodFluxApiKey}
+                  missingLabel="키 없음 — 이미지 생성 불가"
+                />
+                {settings.opodFluxApiKey.set ? (
+                  <ClearKeyButton
+                    label="opod-flux API 키 삭제"
+                    description="저장된 opod-flux 키를 지우고 env 값으로 되돌립니다."
+                    loading={save.isPending}
+                    onConfirm={() => clearKey("opodFluxApiKey")}
+                  />
+                ) : null}
+              </Group>
+            </>
+          ) : (
+            <Group gap="xs" align="flex-end" wrap="nowrap">
+              <PasswordInput
+                label="fal.ai API 키"
+                placeholder={
+                  settings.falApiKey.set
+                    ? "변경할 때만 입력"
+                    : "fal.ai 대시보드에서 발급한 키"
+                }
+                autoComplete="off"
+                flex={1}
+                key={form.key("falApiKey")}
+                {...form.getInputProps("falApiKey")}
+              />
+              <SecretStatusBadge
+                status={settings.falApiKey}
+                envSource={settings.resolved.sources.apiKey}
+                missingLabel="키 없음 — 이미지 생성 불가"
+              />
+              {settings.falApiKey.set ? (
+                <ClearKeyButton
+                  label="fal.ai API 키 삭제"
+                  description="저장된 fal.ai 키를 지우고 env 값으로 되돌립니다. env에도 키가 없으면 이미지 생성이 중단됩니다."
+                  loading={save.isPending}
+                  onConfirm={() => clearKey("falApiKey")}
+                />
+              ) : null}
+            </Group>
+          )}
           <TextInput
-            label="edit 모델 (레퍼런스 컨디셔닝)"
-            placeholder="fal-ai/nano-banana/edit"
+            label="edit 프롬프트 정책 모델 ID"
+            placeholder="black-forest-labs/FLUX.1-Kontext-dev"
             description={sourceNote(settings.resolved.sources.editModel)}
             key={form.key("falImageModel")}
             {...form.getInputProps("falImageModel")}
           />
           <TextInput
-            label="t2i 모델 (콜드스타트)"
-            placeholder="fal-ai/nano-banana"
+            label="t2i 프롬프트 정책 모델 ID"
+            placeholder="black-forest-labs/FLUX.1-Kontext-dev"
             description={sourceNote(settings.resolved.sources.t2iModel)}
             key={form.key("falImageT2iModel")}
             {...form.getInputProps("falImageT2iModel")}

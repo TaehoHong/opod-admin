@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsOptional,
   IsString,
   Matches,
@@ -9,6 +10,10 @@ import {
 // 각 필드: 누락 = 유지, null·빈 문자열 = 삭제(env 폴백 복귀), 값 = 저장.
 // @IsOptional은 null도 검증에서 제외하므로 null 삭제 시맨틱과 호환된다.
 export class UpdateGenerationSettingsDto {
+  @IsOptional()
+  @IsIn(["fal", "opod-flux"])
+  imageProvider?: "fal" | "opod-flux" | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -23,6 +28,19 @@ export class UpdateGenerationSettingsDto {
   @IsString()
   @MaxLength(200)
   falImageT2iModel?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^$|^https:\/\//, {
+    message: "opodFluxApiBaseUrl must start with https://",
+  })
+  @MaxLength(500)
+  opodFluxApiBaseUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  opodFluxApiKey?: string | null;
 
   // 기획 LLM (OpenAI-compatible chat completions)
   // 빈 문자열은 삭제 의미라 통과시키고, 값이 있으면 http(s) URL이어야 한다.

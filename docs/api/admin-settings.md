@@ -19,13 +19,23 @@ GET /api/admin/v1/settings/generation
 
 ```json
 {
+  "imageProvider": "opod-flux",
+  "opodFluxApiBaseUrl": "https://opod-flux.internal/v1",
+  "opodFluxApiKey": { "set": true, "last4": "cd12" },
   "falApiKey": { "set": true, "last4": "cd12" },
   "falImageModel": "fal-ai/nano-banana/edit",
   "falImageT2iModel": "fal-ai/nano-banana",
   "resolved": {
-    "t2iProvider": "fal:fal-ai/nano-banana",
-    "editProvider": "fal:fal-ai/nano-banana/edit",
-    "sources": { "apiKey": "db", "editModel": "db", "t2iModel": "db" }
+    "t2iProvider": "opod-flux:v1",
+    "editProvider": "opod-flux:v1",
+    "sources": {
+      "provider": "db",
+      "apiKey": "db",
+      "editModel": "db",
+      "t2iModel": "db",
+      "opodFluxApiBaseUrl": "db",
+      "opodFluxApiKey": "db"
+    }
   },
   "worker": {
     "enabled": true,
@@ -38,7 +48,7 @@ GET /api/admin/v1/settings/generation
 }
 ```
 
-- `falApiKey` is `{ "set": false }` when no DB key exists (an env key may
+- API keys are `{ "set": false }` when no DB key exists (an env key may
   still be in effect — check `resolved.sources.apiKey`).
 - `resolved.*Provider` is the provider name the worker would route to right
   now (`local` when no key resolves).
@@ -108,13 +118,15 @@ POST /api/admin/v1/settings/generation/test
 Content-Type: application/json
 
 { "target": "image" | "planner" | "chat" | "evaluator",
-  "falApiKey"?, "llmApiUrl"?, "llmApiKey"?, "llmModel"? }
+  "imageProvider"?, "falApiKey"?,
+  "opodFluxApiBaseUrl"?, "opodFluxApiKey"?,
+  "llmApiUrl"?, "llmApiKey"?, "llmModel"? }
 ```
 
 Validates the combination that WOULD apply after saving: supplied fields
 override the currently effective settings (DB > env), omitted fields fall
-through. Returns `{ ok, message }`. The image check authenticates against fal
-without submitting a job (no cost); the planner check makes a minimal
+through. Returns `{ ok, message }`. The image check authenticates against the
+selected provider without submitting a job (no cost); the planner check makes a minimal
 1-token completion call. Nothing is persisted.
 
 ## Update generation provider settings
@@ -125,18 +137,21 @@ PUT /api/admin/v1/settings/generation
 
 Body (all fields optional):
 
-| Field | Semantics |
-| --- | --- |
-| `falApiKey` | omit = keep, `null`/blank = delete (fall back to env), string = save |
-| `falImageModel` | same semantics; the reference-conditioning (edit) model |
-| `falImageT2iModel` | same semantics; the cold-start text-to-image model |
-| `llmApiUrl` | same semantics; planner LLM endpoint (OpenAI-compatible) |
-| `llmApiKey` | same semantics; planner LLM key |
-| `llmModel` | same semantics; planner LLM model |
-| `agentLlmApiUrl` / `agentLlmApiKey` / `agentLlmModel` / `agentEmbeddingModel` | same semantics; blank re-inherits from the planner |
-| `evaluatorLlmApiUrl` / `evaluatorLlmApiKey` / `evaluatorLlmModel` | same semantics; blank re-inherits from the planner |
-| `workerEnabled` | boolean; `null` restores the `WORKER_ENABLED` env default |
-| `evaluationWorkerEnabled` | boolean; `null` restores the `EVALUATION_WORKER_ENABLED` env default |
+| Field                                                                         | Semantics                                                             |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `imageProvider`                                                               | `fal` or `opod-flux`; omit = keep, `null` = env/default `fal`         |
+| `opodFluxApiBaseUrl`                                                          | omit = keep, `null`/blank = env fallback, HTTPS `/v1` base URL = save |
+| `opodFluxApiKey`                                                              | omit = keep, `null`/blank = env fallback, string = save               |
+| `falApiKey`                                                                   | omit = keep, `null`/blank = delete (fall back to env), string = save  |
+| `falImageModel`                                                               | same semantics; the reference-conditioning (edit) model               |
+| `falImageT2iModel`                                                            | same semantics; the cold-start text-to-image model                    |
+| `llmApiUrl`                                                                   | same semantics; planner LLM endpoint (OpenAI-compatible)              |
+| `llmApiKey`                                                                   | same semantics; planner LLM key                                       |
+| `llmModel`                                                                    | same semantics; planner LLM model                                     |
+| `agentLlmApiUrl` / `agentLlmApiKey` / `agentLlmModel` / `agentEmbeddingModel` | same semantics; blank re-inherits from the planner                    |
+| `evaluatorLlmApiUrl` / `evaluatorLlmApiKey` / `evaluatorLlmModel`             | same semantics; blank re-inherits from the planner                    |
+| `workerEnabled`                                                               | boolean; `null` restores the `WORKER_ENABLED` env default             |
+| `evaluationWorkerEnabled`                                                     | boolean; `null` restores the `EVALUATION_WORKER_ENABLED` env default  |
 
 ```json
 { "falApiKey": "fal-...", "falImageModel": "fal-ai/nano-banana/edit" }

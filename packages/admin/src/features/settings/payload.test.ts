@@ -9,9 +9,12 @@ import {
 // 값으로 되돌리기". 이 구분이 뒤집히면 저장 한 번에 운영 중인 키가 지워지거나
 // 옛 모델이 남는데, 화면에는 아무 신호도 나타나지 않는다.
 const empty: SettingsFormValues = {
+  imageProvider: "fal",
   falApiKey: "",
   falImageModel: "",
   falImageT2iModel: "",
+  opodFluxApiBaseUrl: "",
+  opodFluxApiKey: "",
   llmApiKey: "",
   llmApiUrl: "",
   llmModel: "",
@@ -30,8 +33,10 @@ const empty: SettingsFormValues = {
 describe("toSettingsUpdate", () => {
   it("keeps blank API keys and clears blank models", () => {
     expect(toSettingsUpdate(empty)).toEqual({
+      imageProvider: "fal",
       falImageModel: null,
       falImageT2iModel: null,
+      opodFluxApiBaseUrl: null,
       llmApiUrl: null,
       llmModel: null,
       agentLlmApiUrl: null,
@@ -58,9 +63,11 @@ describe("toSettingsUpdate", () => {
         aspectRatioFeed: " 4:5 ",
       }),
     ).toEqual({
+      imageProvider: "fal",
       falApiKey: "fal-secret",
       falImageModel: null,
       falImageT2iModel: null,
+      opodFluxApiBaseUrl: null,
       llmApiKey: "sk-secret",
       llmApiUrl: null,
       llmModel: "gpt-5-mini",
@@ -80,9 +87,29 @@ describe("toSettingsUpdate", () => {
 
 describe("toConnectionTestBody", () => {
   it("omits fields the operator left blank so the server uses effective settings", () => {
-    expect(toConnectionTestBody("image", empty)).toEqual({ target: "image" });
+    expect(toConnectionTestBody("image", empty)).toEqual({
+      target: "image",
+      imageProvider: "fal",
+    });
     expect(toConnectionTestBody("planner", empty)).toEqual({
       target: "planner",
+    });
+  });
+
+  it("sends only opod-flux connection fields when that provider is selected", () => {
+    expect(
+      toConnectionTestBody("image", {
+        ...empty,
+        imageProvider: "opod-flux",
+        falApiKey: "fal-secret",
+        opodFluxApiBaseUrl: " https://opod-flux.internal/v1 ",
+        opodFluxApiKey: " flux-secret ",
+      }),
+    ).toEqual({
+      target: "image",
+      imageProvider: "opod-flux",
+      opodFluxApiBaseUrl: "https://opod-flux.internal/v1",
+      opodFluxApiKey: "flux-secret",
     });
   });
 

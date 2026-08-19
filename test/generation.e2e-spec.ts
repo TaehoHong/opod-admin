@@ -335,7 +335,7 @@ describe("generation", () => {
         name: "e2e-fake-provider",
         async submit(input) {
           providerRequests.push(input);
-          return { requestId: "e2e-request-1" };
+          return { requestId: "e2e-request-1", sentPrompt: input.prompt };
         },
         async poll() {
           return {
@@ -529,8 +529,12 @@ describe("generation", () => {
         expect.objectContaining({
           prompt: "edited final prompt",
           candidateCount: 3,
-          referenceImageUrls: [
-            "https://cdn.local/generation-draft-reference.png",
+          references: [
+            expect.objectContaining({
+              role: "identity",
+              primary: true,
+              url: "https://cdn.local/generation-draft-reference.png",
+            }),
           ],
         }),
       ]);

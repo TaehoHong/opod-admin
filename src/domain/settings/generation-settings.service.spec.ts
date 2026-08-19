@@ -85,10 +85,57 @@ describe("GenerationSettingsService", () => {
     });
 
     expect(resolved).toEqual({
+      provider: "fal",
       apiKey: "db-key",
       editModel: "fal-ai/nano-banana/edit",
       t2iModel: undefined,
-      sources: { apiKey: "db", editModel: "env", t2iModel: "none" },
+      opodFluxApiBaseUrl: undefined,
+      opodFluxApiKey: undefined,
+      sources: {
+        provider: "none",
+        apiKey: "db",
+        editModel: "env",
+        t2iModel: "none",
+        opodFluxApiBaseUrl: "none",
+        opodFluxApiKey: "none",
+      },
+    });
+  });
+
+  it("resolves explicit opod-flux settings without replacing prompt model policy ids", async () => {
+    const repository = repositoryMock([
+      { key: "generation.imageProvider", value: "opod-flux" },
+      {
+        key: "generation.opodFluxApiBaseUrl",
+        value: "https://opod-flux.internal/v1",
+      },
+      { key: "generation.opodFluxApiKey", value: "db-flux-key" },
+      {
+        key: "generation.falImageModel",
+        value: "black-forest-labs/FLUX.1-Kontext-dev",
+      },
+    ]);
+
+    const resolved = await makeService(repository).resolveProviderSettings({
+      OPOD_FLUX_API_KEY: "env-flux-key",
+    });
+
+    expect(resolved).toMatchObject({
+      provider: "opod-flux",
+      opodFluxApiBaseUrl: "https://opod-flux.internal/v1",
+      opodFluxApiKey: "db-flux-key",
+      editModel: "black-forest-labs/FLUX.1-Kontext-dev",
+      sources: {
+        provider: "db",
+        opodFluxApiBaseUrl: "db",
+        opodFluxApiKey: "db",
+      },
+    });
+    await expect(
+      makeService(repository).resolveProviderNames({}),
+    ).resolves.toMatchObject({
+      t2i: "opod-flux:v1",
+      edit: "opod-flux:v1",
     });
   });
 
@@ -106,6 +153,60 @@ describe("GenerationSettingsService", () => {
       edit: "fal:fal-ai/nano-banana/edit",
       planner: "unconfigured",
     });
+  });
+
+  it("tests opod-flux authentication without creating a generation", async () => {
+    const repository = repositoryMock([
+      { key: "generation.imageProvider", value: "opod-flux" },
+      {
+        key: "generation.opodFluxApiBaseUrl",
+        value: "https://opod-flux.internal/v1",
+      },
+      { key: "generation.opodFluxApiKey", value: "db-flux-key" },
+    ]);
+    const fetchMock = jest.fn().mockResolvedValue({
+      status: 404,
+      ok: false,
+      text: async () => "not found",
+    });
+
+    await expect(
+      makeService(repository).testConnection(
+        { target: "image" },
+        {},
+        fetchMock as never,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      message: "opod-flux 인증 확인",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://opod-flux.internal/v1/generations/gen_connection_test",
+      expect.objectContaining({
+        headers: { authorization: "Bearer db-flux-key" },
+      }),
+    );
+  });
+
+  it("rejects opod-flux connection URLs containing credentials", async () => {
+    const fetchMock = jest.fn();
+
+    await expect(
+      makeService(repositoryMock([])).testConnection(
+        {
+          target: "image",
+          imageProvider: "opod-flux",
+          opodFluxApiBaseUrl: "https://user:pass@opod-flux.internal/v1",
+          opodFluxApiKey: "flux-key",
+        },
+        {},
+        fetchMock as never,
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      message: "opod-flux URL은 사용자 정보 없는 HTTPS URL이어야 합니다",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("resolves the LLM planner when url/key/model are all present", async () => {

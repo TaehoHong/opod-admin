@@ -23,9 +23,12 @@ import {
 // admin_settings 키. 프로바이더 설정이 늘면 네임스페이스만 추가한다.
 // generation.* = 이미지 생성(fal), planner.* = 기획 LLM(OpenAI-compatible).
 export const GENERATION_SETTING_KEYS = {
+  imageProvider: "generation.imageProvider",
   falApiKey: "generation.falApiKey",
   falImageModel: "generation.falImageModel",
   falImageT2iModel: "generation.falImageT2iModel",
+  opodFluxApiBaseUrl: "generation.opodFluxApiBaseUrl",
+  opodFluxApiKey: "generation.opodFluxApiKey",
   llmApiUrl: "planner.llmApiUrl",
   llmApiKey: "planner.llmApiKey",
   llmModel: "planner.llmModel",
@@ -94,9 +97,12 @@ export type GenerationSettingsUpdate = Partial<
 
 export type ResolvedProviderSettings = GenerationProviderSettings & {
   sources: {
+    provider: Source;
     apiKey: Source;
     editModel: Source;
     t2iModel: Source;
+    opodFluxApiBaseUrl: Source;
+    opodFluxApiKey: Source;
   };
 };
 
@@ -113,7 +119,10 @@ type SettingsEnv = Record<string, string | undefined>;
 // 연결 테스트 — 폼의 미저장 입력을 실효 설정 위에 덮어 검증한다.
 export type ConnectionTestInput = {
   target: "image" | "planner" | "chat" | "evaluator";
+  imageProvider?: "fal" | "opod-flux";
   falApiKey?: string;
+  opodFluxApiBaseUrl?: string;
+  opodFluxApiKey?: string;
   llmApiUrl?: string;
   llmApiKey?: string;
   llmModel?: string;
@@ -128,9 +137,12 @@ type TokenLimitParam = "max_tokens" | "max_completion_tokens";
 
 // env 폴백이 있는 필드만 여기 둔다. 빠진 필드는 DB 전용이다.
 const ENV_KEYS: Partial<Record<GenerationSettingField, string>> = {
+  imageProvider: "IMAGE_GENERATION_PROVIDER",
   falApiKey: "FAL_API_KEY",
   falImageModel: "FAL_IMAGE_MODEL",
   falImageT2iModel: "FAL_IMAGE_T2I_MODEL",
+  opodFluxApiBaseUrl: "OPOD_FLUX_API_BASE_URL",
+  opodFluxApiKey: "OPOD_FLUX_API_KEY",
   llmApiUrl: "LLM_API_URL",
   llmApiKey: "LLM_API_KEY",
   llmModel: "LLM_MODEL",
@@ -223,17 +235,26 @@ export class GenerationSettingsService {
     env: SettingsEnv = process.env,
   ): Promise<ResolvedProviderSettings> {
     const db = await this.getSettings();
+    const provider = pick(db, env, "imageProvider");
     const apiKey = pick(db, env, "falApiKey");
     const editModel = pick(db, env, "falImageModel");
     const t2iModel = pick(db, env, "falImageT2iModel");
+    const opodFluxApiBaseUrl = pick(db, env, "opodFluxApiBaseUrl");
+    const opodFluxApiKey = pick(db, env, "opodFluxApiKey");
     return {
+      provider: provider.value === "opod-flux" ? "opod-flux" : "fal",
       apiKey: apiKey.value,
       editModel: editModel.value,
       t2iModel: t2iModel.value,
+      opodFluxApiBaseUrl: opodFluxApiBaseUrl.value,
+      opodFluxApiKey: opodFluxApiKey.value,
       sources: {
+        provider: provider.source,
         apiKey: apiKey.source,
         editModel: editModel.source,
         t2iModel: t2iModel.source,
+        opodFluxApiBaseUrl: opodFluxApiBaseUrl.source,
+        opodFluxApiKey: opodFluxApiKey.source,
       },
     };
   }
@@ -462,6 +483,62 @@ export class GenerationSettingsService {
     try {
       if (input.target === "image") {
         const resolved = await this.resolveProviderSettings(env);
+        const provider = input.imageProvider ?? resolved.provider ?? "fal";
+        if (provider === "opod-flux") {
+          const apiBaseUrl =
+            input.opodFluxApiBaseUrl?.trim() || resolved.opodFluxApiBaseUrl;
+          const apiKey =
+            input.opodFluxApiKey?.trim() || resolved.opodFluxApiKey;
+          if (!apiBaseUrl || !apiKey) {
+            return {
+              ok: false,
+              message:
+                "opod-flux URL·API 키가 모두 있어야 테스트할 수 있습니다",
+            };
+          }
+          let base: URL;
+          try {
+            base = new URL(apiBaseUrl);
+          } catch {
+            return { ok: false, message: "opod-flux URL이 올바르지 않습니다" };
+          }
+          if (base.protocol !== "https:" || base.username || base.password) {
+            return {
+              ok: false,
+              message:
+                "opod-flux URL은 사용자 정보 없는 HTTPS URL이어야 합니다",
+            };
+          }
+          const endpoint = `${base.toString().replace(/\/$/, "")}/generations/gen_connection_test`;
+          const execute = () =>
+            fetchFn(endpoint, {
+              headers: { authorization: `Bearer ${apiKey}` },
+              signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
+            });
+          const response = this.llmLogs
+            ? await this.llmLogs.runJsonFetch({
+                type: LLM_LOG_TYPE.connectionTest,
+                provider: "opod-flux",
+                model: "v1",
+                endpoint,
+                requestJson: {
+                  operation: "status",
+                  generation_id: "gen_connection_test",
+                },
+                context: { metadata: { target: "image" } },
+                execute,
+                isSuccessful: (response) =>
+                  response.status !== 401 && response.status !== 403,
+              })
+            : await execute();
+          if (response.status === 401 || response.status === 403) {
+            return {
+              ok: false,
+              message: `opod-flux 인증 실패 (${response.status})`,
+            };
+          }
+          return { ok: true, message: "opod-flux 인증 확인" };
+        }
         const apiKey = input.falApiKey?.trim() || resolved.apiKey;
         if (!apiKey) {
           return { ok: false, message: "적용될 fal API 키가 없습니다" };
@@ -620,6 +697,7 @@ export function settingsChangeEntries(
 }[] {
   const SECRET_FIELDS: GenerationSettingField[] = [
     "falApiKey",
+    "opodFluxApiKey",
     "llmApiKey",
     "agentLlmApiKey",
     "evaluatorLlmApiKey",

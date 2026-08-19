@@ -2,6 +2,7 @@ import {
   GenerationWorkerService,
   WorkerConfig,
 } from "./generation-worker.service";
+import { createHash } from "node:crypto";
 import {
   GenerationPollResult,
   ImageGenerationProvider,
@@ -113,7 +114,10 @@ function providerMock(
   }
   return {
     name,
-    submit: jest.fn().mockResolvedValue({ requestId: "req-1" }),
+    submit: jest.fn().mockResolvedValue({
+      requestId: "req-1",
+      sentPrompt: "sent prompt",
+    }),
     poll,
     cancel: jest.fn().mockResolvedValue(undefined),
   };
@@ -170,6 +174,9 @@ describe("GenerationWorkerService", () => {
     const repository = repositoryFake();
     repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
     repository.findForProcessing.mockResolvedValue(claimedJob());
+    const outputDigest = createHash("sha256")
+      .update(Buffer.from("png-bytes"))
+      .digest("hex");
     const provider = providerMock([
       {
         status: "completed",
@@ -179,6 +186,8 @@ describe("GenerationWorkerService", () => {
             contentType: "image/png",
             width: 1024,
             height: 1024,
+            sha256: outputDigest,
+            downloadHeaders: { authorization: "Bearer flux-secret" },
           },
           {
             url: "https://provider.local/b.png",
@@ -197,6 +206,7 @@ describe("GenerationWorkerService", () => {
     expect(repository.recordProviderSubmission).toHaveBeenCalledWith({
       jobId: "job-1",
       providerRequestId: "req-1",
+      sentPrompt: "sent prompt",
       provider: "test-provider",
       paramsJson: {
         _shot: {
@@ -209,14 +219,32 @@ describe("GenerationWorkerService", () => {
     });
     // 레퍼런스는 업로드 확정본만, negative prompt는 프로필에서 주입
     expect(provider.submit).toHaveBeenCalledWith({
+      idempotencyKey: "job-1",
+      profile: "photoreal_identity_v1",
       prompt: "film photo of a beach",
       negativePrompt: "blurry",
-      referenceImageUrls: ["https://cdn.local/reference.png"],
+      references: [
+        {
+          id: "reference-1",
+          role: "identity",
+          primary: true,
+          url: "https://cdn.local/reference.png",
+        },
+      ],
       candidateCount: 3,
       // 포맷 종횡비는 항상 실린다 — 초안이 없으면 피드 기본값.
       extraParams: { aspect_ratio: "4:5" },
+      metadata: {
+        character_id: "ai-1",
+        generation_job_id: "job-1",
+      },
     });
     expect(downloadBytes).toHaveBeenCalledTimes(2);
+    expect(downloadBytes).toHaveBeenNthCalledWith(
+      1,
+      "https://provider.local/a.png",
+      { authorization: "Bearer flux-secret" },
+    );
     // 후보 두 장을 저장 비용 추정치와 함께 넘긴다.
     expect(repository.persistSuccess).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -230,6 +258,34 @@ describe("GenerationWorkerService", () => {
       }),
     );
     expect(repository.persistSuccess.mock.calls[0][0].files).toHaveLength(2);
+  });
+
+  it("rejects a generated output whose SHA-256 digest does not match", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(claimedJob());
+    const provider = providerMock([
+      {
+        status: "completed",
+        images: [
+          {
+            url: "https://provider.local/a.png",
+            sha256: "0".repeat(64),
+          },
+        ],
+      },
+    ]);
+    const { service } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(repository.persistSuccess).not.toHaveBeenCalled();
+    expect(repository.requeueForRetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: "job-1",
+        message: "generated media SHA-256 verification failed",
+      }),
+    );
   });
 
   it("uses the configured candidate count for legacy jobs", async () => {
@@ -525,7 +581,13 @@ describe("GenerationWorkerService", () => {
 
     expect(edit.submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        referenceImageUrls: ["https://cdn.local/reference.png"],
+        references: [
+          expect.objectContaining({
+            role: "identity",
+            primary: true,
+            url: "https://cdn.local/reference.png",
+          }),
+        ],
       }),
     );
     expect(t2i.submit).not.toHaveBeenCalled();
@@ -560,6 +622,7 @@ describe("GenerationWorkerService", () => {
     expect(repository.recordProviderSubmission).toHaveBeenCalledWith({
       jobId: "job-1",
       providerRequestId: "req-1",
+      sentPrompt: "sent prompt",
       provider: "fal:new-t2i-model",
       paramsJson: {
         _shot: {
@@ -794,9 +857,16 @@ describe("GenerationWorkerService", () => {
     // 기획 LLM이 고른 순서만 유지한다. r2/r4는 미선택이라 제외.
     expect(provider.submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        referenceImageUrls: [
-          "https://cdn.local/r3.png",
-          "https://cdn.local/r1.png",
+        references: [
+          expect.objectContaining({
+            id: "r3",
+            primary: true,
+            url: "https://cdn.local/r3.png",
+          }),
+          expect.objectContaining({
+            id: "r1",
+            url: "https://cdn.local/r1.png",
+          }),
         ],
       }),
     );
@@ -840,7 +910,10 @@ describe("GenerationWorkerService", () => {
     await service.tick();
 
     expect(provider.submit).toHaveBeenCalledWith(
-      expect.objectContaining({ referenceImageUrls: [] }),
+      expect.objectContaining({
+        profile: "photoreal_scene_v1",
+        references: [],
+      }),
     );
   });
 
@@ -896,7 +969,14 @@ describe("GenerationWorkerService", () => {
     expect(repository.markFailed).not.toHaveBeenCalled();
     expect(provider.submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        referenceImageUrls: ["https://cdn.local/desk.png"],
+        profile: "photoreal_scene_v1",
+        references: [
+          expect.objectContaining({
+            id: "desk-ref-1",
+            role: "background",
+            url: "https://cdn.local/desk.png",
+          }),
+        ],
       }),
     );
   });
@@ -995,7 +1075,14 @@ describe("GenerationWorkerService", () => {
 
     expect(provider.submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        referenceImageUrls: ["https://cdn.local/reference.png"],
+        profile: "photoreal_scene_v1",
+        references: [
+          expect.objectContaining({
+            id: "reference-1",
+            role: "outfit",
+            url: "https://cdn.local/reference.png",
+          }),
+        ],
         negativePrompt: "blurry, no visible logos",
       }),
     );
@@ -1015,6 +1102,9 @@ describe("GenerationWorkerService", () => {
         draft: {
           location: {
             negativePrompt: "neon gym",
+            // 빈 공간 레퍼런스를 만들 때만 쓰는 금지어 — 컷 요청에 섞이면
+            // 인물이 나와야 하는 컷과 정면 모순이라 목록 전체가 무시된다.
+            referenceNegativePrompt: "people, faces, silhouettes",
             references: [
               {
                 mediaId: "gym-ref-1",
@@ -1038,8 +1128,45 @@ describe("GenerationWorkerService", () => {
 
     expect(provider.submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        referenceImageUrls: ["https://cdn.local/gym-ref-1.png"],
+        references: [
+          expect.objectContaining({
+            id: "gym-ref-1",
+            role: "background",
+            url: "https://cdn.local/gym-ref-1.png",
+          }),
+        ],
         negativePrompt: "blurry, neon gym",
+      }),
+    );
+    const sent = provider.submit.mock.calls.at(-1)?.[0] as {
+      negativePrompt?: string;
+    };
+    expect(sent.negativePrompt).not.toContain("people");
+    expect(sent.negativePrompt).not.toContain("faces");
+  });
+
+  // 프로바이더가 네거티브를 본문 뒤에 합치는 모델이 있어 "저장본 ≠ 전송본"이었다.
+  // 회귀하면 실제로 무엇이 나갔는지 다시 못 보게 되고, 연구 로그의 1차 증거가
+  // 또 틀려진다(관측 4 부수 발견).
+  it("stores the prompt the provider actually sent", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(claimedJob());
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    provider.submit.mockResolvedValue({
+      requestId: "req-1",
+      sentPrompt: "film photo of a beach Do not include: blurry.",
+    });
+    const { service } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(repository.recordProviderSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: "job-1",
+        sentPrompt: "film photo of a beach Do not include: blurry.",
       }),
     );
   });
@@ -1069,7 +1196,11 @@ describe("GenerationWorkerService", () => {
     expect(sign).toHaveBeenCalledWith("pod/reference/a.png");
     expect(provider.submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        referenceImageUrls: ["https://cdn.local/reference.png?signed=1"],
+        references: [
+          expect.objectContaining({
+            url: "https://cdn.local/reference.png?signed=1",
+          }),
+        ],
       }),
     );
   });

@@ -7,9 +7,12 @@ export type SettingSource = "db" | "env" | "none";
 export type SecretStatus = { set: boolean; last4?: string };
 
 export type GenerationSettingsView = {
+  imageProvider: "fal" | "opod-flux";
   falApiKey: SecretStatus;
   falImageModel: string | null;
   falImageT2iModel: string | null;
+  opodFluxApiBaseUrl: string | null;
+  opodFluxApiKey: SecretStatus;
   llmApiUrl: string | null;
   llmApiKey: SecretStatus;
   llmModel: string | null;
@@ -52,9 +55,12 @@ export type GenerationSettingsView = {
     editProvider: string | null;
     plannerProvider: string;
     sources: {
+      provider: SettingSource;
       apiKey: SettingSource;
       editModel: SettingSource;
       t2iModel: SettingSource;
+      opodFluxApiBaseUrl: SettingSource;
+      opodFluxApiKey: SettingSource;
     };
     plannerSources: {
       apiUrl: SettingSource;
@@ -96,9 +102,12 @@ export type GenerationSettingsView = {
 // 누락 = 유지, null = 삭제(상위 값 복귀), 값 = 저장.
 // UpdateGenerationSettingsDto의 시맨틱을 그대로 따른다.
 export type GenerationSettingsUpdate = {
+  imageProvider?: "fal" | "opod-flux" | null;
   falApiKey?: string | null;
   falImageModel?: string | null;
   falImageT2iModel?: string | null;
+  opodFluxApiBaseUrl?: string | null;
+  opodFluxApiKey?: string | null;
   llmApiUrl?: string | null;
   llmApiKey?: string | null;
   llmModel?: string | null;
@@ -144,7 +153,10 @@ export function updateGenerationSettings(
 
 export function testGenerationSettings(body: {
   target: ConnectionTestTarget;
+  imageProvider?: "fal" | "opod-flux";
   falApiKey?: string;
+  opodFluxApiBaseUrl?: string;
+  opodFluxApiKey?: string;
   llmApiUrl?: string;
   llmApiKey?: string;
   llmModel?: string;

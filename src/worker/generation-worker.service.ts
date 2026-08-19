@@ -4,6 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import { AppConfig } from "../domain/config/app-config";
 import { GenerationJobRepository } from "./generation-job.repository";
 import {
@@ -15,6 +16,7 @@ import {
   ImageGenerationProvider,
   ImageGenerationProviders,
   ImageGenerationRequest,
+  ImageGenerationRequestError,
 } from "./image-generation.provider";
 import { errorMessage, isRecord } from "./value-utils";
 import {
@@ -119,6 +121,7 @@ type ClaimedJob = {
   provider: string | null;
   providerRequestId: string | null;
   originJobId: string | null;
+  draftId: string | null;
   paramsJson: unknown;
   character: {
     visualProfile: {
@@ -202,7 +205,10 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly resolveEnabled: () => Promise<boolean>,
     private readonly config: WorkerConfig,
     private readonly sleep: (ms: number) => Promise<void> = defaultSleep,
-    private readonly downloadBytes: (url: string) => Promise<Buffer> = download,
+    private readonly downloadBytes: (
+      url: string,
+      headers?: Record<string, string>,
+    ) => Promise<Buffer> = download,
     // 자사 S3 레퍼런스를 프로바이더가 받을 수 있게 서명한다(버킷 비공개 유지).
     // null이면 원본 URL 그대로 전송 (공개 버킷/외부 URL 전제).
     private readonly signReferenceUrl: ReferenceUrlSigner | null = null,
@@ -371,9 +377,13 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       const request = await this.buildRequest(job);
       const providers = await this.resolveProviders();
       const provider =
-        request.referenceImageUrls.length > 0 ? providers.edit : providers.t2i;
+        request.references.length > 0 ? providers.edit : providers.t2i;
       const targetModelId = shotTargetModelId(job.paramsJson);
-      if (targetModelId && provider.name !== `fal:${targetModelId}`) {
+      if (
+        targetModelId &&
+        provider.name.startsWith("fal:") &&
+        provider.name !== `fal:${targetModelId}`
+      ) {
         this.logger.warn(
           `Job ${job.id}: planned target model ${targetModelId} does not match resolved provider ${provider.name}`,
         );
@@ -418,7 +428,9 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
         providerRequestId: requestId,
         provider: provider.name,
         paramsJson,
+        sentPrompt: submitted.sentPrompt,
       });
+      job.prompt = submitted.sentPrompt || job.prompt;
     }
 
     const deadline = Date.now() + this.config.providerTimeoutMs;
@@ -510,7 +522,9 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     // 항상 체형 레퍼런스를 묶어서 이 가드가 우연히 안 걸렸을 뿐이다.
     const requiresIdentity = v3
       ? shotIdentityRequired(job.paramsJson)
-      : characterVisible === true;
+      : characterVisible === true ||
+        (characterVisible === undefined &&
+          ordered.some((reference) => identityIds.has(reference.mediaId)));
     try {
       assertVisibleCharacterHasReference(
         requiresIdentity,
@@ -551,6 +565,10 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       ...(isRecord(job.paramsJson) ? job.paramsJson : {}),
     });
     const request: ImageGenerationRequest = {
+      idempotencyKey: job.id,
+      profile: requiresIdentity
+        ? "photoreal_identity_v1"
+        : "photoreal_scene_v1",
       prompt: job.prompt,
       negativePrompt:
         [
@@ -563,10 +581,34 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
           .map((value) => value?.trim())
           .filter(Boolean)
           .join(", ") || undefined,
-      referenceImageUrls,
+      references: ordered
+        .slice(0, MAX_REFERENCE_IMAGES)
+        .map((reference, index) => {
+          const identity = identityIds.has(reference.mediaId);
+          const earlierIdentity = ordered
+            .slice(0, index)
+            .some((candidate) => identityIds.has(candidate.mediaId));
+          return {
+            id: reference.mediaId,
+            role: identity
+              ? requiresIdentity
+                ? ("identity" as const)
+                : ("outfit" as const)
+              : ("background" as const),
+            ...(identity && requiresIdentity && !earlierIdentity
+              ? { primary: true }
+              : {}),
+            url: referenceImageUrls[index],
+          };
+        }),
       candidateCount: job.candidateCount ?? this.config.candidateCount,
       extraParams:
         Object.keys(extraParams).length > 0 ? extraParams : undefined,
+      metadata: {
+        character_id: job.characterId,
+        generation_job_id: job.id,
+        ...(job.draftId ? { draft_id: job.draftId } : {}),
+      },
     };
     this.requestInputMediaIds.set(
       request,
@@ -593,7 +635,14 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       byteSize: number;
     }[] = [];
     for (const image of result.images) {
-      const bytes = await this.downloadBytes(image.url);
+      const bytes = await this.downloadBytes(image.url, image.downloadHeaders);
+      if (
+        image.sha256 &&
+        createHash("sha256").update(bytes).digest("hex") !==
+          image.sha256.toLowerCase()
+      ) {
+        throw new Error("generated media SHA-256 verification failed");
+      }
       const contentType = image.contentType ?? "image/png";
       const file = await this.store({
         bytes,
@@ -628,7 +677,8 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     // 입력 검증 실패(permanent)는 프로바이더 장애가 아니다 — 재시도해도 항상
     // 같은 결과이므로 즉시 실패 처리하고, 서킷브레이커에도 집계하지 않는다.
     const permanent =
-      error instanceof ProviderJobFailedError && error.permanent;
+      (error instanceof ProviderJobFailedError && error.permanent) ||
+      (error instanceof ImageGenerationRequestError && error.permanent);
     if (!permanent) {
       this.consecutiveFailures += 1;
       if (this.consecutiveFailures >= this.config.circuitBreakerThreshold) {
@@ -657,6 +707,8 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       message,
       // 프로바이더가 잡을 거부한 경우에만 requestId를 버리고 재제출한다.
       // transient 오류는 requestId를 유지해 다음 시도가 폴링을 이어받는다.
+      // submit 단계의 영구 입력 오류에는 requestId가 아직 없다. transient
+      // submit 오류는 같은 idempotency key로 다시 시도한다.
       clearProviderRequestId: error instanceof ProviderJobFailedError,
     });
   }
@@ -665,11 +717,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     job: ClaimedJob,
     error: unknown,
   ): Promise<void> {
-    if (
-      !this.llmLogs ||
-      !job.provider?.startsWith("fal:") ||
-      !job.providerRequestId
-    ) {
+    if (!this.llmLogs || !job.providerRequestId) {
       return;
     }
     try {
@@ -716,8 +764,14 @@ export function startOfKstDay(now: Date = new Date()): Date {
   return new Date(kst.getTime() - kstOffsetMs);
 }
 
-async function download(url: string): Promise<Buffer> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+async function download(
+  url: string,
+  headers?: Record<string, string>,
+): Promise<Buffer> {
+  const response = await fetch(url, {
+    ...(headers ? { headers } : {}),
+    signal: AbortSignal.timeout(60_000),
+  });
   if (!response.ok) {
     throw new Error(`generated media download failed (${response.status})`);
   }

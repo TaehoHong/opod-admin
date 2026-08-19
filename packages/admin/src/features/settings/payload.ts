@@ -1,9 +1,12 @@
 import type { ConnectionTestTarget, GenerationSettingsUpdate } from "./api";
 
 export type SettingsFormValues = {
+  imageProvider: "fal" | "opod-flux";
   falApiKey: string;
   falImageModel: string;
   falImageT2iModel: string;
+  opodFluxApiBaseUrl: string;
+  opodFluxApiKey: string;
   llmApiKey: string;
   llmApiUrl: string;
   llmModel: string;
@@ -28,9 +31,12 @@ export function toSettingsUpdate(
   const secret = (field: keyof GenerationSettingsUpdate, value: string) =>
     value.trim() ? { [field]: value.trim() } : {};
   return {
+    imageProvider: values.imageProvider,
     ...secret("falApiKey", values.falApiKey),
     falImageModel: values.falImageModel.trim() || null,
     falImageT2iModel: values.falImageT2iModel.trim() || null,
+    opodFluxApiBaseUrl: values.opodFluxApiBaseUrl.trim() || null,
+    ...secret("opodFluxApiKey", values.opodFluxApiKey),
     ...secret("llmApiKey", values.llmApiKey),
     llmApiUrl: values.llmApiUrl.trim() || null,
     llmModel: values.llmModel.trim() || null,
@@ -54,14 +60,31 @@ export function toConnectionTestBody(
   values: SettingsFormValues,
 ): {
   target: ConnectionTestTarget;
+  imageProvider?: "fal" | "opod-flux";
   falApiKey?: string;
+  opodFluxApiBaseUrl?: string;
+  opodFluxApiKey?: string;
   llmApiUrl?: string;
   llmApiKey?: string;
   llmModel?: string;
 } {
   if (target === "image") {
+    if (values.imageProvider === "opod-flux") {
+      const opodFluxApiBaseUrl = values.opodFluxApiBaseUrl.trim();
+      const opodFluxApiKey = values.opodFluxApiKey.trim();
+      return {
+        target,
+        imageProvider: "opod-flux",
+        ...(opodFluxApiBaseUrl ? { opodFluxApiBaseUrl } : {}),
+        ...(opodFluxApiKey ? { opodFluxApiKey } : {}),
+      };
+    }
     const falApiKey = values.falApiKey.trim();
-    return { target, ...(falApiKey ? { falApiKey } : {}) };
+    return {
+      target,
+      imageProvider: "fal",
+      ...(falApiKey ? { falApiKey } : {}),
+    };
   }
   const source =
     target === "chat"

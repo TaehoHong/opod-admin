@@ -46,8 +46,15 @@ docs/api/admin-settings.md를 따른다.
   전달한다.
 - provider 설정은 DB의 관리자 설정을 우선하고 환경 변수를 fallback으로
   사용한다.
+- 실행 provider는 `fal` 또는 `opod-flux`를 명시적으로 선택한다. opod-flux는
+  `GenerationJob.id`를 idempotency key로 쓰고 `generation_id`를 기존
+  providerRequestId에 저장해 durable polling을 이어간다. 상세 매핑은
+  `docs/opod-flux-v1-integration.md`가 소유한다.
 - provider의 임시 URL은 영구 저장하지 않는다. 결과를 소유한 스토리지로
   옮기고 Media.uploadedAt을 확정해야 게시할 수 있다.
+- opod-flux output은 Bearer 인증으로 다운로드하고 SHA-256을 검증한 뒤에만
+  영구 저장한다. terminal provider 실패의 재시도는 새 idempotency key가
+  필요하므로 같은 잡의 자동 재제출이 아니라 기존 regenerate가 만든 새 잡을 쓴다.
 - 한 cut의 여러 후보는 GenerationJobOutput으로 저장하며, 선택 결과만 최종
   출력으로 연결한다.
 - 빌드 대상 모델·기획 레퍼런스와 실제 provider·해결 레퍼런스가 다르면

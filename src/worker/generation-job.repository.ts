@@ -178,11 +178,15 @@ export class GenerationJobRepository {
   }
 
   // 제출 직후 기록해야 크래시 후 재수용 시 이중 제출을 막는다.
+  // sentPrompt를 prompt 컬럼에 덮어써 **DB에 남는 것이 곧 전송본**이 되게 한다.
+  // 프로바이더가 네거티브를 본문 뒤에 합치는 모델이 있어, 이전에는 저장본과
+  // 전송본이 달랐고 화면·연구 로그가 그 차이를 못 봤다(관측 4 부수 발견).
   async recordProviderSubmission(input: {
     jobId: string;
     providerRequestId: string;
     provider: string;
     paramsJson: unknown;
+    sentPrompt?: string;
   }): Promise<void> {
     await this.prisma.generationJob.updateMany({
       where: { id: input.jobId, status: "running" },
@@ -190,6 +194,7 @@ export class GenerationJobRepository {
         providerRequestId: input.providerRequestId,
         provider: input.provider,
         paramsJson: input.paramsJson as Prisma.InputJsonValue,
+        ...(input.sentPrompt?.trim() ? { prompt: input.sentPrompt } : {}),
       },
     });
   }

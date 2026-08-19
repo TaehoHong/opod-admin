@@ -13,9 +13,12 @@ function settingsView(
   overrides: Partial<GenerationSettingsView["worker"]> = {},
 ): GenerationSettingsView {
   return {
+    imageProvider: "fal",
     falApiKey: { set: false },
     falImageModel: null,
     falImageT2iModel: null,
+    opodFluxApiBaseUrl: null,
+    opodFluxApiKey: { set: false },
     llmApiUrl: null,
     llmApiKey: { set: false },
     llmModel: null,
@@ -52,7 +55,14 @@ function settingsView(
       t2iProvider: null,
       editProvider: null,
       plannerProvider: "unconfigured",
-      sources: { apiKey: "none", editModel: "none", t2iModel: "none" },
+      sources: {
+        provider: "none",
+        apiKey: "none",
+        editModel: "none",
+        t2iModel: "none",
+        opodFluxApiBaseUrl: "none",
+        opodFluxApiKey: "none",
+      },
       plannerSources: { apiUrl: "none", apiKey: "none", model: "none" },
     },
     aspectRatios: {

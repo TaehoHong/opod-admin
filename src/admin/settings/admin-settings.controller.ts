@@ -63,12 +63,21 @@ export class AdminSettingsController {
     // 토글은 API에서 boolean, 저장은 문자열이다. 감사 로그도 이 정규화된
     // update를 그대로 봐야 "무엇이 바뀌었는지"가 저장값과 일치한다.
     const update = {
+      ...("imageProvider" in body
+        ? { imageProvider: body.imageProvider ?? null }
+        : {}),
       ...("falApiKey" in body ? { falApiKey: body.falApiKey ?? null } : {}),
       ...("falImageModel" in body
         ? { falImageModel: body.falImageModel ?? null }
         : {}),
       ...("falImageT2iModel" in body
         ? { falImageT2iModel: body.falImageT2iModel ?? null }
+        : {}),
+      ...("opodFluxApiBaseUrl" in body
+        ? { opodFluxApiBaseUrl: body.opodFluxApiBaseUrl ?? null }
+        : {}),
+      ...("opodFluxApiKey" in body
+        ? { opodFluxApiKey: body.opodFluxApiKey ?? null }
         : {}),
       ...("llmApiUrl" in body ? { llmApiUrl: body.llmApiUrl ?? null } : {}),
       ...("llmApiKey" in body ? { llmApiKey: body.llmApiKey ?? null } : {}),
@@ -155,11 +164,16 @@ export class AdminSettingsController {
     ]);
     const worker = this.config.worker;
     return {
+      imageProvider: resolved.provider ?? "fal",
       falApiKey: saved.falApiKey
         ? { set: true, last4: saved.falApiKey.slice(-4) }
         : { set: false },
       falImageModel: saved.falImageModel ?? null,
       falImageT2iModel: saved.falImageT2iModel ?? null,
+      opodFluxApiBaseUrl: saved.opodFluxApiBaseUrl ?? null,
+      opodFluxApiKey: saved.opodFluxApiKey
+        ? { set: true, last4: saved.opodFluxApiKey.slice(-4) }
+        : { set: false },
       llmApiUrl: saved.llmApiUrl ?? null,
       llmApiKey: saved.llmApiKey
         ? { set: true, last4: saved.llmApiKey.slice(-4) }
