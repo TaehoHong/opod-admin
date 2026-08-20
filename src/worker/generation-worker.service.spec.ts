@@ -597,22 +597,24 @@ describe("GenerationWorkerService", () => {
     expect(provider.cancel).toHaveBeenCalledWith("req-1");
   });
 
-  it("does not cancel a provider job that is already running when local polling times out", async () => {
+  it("keeps polling a provider job that is already running past the local deadline", async () => {
     const repository = repositoryFake();
     repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
     repository.findForProcessing.mockResolvedValue(
       claimedJob({ attemptCount: 1 }),
     );
     const provider = providerMock([]);
-    provider.poll.mockResolvedValue({
-      status: "pending",
-      progress: {
-        status: "running",
-        phase: "generating",
-        stage: "base",
-        progress: 0,
-      },
-    });
+    provider.poll
+      .mockResolvedValueOnce({
+        status: "pending",
+        progress: {
+          status: "running",
+          phase: "generating",
+          stage: "base",
+          progress: 0,
+        },
+      })
+      .mockResolvedValueOnce({ status: "completed", images: [] });
     const { service } = makeService(repository, provider, {
       providerTimeoutMs: 0,
     });
@@ -620,11 +622,9 @@ describe("GenerationWorkerService", () => {
     await service.tick();
 
     expect(provider.cancel).not.toHaveBeenCalled();
-    expect(repository.requeueForRetry).toHaveBeenCalledWith({
-      jobId: "job-1",
-      message: expect.stringContaining("timed out"),
-      clearProviderRequestId: false,
-    });
+    expect(provider.poll).toHaveBeenCalledTimes(2);
+    expect(repository.requeueForRetry).not.toHaveBeenCalled();
+    expect(repository.persistSuccess).toHaveBeenCalled();
   });
 
   it("fails an explicit character-visible shot without usable references before submission", async () => {
