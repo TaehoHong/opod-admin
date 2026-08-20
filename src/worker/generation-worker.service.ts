@@ -436,6 +436,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     }
 
     let lastProgress = "";
+    let latestProviderStatus: ImageGenerationProgress["status"] | undefined;
     let progressWrites = Promise.resolve();
     const persistProgress = (progress: ImageGenerationProgress) => {
       const serialized = JSON.stringify(progress);
@@ -468,10 +469,20 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
             result.permanent === true,
           );
         }
-        if (result.progress) persistProgress(result.progress);
+        if (result.progress) {
+          latestProviderStatus = result.progress.status;
+          persistProgress(result.progress);
+        }
         if (Date.now() >= deadline) {
-          // 아직 큐에서 시작 전이라면 과금 전에 취소를 시도한다 (베스트에포트).
-          await provider.cancel?.(requestId);
+          // 이미 생성 중인 원격 작업은 다음 시도가 같은 requestId로 폴링을
+          // 이어받아야 한다. 아직 시작 여부를 모르는 요청과 queued 작업만
+          // 과금 전에 취소를 시도한다 (베스트에포트).
+          if (
+            latestProviderStatus === undefined ||
+            latestProviderStatus === "queued"
+          ) {
+            await provider.cancel?.(requestId);
+          }
           throw new Error(
             `provider polling timed out after ${this.config.providerTimeoutMs}ms`,
           );
@@ -593,7 +604,10 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       ...(isRecord(job.paramsJson) ? job.paramsJson : {}),
     });
     const request: ImageGenerationRequest = {
-      idempotencyKey: job.id,
+      // 프로바이더가 terminal 실패를 반환해 requestId를 버린 재시도는 새
+      // 작업이어야 한다. 잡 id만 쓰면 서버의 멱등성 캐시가 취소된 작업을
+      // 영구 재생하므로 claim 횟수를 키에 포함한다.
+      idempotencyKey: `${job.id}-attempt-${job.attemptCount}`,
       profile: requiresIdentity
         ? "photoreal_identity_v1"
         : "photoreal_scene_v1",
