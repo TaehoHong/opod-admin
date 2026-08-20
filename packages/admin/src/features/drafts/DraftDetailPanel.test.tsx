@@ -87,6 +87,55 @@ describe("draft generation trace", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "승인" })).not.toBeDisabled();
   });
+
+  it("shows live opod-flux progress for a running shot", async () => {
+    server.use(
+      http.get("/api/admin/v1/drafts/draft-1", () =>
+        HttpResponse.json({
+          id: "draft-1",
+          characterId: "character-1",
+          draftType: "post",
+          contentType: "feed",
+          caption: "노을 산책",
+          hashtags: [],
+          status: "generating",
+          attemptCount: 1,
+          conceptJson: { mode: "manual", plan: { shots: [{}] } },
+          shots: [
+            {
+              sortOrder: 0,
+              jobId: "job-1",
+              status: "running",
+              prompt: "a quiet sunset walk",
+              provider: "opod-flux:v1",
+              providerProgress: {
+                status: "running",
+                phase: "generating",
+                stage: "base",
+                progress: 0,
+                updatedAt: "2026-08-20T01:25:10.223Z",
+              },
+              outputs: [],
+            },
+          ],
+          createdAt: "2026-08-20T01:23:18.873Z",
+          updatedAt: "2026-08-20T01:25:10.223Z",
+        }),
+      ),
+    );
+
+    render(
+      <AppProviders>
+        <DraftDetailPanel draftId="draft-1" />
+      </AppProviders>,
+    );
+
+    expect(await screen.findByText("기본 생성 중")).toBeInTheDocument();
+    expect(screen.getByText("0%")).toBeInTheDocument();
+    expect(
+      screen.getByRole("progressbar", { name: "컷 이미지 생성 진행률" }),
+    ).toHaveAttribute("aria-valuenow", "0");
+  });
 });
 
 function draftWithCandidate(filterPreset: string) {

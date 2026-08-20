@@ -314,6 +314,45 @@ describe("DraftsService", () => {
     });
   });
 
+  it("returns live provider progress for a running draft shot", async () => {
+    const repository = repositoryFake({
+      findDraft: jest.fn().mockResolvedValue(draftRow),
+      findDraftJobs: jest.fn().mockResolvedValue([
+        {
+          ...selectedJob,
+          status: "running",
+          provider: "opod-flux:v1",
+          paramsJson: {
+            _providerProgress: {
+              status: "running",
+              phase: "generating",
+              stage: "base",
+              progress: 0,
+              updatedAt: "2026-08-20T01:25:10.223Z",
+            },
+          },
+          outputs: [],
+        },
+      ]),
+    });
+    const service = makeService(repository);
+
+    await expect(service.getDraft("draft-1")).resolves.toMatchObject({
+      shots: [
+        {
+          jobId: "job-1",
+          providerProgress: {
+            status: "running",
+            phase: "generating",
+            stage: "base",
+            progress: 0,
+            updatedAt: "2026-08-20T01:25:10.223Z",
+          },
+        },
+      ],
+    });
+  });
+
   it("returns planned and actual generation trace without hiding missing references", async () => {
     const repository = repositoryFake({
       findDraft: jest.fn().mockResolvedValue(draftRow),
