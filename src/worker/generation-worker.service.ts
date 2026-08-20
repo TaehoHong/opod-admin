@@ -13,6 +13,7 @@ import {
 } from "./generated-media-store";
 import {
   GeneratedImage,
+  ImageGenerationProgress,
   ImageGenerationProvider,
   ImageGenerationProviders,
   ImageGenerationRequest,
@@ -95,6 +96,7 @@ function withShotExecution(
   execution: ShotExecution,
 ): Record<string, unknown> {
   const params = isRecord(paramsJson) ? { ...paramsJson } : {};
+  delete params._providerProgress;
   const shot = isRecord(params._shot) ? { ...params._shot } : {};
   return { ...params, _shot: { ...shot, execution } };
 }
@@ -433,27 +435,53 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       job.prompt = submitted.sentPrompt || job.prompt;
     }
 
+    let lastProgress = "";
+    let progressWrites = Promise.resolve();
+    const persistProgress = (progress: ImageGenerationProgress) => {
+      const serialized = JSON.stringify(progress);
+      if (serialized === lastProgress) return;
+      lastProgress = serialized;
+      progressWrites = progressWrites
+        .then(() =>
+          this.jobs.recordProviderProgress({ jobId: job.id, progress }),
+        )
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `Job ${job.id}: provider progress could not be persisted: ${errorMessage(error)}`,
+          );
+        });
+    };
+    const unsubscribe = provider.subscribeProgress?.(
+      requestId,
+      persistProgress,
+    );
     const deadline = Date.now() + this.config.providerTimeoutMs;
-    for (;;) {
-      const result = await provider.poll(requestId);
-      if (result.status === "completed") {
-        return result;
+    try {
+      for (;;) {
+        const result = await provider.poll(requestId);
+        if (result.status === "completed") {
+          return result;
+        }
+        if (result.status === "failed") {
+          throw new ProviderJobFailedError(
+            result.errorMessage,
+            result.permanent === true,
+          );
+        }
+        if (result.progress) persistProgress(result.progress);
+        if (Date.now() >= deadline) {
+          // 아직 큐에서 시작 전이라면 과금 전에 취소를 시도한다 (베스트에포트).
+          await provider.cancel?.(requestId);
+          throw new Error(
+            `provider polling timed out after ${this.config.providerTimeoutMs}ms`,
+          );
+        }
+        await this.extendLease(job.id);
+        await this.sleep(this.config.providerPollIntervalMs);
       }
-      if (result.status === "failed") {
-        throw new ProviderJobFailedError(
-          result.errorMessage,
-          result.permanent === true,
-        );
-      }
-      if (Date.now() >= deadline) {
-        // 아직 큐에서 시작 전이라면 과금 전에 취소를 시도한다 (베스트에포트).
-        await provider.cancel?.(requestId);
-        throw new Error(
-          `provider polling timed out after ${this.config.providerTimeoutMs}ms`,
-        );
-      }
-      await this.extendLease(job.id);
-      await this.sleep(this.config.providerPollIntervalMs);
+    } finally {
+      unsubscribe?.();
+      await progressWrites;
     }
   }
 
@@ -635,7 +663,9 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       byteSize: number;
     }[] = [];
     for (const image of result.images) {
-      const bytes = await this.downloadBytes(image.url, image.downloadHeaders);
+      const bytes = image.dataBase64
+        ? decodeBase64Image(image.dataBase64)
+        : await this.downloadBytes(image.url, image.downloadHeaders);
       if (
         image.sha256 &&
         createHash("sha256").update(bytes).digest("hex") !==
@@ -776,6 +806,20 @@ async function download(
     throw new Error(`generated media download failed (${response.status})`);
   }
   return Buffer.from(await response.arrayBuffer());
+}
+
+function decodeBase64Image(value: string): Buffer {
+  const normalized = value.replace(/\s/g, "");
+  if (
+    !normalized ||
+    normalized.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      normalized,
+    )
+  ) {
+    throw new Error("generated media contains invalid base64 data");
+  }
+  return Buffer.from(normalized, "base64");
 }
 
 function defaultSleep(ms: number): Promise<void> {

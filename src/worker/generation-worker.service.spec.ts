@@ -74,6 +74,7 @@ type RepositoryFake = {
   sumCostSince: jest.Mock;
   findForProcessing: jest.Mock;
   recordProviderSubmission: jest.Mock;
+  recordProviderProgress: jest.Mock;
   extendLease: jest.Mock;
   persistSuccess: jest.Mock;
   recordActionLog: jest.Mock;
@@ -92,6 +93,7 @@ function repositoryFake(): RepositoryFake {
     sumCostSince: jest.fn().mockResolvedValue(0),
     findForProcessing: jest.fn(),
     recordProviderSubmission: jest.fn().mockResolvedValue(undefined),
+    recordProviderProgress: jest.fn().mockResolvedValue(undefined),
     extendLease: jest.fn().mockResolvedValue(undefined),
     persistSuccess: jest.fn().mockResolvedValue(undefined),
     recordActionLog: jest.fn().mockResolvedValue(undefined),
@@ -260,6 +262,48 @@ describe("GenerationWorkerService", () => {
     expect(repository.persistSuccess.mock.calls[0][0].files).toHaveLength(2);
   });
 
+  it("persists live provider progress while the generation is running", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(claimedJob());
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const unsubscribe = jest.fn();
+    (
+      provider as unknown as {
+        subscribeProgress: (
+          requestId: string,
+          listener: (progress: unknown) => void,
+        ) => () => void;
+      }
+    ).subscribeProgress = jest.fn((_requestId, listener) => {
+      listener({
+        status: "running",
+        phase: "generating",
+        stage: "face",
+        progress: 0.58,
+        updatedAt: "2026-08-20T10:00:20Z",
+      });
+      return unsubscribe;
+    });
+    const { service } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(repository.recordProviderProgress).toHaveBeenCalledWith({
+      jobId: "job-1",
+      progress: {
+        status: "running",
+        phase: "generating",
+        stage: "face",
+        progress: 0.58,
+        updatedAt: "2026-08-20T10:00:20Z",
+      },
+    });
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a generated output whose SHA-256 digest does not match", async () => {
     const repository = repositoryFake();
     repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
@@ -286,6 +330,35 @@ describe("GenerationWorkerService", () => {
         message: "generated media SHA-256 verification failed",
       }),
     );
+  });
+
+  it("stores SSE image bytes without downloading the output URL again", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(claimedJob());
+    const bytes = Buffer.from("streamed-image");
+    const provider = providerMock([
+      {
+        status: "completed",
+        images: [
+          {
+            url: "https://provider.local/a.png",
+            contentType: "image/png",
+            dataBase64: bytes.toString("base64"),
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+          },
+        ],
+      },
+    ]);
+    const { service, store, downloadBytes } = makeService(repository, provider);
+
+    await service.tick();
+
+    expect(downloadBytes).not.toHaveBeenCalled();
+    expect(store).toHaveBeenCalledWith(
+      expect.objectContaining({ bytes, contentType: "image/png" }),
+    );
+    expect(repository.persistSuccess).toHaveBeenCalledTimes(1);
   });
 
   it("uses the configured candidate count for legacy jobs", async () => {

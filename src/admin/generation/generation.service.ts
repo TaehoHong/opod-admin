@@ -19,6 +19,7 @@ import {
   localImagePromptBuilder,
   targetModelIdForShot,
 } from "../../worker/image-prompt-builder";
+import type { ImageGenerationProgress } from "../../worker/image-generation.provider";
 import { randomUUID } from "node:crypto";
 import {
   GenerationParams,
@@ -63,6 +64,7 @@ type GenerationJob = {
   status: JobStatus;
   outputMediaId?: string;
   provider?: string;
+  providerProgress?: ImageGenerationProgress;
   attemptCount: number;
   // 초안 파이프라인 소속 컷이면 해당 초안 id (추적 링크용).
   draftId?: string;
@@ -661,6 +663,10 @@ export class GenerationService {
 
     const wizard = wizardMetaFromParams(job.paramsJson);
     const aspectRatio = aspectRatioFromParams(job.paramsJson);
+    const providerProgress =
+      job.status === "running"
+        ? providerProgressFromParams(job.paramsJson)
+        : undefined;
 
     return {
       id: job.id,
@@ -678,6 +684,7 @@ export class GenerationService {
       ...(job.outputMediaId ? { outputMediaId: job.outputMediaId } : {}),
       attemptCount: job.attemptCount ?? 0,
       ...(job.provider ? { provider: job.provider } : {}),
+      ...(providerProgress ? { providerProgress } : {}),
       ...(job.draftId ? { draftId: job.draftId } : {}),
       ...(job.originJobId ? { originJobId: job.originJobId } : {}),
       ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
@@ -704,6 +711,53 @@ export class GenerationService {
       route: referenceImageCount > 0 ? "edit" : "t2i",
     };
   }
+}
+
+function providerProgressFromParams(
+  paramsJson: GenerationParamsValue | null | undefined,
+): ImageGenerationProgress | undefined {
+  if (
+    paramsJson == null ||
+    typeof paramsJson !== "object" ||
+    Array.isArray(paramsJson)
+  ) {
+    return undefined;
+  }
+  const value = (paramsJson as Record<string, unknown>)._providerProgress;
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const progress = value as Record<string, unknown>;
+  const status = progress.status;
+  if (status !== "queued" && status !== "running" && status !== "cancelling") {
+    return undefined;
+  }
+  const phase = progress.phase;
+  const validPhase =
+    phase === "preparing" ||
+    phase === "generating" ||
+    phase === "quality_check" ||
+    phase === "finalizing"
+      ? phase
+      : undefined;
+  const amount =
+    typeof progress.progress === "number" &&
+    Number.isFinite(progress.progress) &&
+    progress.progress >= 0 &&
+    progress.progress <= 1
+      ? progress.progress
+      : undefined;
+  return {
+    status,
+    ...(validPhase ? { phase: validPhase } : {}),
+    ...(typeof progress.stage === "string" || progress.stage === null
+      ? { stage: progress.stage }
+      : {}),
+    ...(amount !== undefined ? { progress: amount } : {}),
+    ...(typeof progress.updatedAt === "string"
+      ? { updatedAt: progress.updatedAt }
+      : {}),
+  };
 }
 
 // paramsJson.aspect_ratio — 잡 단위 종횡비 오버라이드를 꺼낸다.

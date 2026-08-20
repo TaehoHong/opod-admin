@@ -171,6 +171,7 @@ default applies when that draft is confirmed and processed.
 | `outputMediaId`, `outputMedia` | Present only after selecting or otherwise assigning an output |
 | `originJobId` | Present on retry/regeneration descendants |
 | `provider`, `costUsd`, `errorMessage` | Present only when recorded |
+| `providerProgress` | Present while an opod-flux job is running; contains validated `status`, optional `phase`, `stage`, `progress` (0–1), and `updatedAt` from the provider stream |
 
 ## Get a generation job
 

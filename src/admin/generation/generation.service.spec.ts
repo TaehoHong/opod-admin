@@ -578,6 +578,38 @@ describe("GenerationService", () => {
     });
   });
 
+  it("returns validated opod-flux progress for a running image job", async () => {
+    const repository = repositoryFake({
+      findJobDetail: jest.fn().mockResolvedValue(
+        job({
+          status: "running",
+          provider: "opod-flux:v1",
+          paramsJson: {
+            _providerProgress: {
+              status: "running",
+              phase: "generating",
+              stage: "face",
+              progress: 0.58,
+              updatedAt: "2026-08-20T10:00:20Z",
+            },
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      new GenerationService(repository).getJob("job-1"),
+    ).resolves.toMatchObject({
+      providerProgress: {
+        status: "running",
+        phase: "generating",
+        stage: "face",
+        progress: 0.58,
+        updatedAt: "2026-08-20T10:00:20Z",
+      },
+    });
+  });
+
   it("rejects a missing generation job", async () => {
     const repository = repositoryFake({
       findJobDetail: jest.fn().mockResolvedValue(null),

@@ -454,11 +454,10 @@ export class GenerationSettingsService {
             input.opodFluxApiBaseUrl?.trim() || resolved.opodFluxApiBaseUrl;
           const apiKey =
             input.opodFluxApiKey?.trim() || resolved.opodFluxApiKey;
-          if (!apiBaseUrl || !apiKey) {
+          if (!apiBaseUrl) {
             return {
               ok: false,
-              message:
-                "opod-flux URL·API 키가 모두 있어야 테스트할 수 있습니다",
+              message: "opod-flux URL이 있어야 테스트할 수 있습니다",
             };
           }
           let base: URL;
@@ -477,7 +476,7 @@ export class GenerationSettingsService {
           const endpoint = `${base.toString().replace(/\/$/, "")}/generations/gen_connection_test`;
           const execute = () =>
             fetchFn(endpoint, {
-              headers: { authorization: `Bearer ${apiKey}` },
+              headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
               signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
             });
           const response = this.llmLogs
@@ -502,7 +501,12 @@ export class GenerationSettingsService {
               message: `opod-flux 인증 실패 (${response.status})`,
             };
           }
-          return { ok: true, message: "opod-flux 인증 확인" };
+          return {
+            ok: true,
+            message: apiKey
+              ? "opod-flux 인증 확인"
+              : "opod-flux 연결 확인 (인증 헤더 없음)",
+          };
         }
         const apiKey = input.falApiKey?.trim() || resolved.apiKey;
         if (!apiKey) {

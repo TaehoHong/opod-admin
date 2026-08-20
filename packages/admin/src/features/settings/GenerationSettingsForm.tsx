@@ -160,7 +160,7 @@ export function GenerationSettingsForm({
             <>
               <TextInput
                 label="opod-flux API Base URL"
-                placeholder="https://opod-flux.internal/v1"
+                placeholder="https://taeho.taildac41e.ts.net:8850/v1"
                 description={sourceNote(
                   settings.resolved.sources.opodFluxApiBaseUrl,
                 )}
@@ -173,7 +173,7 @@ export function GenerationSettingsForm({
                   placeholder={
                     settings.opodFluxApiKey.set
                       ? "변경할 때만 입력"
-                      : "Bearer API 키"
+                      : "Bearer API 키 (인증 사용 시)"
                   }
                   autoComplete="off"
                   flex={1}
@@ -183,7 +183,7 @@ export function GenerationSettingsForm({
                 <SecretStatusBadge
                   status={settings.opodFluxApiKey}
                   envSource={settings.resolved.sources.opodFluxApiKey}
-                  missingLabel="키 없음 — 이미지 생성 불가"
+                  missingLabel="키 없음 — 인증 비활성 배포만 가능"
                 />
                 {settings.opodFluxApiKey.set ? (
                   <ClearKeyButton
