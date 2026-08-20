@@ -5,6 +5,7 @@ import {
   Card,
   Group,
   NumberInput,
+  Progress,
   SimpleGrid,
   Spoiler,
   Stack,
@@ -328,12 +329,7 @@ function ShotBody({ draft, shot }: { draft: Draft; shot: DraftShot }) {
     return <QueuedShotBody draft={draft} shot={shot} />;
   }
   if (shot.status === "running") {
-    return (
-      <Text size="sm" c="dimmed">
-        이미지를 생성하는 중입니다…
-        {shot.provider ? ` · ${shot.provider}` : ""}
-      </Text>
-    );
+    return <RunningShotBody shot={shot} />;
   }
   if (shot.status === "failed") {
     return (
@@ -387,6 +383,109 @@ function ShotBody({ draft, shot }: { draft: Draft; shot: DraftShot }) {
         />
       ))}
     </SimpleGrid>
+  );
+}
+
+const PHASE_COPY = {
+  preparing: {
+    label: "생성 준비",
+    description: "생성 환경을 준비하고 있습니다.",
+  },
+  generating: {
+    label: "이미지 생성",
+    description: "이미지 후보를 생성하고 있습니다.",
+  },
+  quality_check: {
+    label: "품질 검사",
+    description: "생성 결과의 품질을 검사하고 있습니다.",
+  },
+  finalizing: {
+    label: "결과 마무리",
+    description: "최종 이미지 파일을 마무리하고 있습니다.",
+  },
+} as const;
+
+const STAGE_COPY: Record<string, { label: string; description: string }> = {
+  preparing: { label: "준비", description: "생성 환경을 준비하고 있습니다." },
+  base: { label: "기본 생성", description: "기본 이미지를 생성하고 있습니다." },
+  generating: { label: "생성", description: "이미지를 생성하고 있습니다." },
+  refine: {
+    label: "디테일 보정",
+    description: "세부 묘사를 보정하고 있습니다.",
+  },
+  face: {
+    label: "얼굴 보정",
+    description: "얼굴의 특징과 질감을 보정하고 있습니다.",
+  },
+  hand: {
+    label: "손 보정",
+    description: "손의 형태와 디테일을 보정하고 있습니다.",
+  },
+  quality_check: {
+    label: "품질 검사",
+    description: "생성 결과의 품질을 검사하고 있습니다.",
+  },
+  final: { label: "최종 처리", description: "최종 결과를 처리하고 있습니다." },
+  finalizing: {
+    label: "마무리",
+    description: "최종 이미지 파일을 마무리하고 있습니다.",
+  },
+};
+
+function RunningShotBody({ shot }: { shot: DraftShot }) {
+  const providerProgress = shot.providerProgress;
+  const phase = providerProgress?.phase
+    ? PHASE_COPY[providerProgress.phase]
+    : undefined;
+  const stage = providerProgress?.stage
+    ? STAGE_COPY[providerProgress.stage]
+    : undefined;
+  const percentage =
+    providerProgress?.progress === undefined
+      ? undefined
+      : Math.round(providerProgress.progress * 100);
+  const title = stage?.label
+    ? `${stage.label} 중`
+    : phase?.label
+      ? `${phase.label} 중`
+      : "이미지 생성 중";
+
+  return (
+    <Stack gap="xs" aria-live="polite">
+      <Text size="sm" fw={600}>
+        {title}
+      </Text>
+      {percentage === undefined ? (
+        providerProgress ? (
+          <Text size="sm" c="dimmed">
+            세부 진행률을 제공하지 않는 단계입니다.
+          </Text>
+        ) : (
+          <Text size="sm" c="dimmed">
+            이미지를 생성하는 중입니다…
+          </Text>
+        )
+      ) : (
+        <Stack gap={4}>
+          <Group justify="space-between" gap="xs">
+            <Text size="sm">진행률</Text>
+            <Text size="sm" fw={600}>
+              {percentage}%
+            </Text>
+          </Group>
+          <Progress
+            value={percentage}
+            size="sm"
+            aria-label="컷 이미지 생성 진행률"
+          />
+        </Stack>
+      )}
+      <Text size="sm" c="dimmed">
+        {stage?.description ??
+          phase?.description ??
+          "이미지 후보를 생성하고 있습니다."}
+      </Text>
+    </Stack>
   );
 }
 

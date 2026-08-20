@@ -53,6 +53,13 @@ export type DraftShot = {
   generationTrace?: GenerationTrace;
   candidateCount?: number;
   provider?: string;
+  providerProgress?: {
+    status: "queued" | "running" | "cancelling";
+    phase?: "preparing" | "generating" | "quality_check" | "finalizing";
+    stage?: string | null;
+    progress?: number;
+    updatedAt?: string;
+  };
   costUsd?: string;
   errorMessage?: string;
   attemptCount?: number;

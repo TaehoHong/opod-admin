@@ -7,6 +7,7 @@ import {
   pageFromRows,
 } from "../../domain/database/page";
 import { parseFinishPreset } from "../../worker/film-finish";
+import type { ImageGenerationProgress } from "../../worker/image-generation.provider";
 import { GenerationSettingsService } from "../../domain/settings/generation-settings.service";
 import {
   createPostPipelineV3Concept,
@@ -97,6 +98,7 @@ type DraftShot = {
   generationTrace?: GenerationTrace;
   candidateCount?: number;
   provider?: string;
+  providerProgress?: ImageGenerationProgress;
   costUsd?: string;
   errorMessage?: string;
   // 실행이 실제로 돌았는지 판단하는 가장 싼 신호. 재시도 횟수와 소요 시간이
@@ -143,6 +145,53 @@ function stringIds(value: unknown): string[] | undefined {
   return Array.isArray(value)
     ? value.filter((id): id is string => typeof id === "string")
     : undefined;
+}
+
+function providerProgressFromParams(
+  paramsJson: unknown,
+): ImageGenerationProgress | undefined {
+  if (
+    paramsJson == null ||
+    typeof paramsJson !== "object" ||
+    Array.isArray(paramsJson)
+  ) {
+    return undefined;
+  }
+  const value = (paramsJson as Record<string, unknown>)._providerProgress;
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const progress = value as Record<string, unknown>;
+  const status = progress.status;
+  if (status !== "queued" && status !== "running" && status !== "cancelling") {
+    return undefined;
+  }
+  const phase = progress.phase;
+  const validPhase =
+    phase === "preparing" ||
+    phase === "generating" ||
+    phase === "quality_check" ||
+    phase === "finalizing"
+      ? phase
+      : undefined;
+  const amount =
+    typeof progress.progress === "number" &&
+    Number.isFinite(progress.progress) &&
+    progress.progress >= 0 &&
+    progress.progress <= 1
+      ? progress.progress
+      : undefined;
+  return {
+    status,
+    ...(validPhase ? { phase: validPhase } : {}),
+    ...(typeof progress.stage === "string" || progress.stage === null
+      ? { stage: progress.stage }
+      : {}),
+    ...(amount !== undefined ? { progress: amount } : {}),
+    ...(typeof progress.updatedAt === "string"
+      ? { updatedAt: progress.updatedAt }
+      : {}),
+  };
 }
 
 // paramsJson._shot — 기획과 provider 제출 시점의 실행 메타데이터.
@@ -348,6 +397,10 @@ export class DraftsService {
       .sort(([a], [b]) => a - b)
       .map(([sortOrder, job]) => {
         const meta = shotMeta(job.paramsJson);
+        const providerProgress =
+          job.status === "running"
+            ? providerProgressFromParams(job.paramsJson)
+            : undefined;
         const references = (meta.referenceMediaIds ?? [])
           .filter((mediaId) => referenceUrls.has(mediaId))
           .map((mediaId) => ({
@@ -367,6 +420,7 @@ export class DraftsService {
             ? { candidateCount: job.candidateCount }
             : {}),
           ...(job.provider ? { provider: job.provider } : {}),
+          ...(providerProgress ? { providerProgress } : {}),
           ...(job.costUsd != null ? { costUsd: job.costUsd.toString() } : {}),
           ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
           attemptCount: job.attemptCount,
