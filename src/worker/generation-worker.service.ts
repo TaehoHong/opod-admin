@@ -456,7 +456,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       requestId,
       persistProgress,
     );
-    const deadline = Date.now() + this.config.providerTimeoutMs;
+    let deadline = Date.now() + this.config.providerTimeoutMs;
     try {
       for (;;) {
         const result = await provider.poll(requestId);
@@ -474,18 +474,21 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
           persistProgress(result.progress);
         }
         if (Date.now() >= deadline) {
-          // 이미 생성 중인 원격 작업은 다음 시도가 같은 requestId로 폴링을
-          // 이어받아야 한다. 아직 시작 여부를 모르는 요청과 queued 작업만
-          // 과금 전에 취소를 시도한다 (베스트에포트).
           if (
-            latestProviderStatus === undefined ||
-            latestProviderStatus === "queued"
+            latestProviderStatus === "running" ||
+            latestProviderStatus === "cancelling"
           ) {
+            // 생성 엔진이 실제 실행을 확인한 작업은 서버의 terminal 이벤트까지
+            // 계속 추적한다. 로컬 폴링 창만 연장하며 원격 작업을 취소하거나
+            // 운영자에게 다시 실행을 요구하지 않는다.
+            deadline = Date.now() + this.config.providerTimeoutMs;
+          } else {
+            // 아직 시작 여부를 모르는 요청과 queued 작업만 과금 전에 취소한다.
             await provider.cancel?.(requestId);
+            throw new Error(
+              `provider polling timed out after ${this.config.providerTimeoutMs}ms`,
+            );
           }
-          throw new Error(
-            `provider polling timed out after ${this.config.providerTimeoutMs}ms`,
-          );
         }
         await this.extendLease(job.id);
         await this.sleep(this.config.providerPollIntervalMs);
