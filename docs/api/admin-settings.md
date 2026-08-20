@@ -20,7 +20,7 @@ GET /api/admin/v1/settings/generation
 ```json
 {
   "imageProvider": "opod-flux",
-  "opodFluxApiBaseUrl": "https://opod-flux.internal/v1",
+  "opodFluxApiBaseUrl": "https://taeho.taildac41e.ts.net:8850/v1",
   "opodFluxApiKey": { "set": true, "last4": "cd12" },
   "falApiKey": { "set": true, "last4": "cd12" },
   "falImageModel": "fal-ai/nano-banana/edit",
@@ -51,7 +51,8 @@ GET /api/admin/v1/settings/generation
 - API keys are `{ "set": false }` when no DB key exists (an env key may
   still be in effect — check `resolved.sources.apiKey`).
 - `resolved.*Provider` is the provider name the worker would route to right
-  now (`local` when no key resolves).
+  now. fal requires a key; opod-flux can resolve without one for an
+  authentication-disabled deployment.
 - Each `sources` entry is `db`, `env`, or `none`.
 - `worker` carries today's (KST) `costUsd` sum, the boot-time tuning values
   (interval, budget, cost estimate) and the two automatic-loop switches.
@@ -125,9 +126,10 @@ Content-Type: application/json
 
 Validates the combination that WOULD apply after saving: supplied fields
 override the currently effective settings (DB > env), omitted fields fall
-through. Returns `{ ok, message }`. The image check authenticates against the
-selected provider without submitting a job (no cost); the planner check makes a minimal
-1-token completion call. Nothing is persisted.
+through. Returns `{ ok, message }`. The image check probes the selected provider
+without submitting a job (no cost); opod-flux sends Bearer only when a key resolves,
+so an authentication-disabled Tailnet deployment can be tested with URL alone. The
+planner check makes a minimal 1-token completion call. Nothing is persisted.
 
 ## Update generation provider settings
 
@@ -141,7 +143,7 @@ Body (all fields optional):
 | ----------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `imageProvider`                                                               | `fal` or `opod-flux`; omit = keep, `null` = env/default `fal`         |
 | `opodFluxApiBaseUrl`                                                          | omit = keep, `null`/blank = env fallback, HTTPS `/v1` base URL = save |
-| `opodFluxApiKey`                                                              | omit = keep, `null`/blank = env fallback, string = save               |
+| `opodFluxApiKey`                                                              | optional; omit = keep, `null`/blank = env fallback, string = save     |
 | `falApiKey`                                                                   | omit = keep, `null`/blank = delete (fall back to env), string = save  |
 | `falImageModel`                                                               | same semantics; the reference-conditioning (edit) model               |
 | `falImageT2iModel`                                                            | same semantics; the cold-start text-to-image model                    |
