@@ -172,7 +172,10 @@ describe("GenerationRepository", () => {
       prompt: "portrait",
       inputPrompt: "portrait source",
       candidateCount: 2,
-      paramsJson: { aspect_ratio: "4:3" },
+      paramsJson: {
+        aspect_ratio: "4:3",
+        _providerProgress: { status: "running", progress: 0.8 },
+      },
       sortOrder: 10,
     };
     const createJob = jest.fn().mockResolvedValue(retried);

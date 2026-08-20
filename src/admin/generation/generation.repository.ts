@@ -85,6 +85,15 @@ export type GenerationParamsValue = unknown;
 
 export type OutputSelectionResult = "missing" | "unchanged" | "selected";
 
+function paramsWithoutProviderProgress(value: unknown): unknown {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const params = { ...(value as Record<string, unknown>) };
+  delete params._providerProgress;
+  return params;
+}
+
 @Injectable()
 export class GenerationRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -226,7 +235,11 @@ export class GenerationRepository {
         prompt: source.prompt,
         candidateCount: source.candidateCount,
         ...(source.paramsJson != null
-          ? { paramsJson: source.paramsJson as Prisma.InputJsonValue }
+          ? {
+              paramsJson: paramsWithoutProviderProgress(
+                source.paramsJson,
+              ) as Prisma.InputJsonValue,
+            }
           : {}),
         originJobId: source.id,
       },
@@ -325,7 +338,11 @@ export class GenerationRepository {
             ? { candidateCount: source.candidateCount }
             : {}),
           ...(source.paramsJson != null
-            ? { paramsJson: source.paramsJson as Prisma.InputJsonValue }
+            ? {
+                paramsJson: paramsWithoutProviderProgress(
+                  source.paramsJson,
+                ) as Prisma.InputJsonValue,
+              }
             : {}),
           sortOrder: source.sortOrder,
           originJobId: source.id,

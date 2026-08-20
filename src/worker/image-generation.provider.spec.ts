@@ -16,11 +16,18 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function sseResponse(...events: string[]): Response {
+  return new Response(`${events.join("\n\n")}\n\n`, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
 function baseRequest(
   overrides: Partial<ImageGenerationRequest> = {},
 ): ImageGenerationRequest {
   return {
-    idempotencyKey: "job-1",
+    idempotencyKey: "job-0001",
     profile: "photoreal_scene_v1",
     prompt: "film photo of a beach",
     references: [],
@@ -319,16 +326,15 @@ describe("createOpodFluxImageGenerationProvider", () => {
   };
 
   it("submits the approved v1 request with caller auth and idempotency", async () => {
-    const fetchFn = jest.fn().mockResolvedValue(
-      jsonResponse(
-        {
-          generation_id: "gen-1",
-          status: "queued",
-          created_at: "2026-08-19T05:30:00Z",
-        },
-        202,
-      ),
-    );
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          'id: 1\nevent: connected\ndata: {"request_id":"req-1","status":"connecting"}',
+          'id: 2\nevent: accepted\ndata: {"generation_id":"gen-1","status":"queued","replayed":false}',
+          'id: 3\nevent: complete\ndata: {"generation_id":"gen-1","status":"succeeded","outputs":[{"id":"out-0","index":0,"content_type":"image/jpeg","width":1365,"height":2048,"sha256":"abcd","download_url":"https://opod-flux.internal/v1/generations/gen-1/outputs/out-0"}],"images_sent":1}',
+        ),
+      );
     const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
 
     await expect(
@@ -361,9 +367,10 @@ describe("createOpodFluxImageGenerationProvider", () => {
     });
 
     const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://opod-flux.internal/v1/generations");
+    expect(url).toBe("https://opod-flux.internal/v1/generations/stream");
     expect(init.headers).toMatchObject({
       authorization: "Bearer flux-secret",
+      accept: "text/event-stream",
       "content-type": "application/json",
       "idempotency-key": "generation-job-1",
     });
@@ -387,7 +394,391 @@ describe("createOpodFluxImageGenerationProvider", () => {
         quality: 95,
       },
       controls: { seed: 1729, identity_strict: true },
+      webhook_id: null,
       metadata: { character_id: "character-1" },
+    });
+    await expect(provider.poll("gen-1")).resolves.toEqual({
+      status: "completed",
+      images: [
+        {
+          url: "https://opod-flux.internal/v1/generations/gen-1/outputs/out-0",
+          contentType: "image/jpeg",
+          width: 1365,
+          height: 2048,
+          sha256: "abcd",
+          downloadHeaders: { authorization: "Bearer flux-secret" },
+        },
+      ],
+    });
+  });
+
+  it("sends explicit scene defaults and validates the public request contract", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          'event: accepted\ndata: {"generation_id":"gen-scene","status":"queued"}',
+          'event: complete\ndata: {"generation_id":"gen-scene","status":"succeeded","outputs":[{"download_url":"https://opod-flux.internal/v1/generations/gen-scene/outputs/out-0"}],"images_sent":1}',
+        ),
+      );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await provider.submit(
+      baseRequest({ extraParams: { aspect_ratio: "16:9" } }),
+    );
+
+    const [, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      profile: "photoreal_scene_v1",
+      prompt: "film photo of a beach",
+      negative_prompt: null,
+      references: [],
+      output: {
+        count: 2,
+        aspect_ratio: "16:9",
+        long_edge: 2048,
+        format: "jpeg",
+        quality: 95,
+      },
+      controls: { seed: null },
+      webhook_id: null,
+      metadata: {},
+    });
+
+    await expect(
+      provider.submit(
+        baseRequest({
+          profile: "photoreal_identity_v1",
+          references: [],
+          extraParams: { aspect_ratio: "4:5" },
+        }),
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("1 to 3 identity references"),
+      permanent: true,
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["short idempotency key", { idempotencyKey: "short" }],
+    ["empty prompt", { prompt: "" }],
+    ["long negative prompt", { negativePrompt: "x".repeat(2_001) }],
+    ["candidate count", { candidateCount: 5 }],
+    ["aspect ratio", { extraParams: { aspect_ratio: "7:8" } }],
+    ["long edge", { extraParams: { aspect_ratio: "4:5", long_edge: 500 } }],
+    ["format", { extraParams: { aspect_ratio: "4:5", format: "gif" } }],
+    ["quality", { extraParams: { aspect_ratio: "4:5", quality: 69 } }],
+    ["seed", { extraParams: { aspect_ratio: "4:5", seed: -1 } }],
+    [
+      "scene identity reference",
+      {
+        references: [
+          {
+            id: "identity-front",
+            role: "identity" as const,
+            primary: true,
+            url: "https://cdn.local/reference.jpg",
+          },
+        ],
+      },
+    ],
+  ])("rejects an invalid %s before fetch", async (_label, overrides) => {
+    const fetchFn = jest.fn();
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await expect(
+      provider.submit(
+        baseRequest({
+          extraParams: { aspect_ratio: "4:5" },
+          ...(overrides as Partial<ImageGenerationRequest>),
+        }),
+      ),
+    ).rejects.toMatchObject({ permanent: true });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("returns after accepted, then consumes chunked image and complete events", async () => {
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+        controller.enqueue(encoder.encode(": keep-alive\n\n"));
+        controller.enqueue(
+          encoder.encode(
+            'event: accepted\ndata: {"generation_id":"gen-chunk","status":"queued",',
+          ),
+        );
+        controller.enqueue(encoder.encode('"replayed":false}\n\n'));
+      },
+    });
+    const fetchFn = jest.fn().mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await expect(
+      provider.submit(baseRequest({ extraParams: { aspect_ratio: "4:5" } })),
+    ).resolves.toMatchObject({ requestId: "gen-chunk" });
+    await expect(provider.poll("gen-chunk")).resolves.toEqual({
+      status: "pending",
+      progress: { status: "queued" },
+    });
+
+    streamController.enqueue(
+      encoder.encode(
+        'event: image\ndata: {"generation_id":"gen-chunk","output":{"id":"out-0","index":0,"content_type":"image/jpeg","sha256":"abcd","download_url":"https://opod-flux.internal/v1/generations/gen-chunk/outputs/out-0"},"data_base64":"aW1hZ2U="}\n\n',
+      ),
+    );
+    streamController.enqueue(
+      encoder.encode(
+        'event: complete\ndata: {"generation_id":"gen-chunk","status":"succeeded","outputs":[],"images_sent":1}\n\n',
+      ),
+    );
+    streamController.close();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await expect(provider.poll("gen-chunk")).resolves.toEqual({
+      status: "completed",
+      images: [
+        {
+          url: "https://opod-flux.internal/v1/generations/gen-chunk/outputs/out-0",
+          contentType: "image/jpeg",
+          sha256: "abcd",
+          dataBase64: "aW1hZ2U=",
+          downloadHeaders: { authorization: "Bearer flux-secret" },
+        },
+      ],
+    });
+  });
+
+  it("publishes the latest accepted and progress events to a subscriber", async () => {
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+        controller.enqueue(
+          encoder.encode(
+            'event: accepted\ndata: {"generation_id":"gen-progress","status":"queued"}\n\n',
+          ),
+        );
+      },
+    });
+    const fetchFn = jest.fn().mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await provider.submit(
+      baseRequest({ extraParams: { aspect_ratio: "4:5" } }),
+    );
+    const progressEvents: unknown[] = [];
+    const subscribeProgress = (
+      provider as unknown as {
+        subscribeProgress?: (
+          requestId: string,
+          listener: (progress: unknown) => void,
+        ) => () => void;
+      }
+    ).subscribeProgress;
+    expect(subscribeProgress).toBeDefined();
+    const unsubscribe = subscribeProgress?.("gen-progress", (progress) =>
+      progressEvents.push(progress),
+    );
+
+    streamController.enqueue(
+      encoder.encode(
+        'event: progress\ndata: {"generation_id":"gen-progress","status":"running","phase":"generating","stage":"face","progress":0.58,"updated_at":"2026-08-20T10:00:20Z"}\n\n',
+      ),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(progressEvents).toEqual([
+      { status: "queued" },
+      {
+        status: "running",
+        phase: "generating",
+        stage: "face",
+        progress: 0.58,
+        updatedAt: "2026-08-20T10:00:20Z",
+      },
+    ]);
+    unsubscribe?.();
+    streamController.close();
+  });
+
+  it("omits Authorization when the Tailnet deployment has authentication disabled", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          'event: accepted\ndata: {"generation_id":"gen-open","status":"queued"}',
+          'event: complete\ndata: {"generation_id":"gen-open","status":"succeeded","outputs":[{"id":"out-0","index":0,"content_type":"image/jpeg","download_url":"https://opod-flux.internal/v1/generations/gen-open/outputs/out-0"}],"images_sent":1}',
+        ),
+      );
+    const provider = createOpodFluxImageGenerationProvider(
+      { ...config, apiKey: "" },
+      fetchFn,
+    );
+
+    await provider.submit(
+      baseRequest({ extraParams: { aspect_ratio: "4:5" } }),
+    );
+
+    const [, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).not.toHaveProperty("authorization");
+    await expect(provider.poll("gen-open")).resolves.toEqual({
+      status: "completed",
+      images: [
+        {
+          url: "https://opod-flux.internal/v1/generations/gen-open/outputs/out-0",
+          contentType: "image/jpeg",
+        },
+      ],
+    });
+  });
+
+  it("falls back to durable status polling when the stream ends after accepted", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse(
+          'event: accepted\ndata: {"generation_id":"gen-resume","status":"running"}',
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          generation_id: "gen-resume",
+          status: "succeeded",
+          outputs: [
+            {
+              id: "out-0",
+              index: 0,
+              content_type: "image/jpeg",
+              download_url:
+                "https://opod-flux.internal/v1/generations/gen-resume/outputs/out-0",
+            },
+          ],
+        }),
+      );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await provider.submit(
+      baseRequest({ extraParams: { aspect_ratio: "4:5" } }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    await expect(provider.poll("gen-resume")).resolves.toMatchObject({
+      status: "completed",
+    });
+    expect(fetchFn.mock.calls[1][0]).toBe(
+      "https://opod-flux.internal/v1/generations/gen-resume",
+    );
+  });
+
+  it("closes a malformed accepted stream before falling back to status polling", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse(
+          'event: accepted\ndata: {"generation_id":"gen-malformed","status":"running"}',
+          'event: progress\ndata: {"generation_id":"gen-malformed","status":"succeeded"}',
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          generation_id: "gen-malformed",
+          status: "running",
+          phase: "generating",
+          progress: 0.25,
+        }),
+      );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await provider.submit(
+      baseRequest({ extraParams: { aspect_ratio: "4:5" } }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const [, streamRequest] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect((streamRequest.signal as AbortSignal).aborted).toBe(true);
+    await expect(provider.poll("gen-malformed")).resolves.toEqual({
+      status: "pending",
+      progress: {
+        status: "running",
+        phase: "generating",
+        progress: 0.25,
+      },
+    });
+  });
+
+  it("maps an SSE error event to a terminal admin job failure", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          'event: accepted\ndata: {"generation_id":"gen-failed","status":"running"}',
+          'event: error\ndata: {"generation_id":"gen-failed","error":{"code":"IDENTITY_THRESHOLD_NOT_MET","message":"identity check failed","retryable":true}}',
+        ),
+      );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await provider.submit(
+      baseRequest({ extraParams: { aspect_ratio: "4:5" } }),
+    );
+
+    await expect(provider.poll("gen-failed")).resolves.toEqual({
+      status: "failed",
+      errorMessage: "IDENTITY_THRESHOLD_NOT_MET: identity check failed",
+      permanent: true,
+    });
+  });
+
+  it("surfaces a registration error event before accepted", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          'event: connected\ndata: {"request_id":"req-1","status":"connecting"}',
+          'event: error\ndata: {"request_id":"req-1","error":{"code":"QUEUE_FULL","message":"try later","retryable":true}}',
+        ),
+      );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await expect(
+      provider.submit(baseRequest({ extraParams: { aspect_ratio: "4:5" } })),
+    ).rejects.toMatchObject({
+      message: "QUEUE_FULL: try later",
+      permanent: true,
+    });
+  });
+
+  it("maps a cancelled event to a terminal admin job failure", async () => {
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          'event: accepted\ndata: {"generation_id":"gen-cancelled","status":"running"}',
+          'event: cancelled\ndata: {"generation_id":"gen-cancelled","status":"cancelled","progress":0.4}',
+        ),
+      );
+    const provider = createOpodFluxImageGenerationProvider(config, fetchFn);
+
+    await provider.submit(
+      baseRequest({ extraParams: { aspect_ratio: "4:5" } }),
+    );
+
+    await expect(provider.poll("gen-cancelled")).resolves.toEqual({
+      status: "failed",
+      errorMessage: "GENERATION_CANCELLED: opod-flux generation cancelled",
+      permanent: true,
     });
   });
 
@@ -411,7 +802,14 @@ describe("createOpodFluxImageGenerationProvider", () => {
           profile: "photoreal_identity_v1",
           extraParams: { aspect_ratio: "4:5" },
         }),
-        references: [],
+        references: [
+          {
+            id: "identity-front",
+            role: "identity",
+            primary: true,
+            url: "https://cdn.local/reference.jpg",
+          },
+        ],
       }),
     ).rejects.toMatchObject({
       message: expect.stringContaining("VALIDATION_FAILED"),
@@ -445,6 +843,7 @@ describe("createOpodFluxImageGenerationProvider", () => {
 
     await expect(provider.poll("gen-1")).resolves.toEqual({
       status: "pending",
+      progress: { status: "running" },
     });
     await expect(provider.poll("gen-1")).resolves.toEqual({
       status: "completed",

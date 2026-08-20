@@ -15,6 +15,41 @@ describe("GenerationJobRepository", () => {
     ).toEqual({ isActive: true });
   });
 
+  it("stores provider progress as running-job metadata", async () => {
+    const executeRaw = jest.fn().mockResolvedValue(1);
+    const repository = new GenerationJobRepository({
+      $executeRaw: executeRaw,
+    } as never);
+
+    await (
+      repository as unknown as {
+        recordProviderProgress(input: {
+          jobId: string;
+          progress: Record<string, unknown>;
+        }): Promise<void>;
+      }
+    ).recordProviderProgress({
+      jobId: "job-1",
+      progress: {
+        status: "running",
+        phase: "generating",
+        stage: "face",
+        progress: 0.58,
+      },
+    });
+
+    const [sql, progressJson, jobId] = executeRaw.mock.calls[0];
+    expect(sql.join(" ")).toContain("jsonb_set");
+    expect(sql.join(" ")).toContain("status = 'running'");
+    expect(JSON.parse(progressJson)).toEqual({
+      status: "running",
+      phase: "generating",
+      stage: "face",
+      progress: 0.58,
+    });
+    expect(jobId).toBe("job-1");
+  });
+
   // V4: 프롬프트당 1장이라 고를 것이 없다 — 유일한 출력이 곧 게시 이미지여야
   // 게시(outputMediaId)·평가(selected)·캡션 단계가 사람 없이 이어진다.
   // 후보가 여럿이면 종전대로 미선택으로 두어 v3 검수 흐름을 깨지 않는다.

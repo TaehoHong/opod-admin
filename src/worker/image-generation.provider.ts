@@ -32,13 +32,24 @@ export type GeneratedImage = {
   width?: number;
   height?: number;
   sha256?: string;
-  // opod-flux 결과 endpoint는 caller Bearer 인증이 필요하다. 결과를 영구
-  // 저장하는 worker가 이 헤더로 별도 binary download를 수행한다.
+  // SSE image 이벤트가 전달한 원본 바이트. 있으면 worker는 output URL을
+  // 다시 다운로드하지 않고 이 값을 검증·영구 저장한다.
+  dataBase64?: string;
+  // opod-flux 복구 polling의 결과 endpoint에 Bearer가 설정된 경우, 결과를
+  // 영구 저장하는 worker가 이 헤더로 별도 binary download를 수행한다.
   downloadHeaders?: Record<string, string>;
 };
 
+export type ImageGenerationProgress = {
+  status: "queued" | "running" | "cancelling";
+  phase?: "preparing" | "generating" | "quality_check" | "finalizing";
+  stage?: string | null;
+  progress?: number;
+  updatedAt?: string;
+};
+
 export type GenerationPollResult =
-  | { status: "pending" }
+  | { status: "pending"; progress?: ImageGenerationProgress }
   | { status: "completed"; images: GeneratedImage[]; costUsd?: number }
   // permanent: 입력 검증 실패(422 등) — 같은 입력으로 재시도해도 항상 실패한다.
   | { status: "failed"; errorMessage: string; permanent?: boolean };
@@ -55,6 +66,12 @@ export type ImageGenerationProvider = {
     request: ImageGenerationRequest,
   ): Promise<{ requestId: string; sentPrompt: string }>;
   poll(requestId: string): Promise<GenerationPollResult>;
+  // SSE처럼 provider가 push 진행률을 제공할 때만 구현한다. 구독 직후 현재
+  // 최신값을 한 번 재생하므로 submit/DB 기록 사이에 온 이벤트도 유실되지 않는다.
+  subscribeProgress?(
+    requestId: string,
+    listener: (progress: ImageGenerationProgress) => void,
+  ): () => void;
   // 폴링 데드라인 초과 등으로 결과를 포기할 때의 베스트에포트 취소.
   // 큐에서 아직 시작 전인 요청만 실제로 취소되며, 실패는 무시한다.
   cancel?(requestId: string): Promise<void>;
@@ -88,6 +105,7 @@ function safeFalExtraParams(
 }
 
 const HTTP_TIMEOUT_MS = 30_000;
+const HTTP_OK_STATUS = 200;
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 
 // 이미지 생성 설정 누락. 환경 구분 없이 실패시킨다 — 플레이스홀더 이미지를
@@ -197,9 +215,19 @@ type OpodFluxConfig = { apiBaseUrl: string; apiKey: string };
 
 const OPOD_FLUX_SUBMIT_TIMEOUT_MS = 120_000;
 
-// 승인된 opod-flux v1 계약을 현재 worker의 submit/poll provider 경계로
-// 변환한다. webhook은 쓰지 않는다 — admin worker의 기존 durable poll/retry가
-// 결과 수신과 복구를 소유한다.
+type OpodFluxStreamState = {
+  controller: AbortController;
+  images: GeneratedImage[];
+  progress?: ImageGenerationProgress;
+  progressListeners: Set<(progress: ImageGenerationProgress) => void>;
+  result?: Exclude<GenerationPollResult, { status: "pending" }>;
+  responseJson?: unknown;
+  disconnected: boolean;
+};
+
+// 승인된 opod-flux v1 POST SSE 계약을 현재 worker의 submit/poll provider
+// 경계로 변환한다. accepted에서 submit을 반환하고 stream 결과는 poll로
+// 노출한다. webhook은 쓰지 않으며 단절·재시작은 기존 durable polling이 복구한다.
 export function createOpodFluxImageGenerationProvider(
   config: OpodFluxConfig,
   fetchFn: typeof fetch = fetch,
@@ -207,14 +235,11 @@ export function createOpodFluxImageGenerationProvider(
 ): ImageGenerationProvider {
   const apiBaseUrl = normalizeOpodFluxBaseUrl(config.apiBaseUrl);
   const apiKey = config.apiKey.trim();
-  if (!apiKey) {
-    throw new ImageGenerationConfigError(
-      "opod-flux API key is not configured; set it in admin settings or OPOD_FLUX_API_KEY",
-    );
-  }
   const generationsUrl = `${apiBaseUrl}/generations`;
-  const authorization = `Bearer ${apiKey}`;
+  const streamUrl = `${generationsUrl}/stream`;
+  const authorization = apiKey ? `Bearer ${apiKey}` : undefined;
   const activeLogs = new Map<string, LlmLogHandle>();
+  const activeStreams = new Map<string, OpodFluxStreamState>();
   let logContext: LlmLogContext | undefined;
 
   const handleFor = async (
@@ -249,17 +274,23 @@ export function createOpodFluxImageGenerationProvider(
             type: LLM_LOG_TYPE.imageGenerate,
             provider: "opod-flux",
             model: request.profile,
-            endpoint: generationsUrl,
+            endpoint: streamUrl,
             requestJson,
             context: { ...logContext },
           })
         : undefined;
+      const controller = new AbortController();
+      const submitTimeout = setTimeout(
+        () => controller.abort(),
+        OPOD_FLUX_SUBMIT_TIMEOUT_MS,
+      );
       let response: Response;
       try {
-        response = await fetchFn(generationsUrl, {
+        response = await fetchFn(streamUrl, {
           method: "POST",
           headers: {
-            authorization,
+            ...(authorization ? { authorization } : {}),
+            accept: "text/event-stream",
             "content-type": "application/json",
             "idempotency-key": request.idempotencyKey,
             ...(logContext?.requestId
@@ -267,13 +298,15 @@ export function createOpodFluxImageGenerationProvider(
               : {}),
           },
           body: JSON.stringify(requestJson),
-          signal: AbortSignal.timeout(OPOD_FLUX_SUBMIT_TIMEOUT_MS),
+          signal: controller.signal,
         });
       } catch (error) {
+        clearTimeout(submitTimeout);
         if (handle) await llmLogs?.fail(handle, error);
         throw error;
       }
       if (!response.ok) {
+        clearTimeout(submitTimeout);
         const message = await opodFluxHttpError(response, "submit failed");
         if (handle) {
           await llmLogs?.fail(handle, new Error(message), {
@@ -286,29 +319,220 @@ export function createOpodFluxImageGenerationProvider(
           opodFluxPermanentHttpStatus(response.status),
         );
       }
-      const payload = (await response.json()) as { generation_id?: unknown };
-      if (typeof payload.generation_id !== "string" || !payload.generation_id) {
-        const error = new Error(
-          "opod-flux submit response is missing generation_id",
-        );
+      if (!response.body) {
+        clearTimeout(submitTimeout);
+        const error = new Error("opod-flux stream response has no body");
+        if (handle) await llmLogs?.fail(handle, error);
+        throw error;
+      }
+
+      const state: OpodFluxStreamState = {
+        controller,
+        images: [],
+        progressListeners: new Set(),
+        disconnected: false,
+      };
+      let acceptedId: string | undefined;
+      let resolveAccepted: (requestId: string) => void = () => undefined;
+      let rejectAccepted: (error: unknown) => void = () => undefined;
+      const accepted = new Promise<string>((resolve, reject) => {
+        resolveAccepted = resolve;
+        rejectAccepted = reject;
+      });
+
+      void consumeOpodFluxStream(response.body, (eventName, payload) => {
+        if (eventName === "accepted") {
+          if (!isRecord(payload) || typeof payload.generation_id !== "string") {
+            throw new Error(
+              "opod-flux accepted event is missing generation_id",
+            );
+          }
+          if (!acceptedId) {
+            acceptedId = payload.generation_id;
+            activeStreams.set(acceptedId, state);
+            updateOpodFluxProgress(state, payload);
+            clearTimeout(submitTimeout);
+            resolveAccepted(acceptedId);
+          } else if (acceptedId !== payload.generation_id) {
+            throw new Error("opod-flux stream changed generation_id");
+          }
+          return;
+        }
+        if (eventName === "progress") {
+          if (!acceptedId || !isRecord(payload)) {
+            throw new Error("opod-flux progress event arrived before accepted");
+          }
+          assertStreamGenerationId(payload, acceptedId);
+          if (!updateOpodFluxProgress(state, payload)) {
+            throw new Error("opod-flux progress event is invalid");
+          }
+          return;
+        }
+        if (eventName === "image") {
+          if (!acceptedId || !isRecord(payload)) {
+            throw new Error("opod-flux image event arrived before accepted");
+          }
+          assertStreamGenerationId(payload, acceptedId);
+          const images = opodFluxImages(
+            "output" in payload ? [payload.output] : [],
+            apiBaseUrl,
+            authorization,
+          );
+          if (images.length !== 1) {
+            throw new Error("opod-flux image event has an invalid output");
+          }
+          if (
+            typeof payload.data_base64 === "string" &&
+            payload.data_base64.length > 0
+          ) {
+            images[0].dataBase64 = payload.data_base64;
+          }
+          state.images.push(images[0]);
+          return;
+        }
+        if (eventName === "complete") {
+          if (!acceptedId || !isRecord(payload)) {
+            throw new Error("opod-flux complete event arrived before accepted");
+          }
+          assertStreamGenerationId(payload, acceptedId);
+          const images =
+            state.images.length > 0
+              ? state.images
+              : opodFluxImages(payload.outputs, apiBaseUrl, authorization);
+          state.responseJson = payload;
+          state.result =
+            images.length > 0
+              ? { status: "completed", images }
+              : {
+                  status: "failed",
+                  errorMessage: "opod-flux result contained no outputs",
+                  permanent: true,
+                };
+          controller.abort();
+          return;
+        }
+        if (eventName === "error") {
+          if (!isRecord(payload)) {
+            throw new Error("opod-flux error event is invalid");
+          }
+          const error = isRecord(payload.error) ? payload.error : {};
+          const code =
+            typeof error.code === "string" ? error.code : "GENERATION_FAILED";
+          const detail =
+            typeof error.message === "string"
+              ? error.message
+              : "opod-flux generation failed";
+          const message = `${code}: ${detail}`;
+          if (!acceptedId) {
+            clearTimeout(submitTimeout);
+            rejectAccepted(new ImageGenerationRequestError(message, true));
+            controller.abort();
+            return;
+          }
+          assertStreamGenerationId(payload, acceptedId);
+          state.responseJson = payload;
+          state.result = {
+            status: "failed",
+            errorMessage: message,
+            // retryable=true도 새 idempotency key가 필요하므로 현재 admin job은
+            // terminal 처리하고 운영자의 regenerate가 새 job id를 만든다.
+            permanent: true,
+          };
+          controller.abort();
+          return;
+        }
+        if (eventName === "cancelled") {
+          if (!acceptedId || !isRecord(payload)) {
+            throw new Error(
+              "opod-flux cancelled event arrived before accepted",
+            );
+          }
+          assertStreamGenerationId(payload, acceptedId);
+          state.responseJson = payload;
+          state.result = {
+            status: "failed",
+            errorMessage:
+              "GENERATION_CANCELLED: opod-flux generation cancelled",
+            permanent: true,
+          };
+          controller.abort();
+        }
+      })
+        .then(() => {
+          if (!acceptedId) {
+            clearTimeout(submitTimeout);
+            rejectAccepted(
+              new Error("opod-flux stream ended before accepted event"),
+            );
+          } else if (!state.result) {
+            state.disconnected = true;
+          }
+        })
+        .catch((error: unknown) => {
+          clearTimeout(submitTimeout);
+          if (!acceptedId) {
+            rejectAccepted(error);
+          } else {
+            // accepted 이후 연결 오류는 생성 작업을 취소하지 않는다. poll()이
+            // 저장된 generation id로 상태 endpoint를 조회해 이어받는다. 여기서
+            // abort는 서버 작업이 아니라 이미 열린 로컬 HTTP 연결만 닫는다.
+            controller.abort();
+            state.disconnected = true;
+          }
+        });
+
+      let requestId: string;
+      try {
+        requestId = await accepted;
+      } catch (error) {
         if (handle) await llmLogs?.fail(handle, error);
         throw error;
       }
       if (handle) {
-        activeLogs.set(payload.generation_id, handle);
-        await llmLogs?.setProviderRequestId(handle, payload.generation_id);
+        activeLogs.set(requestId, handle);
+        await llmLogs?.setProviderRequestId(handle, requestId);
       }
       return {
-        requestId: payload.generation_id,
+        requestId,
         sentPrompt: request.prompt,
       };
     },
 
     async poll(requestId) {
       const handle = await handleFor(requestId);
+      const stream = activeStreams.get(requestId);
+      if (stream && !stream.disconnected && !stream.result) {
+        return {
+          status: "pending",
+          ...(stream.progress ? { progress: stream.progress } : {}),
+        };
+      }
+      if (stream?.result) {
+        activeStreams.delete(requestId);
+        if (stream.result.status === "completed") {
+          if (handle) {
+            await llmLogs?.succeed(handle, {
+              responseJson: stream.responseJson,
+              providerRequestId: requestId,
+              httpStatus: HTTP_OK_STATUS,
+            });
+          }
+        } else if (handle) {
+          await llmLogs?.fail(handle, new Error(stream.result.errorMessage), {
+            responseJson: stream.responseJson,
+            providerRequestId: requestId,
+            httpStatus: HTTP_OK_STATUS,
+          });
+        }
+        activeLogs.delete(requestId);
+        return stream.result;
+      }
+      if (stream?.disconnected) {
+        activeStreams.delete(requestId);
+      }
       const endpoint = `${generationsUrl}/${encodeURIComponent(requestId)}`;
       const response = await fetchFn(endpoint, {
-        headers: { authorization },
+        headers: authorization ? { authorization } : {},
         signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
       });
       if (!response.ok) {
@@ -342,7 +566,11 @@ export function createOpodFluxImageGenerationProvider(
         payload.status === "running" ||
         payload.status === "cancelling"
       ) {
-        return { status: "pending" };
+        const progress = opodFluxProgress(payload);
+        return {
+          status: "pending",
+          ...(progress ? { progress } : {}),
+        };
       }
       if (payload.status === "failed" || payload.status === "cancelled") {
         const error = isRecord(payload.error) ? payload.error : {};
@@ -405,13 +633,29 @@ export function createOpodFluxImageGenerationProvider(
       return { status: "completed", images };
     },
 
+    subscribeProgress(requestId, listener) {
+      const stream = activeStreams.get(requestId);
+      if (!stream) return () => undefined;
+      stream.progressListeners.add(listener);
+      if (stream.progress) {
+        try {
+          listener(stream.progress);
+        } catch {
+          // 관측 listener 실패가 생성 stream을 끊지 않게 격리한다.
+        }
+      }
+      return () => stream.progressListeners.delete(listener);
+    },
+
     async cancel(requestId) {
+      activeStreams.get(requestId)?.controller.abort();
+      activeStreams.delete(requestId);
       try {
         await fetchFn(
           `${generationsUrl}/${encodeURIComponent(requestId)}/cancel`,
           {
             method: "POST",
-            headers: { authorization },
+            headers: authorization ? { authorization } : {},
             signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
           },
         );
@@ -421,11 +665,132 @@ export function createOpodFluxImageGenerationProvider(
     },
 
     async fail(requestId, error) {
+      activeStreams.get(requestId)?.controller.abort();
+      activeStreams.delete(requestId);
       const handle = await handleFor(requestId);
       if (handle) await llmLogs?.fail(handle, error);
       activeLogs.delete(requestId);
     },
   };
+}
+
+function updateOpodFluxProgress(
+  state: OpodFluxStreamState,
+  payload: Record<string, unknown>,
+): ImageGenerationProgress | undefined {
+  const progress = opodFluxProgress(payload);
+  if (!progress) return undefined;
+  state.progress = progress;
+  for (const listener of state.progressListeners) {
+    try {
+      listener(progress);
+    } catch {
+      // 비동기 저장 실패는 worker가 로그하며, 동기 listener 실패도 생성 결과와
+      // 분리한다.
+    }
+  }
+  return progress;
+}
+
+function opodFluxProgress(
+  payload: Record<string, unknown>,
+): ImageGenerationProgress | undefined {
+  const status = payload.status;
+  if (status !== "queued" && status !== "running" && status !== "cancelling") {
+    return undefined;
+  }
+  const phase = payload.phase;
+  const validPhase =
+    phase === "preparing" ||
+    phase === "generating" ||
+    phase === "quality_check" ||
+    phase === "finalizing"
+      ? phase
+      : undefined;
+  const stage =
+    typeof payload.stage === "string" || payload.stage === null
+      ? payload.stage
+      : undefined;
+  const progress =
+    typeof payload.progress === "number" &&
+    Number.isFinite(payload.progress) &&
+    payload.progress >= 0 &&
+    payload.progress <= 1
+      ? payload.progress
+      : undefined;
+  return {
+    status,
+    ...(validPhase ? { phase: validPhase } : {}),
+    ...(stage !== undefined ? { stage } : {}),
+    ...(progress !== undefined ? { progress } : {}),
+    ...(typeof payload.updated_at === "string"
+      ? { updatedAt: payload.updated_at }
+      : {}),
+  };
+}
+
+async function consumeOpodFluxStream(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (eventName: string, payload: unknown) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const consumeBlocks = (flush: boolean) => {
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    const trailing = blocks.pop() ?? "";
+    for (const block of blocks) {
+      parseOpodFluxEventBlock(block, onEvent);
+    }
+    if (flush) {
+      buffer = "";
+      if (trailing.trim()) {
+        parseOpodFluxEventBlock(trailing, onEvent);
+      }
+    } else {
+      buffer = trailing;
+    }
+  };
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    consumeBlocks(false);
+  }
+  buffer += decoder.decode();
+  consumeBlocks(true);
+}
+
+function parseOpodFluxEventBlock(
+  block: string,
+  onEvent: (eventName: string, payload: unknown) => void,
+): void {
+  let eventName = "message";
+  const dataLines: string[] = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (!line || line.startsWith(":")) continue;
+    if (line.startsWith("event:")) {
+      eventName = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      const data = line.slice(5);
+      dataLines.push(data.startsWith(" ") ? data.slice(1) : data);
+    }
+  }
+  if (dataLines.length === 0) return;
+  onEvent(eventName, JSON.parse(dataLines.join("\n")));
+}
+
+function assertStreamGenerationId(
+  payload: Record<string, unknown>,
+  acceptedId: string,
+): void {
+  if (payload.generation_id !== acceptedId) {
+    throw new Error(
+      "opod-flux stream event generation_id does not match accepted",
+    );
+  }
 }
 
 function normalizeOpodFluxBaseUrl(value: string): string {
@@ -447,28 +812,110 @@ function normalizeOpodFluxBaseUrl(value: string): string {
 function opodFluxRequestBody(
   request: ImageGenerationRequest,
 ): Record<string, unknown> {
+  if (
+    request.idempotencyKey.length < 8 ||
+    request.idempotencyKey.length > 128
+  ) {
+    throw opodFluxValidationError(
+      "idempotency key must contain 8 to 128 characters",
+    );
+  }
+  if (request.prompt.length < 1 || request.prompt.length > 8_000) {
+    throw opodFluxValidationError("prompt must contain 1 to 8000 characters");
+  }
+  if ((request.negativePrompt?.length ?? 0) > 2_000) {
+    throw opodFluxValidationError(
+      "negative_prompt must contain at most 2000 characters",
+    );
+  }
+  if (
+    !Number.isInteger(request.candidateCount) ||
+    request.candidateCount < 1 ||
+    request.candidateCount > 4
+  ) {
+    throw opodFluxValidationError(
+      "output.count must be an integer from 1 to 4",
+    );
+  }
+
+  const identityReferences = request.references.filter(
+    (reference) => reference.role === "identity",
+  );
+  const primaryReferences = request.references.filter(
+    (reference) => reference.primary === true,
+  );
+  if (request.profile === "photoreal_identity_v1") {
+    if (identityReferences.length < 1 || identityReferences.length > 3) {
+      throw opodFluxValidationError(
+        "photoreal_identity_v1 requires 1 to 3 identity references",
+      );
+    }
+    if (
+      primaryReferences.length !== 1 ||
+      primaryReferences[0].role !== "identity"
+    ) {
+      throw opodFluxValidationError(
+        "photoreal_identity_v1 requires exactly one primary identity reference",
+      );
+    }
+  } else if (identityReferences.length > 0 || primaryReferences.length > 0) {
+    throw opodFluxValidationError(
+      "photoreal_scene_v1 does not allow identity or primary references",
+    );
+  }
+
   const extra = request.extraParams ?? {};
   const aspectRatio = extra.aspect_ratio;
-  if (typeof aspectRatio !== "string" || !aspectRatio) {
-    throw new Error("opod-flux request requires aspect_ratio");
+  if (
+    typeof aspectRatio !== "string" ||
+    !OPOD_FLUX_ASPECT_RATIOS.has(aspectRatio)
+  ) {
+    throw opodFluxValidationError("output.aspect_ratio is unsupported");
+  }
+  const longEdge = extra.long_edge ?? 2048;
+  if (
+    !Number.isInteger(longEdge) ||
+    (longEdge as number) < 512 ||
+    (longEdge as number) > 4096
+  ) {
+    throw opodFluxValidationError(
+      "output.long_edge must be an integer from 512 to 4096",
+    );
+  }
+  const format = extra.format ?? "jpeg";
+  if (!OPOD_FLUX_FORMATS.has(format)) {
+    throw opodFluxValidationError("output.format is unsupported");
+  }
+  const quality = extra.quality ?? 95;
+  if (
+    !Number.isInteger(quality) ||
+    (quality as number) < 70 ||
+    (quality as number) > 100
+  ) {
+    throw opodFluxValidationError(
+      "output.quality must be an integer from 70 to 100",
+    );
   }
   const output: Record<string, unknown> = {
     count: request.candidateCount,
     aspect_ratio: aspectRatio,
+    long_edge: longEdge,
+    format,
+    quality,
   };
-  if (Number.isInteger(extra.long_edge)) output.long_edge = extra.long_edge;
-  if (["jpeg", "png", "webp"].includes(String(extra.format))) {
-    output.format = extra.format;
-  }
-  if (Number.isInteger(extra.quality)) output.quality = extra.quality;
 
-  const controls: Record<string, unknown> = {};
+  const seed = extra.seed ?? null;
   if (
-    extra.seed === null ||
-    (typeof extra.seed === "number" && Number.isInteger(extra.seed))
+    seed !== null &&
+    (!Number.isInteger(seed) ||
+      (seed as number) < 0 ||
+      (seed as number) > 4_294_967_295)
   ) {
-    controls.seed = extra.seed;
+    throw opodFluxValidationError(
+      "controls.seed must be null or an integer from 0 to 4294967295",
+    );
   }
+  const controls: Record<string, unknown> = { seed };
   if (request.profile === "photoreal_identity_v1") {
     controls.identity_strict =
       typeof extra.identity_strict === "boolean" ? extra.identity_strict : true;
@@ -477,32 +924,42 @@ function opodFluxRequestBody(
   return {
     profile: request.profile,
     prompt: request.prompt,
-    ...(request.negativePrompt
-      ? { negative_prompt: request.negativePrompt }
-      : {}),
-    ...(request.references.length > 0
-      ? {
-          references: request.references.map((reference) => ({
-            id: reference.id,
-            role: reference.role,
-            ...(reference.primary === true ? { primary: true } : {}),
-            source: { type: "url", url: reference.url },
-            ...(reference.description
-              ? { description: reference.description }
-              : {}),
-          })),
-        }
-      : {}),
+    negative_prompt: request.negativePrompt ?? null,
+    references: request.references.map((reference) => ({
+      id: reference.id,
+      role: reference.role,
+      ...(reference.primary === true ? { primary: true } : {}),
+      source: { type: "url", url: reference.url },
+      ...(reference.description ? { description: reference.description } : {}),
+    })),
     output,
-    ...(Object.keys(controls).length > 0 ? { controls } : {}),
-    ...(request.metadata ? { metadata: request.metadata } : {}),
+    controls,
+    webhook_id: null,
+    metadata: request.metadata ?? {},
   };
+}
+
+const OPOD_FLUX_ASPECT_RATIOS = new Set([
+  "1:1",
+  "2:3",
+  "3:2",
+  "3:4",
+  "4:3",
+  "4:5",
+  "5:4",
+  "9:16",
+  "16:9",
+]);
+const OPOD_FLUX_FORMATS = new Set<unknown>(["jpeg", "png", "webp"]);
+
+function opodFluxValidationError(message: string): ImageGenerationRequestError {
+  return new ImageGenerationRequestError(`opod-flux ${message}`, true);
 }
 
 function opodFluxImages(
   value: unknown,
   apiBaseUrl: string,
-  authorization: string,
+  authorization?: string,
 ): GeneratedImage[] {
   if (!Array.isArray(value)) return [];
   const apiBase = new URL(apiBaseUrl);
@@ -537,7 +994,7 @@ function opodFluxImages(
         ...(typeof output.width === "number" ? { width: output.width } : {}),
         ...(typeof output.height === "number" ? { height: output.height } : {}),
         ...(typeof output.sha256 === "string" ? { sha256: output.sha256 } : {}),
-        downloadHeaders: { authorization },
+        ...(authorization ? { downloadHeaders: { authorization } } : {}),
       },
     ];
   });

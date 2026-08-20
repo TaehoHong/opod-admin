@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../domain/database/prisma.service";
 import { LLM_LOG_TYPE } from "../domain/llm-logs/llm-log.service";
+import type { ImageGenerationProgress } from "./image-generation.provider";
 
 // entity repository — PrismaService는 이 계층에서만 쓴다
 // (docs/02-development-rules.md "Module and Repository Rules").
@@ -197,6 +198,28 @@ export class GenerationJobRepository {
         ...(input.sentPrompt?.trim() ? { prompt: input.sentPrompt } : {}),
       },
     });
+  }
+
+  async recordProviderProgress(input: {
+    jobId: string;
+    progress: ImageGenerationProgress;
+  }): Promise<void> {
+    const progressJson = JSON.stringify(input.progress);
+    // paramsJson의 다른 파이프라인 메타데이터를 덮어쓰지 않고 진행 정보만
+    // 원자적으로 갱신한다. submit 직후 이벤트와 실행 메타데이터 기록이 겹쳐도
+    // 마지막 opod-flux 단계가 유실되지 않는다.
+    await this.prisma.$executeRaw`
+      UPDATE opod.generation_jobs
+      SET params_json = jsonb_set(
+            COALESCE(params_json, '{}'::jsonb),
+            '{_providerProgress}',
+            ${progressJson}::jsonb,
+            true
+          ),
+          updated_at = now()
+      WHERE id = ${input.jobId}::uuid
+        AND status = 'running'
+    `;
   }
 
   async extendLease(jobId: string, leaseSeconds: number): Promise<void> {

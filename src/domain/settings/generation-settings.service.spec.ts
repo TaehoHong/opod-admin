@@ -188,6 +188,36 @@ describe("GenerationSettingsService", () => {
     );
   });
 
+  it("tests an authentication-disabled opod-flux deployment without a key", async () => {
+    const repository = repositoryMock([
+      { key: "generation.imageProvider", value: "opod-flux" },
+      {
+        key: "generation.opodFluxApiBaseUrl",
+        value: "https://opod-flux.internal/v1",
+      },
+    ]);
+    const fetchMock = jest.fn().mockResolvedValue({
+      status: 404,
+      ok: false,
+      text: async () => "not found",
+    });
+
+    await expect(
+      makeService(repository).testConnection(
+        { target: "image" },
+        {},
+        fetchMock as never,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      message: "opod-flux 연결 확인 (인증 헤더 없음)",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://opod-flux.internal/v1/generations/gen_connection_test",
+      expect.objectContaining({ headers: {} }),
+    );
+  });
+
   it("rejects opod-flux connection URLs containing credentials", async () => {
     const fetchMock = jest.fn();
 
