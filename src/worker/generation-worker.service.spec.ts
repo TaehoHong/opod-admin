@@ -221,7 +221,7 @@ describe("GenerationWorkerService", () => {
     });
     // 레퍼런스는 업로드 확정본만, negative prompt는 프로필에서 주입
     expect(provider.submit).toHaveBeenCalledWith({
-      idempotencyKey: "job-1",
+      idempotencyKey: "job-1-attempt-1",
       profile: "photoreal_identity_v1",
       prompt: "film photo of a beach",
       negativePrompt: "blurry",
@@ -595,6 +595,36 @@ describe("GenerationWorkerService", () => {
     );
     // 데드라인 초과 시 시작 전 요청은 과금 전에 취소를 시도한다 (베스트에포트).
     expect(provider.cancel).toHaveBeenCalledWith("req-1");
+  });
+
+  it("does not cancel a provider job that is already running when local polling times out", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({ attemptCount: 1 }),
+    );
+    const provider = providerMock([]);
+    provider.poll.mockResolvedValue({
+      status: "pending",
+      progress: {
+        status: "running",
+        phase: "generating",
+        stage: "base",
+        progress: 0,
+      },
+    });
+    const { service } = makeService(repository, provider, {
+      providerTimeoutMs: 0,
+    });
+
+    await service.tick();
+
+    expect(provider.cancel).not.toHaveBeenCalled();
+    expect(repository.requeueForRetry).toHaveBeenCalledWith({
+      jobId: "job-1",
+      message: expect.stringContaining("timed out"),
+      clearProviderRequestId: false,
+    });
   });
 
   it("fails an explicit character-visible shot without usable references before submission", async () => {
