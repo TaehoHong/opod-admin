@@ -171,4 +171,69 @@ describe("image generation wizard", () => {
       ]),
     );
   });
+
+  it("shows the live opod-flux phase, stage and real progress", async () => {
+    server.use(
+      http.get(`/api/admin/v1/generation/jobs/${JOB_ID}`, () =>
+        HttpResponse.json(
+          imageJob({
+            status: "running",
+            provider: "opod-flux:v1",
+            providerProgress: {
+              status: "running",
+              phase: "generating",
+              stage: "face",
+              progress: 0.58,
+              updatedAt: "2026-08-20T10:00:20Z",
+            },
+          } as unknown as Partial<GenerationJob>),
+        ),
+      ),
+    );
+
+    render(
+      <AppProviders>
+        <ImageWizard jobId={JOB_ID} onJobChange={() => {}} />
+      </AppProviders>,
+    );
+
+    expect(
+      await screen.findByText("generating · 이미지 생성"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("face · 얼굴 보정")).toBeInTheDocument();
+    expect(screen.getByText("58%")).toBeInTheDocument();
+    expect(
+      screen.getByRole("progressbar", { name: "이미지 생성 진행률" }),
+    ).toHaveAttribute("aria-valuenow", "58");
+  });
+
+  it("does not invent a percentage when opod-flux omits it", async () => {
+    server.use(
+      http.get(`/api/admin/v1/generation/jobs/${JOB_ID}`, () =>
+        HttpResponse.json(
+          imageJob({
+            status: "running",
+            provider: "opod-flux:v1",
+            providerProgress: {
+              status: "running",
+              phase: "quality_check",
+              stage: "quality_check",
+              updatedAt: "2026-08-20T10:00:20Z",
+            },
+          } as unknown as Partial<GenerationJob>),
+        ),
+      ),
+    );
+
+    render(
+      <AppProviders>
+        <ImageWizard jobId={JOB_ID} onJobChange={() => {}} />
+      </AppProviders>,
+    );
+
+    expect(
+      await screen.findByText("세부 진행률을 제공하지 않는 단계입니다."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
 });

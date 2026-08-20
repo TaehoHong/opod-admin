@@ -1,10 +1,12 @@
 import {
   Alert,
+  Badge,
   Button,
   Group,
   Loader,
   NumberInput,
   Paper,
+  Progress,
   Spoiler,
   Stack,
   Stepper,
@@ -31,6 +33,52 @@ import { useState } from "react";
 
 // 생성 중에는 서버가 상태를 바꾸므로 짧게 폴링한다. 종료 상태에서는 멈춘다.
 const POLL_INTERVAL_MS = 2000;
+
+const PHASE_COPY = {
+  preparing: {
+    label: "생성 준비",
+    description: "생성 환경을 준비하고 있습니다.",
+  },
+  generating: {
+    label: "이미지 생성",
+    description: "이미지 후보를 생성하고 있습니다.",
+  },
+  quality_check: {
+    label: "품질 검사",
+    description: "생성 결과의 품질을 검사하고 있습니다.",
+  },
+  finalizing: {
+    label: "결과 마무리",
+    description: "최종 이미지 파일을 마무리하고 있습니다.",
+  },
+} as const;
+
+const STAGE_COPY: Record<string, { label: string; description: string }> = {
+  preparing: { label: "준비", description: "생성 환경을 준비하고 있습니다." },
+  base: { label: "기본 생성", description: "기본 이미지를 생성하고 있습니다." },
+  generating: { label: "생성", description: "이미지를 생성하고 있습니다." },
+  refine: {
+    label: "디테일 보정",
+    description: "세부 묘사를 보정하고 있습니다.",
+  },
+  face: {
+    label: "얼굴 보정",
+    description: "얼굴의 특징과 질감을 보정하고 있습니다.",
+  },
+  hand: {
+    label: "손 보정",
+    description: "손의 형태와 디테일을 보정하고 있습니다.",
+  },
+  quality_check: {
+    label: "품질 검사",
+    description: "생성 결과의 품질을 검사하고 있습니다.",
+  },
+  final: { label: "최종 처리", description: "최종 결과를 처리하고 있습니다." },
+  finalizing: {
+    label: "마무리",
+    description: "최종 이미지 파일을 마무리하고 있습니다.",
+  },
+};
 
 function jobKey(jobId: string) {
   return ["generation", "job", jobId] as const;
@@ -272,23 +320,101 @@ function PromptStep({ job }: { job: GenerationJob }) {
 }
 
 function GeneratingStep({ job }: { job: GenerationJob }) {
+  const providerProgress = job.providerProgress;
+  const phase = providerProgress?.phase
+    ? PHASE_COPY[providerProgress.phase]
+    : undefined;
+  const stage = providerProgress?.stage
+    ? STAGE_COPY[providerProgress.stage]
+    : undefined;
+  const percentage =
+    providerProgress?.progress === undefined
+      ? undefined
+      : Math.round(providerProgress.progress * 100);
+  const title =
+    providerProgress?.status === "queued"
+      ? "opod-flux 실행 대기"
+      : providerProgress?.status === "cancelling"
+        ? "취소 처리 중"
+        : phase?.label
+          ? `${phase.label} 중`
+          : job.status === "queued"
+            ? "생성 대기"
+            : "이미지 생성 중";
+  const description =
+    stage?.description ??
+    phase?.description ??
+    (providerProgress?.status === "queued"
+      ? "opod-flux 작업이 실행 순서를 기다리고 있습니다."
+      : job.status === "queued"
+        ? "작업이 실행 순서를 기다리고 있습니다."
+        : "이미지 후보를 생성하고 있습니다.");
+
   return (
     <Paper p="md" component="section">
-      <Stack gap="xs">
-        <Title order={5}>
-          {job.status === "queued" ? "생성 대기" : "생성 중"}
-        </Title>
-        <Text size="sm">
-          {job.status === "queued"
-            ? "작업이 실행 순서를 기다리고 있습니다."
-            : "이미지 후보를 생성하고 있습니다."}
-        </Text>
-        <Text size="xs" c="dimmed">
-          {job.provider ?? "프로바이더 준비 중"}
-        </Text>
+      <Stack gap="sm" aria-live="polite">
+        <Group justify="space-between" align="flex-start">
+          <Title order={5}>{title}</Title>
+          <Text size="xs" c="dimmed">
+            {job.provider ?? "프로바이더 준비 중"}
+          </Text>
+        </Group>
+
+        {providerProgress ? (
+          <Group gap="xs">
+            <Badge color="accent">
+              {providerProgress.phase
+                ? `${providerProgress.phase} · ${phase?.label ?? providerProgress.phase}`
+                : `${providerProgress.status} · ${providerProgress.status === "queued" ? "실행 대기" : "처리 중"}`}
+            </Badge>
+            {providerProgress.stage ? (
+              <Badge variant="light" color="ink">
+                {stage
+                  ? `${providerProgress.stage} · ${stage.label}`
+                  : providerProgress.stage}
+              </Badge>
+            ) : null}
+          </Group>
+        ) : null}
+
+        {percentage === undefined ? (
+          providerProgress && providerProgress.status !== "queued" ? (
+            <Text size="sm" c="dimmed">
+              세부 진행률을 제공하지 않는 단계입니다.
+            </Text>
+          ) : null
+        ) : (
+          <Stack gap={4}>
+            <Group justify="space-between" gap="xs">
+              <Text size="sm">진행률</Text>
+              <Text size="sm" fw={600}>
+                {percentage}%
+              </Text>
+            </Group>
+            <Progress
+              value={percentage}
+              size="sm"
+              aria-label="이미지 생성 진행률"
+            />
+          </Stack>
+        )}
+
+        <Text size="sm">{description}</Text>
+        {providerProgress?.updatedAt ? (
+          <Text size="xs" c="dimmed">
+            마지막 업데이트 {formatProgressTime(providerProgress.updatedAt)}
+          </Text>
+        ) : null}
       </Stack>
     </Paper>
   );
+}
+
+function formatProgressTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat("ko-KR", { timeStyle: "medium" }).format(date);
 }
 
 function FailedStep({

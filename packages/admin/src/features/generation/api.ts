@@ -24,6 +24,13 @@ export type GenerationJob = {
   status: JobStatus;
   outputMediaId?: string;
   provider?: string;
+  providerProgress?: {
+    status: "queued" | "running" | "cancelling";
+    phase?: "preparing" | "generating" | "quality_check" | "finalizing";
+    stage?: string | null;
+    progress?: number;
+    updatedAt?: string;
+  };
   attemptCount: number;
   draftId?: string;
   originJobId?: string;
