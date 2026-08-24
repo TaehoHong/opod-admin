@@ -94,6 +94,9 @@ export class LlmLogService {
       rows.map((row) => ({
         ...row,
         id: row.id.toString(),
+        displayModel: row.responseModel ?? row.model,
+        cost: row.cost?.toString() ?? null,
+        upstreamCost: row.upstreamCost?.toString() ?? null,
         mediaCount: row._count.media,
         _count: undefined,
         createdAt: row.createdAt.toISOString(),
@@ -109,6 +112,9 @@ export class LlmLogService {
     return {
       ...log,
       id: log.id.toString(),
+      displayModel: log.responseModel ?? log.model,
+      cost: log.cost?.toString() ?? null,
+      upstreamCost: log.upstreamCost?.toString() ?? null,
       createdAt: log.createdAt.toISOString(),
       completedAt: log.completedAt?.toISOString(),
       media: log.media.map((relation) => ({
@@ -298,6 +304,14 @@ export class LlmLogService {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         totalTokens: usage.totalTokens,
+        responseModel: usage.responseModel,
+        usageJson: (usage.usageJson ?? null) as Prisma.InputJsonValue | null,
+        finishReason: usage.finishReason,
+        cachedInputTokens: usage.cachedInputTokens,
+        cacheWriteTokens: usage.cacheWriteTokens,
+        reasoningTokens: usage.reasoningTokens,
+        cost: usage.cost,
+        upstreamCost: usage.upstreamCost,
         completedAt: new Date(),
       });
     } catch (error) {
@@ -452,14 +466,57 @@ function usageOf(value: unknown): {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  responseModel?: string;
+  usageJson?: Record<string, unknown>;
+  finishReason?: string;
+  cachedInputTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  cost?: number;
+  upstreamCost?: number;
 } {
   const usage = isRecord(value) && isRecord(value.usage) ? value.usage : null;
-  if (!usage) return {};
+  const responseModel =
+    isRecord(value) && typeof value.model === "string"
+      ? value.model
+      : undefined;
+  const firstChoice =
+    isRecord(value) && Array.isArray(value.choices)
+      ? value.choices.find(isRecord)
+      : undefined;
+  const finishReason =
+    firstChoice && typeof firstChoice.finish_reason === "string"
+      ? firstChoice.finish_reason
+      : undefined;
+  if (!usage) return { responseModel, finishReason };
   const input = numberOf(usage.prompt_tokens ?? usage.input_tokens);
   const output = numberOf(usage.completion_tokens ?? usage.output_tokens);
   const total =
     numberOf(usage.total_tokens) ?? ((input ?? 0) + (output ?? 0) || undefined);
-  return { inputTokens: input, outputTokens: output, totalTokens: total };
+  const inputDetails = isRecord(usage.prompt_tokens_details)
+    ? usage.prompt_tokens_details
+    : isRecord(usage.input_tokens_details)
+      ? usage.input_tokens_details
+      : {};
+  const outputDetails = isRecord(usage.completion_tokens_details)
+    ? usage.completion_tokens_details
+    : isRecord(usage.output_tokens_details)
+      ? usage.output_tokens_details
+      : {};
+  const costDetails = isRecord(usage.cost_details) ? usage.cost_details : {};
+  return {
+    inputTokens: input,
+    outputTokens: output,
+    totalTokens: total,
+    responseModel,
+    usageJson: usage,
+    finishReason,
+    cachedInputTokens: numberOf(inputDetails.cached_tokens),
+    cacheWriteTokens: numberOf(inputDetails.cache_write_tokens),
+    reasoningTokens: numberOf(outputDetails.reasoning_tokens),
+    cost: numberOf(usage.cost),
+    upstreamCost: numberOf(costDetails.upstream_inference_cost),
+  };
 }
 
 function errorFields(error: unknown): {

@@ -73,6 +73,55 @@ describe("LlmLogService", () => {
     ).resolves.toMatchObject({ response: { status: 200 }, logId: "42" });
   });
 
+  it("normalizes provider usage while preserving the full usage object", async () => {
+    const finish = jest.fn().mockResolvedValue(undefined);
+    const service = serviceWith({
+      create: jest.fn().mockResolvedValue(1n),
+      finish,
+    });
+
+    await service.runJsonFetch({
+      type: "admin.content.plan",
+      provider: "openai-compatible",
+      model: "requested-model",
+      endpoint: "https://llm.example/v1/chat/completions",
+      requestJson: { model: "requested-model", messages: [] },
+      execute: () =>
+        Promise.resolve(
+          Response.json({
+            model: "response-model",
+            choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 4,
+              total_tokens: 14,
+              prompt_tokens_details: {
+                cached_tokens: 8,
+                cache_write_tokens: 2,
+              },
+              completion_tokens_details: { reasoning_tokens: 1 },
+              cost: 0.001,
+              cost_details: { upstream_inference_cost: 0.0008 },
+            },
+          }),
+        ),
+    });
+
+    expect(finish).toHaveBeenLastCalledWith(
+      1n,
+      expect.objectContaining({
+        responseModel: "response-model",
+        finishReason: "stop",
+        cachedInputTokens: 8,
+        cacheWriteTokens: 2,
+        reasoningTokens: 1,
+        cost: 0.001,
+        upstreamCost: 0.0008,
+        usageJson: expect.objectContaining({ total_tokens: 14 }),
+      }),
+    );
+  });
+
   // id가 BigInt라 그대로 내보내면 JSON 직렬화가 터진다.
   it("serializes BigInt ids in the read-only list contract", async () => {
     const row: LlmLogListRow = {
@@ -93,6 +142,14 @@ describe("LlmLogService", () => {
       inputTokens: 2,
       outputTokens: 3,
       totalTokens: 5,
+      responseModel: "response-model",
+      finishReason: "stop",
+      timeToFirstTokenMs: 2,
+      cachedInputTokens: 1,
+      cacheWriteTokens: 0,
+      reasoningTokens: 1,
+      cost: { toString: () => "0.001" } as never,
+      upstreamCost: null,
       createdAt: new Date("2026-07-29T00:00:00.000Z"),
       completedAt: new Date("2026-07-29T00:00:00.010Z"),
       _count: { media: 1 },
@@ -102,7 +159,15 @@ describe("LlmLogService", () => {
     });
 
     await expect(service.list({ limit: 50 })).resolves.toMatchObject({
-      items: [{ id: "12", mediaCount: 1, totalTokens: 5 }],
+      items: [
+        {
+          id: "12",
+          mediaCount: 1,
+          totalTokens: 5,
+          displayModel: "response-model",
+          cost: "0.001",
+        },
+      ],
     });
   });
 });

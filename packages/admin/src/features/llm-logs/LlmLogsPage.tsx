@@ -138,17 +138,18 @@ function LlmLogList() {
         </form>
       }
     >
-      <Table.ScrollContainer minWidth={1140}>
+      <Table.ScrollContainer minWidth={1320}>
         <Table striped>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>상태</Table.Th>
               <Table.Th>종류</Table.Th>
-              <Table.Th>provider · model</Table.Th>
+              <Table.Th>provider · 사용 모델</Table.Th>
               <Table.Th>연결</Table.Th>
               <Table.Th>토큰</Table.Th>
               <Table.Th>미디어</Table.Th>
-              <Table.Th>소요</Table.Th>
+              <Table.Th>성능</Table.Th>
+              <Table.Th>비용</Table.Th>
               <Table.Th>일시</Table.Th>
               <Table.Th />
             </Table.Tr>
@@ -166,7 +167,7 @@ function LlmLogList() {
                   <Stack gap={0}>
                     <Text>{log.provider}</Text>
                     <Text size="xs" c="dimmed">
-                      {log.model}
+                      {log.displayModel}
                     </Text>
                   </Stack>
                 </Table.Td>
@@ -184,15 +185,21 @@ function LlmLogList() {
                     </Text>
                   )}
                 </Table.Td>
-                <Table.Td>{log.totalTokens?.toLocaleString() ?? "—"}</Table.Td>
+                <Table.Td>
+                  <Stack gap={0}>
+                    <Text size="sm">
+                      {log.totalTokens?.toLocaleString() ?? "—"}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {tokenSummary(log)}
+                    </Text>
+                  </Stack>
+                </Table.Td>
                 <Table.Td>
                   {log.mediaCount > 0 ? `${log.mediaCount}장` : "—"}
                 </Table.Td>
-                <Table.Td>
-                  {log.durationMs === null
-                    ? "—"
-                    : `${log.durationMs.toLocaleString()} ms`}
-                </Table.Td>
+                <Table.Td>{performanceSummary(log)}</Table.Td>
+                <Table.Td>{formatCost(log.cost)}</Table.Td>
                 <Table.Td>
                   {log.createdAt.replace("T", " ").slice(0, 16)}
                 </Table.Td>
@@ -218,4 +225,51 @@ function LlmLogList() {
       {selectedId ? <LlmLogDetailPanel id={selectedId} /> : null}
     </DataPage>
   );
+}
+
+function tokenSummary(log: {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cachedInputTokens: number | null;
+}): string {
+  const parts = [
+    `입력 ${log.inputTokens?.toLocaleString() ?? "—"}`,
+    `출력 ${log.outputTokens?.toLocaleString() ?? "—"}`,
+  ];
+  if (log.cachedInputTokens !== null) {
+    const rate = log.inputTokens
+      ? ` (${((log.cachedInputTokens / log.inputTokens) * 100).toFixed(1)}%)`
+      : "";
+    parts.push(`캐시 ${log.cachedInputTokens.toLocaleString()}${rate}`);
+  }
+  return parts.join(" · ");
+}
+
+function performanceSummary(log: {
+  durationMs: number | null;
+  timeToFirstTokenMs: number | null;
+  outputTokens: number | null;
+}): string {
+  if (log.durationMs === null) return "—";
+  const generationMs = Math.max(
+    0,
+    log.durationMs - (log.timeToFirstTokenMs ?? 0),
+  );
+  const rate =
+    log.outputTokens && generationMs > 0
+      ? `${((log.outputTokens * 1000) / generationMs).toFixed(1)} tok/s`
+      : null;
+  return [
+    `${log.durationMs.toLocaleString()} ms`,
+    log.timeToFirstTokenMs === null
+      ? rate && `평균 ${rate}`
+      : `TTFT ${log.timeToFirstTokenMs.toLocaleString()} ms${rate ? ` · ${rate}` : ""}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function formatCost(value: string | null): string {
+  if (value === null) return "—";
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 10 });
 }

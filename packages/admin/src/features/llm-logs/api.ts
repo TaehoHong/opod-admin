@@ -8,6 +8,8 @@ export type LlmLogListItem = {
   type: string;
   provider: string;
   model: string;
+  displayModel: string;
+  responseModel: string | null;
   status: LlmLogStatus;
   isStreaming: boolean;
   requestId: string | null;
@@ -21,6 +23,13 @@ export type LlmLogListItem = {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  finishReason: string | null;
+  timeToFirstTokenMs: number | null;
+  cachedInputTokens: number | null;
+  cacheWriteTokens: number | null;
+  reasoningTokens: number | null;
+  cost: string | null;
+  upstreamCost: string | null;
   createdAt: string;
   completedAt?: string;
   mediaCount: number;
@@ -41,6 +50,7 @@ export type LlmLogDetail = Omit<LlmLogListItem, "mediaCount"> & {
   userPromptJson: unknown;
   requestJson: unknown;
   responseJson: unknown;
+  usageJson: unknown;
   metadataJson: unknown;
   redactedPaths: string[];
   errorMessage: string | null;

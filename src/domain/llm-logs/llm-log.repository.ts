@@ -40,6 +40,14 @@ const listFields = {
   inputTokens: true,
   outputTokens: true,
   totalTokens: true,
+  responseModel: true,
+  finishReason: true,
+  timeToFirstTokenMs: true,
+  cachedInputTokens: true,
+  cacheWriteTokens: true,
+  reasoningTokens: true,
+  cost: true,
+  upstreamCost: true,
   createdAt: true,
   completedAt: true,
   _count: { select: { media: true } },
@@ -87,6 +95,15 @@ export type LlmLogFinishInput = {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  responseModel?: string;
+  usageJson?: Prisma.InputJsonValue | null;
+  finishReason?: string;
+  timeToFirstTokenMs?: number;
+  cachedInputTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  cost?: number;
+  upstreamCost?: number;
   completedAt?: Date;
 };
 
@@ -112,7 +129,17 @@ export class LlmLogRepository {
       ...(filter.type ? { type: filter.type } : {}),
       ...(filter.provider ? { provider: filter.provider } : {}),
       ...(filter.model
-        ? { model: { contains: filter.model, mode: "insensitive" } }
+        ? {
+            OR: [
+              { model: { contains: filter.model, mode: "insensitive" } },
+              {
+                responseModel: {
+                  contains: filter.model,
+                  mode: "insensitive",
+                },
+              },
+            ],
+          }
         : {}),
       ...(filter.requestId ? { requestId: filter.requestId } : {}),
       ...(filter.generationJobId
@@ -209,8 +236,8 @@ export class LlmLogRepository {
   }
 
   async finish(id: bigint, input: LlmLogFinishInput): Promise<void> {
-    // responseJson만 따로 다룬다 — null은 "지우기"가 아니라 JSON null 저장이다.
-    const { responseJson, ...rest } = input;
+    // nullable JSON은 null을 SQL NULL이 아니라 JSON null로 명시해야 한다.
+    const { responseJson, usageJson, ...rest } = input;
     await this.prisma.llmLog.update({
       where: { id },
       data: {
@@ -218,6 +245,9 @@ export class LlmLogRepository {
         ...(responseJson === undefined
           ? {}
           : { responseJson: responseJson ?? Prisma.JsonNull }),
+        ...(usageJson === undefined
+          ? {}
+          : { usageJson: usageJson ?? Prisma.JsonNull }),
       },
     });
   }
