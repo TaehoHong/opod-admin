@@ -25,6 +25,8 @@ export const GENERATION_SETTING_KEYS = {
   agentLlmApiUrl: "agent.llmApiUrl",
   agentLlmApiKey: "agent.llmApiKey",
   agentLlmModel: "agent.llmModel",
+  agentEmbeddingApiUrl: "agent.embeddingApiUrl",
+  agentEmbeddingApiKey: "agent.embeddingApiKey",
   agentEmbeddingModel: "agent.embeddingModel",
   // 평가 워커 LLM — 미설정 필드는 planner.*를 상속 (chat과 같은 규칙).
   // 플래너와 다른 모델을 지정해 자기 평가 편향을 줄일 수 있다.
@@ -79,7 +81,7 @@ export type GenerationSettings = Partial<
   Record<GenerationSettingField, string>
 >;
 
-// undefined = 유지, null·빈 문자열 = 삭제(env 폴백으로 복귀), 값 = 저장.
+// undefined = 유지, null·빈 문자열 = 삭제(필드별 기본값·상속·미설정으로 복귀), 값 = 저장.
 export type GenerationSettingsUpdate = Partial<
   Record<GenerationSettingField, string | null>
 >;
@@ -104,7 +106,7 @@ type SettingsEnv = Record<string, string | undefined>;
 
 // 연결 테스트 — 폼의 미저장 입력을 실효 설정 위에 덮어 검증한다.
 export type ConnectionTestInput = {
-  target: "image" | "planner" | "chat" | "evaluator";
+  target: "image" | "planner" | "chat" | "embedding" | "evaluator";
   falApiKey?: string;
   llmApiUrl?: string;
   llmApiKey?: string;
@@ -134,8 +136,6 @@ const ENV_KEYS: Partial<Record<GenerationSettingField, string>> = {
   pipelineV3Enabled: "POST_PIPELINE_V3_ENABLED",
 };
 
-const CHAT_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
-
 // 평가 LLM 실효 설정 — evaluator.* 오버라이드(DB 전용), 없으면 planner 상속.
 export type ResolvedEvaluatorSettings = PlannerProviderSettings & {
   overridden: { apiUrl: boolean; apiKey: boolean; model: boolean };
@@ -156,11 +156,15 @@ export type ResolvedChatSettings = {
   apiUrl?: string;
   apiKey?: string;
   model?: string;
-  embeddingModel: string;
+  embeddingApiUrl?: string;
+  embeddingApiKey?: string;
+  embeddingModel?: string;
   overridden: {
     apiUrl: boolean;
     apiKey: boolean;
     model: boolean;
+    embeddingApiUrl: boolean;
+    embeddingApiKey: boolean;
     embeddingModel: boolean;
   };
 };
@@ -413,28 +417,29 @@ export class GenerationSettingsService {
     };
   }
 
-  // 채팅 LLM 실효 설정 — 필드 단위로 agent.* 오버라이드, 미설정은 planner
-  // 실효값(DB > env) 상속. opod-agent도 같은 규칙으로 읽는다.
-  async resolveChatSettings(
-    env: SettingsEnv = process.env,
-  ): Promise<ResolvedChatSettings> {
+  // 제품 채팅은 DB만 읽는다. 채팅 URL·키·모델은 DB planner.*를 상속할 수
+  // 있지만 임베딩 3종은 별도 agent.* 값이 모두 있어야 한다.
+  async resolveChatSettings(): Promise<ResolvedChatSettings> {
     const db = await this.getSettings();
-    const planner = await this.resolvePlannerSettings(env);
     return {
-      apiUrl: db.agentLlmApiUrl ?? planner.apiUrl,
-      apiKey: db.agentLlmApiKey ?? planner.apiKey,
-      model: db.agentLlmModel ?? planner.model,
-      embeddingModel: db.agentEmbeddingModel ?? CHAT_DEFAULT_EMBEDDING_MODEL,
+      apiUrl: db.agentLlmApiUrl ?? db.llmApiUrl,
+      apiKey: db.agentLlmApiKey ?? db.llmApiKey,
+      model: db.agentLlmModel ?? db.llmModel,
+      embeddingApiUrl: db.agentEmbeddingApiUrl,
+      embeddingApiKey: db.agentEmbeddingApiKey,
+      embeddingModel: db.agentEmbeddingModel,
       overridden: {
         apiUrl: db.agentLlmApiUrl !== undefined,
         apiKey: db.agentLlmApiKey !== undefined,
         model: db.agentLlmModel !== undefined,
+        embeddingApiUrl: db.agentEmbeddingApiUrl !== undefined,
+        embeddingApiKey: db.agentEmbeddingApiKey !== undefined,
         embeddingModel: db.agentEmbeddingModel !== undefined,
       },
     };
   }
 
-  // 저장 전 연결 검증 — 폼 입력값을 현재 실효 설정(DB > env) 위에 덮어
+  // 저장 전 연결 검증 — 폼 입력값을 현재 실효 설정 위에 덮어
   // "저장하면 적용될 조합"으로 프로바이더를 실제 호출해본다. 읽기 전용.
   async testConnection(
     input: ConnectionTestInput,
@@ -482,9 +487,53 @@ export class GenerationSettingsService {
         return { ok: true, message: "fal 키 인증 확인" };
       }
 
+      if (input.target === "embedding") {
+        const resolved = await this.resolveChatSettings();
+        const apiUrl = input.llmApiUrl?.trim() || resolved.embeddingApiUrl;
+        const apiKey = input.llmApiKey?.trim() || resolved.embeddingApiKey;
+        const model = input.llmModel?.trim() || resolved.embeddingModel;
+        if (!apiUrl || !apiKey || !model) {
+          return {
+            ok: false,
+            message: "임베딩 URL·키·모델이 모두 있어야 테스트할 수 있습니다",
+          };
+        }
+        const requestJson = { model, input: ["ping"] };
+        const execute = () =>
+          fetchFn(apiUrl, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(requestJson),
+            signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
+          });
+        const response = this.llmLogs
+          ? await this.llmLogs.runJsonFetch({
+              type: LLM_LOG_TYPE.connectionTest,
+              provider: "openai-compatible",
+              model,
+              endpoint: apiUrl,
+              requestJson,
+              context: { metadata: { target: "embedding" } },
+              execute,
+            })
+          : await execute();
+        const detail = response.ok
+          ? ""
+          : (await response.text().catch(() => "")).slice(0, 200);
+        return response.ok
+          ? { ok: true, message: `임베딩 연결 확인 (${model})` }
+          : {
+              ok: false,
+              message: `임베딩 응답 ${response.status}${detail ? `: ${detail}` : ""}`,
+            };
+      }
+
       const resolved =
         input.target === "chat"
-          ? await this.resolveChatSettings(env)
+          ? await this.resolveChatSettings()
           : input.target === "evaluator"
             ? await this.resolveEvaluatorSettings(env)
             : await this.resolvePlannerSettings(env);
@@ -604,6 +653,7 @@ export function settingsChangeEntries(
     "falApiKey",
     "llmApiKey",
     "agentLlmApiKey",
+    "agentEmbeddingApiKey",
     "evaluatorLlmApiKey",
   ];
   const entries: {
@@ -620,10 +670,15 @@ export function settingsChangeEntries(
     if (prev === next) continue;
     const target = GENERATION_SETTING_KEYS[field];
     if (next === undefined) {
+      const summary = ENV_KEYS[field]
+        ? "삭제 (env 폴백 복귀)"
+        : field.startsWith("agentEmbedding")
+          ? "삭제 (미설정)"
+          : "삭제 (기획 LLM 상속)";
       entries.push({
         target,
         actionType: "SETTINGS_CLEAR",
-        summary: "삭제 (env 폴백 복귀)",
+        summary,
       });
       continue;
     }

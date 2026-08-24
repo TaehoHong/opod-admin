@@ -71,6 +71,8 @@ export function GenerationSettingsForm({
       agentLlmApiKey: "",
       agentLlmApiUrl: settings.chat.overrides.apiUrl ?? "",
       agentLlmModel: settings.chat.overrides.model ?? "",
+      agentEmbeddingApiKey: "",
+      agentEmbeddingApiUrl: settings.chat.overrides.embeddingApiUrl ?? "",
       agentEmbeddingModel: settings.chat.overrides.embeddingModel ?? "",
       evaluatorLlmApiKey: "",
       evaluatorLlmApiUrl: settings.evaluator.overrides.apiUrl ?? "",
@@ -82,6 +84,7 @@ export function GenerationSettingsForm({
     validate: {
       llmApiUrl: httpUrlOrEmpty,
       agentLlmApiUrl: httpUrlOrEmpty,
+      agentEmbeddingApiUrl: httpUrlOrEmpty,
       evaluatorLlmApiUrl: httpUrlOrEmpty,
       aspectRatioFeed: aspectRatioOrEmpty,
       aspectRatioStory: aspectRatioOrEmpty,
@@ -284,9 +287,46 @@ export function GenerationSettingsForm({
             key={form.key("agentLlmModel")}
             {...form.getInputProps("agentLlmModel")}
           />
+
+          <Divider label="임베딩" labelPosition="center" />
+          {sectionHeader("기억 검색 임베딩", "embedding")}
+          <Group gap="xs" align="flex-end" wrap="nowrap">
+            <PasswordInput
+              label="임베딩 API 키"
+              placeholder="임베딩 전용 키로 바꿀 때만 입력"
+              autoComplete="off"
+              flex={1}
+              key={form.key("agentEmbeddingApiKey")}
+              {...form.getInputProps("agentEmbeddingApiKey")}
+            />
+            <StandaloneKeyBadge
+              status={settings.chat.overrides.embeddingApiKey}
+              effectiveLast4={settings.chat.effective.embeddingApiKeyLast4}
+              missingLabel="키 없음 — 기억 검색 불가"
+            />
+            {settings.chat.overrides.embeddingApiKey.set ? (
+              <ClearKeyButton
+                label="임베딩 API 키 삭제"
+                description="저장된 임베딩 키를 삭제합니다. 별도 키가 없으면 기억 검색 임베딩이 중단됩니다."
+                loading={save.isPending}
+                onConfirm={() => clearKey("agentEmbeddingApiKey")}
+              />
+            ) : null}
+          </Group>
+          <TextInput
+            label="임베딩 API URL"
+            placeholder="https://openrouter.ai/api/v1/embeddings"
+            description="채팅 URL을 상속하지 않습니다"
+            key={form.key("agentEmbeddingApiUrl")}
+            {...form.getInputProps("agentEmbeddingApiUrl")}
+          />
           <TextInput
             label="임베딩 모델"
-            placeholder={settings.chat.effective.embeddingModel}
+            placeholder={
+              settings.chat.effective.embeddingModel ??
+              "openai/text-embedding-3-small"
+            }
+            description="채팅 모델을 상속하지 않습니다"
             key={form.key("agentEmbeddingModel")}
             {...form.getInputProps("agentEmbeddingModel")}
           />
@@ -335,7 +375,8 @@ export function GenerationSettingsForm({
 
           <Text size="xs" c="dimmed">
             이미지·기획 설정은 DB 값이 env보다 우선하고, 채팅·평가 LLM은 DB
-            전용이라 비운 필드는 기획 LLM을 상속합니다. 저장하면 다음
+            전용이라 비운 필드는 기획 LLM을 상속합니다. 임베딩 URL·키·모델은
+            별도 설정이며 세 값이 모두 필요합니다. 저장하면 다음
             잡·기획·대화·평가부터 적용됩니다. 모델과 URL은 비우고 저장하면 상위
             값으로 복귀하지만, API 키는 비워도 유지되고 삭제는 키 삭제
             버튼으로만 합니다.
@@ -415,6 +456,21 @@ function InheritedKeyBadge({
     );
   }
   return <Badge color="attention">키 없음</Badge>;
+}
+
+function StandaloneKeyBadge({
+  status,
+  effectiveLast4,
+  missingLabel,
+}: {
+  status: SecretStatus;
+  effectiveLast4: string | null;
+  missingLabel: string;
+}) {
+  if (status.set && effectiveLast4) {
+    return <Badge color="accent">저장됨 ····{effectiveLast4}</Badge>;
+  }
+  return <Badge color="attention">{missingLabel}</Badge>;
 }
 
 function SecretStatusBadge({

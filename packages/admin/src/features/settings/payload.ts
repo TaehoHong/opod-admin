@@ -10,6 +10,8 @@ export type SettingsFormValues = {
   agentLlmApiKey: string;
   agentLlmApiUrl: string;
   agentLlmModel: string;
+  agentEmbeddingApiKey: string;
+  agentEmbeddingApiUrl: string;
   agentEmbeddingModel: string;
   evaluatorLlmApiKey: string;
   evaluatorLlmApiUrl: string;
@@ -37,6 +39,8 @@ export function toSettingsUpdate(
     ...secret("agentLlmApiKey", values.agentLlmApiKey),
     agentLlmApiUrl: values.agentLlmApiUrl.trim() || null,
     agentLlmModel: values.agentLlmModel.trim() || null,
+    ...secret("agentEmbeddingApiKey", values.agentEmbeddingApiKey),
+    agentEmbeddingApiUrl: values.agentEmbeddingApiUrl.trim() || null,
     agentEmbeddingModel: values.agentEmbeddingModel.trim() || null,
     ...secret("evaluatorLlmApiKey", values.evaluatorLlmApiKey),
     evaluatorLlmApiUrl: values.evaluatorLlmApiUrl.trim() || null,
@@ -70,17 +74,23 @@ export function toConnectionTestBody(
           llmApiUrl: values.agentLlmApiUrl,
           llmModel: values.agentLlmModel,
         }
-      : target === "evaluator"
+      : target === "embedding"
         ? {
-            llmApiKey: values.evaluatorLlmApiKey,
-            llmApiUrl: values.evaluatorLlmApiUrl,
-            llmModel: values.evaluatorLlmModel,
+            llmApiKey: values.agentEmbeddingApiKey,
+            llmApiUrl: values.agentEmbeddingApiUrl,
+            llmModel: values.agentEmbeddingModel,
           }
-        : {
-            llmApiKey: values.llmApiKey,
-            llmApiUrl: values.llmApiUrl,
-            llmModel: values.llmModel,
-          };
+        : target === "evaluator"
+          ? {
+              llmApiKey: values.evaluatorLlmApiKey,
+              llmApiUrl: values.evaluatorLlmApiUrl,
+              llmModel: values.evaluatorLlmModel,
+            }
+          : {
+              llmApiKey: values.llmApiKey,
+              llmApiUrl: values.llmApiUrl,
+              llmModel: values.llmModel,
+            };
   return {
     target,
     ...Object.fromEntries(

@@ -155,6 +155,43 @@ describe("GenerationSettingsService", () => {
     });
   });
 
+  it("resolves chat from DB only and keeps embedding settings separate", async () => {
+    const repository = repositoryMock([
+      {
+        key: "planner.llmApiUrl",
+        value: "https://planner.test/v1/chat/completions",
+      },
+      { key: "planner.llmApiKey", value: "planner-key" },
+      { key: "planner.llmModel", value: "planner-model" },
+      { key: "agent.llmModel", value: "chat-model" },
+      {
+        key: "agent.embeddingApiUrl",
+        value: "https://embed.test/v1/embeddings",
+      },
+      { key: "agent.embeddingApiKey", value: "embedding-key" },
+      { key: "agent.embeddingModel", value: "embedding-model" },
+    ]);
+
+    await expect(
+      makeService(repository).resolveChatSettings(),
+    ).resolves.toEqual({
+      apiUrl: "https://planner.test/v1/chat/completions",
+      apiKey: "planner-key",
+      model: "chat-model",
+      embeddingApiUrl: "https://embed.test/v1/embeddings",
+      embeddingApiKey: "embedding-key",
+      embeddingModel: "embedding-model",
+      overridden: {
+        apiUrl: false,
+        apiKey: false,
+        model: true,
+        embeddingApiUrl: true,
+        embeddingApiKey: true,
+        embeddingModel: true,
+      },
+    });
+  });
+
   // 토글을 잘못 읽으면 화면에서 끈 워커가 계속 돌아 이미지·평가 비용이 샌다.
   it("resolves worker toggles from DB first and falls back to env defaults", async () => {
     const repository = repositoryMock([
@@ -401,6 +438,39 @@ describe("GenerationSettingsService", () => {
     expect(retryBody.max_tokens).toBeUndefined();
   });
 
+  it("tests the separately stored embedding URL, key, and model", async () => {
+    const repository = repositoryMock([
+      {
+        key: "agent.embeddingApiUrl",
+        value: "https://embed.test/v1/embeddings",
+      },
+      { key: "agent.embeddingApiKey", value: "embedding-key" },
+      { key: "agent.embeddingModel", value: "embedding-model" },
+    ]);
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200 });
+
+    await expect(
+      makeService(repository).testConnection(
+        { target: "embedding" },
+        {},
+        fetchMock as never,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      message: "임베딩 연결 확인 (embedding-model)",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://embed.test/v1/embeddings",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          authorization: "Bearer embedding-key",
+        }),
+        body: JSON.stringify({ model: "embedding-model", input: ["ping"] }),
+      }),
+    );
+  });
+
   it("testConnection surfaces a 400 unrelated to max_tokens without retrying", async () => {
     const repository = repositoryMock([
       { key: "planner.llmApiUrl", value: "https://llm.test/v1/chat" },
@@ -450,6 +520,30 @@ describe("GenerationSettingsService", () => {
         target: "planner.llmModel",
         actionType: "SETTINGS_SET",
         summary: "gpt-5-mini",
+      },
+    ]);
+  });
+
+  it("describes DB-only setting deletion without claiming an env fallback", () => {
+    expect(
+      settingsChangeEntries(
+        {
+          agentEmbeddingApiKey: "embedding-key",
+          agentLlmModel: "chat-model",
+        },
+        {},
+        { agentEmbeddingApiKey: null, agentLlmModel: null },
+      ),
+    ).toEqual([
+      {
+        target: "agent.llmModel",
+        actionType: "SETTINGS_CLEAR",
+        summary: "삭제 (기획 LLM 상속)",
+      },
+      {
+        target: "agent.embeddingApiKey",
+        actionType: "SETTINGS_CLEAR",
+        summary: "삭제 (미설정)",
       },
     ]);
   });

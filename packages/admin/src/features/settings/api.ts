@@ -18,17 +18,23 @@ export type GenerationSettingsView = {
       apiUrl: string | null;
       apiKey: SecretStatus;
       model: string | null;
+      embeddingApiUrl: string | null;
+      embeddingApiKey: SecretStatus;
       embeddingModel: string | null;
     };
     effective: {
       apiUrl: string | null;
       apiKeyLast4: string | null;
       model: string | null;
-      embeddingModel: string;
+      embeddingApiUrl: string | null;
+      embeddingApiKeyLast4: string | null;
+      embeddingModel: string | null;
       overridden: {
         apiUrl: boolean;
         apiKey: boolean;
         model: boolean;
+        embeddingApiUrl: boolean;
+        embeddingApiKey: boolean;
         embeddingModel: boolean;
       };
     };
@@ -105,6 +111,8 @@ export type GenerationSettingsUpdate = {
   agentLlmApiUrl?: string | null;
   agentLlmApiKey?: string | null;
   agentLlmModel?: string | null;
+  agentEmbeddingApiUrl?: string | null;
+  agentEmbeddingApiKey?: string | null;
   agentEmbeddingModel?: string | null;
   evaluatorLlmApiUrl?: string | null;
   evaluatorLlmApiKey?: string | null;
@@ -119,7 +127,8 @@ export type GenerationSettingsUpdate = {
   aspectRatioReel?: string | null;
 };
 
-export type ConnectionTestTarget = "image" | "planner" | "chat" | "evaluator";
+export type ConnectionTestTarget =
+  "image" | "planner" | "chat" | "embedding" | "evaluator";
 
 export type ConnectionTestResult = { ok: boolean; message: string };
 

@@ -18,6 +18,8 @@ const empty: SettingsFormValues = {
   agentLlmApiKey: "",
   agentLlmApiUrl: "",
   agentLlmModel: "",
+  agentEmbeddingApiKey: "",
+  agentEmbeddingApiUrl: "",
   agentEmbeddingModel: "",
   evaluatorLlmApiKey: "",
   evaluatorLlmApiUrl: "",
@@ -36,6 +38,7 @@ describe("toSettingsUpdate", () => {
       llmModel: null,
       agentLlmApiUrl: null,
       agentLlmModel: null,
+      agentEmbeddingApiUrl: null,
       agentEmbeddingModel: null,
       evaluatorLlmApiUrl: null,
       evaluatorLlmModel: null,
@@ -67,6 +70,7 @@ describe("toSettingsUpdate", () => {
       agentLlmApiKey: "sk-chat",
       agentLlmApiUrl: null,
       agentLlmModel: null,
+      agentEmbeddingApiUrl: null,
       agentEmbeddingModel: null,
       evaluatorLlmApiKey: "sk-eval",
       evaluatorLlmApiUrl: null,
@@ -114,6 +118,22 @@ describe("toConnectionTestBody", () => {
       target: "evaluator",
       llmModel: "eval-model",
       llmApiKey: "sk-eval",
+    });
+  });
+
+  it("maps the separate embedding settings onto the embedding test request", () => {
+    expect(
+      toConnectionTestBody("embedding", {
+        ...empty,
+        agentEmbeddingApiUrl: "https://embed.test/v1/embeddings",
+        agentEmbeddingApiKey: "embed-key",
+        agentEmbeddingModel: "embed-model",
+      }),
+    ).toEqual({
+      target: "embedding",
+      llmApiUrl: "https://embed.test/v1/embeddings",
+      llmApiKey: "embed-key",
+      llmModel: "embed-model",
     });
   });
 });
