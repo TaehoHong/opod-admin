@@ -91,6 +91,12 @@ export class AdminSettingsController {
       ...("agentLlmModel" in body
         ? { agentLlmModel: body.agentLlmModel ?? null }
         : {}),
+      ...("agentEmbeddingApiUrl" in body
+        ? { agentEmbeddingApiUrl: body.agentEmbeddingApiUrl ?? null }
+        : {}),
+      ...("agentEmbeddingApiKey" in body
+        ? { agentEmbeddingApiKey: body.agentEmbeddingApiKey ?? null }
+        : {}),
       ...("agentEmbeddingModel" in body
         ? { agentEmbeddingModel: body.agentEmbeddingModel ?? null }
         : {}),
@@ -172,13 +178,21 @@ export class AdminSettingsController {
             ? { set: true, last4: saved.agentLlmApiKey.slice(-4) }
             : { set: false },
           model: saved.agentLlmModel ?? null,
+          embeddingApiUrl: saved.agentEmbeddingApiUrl ?? null,
+          embeddingApiKey: saved.agentEmbeddingApiKey
+            ? { set: true, last4: saved.agentEmbeddingApiKey.slice(-4) }
+            : { set: false },
           embeddingModel: saved.agentEmbeddingModel ?? null,
         },
         effective: {
           apiUrl: chat.apiUrl ?? null,
           apiKeyLast4: chat.apiKey ? chat.apiKey.slice(-4) : null,
           model: chat.model ?? null,
-          embeddingModel: chat.embeddingModel,
+          embeddingApiUrl: chat.embeddingApiUrl ?? null,
+          embeddingApiKeyLast4: chat.embeddingApiKey
+            ? chat.embeddingApiKey.slice(-4)
+            : null,
+          embeddingModel: chat.embeddingModel ?? null,
           overridden: chat.overridden,
         },
       },

@@ -7,7 +7,7 @@ import {
   MaxLength,
 } from "class-validator";
 
-// 각 필드: 누락 = 유지, null·빈 문자열 = 삭제(env 폴백 복귀), 값 = 저장.
+// 각 필드: 누락 = 유지, null·빈 문자열 = 삭제(필드별 기본값·상속·미설정), 값 = 저장.
 // @IsOptional은 null도 검증에서 제외하므로 null 삭제 시맨틱과 호환된다.
 export class UpdateGenerationSettingsDto {
   @IsOptional()
@@ -81,6 +81,19 @@ export class UpdateGenerationSettingsDto {
   @IsString()
   @MaxLength(200)
   agentLlmModel?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^$|^https?:\/\//, {
+    message: "agentEmbeddingApiUrl must start with http:// or https://",
+  })
+  @MaxLength(500)
+  agentEmbeddingApiUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  agentEmbeddingApiKey?: string | null;
 
   @IsOptional()
   @IsString()

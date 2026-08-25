@@ -21,17 +21,23 @@ export type GenerationSettingsView = {
       apiUrl: string | null;
       apiKey: SecretStatus;
       model: string | null;
+      embeddingApiUrl: string | null;
+      embeddingApiKey: SecretStatus;
       embeddingModel: string | null;
     };
     effective: {
       apiUrl: string | null;
       apiKeyLast4: string | null;
       model: string | null;
-      embeddingModel: string;
+      embeddingApiUrl: string | null;
+      embeddingApiKeyLast4: string | null;
+      embeddingModel: string | null;
       overridden: {
         apiUrl: boolean;
         apiKey: boolean;
         model: boolean;
+        embeddingApiUrl: boolean;
+        embeddingApiKey: boolean;
         embeddingModel: boolean;
       };
     };
@@ -96,6 +102,8 @@ export type GenerationSettingsUpdate = {
   agentLlmApiUrl?: string | null;
   agentLlmApiKey?: string | null;
   agentLlmModel?: string | null;
+  agentEmbeddingApiUrl?: string | null;
+  agentEmbeddingApiKey?: string | null;
   agentEmbeddingModel?: string | null;
   // 워커 자동 루프 — null = env 기본값으로 복귀.
   workerEnabled?: boolean | null;
@@ -106,7 +114,7 @@ export type GenerationSettingsUpdate = {
   aspectRatioReel?: string | null;
 };
 
-export type ConnectionTestTarget = "image" | "planner" | "chat";
+export type ConnectionTestTarget = "image" | "planner" | "chat" | "embedding";
 
 export type ConnectionTestResult = { ok: boolean; message: string };
 

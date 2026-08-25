@@ -22,6 +22,7 @@ const JSON_SECTIONS = [
   { key: "userPromptJson", label: "user prompt" },
   { key: "requestJson", label: "request" },
   { key: "responseJson", label: "response" },
+  { key: "usageJson", label: "usage" },
   { key: "metadataJson", label: "metadata" },
 ] as const;
 
@@ -46,6 +47,14 @@ export function LlmLogDetailPanel({ id }: { id: string }) {
   const tokens = [detail.inputTokens, detail.outputTokens, detail.totalTokens]
     .map((value) => value?.toLocaleString() ?? "—")
     .join(" / ");
+  const generationMs =
+    detail.durationMs === null
+      ? null
+      : Math.max(0, detail.durationMs - (detail.timeToFirstTokenMs ?? 0));
+  const tokensPerSecond =
+    detail.outputTokens && generationMs
+      ? (detail.outputTokens * 1000) / generationMs
+      : null;
 
   return (
     <Paper p="md">
@@ -58,12 +67,38 @@ export function LlmLogDetailPanel({ id }: { id: string }) {
         </Group>
 
         <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+          <Field label="요청 모델">{detail.model}</Field>
+          <Field label="응답 모델">{detail.responseModel ?? "—"}</Field>
           <Field label="토큰 (입력/출력/합계)">{tokens}</Field>
+          <Field label="캐시 (읽기/쓰기)">
+            {detail.cachedInputTokens?.toLocaleString() ?? "—"} /{" "}
+            {detail.cacheWriteTokens?.toLocaleString() ?? "—"}
+          </Field>
+          <Field label="추론 토큰">
+            {detail.reasoningTokens?.toLocaleString() ?? "—"}
+          </Field>
           <Field label="소요">
             {detail.durationMs === null
               ? "—"
               : `${detail.durationMs.toLocaleString()} ms`}
           </Field>
+          <Field label="첫 토큰 (TTFT)">
+            {detail.timeToFirstTokenMs === null
+              ? "—"
+              : `${detail.timeToFirstTokenMs.toLocaleString()} ms`}
+          </Field>
+          <Field
+            label={
+              detail.timeToFirstTokenMs === null ? "평균 처리량" : "생성 속도"
+            }
+          >
+            {tokensPerSecond === null
+              ? "—"
+              : `${tokensPerSecond.toFixed(1)} tok/s`}
+          </Field>
+          <Field label="비용">{formatCost(detail.cost)}</Field>
+          <Field label="upstream 비용">{formatCost(detail.upstreamCost)}</Field>
+          <Field label="종료 사유">{detail.finishReason ?? "—"}</Field>
           <Field label="HTTP">{detail.httpStatus ?? "—"}</Field>
           <Field label="스트리밍">{detail.isStreaming ? "예" : "아니오"}</Field>
         </SimpleGrid>
@@ -152,4 +187,9 @@ function Field({
       <Text size="sm">{children}</Text>
     </Stack>
   );
+}
+
+function formatCost(value: string | null): string {
+  if (value === null) return "—";
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 10 });
 }

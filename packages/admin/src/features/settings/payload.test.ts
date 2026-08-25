@@ -21,6 +21,8 @@ const empty: SettingsFormValues = {
   agentLlmApiKey: "",
   agentLlmApiUrl: "",
   agentLlmModel: "",
+  agentEmbeddingApiKey: "",
+  agentEmbeddingApiUrl: "",
   agentEmbeddingModel: "",
   aspectRatioFeed: "",
   aspectRatioStory: "",
@@ -38,6 +40,7 @@ describe("toSettingsUpdate", () => {
       llmModel: null,
       agentLlmApiUrl: null,
       agentLlmModel: null,
+      agentEmbeddingApiUrl: null,
       agentEmbeddingModel: null,
       // 비운 종횡비는 삭제 = 코드 기본값 복귀다. 생략(유지)이 아니다.
       aspectRatioFeed: null,
@@ -68,6 +71,7 @@ describe("toSettingsUpdate", () => {
       agentLlmApiKey: "sk-chat",
       agentLlmApiUrl: null,
       agentLlmModel: null,
+      agentEmbeddingApiUrl: null,
       agentEmbeddingModel: null,
       aspectRatioFeed: "4:5",
       aspectRatioStory: null,
@@ -116,6 +120,21 @@ describe("toConnectionTestBody", () => {
       target: "chat",
       llmModel: "chat-model",
       llmApiKey: "sk-chat",
+    });
+  });
+  it("maps the separate embedding settings onto the embedding test request", () => {
+    expect(
+      toConnectionTestBody("embedding", {
+        ...empty,
+        agentEmbeddingApiUrl: "https://embed.test/v1/embeddings",
+        agentEmbeddingApiKey: "embed-key",
+        agentEmbeddingModel: "embed-model",
+      }),
+    ).toEqual({
+      target: "embedding",
+      llmApiUrl: "https://embed.test/v1/embeddings",
+      llmApiKey: "embed-key",
+      llmModel: "embed-model",
     });
   });
 });

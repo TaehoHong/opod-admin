@@ -13,6 +13,8 @@ export type SettingsFormValues = {
   agentLlmApiKey: string;
   agentLlmApiUrl: string;
   agentLlmModel: string;
+  agentEmbeddingApiKey: string;
+  agentEmbeddingApiUrl: string;
   agentEmbeddingModel: string;
   aspectRatioFeed: string;
   aspectRatioStory: string;
@@ -40,6 +42,8 @@ export function toSettingsUpdate(
     ...secret("agentLlmApiKey", values.agentLlmApiKey),
     agentLlmApiUrl: values.agentLlmApiUrl.trim() || null,
     agentLlmModel: values.agentLlmModel.trim() || null,
+    ...secret("agentEmbeddingApiKey", values.agentEmbeddingApiKey),
+    agentEmbeddingApiUrl: values.agentEmbeddingApiUrl.trim() || null,
     agentEmbeddingModel: values.agentEmbeddingModel.trim() || null,
     aspectRatioFeed: values.aspectRatioFeed.trim() || null,
     aspectRatioStory: values.aspectRatioStory.trim() || null,
@@ -87,11 +91,17 @@ export function toConnectionTestBody(
           llmApiUrl: values.agentLlmApiUrl,
           llmModel: values.agentLlmModel,
         }
-      : {
-          llmApiKey: values.llmApiKey,
-          llmApiUrl: values.llmApiUrl,
-          llmModel: values.llmModel,
-        };
+      : target === "embedding"
+        ? {
+            llmApiKey: values.agentEmbeddingApiKey,
+            llmApiUrl: values.agentEmbeddingApiUrl,
+            llmModel: values.agentEmbeddingModel,
+          }
+        : {
+            llmApiKey: values.llmApiKey,
+            llmApiUrl: values.llmApiUrl,
+            llmModel: values.llmModel,
+          };
   return {
     target,
     ...Object.fromEntries(
