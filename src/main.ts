@@ -10,6 +10,9 @@ async function bootstrap() {
   // composition root — 여기서 한 번 읽고 검증한 뒤 나머지 코드는
   // AppConfigService를 주입받는다 (docs/02-development-rules.md:135-137).
   const config = loadAppConfig();
+  const s3UploadOrigin = config.s3
+    ? `https://${config.s3.bucket}.s3.${config.s3.region}.amazonaws.com`
+    : undefined;
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     ...(config.tls
       ? {
@@ -43,7 +46,10 @@ async function bootstrap() {
           "style-src": ["'self'", "'unsafe-inline'"],
           "img-src": ["'self'", "data:", "https:"],
           "font-src": ["'self'", "data:"],
-          "connect-src": ["'self'"],
+          "connect-src": [
+            "'self'",
+            ...(s3UploadOrigin ? [s3UploadOrigin] : []),
+          ],
           "form-action": ["'self'"],
           "frame-ancestors": ["'none'"],
           "object-src": ["'none'"],
