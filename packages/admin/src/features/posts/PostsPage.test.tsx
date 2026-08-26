@@ -2,10 +2,31 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { useLocation } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import type { SelectHTMLAttributes } from "react";
+import { describe, expect, it, vi } from "vitest";
 import { renderPage } from "../../test/renderPage";
 import { server } from "../../test/server";
 import { PostsPage } from "./PostsPage";
+
+vi.mock("../../shared/ui/CharacterSelect", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../shared/ui/CharacterSelect")>();
+  return {
+    ...actual,
+    CharacterSelect: ({
+      label = "캐릭터",
+      ...props
+    }: SelectHTMLAttributes<HTMLSelectElement> & { label?: string }) => (
+      <label>
+        {label}
+        <select aria-label={label} {...props}>
+          <option value="">선택하세요</option>
+          <option value="character-1">서린</option>
+        </select>
+      </label>
+    ),
+  };
+});
 
 const item = {
   id: "draft-1",
@@ -159,6 +180,101 @@ describe("post operations workspace", () => {
         "/posts/draft-1/prompt",
       ),
     );
+  });
+
+  it("uploads media and publishes a post directly without starting an Agent workflow", async () => {
+    let postBody: unknown;
+    let queueRequests = 0;
+    registerListHandlers(() => {
+      queueRequests += 1;
+    });
+    server.use(
+      http.post("/api/admin/v1/media/uploads", async ({ request }) => {
+        expect(await request.json()).toEqual({
+          mediaType: "image",
+          contentType: "image/png",
+          fileName: "direct.png",
+          byteSize: 5,
+          storagePrefix: "pod/feed/character/character-1",
+        });
+        return HttpResponse.json({
+          media: {
+            id: "media-1",
+            mediaType: "image",
+            url: "https://media.test/direct.png",
+            uploadedAt: null,
+            createdAt: "2026-08-26T00:00:00.000Z",
+          },
+          uploadUrl: "https://upload.test/direct.png",
+          method: "PUT",
+          headers: {},
+          expiresAt: "2026-08-26T01:00:00.000Z",
+        });
+      }),
+      http.put(
+        "https://upload.test/direct.png",
+        () => new HttpResponse(null, { status: 200 }),
+      ),
+      http.post("/api/admin/v1/media/media-1/confirm-upload", () =>
+        HttpResponse.json({
+          id: "media-1",
+          mediaType: "image",
+          url: "https://media.test/direct.png",
+          uploadedAt: "2026-08-26T00:01:00.000Z",
+          createdAt: "2026-08-26T00:00:00.000Z",
+        }),
+      ),
+      http.post("/api/admin/v1/posts", async ({ request }) => {
+        postBody = await request.json();
+        return HttpResponse.json({
+          id: "post-1",
+          characterId: "character-1",
+          contentType: "feed",
+          content: "직접 올리는 캡션",
+          hashtags: ["직접게시"],
+          media: [{ mediaType: "image", url: "https://media.test/direct.png" }],
+          commentCount: 0,
+          reactionCount: 0,
+          createdAt: "2026-08-26T00:02:00.000Z",
+        });
+      }),
+    );
+
+    renderPage(<PostsPage />, { path: "/posts", routes: ["posts"] });
+
+    await screen.findByRole("columnheader", { name: "게시물" });
+    await userEvent.click(screen.getByRole("button", { name: "직접 게시" }));
+    await screen.findByRole("dialog", { name: "직접 게시" });
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "작성 캐릭터" }),
+      "character-1",
+    );
+    await userEvent.type(screen.getByLabelText("캡션"), "직접 올리는 캡션");
+    await userEvent.type(
+      screen.getByRole("combobox", { name: "해시태그" }),
+      "직접게시{Enter}",
+    );
+    const mediaInput =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(mediaInput).not.toBeNull();
+    await userEvent.upload(
+      mediaInput!,
+      new File(["image"], "direct.png", { type: "image/png" }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "바로 게시" }));
+
+    await waitFor(() =>
+      expect(postBody).toEqual({
+        actorType: "character",
+        actorId: "character-1",
+        contentType: "feed",
+        content: "직접 올리는 캡션",
+        hashtags: ["직접게시"],
+        reason: "관리자 직접 게시",
+        media: [{ mediaId: "media-1" }],
+      }),
+    );
+    await waitFor(() => expect(queueRequests).toBeGreaterThan(1));
   });
 
   it("creates a manual workflow without exposing a mode choice", async () => {

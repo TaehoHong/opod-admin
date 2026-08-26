@@ -8,7 +8,6 @@ import {
   Stack,
   TagsInput,
   Textarea,
-  TextInput,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -26,7 +25,6 @@ type FormValues = {
   contentType: Exclude<PostContentType, "story">;
   content: string;
   hashtags: string[];
-  reason: string;
   mediaFiles: File[];
 };
 
@@ -45,13 +43,11 @@ export function PostCreateModal({
       contentType: "feed",
       content: "",
       hashtags: [],
-      reason: "",
       mediaFiles: [],
     },
     validate: {
       actorId: required("작성 캐릭터를 선택해 주세요"),
-      content: required("본문을 입력해 주세요"),
-      reason: required("로그 이유를 입력해 주세요"),
+      content: required("캡션을 입력해 주세요"),
       mediaFiles: (files) =>
         files.length === 0
           ? "이미지 또는 영상을 하나 이상 선택해 주세요"
@@ -66,6 +62,7 @@ export function PostCreateModal({
       createPost(await toCreateBody(values)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["posts"] });
+      void queryClient.invalidateQueries({ queryKey: ["post-work-items"] });
       form.reset();
       onClose();
     },
@@ -79,7 +76,7 @@ export function PostCreateModal({
   };
 
   return (
-    <Modal opened={opened} onClose={close} title="새 게시글" size="lg">
+    <Modal opened={opened} onClose={close} title="직접 게시" size="lg">
       <form
         onSubmit={form.onSubmit((values) => {
           if (!create.isPending) create.mutate(values);
@@ -99,7 +96,7 @@ export function PostCreateModal({
             {...form.getInputProps("contentType")}
           />
           <Textarea
-            label="본문"
+            label="캡션"
             rows={4}
             key={form.key("content")}
             {...form.getInputProps("content")}
@@ -111,14 +108,9 @@ export function PostCreateModal({
             key={form.key("hashtags")}
             {...form.getInputProps("hashtags")}
           />
-          <TextInput
-            label="로그 이유"
-            key={form.key("reason")}
-            {...form.getInputProps("reason")}
-          />
           <FileInput
-            label="미디어"
-            description="이미지 또는 영상 파일을 하나 이상 선택합니다"
+            label="이미지 또는 영상"
+            description="게시할 파일을 하나 이상 선택합니다"
             accept="image/*,video/*"
             multiple
             clearable
@@ -126,7 +118,7 @@ export function PostCreateModal({
             {...form.getInputProps("mediaFiles")}
           />
           {create.isError ? (
-            <Alert color="red" role="alert" title="게시하지 못했습니다">
+            <Alert color="red" role="alert" title="직접 게시하지 못했습니다">
               {create.error.message}
             </Alert>
           ) : null}
@@ -140,7 +132,7 @@ export function PostCreateModal({
               취소
             </Button>
             <Button type="submit" loading={create.isPending}>
-              게시
+              바로 게시
             </Button>
           </Group>
         </Stack>
@@ -170,7 +162,7 @@ async function toCreateBody(values: FormValues): Promise<PostCreate> {
     contentType: values.contentType,
     content: values.content.trim(),
     hashtags: values.hashtags.map((value) => value.trim()).filter(Boolean),
-    reason: values.reason.trim(),
+    reason: "관리자 직접 게시",
     media,
   };
 }

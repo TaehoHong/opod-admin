@@ -8,7 +8,7 @@ import {
   Table,
   Text,
 } from "@mantine/core";
-import type { KeyboardEvent, MouseEvent } from "react";
+import { useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
@@ -19,6 +19,7 @@ import {
   type PostWorkFilter,
   type PostWorkItem,
 } from "./api";
+import { PostCreateModal } from "./PostCreateModal";
 import styles from "./PostQueuePage.module.css";
 
 const FILTERS: { value: PostWorkFilter; label: string }[] = [
@@ -56,6 +57,7 @@ const STATUS_COLOR: Record<PostWorkItem["operationalStatus"], string> = {
 export function PostQueuePage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
+  const [directCreateOpen, setDirectCreateOpen] = useState(false);
   const filter = validFilter(params.get("filter"));
   const items = useCursorList(["post-work-items", filter], (cursor) =>
     fetchPostWorkItems({ filter, cursor }),
@@ -85,9 +87,14 @@ export function PostQueuePage() {
               setParams(next, { replace: true });
             }}
           />
-          <Button component={Link} to="/posts/new/brief">
-            게시물 만들기
+          <Button variant="default" component={Link} to="/posts/new/brief">
+            Agent로 만들기
           </Button>
+          <Button onClick={() => setDirectCreateOpen(true)}>직접 게시</Button>
+          <PostCreateModal
+            opened={directCreateOpen}
+            onClose={() => setDirectCreateOpen(false)}
+          />
         </Group>
       }
     >
