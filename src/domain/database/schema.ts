@@ -217,7 +217,7 @@ export const agentArchivalMemories = opod.table(
     embedding: doublePrecision().array(),
     evidence: text()
       .array()
-      .default(sql`ARRAY[]`),
+      .default(sql`ARRAY[]::text[]`),
     operationKey: text("operation_key"),
     ordinal: integer().default(0).notNull(),
     createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
@@ -672,7 +672,7 @@ export const characters = opod.table(
     bio: text().notNull(),
     interests: text()
       .array()
-      .default(sql`ARRAY[]`),
+      .default(sql`ARRAY[]::text[]`),
     status: characterStatus().default("active").notNull(),
     createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
@@ -1367,7 +1367,7 @@ export const llmLogs = opod.table(
     metadataJson: jsonb("metadata_json"),
     redactedPaths: text("redacted_paths")
       .array()
-      .default(sql`ARRAY[]`)
+      .default(sql`ARRAY[]::text[]`)
       .notNull(),
     httpStatus: integer("http_status"),
     errorType: text("error_type"),
@@ -1942,7 +1942,7 @@ export const postDrafts = opod.table(
     caption: text().default("").notNull(),
     hashtags: text()
       .array()
-      .default(sql`ARRAY[]`),
+      .default(sql`ARRAY[]::text[]`),
     conceptJson: jsonb("concept_json"),
     status: postDraftStatus().default("planned").notNull(),
     errorMessage: text("error_message"),
