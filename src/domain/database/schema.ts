@@ -405,6 +405,7 @@ export const characterActionLogs = opod.table(
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
+        name: "character_action_logs_character_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -431,12 +432,14 @@ export const characterLocationReferences = opod.table(
     locationId: uuid("location_id")
       .notNull()
       .references(() => characterLocations.id, {
+        name: "character_location_references_location_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
     mediaId: uuid("media_id")
       .notNull()
       .references(() => media.id, {
+        name: "character_location_references_media_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -469,6 +472,7 @@ export const characterLocations = opod.table(
       .primaryKey()
       .$defaultFn(() => createUuidV7()),
     characterId: uuid("character_id").references(() => characters.id, {
+      name: "character_locations_character_id_fkey",
       onDelete: "cascade",
       onUpdate: "cascade",
     }),
@@ -515,6 +519,7 @@ export const characterMemories = opod.table(
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
+        name: "character_memories_character_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
@@ -548,6 +553,7 @@ export const characterPersonas = opod.table(
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
+        name: "character_personas_character_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
@@ -581,6 +587,7 @@ export const characterPostingPolicies = opod.table(
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
+        name: "character_posting_policies_character_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
@@ -609,12 +616,14 @@ export const characterVisualProfileReferences = opod.table(
     profileId: uuid("profile_id")
       .notNull()
       .references(() => characterVisualProfiles.id, {
+        name: "character_visual_profile_references_profile_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
     mediaId: uuid("media_id")
       .notNull()
       .references(() => media.id, {
+        name: "character_visual_profile_references_media_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -639,6 +648,7 @@ export const characterVisualProfiles = opod.table(
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
+        name: "character_visual_profiles_character_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
@@ -690,6 +700,7 @@ export const characters = opod.table(
       .default(1)
       .notNull(),
     profileImageId: uuid("profile_image_id").references(() => media.id, {
+      name: "characters_profile_image_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
@@ -742,6 +753,7 @@ export const creditCheckIns = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "credit_check_ins_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -768,12 +780,14 @@ export const creditLedger = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "credit_ledger_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
     type: creditLedgerType().notNull(),
     creditKind: creditKind("credit_kind"),
     purchaseId: uuid("purchase_id").references(() => creditPurchases.id, {
+      name: "credit_ledger_purchase_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
@@ -850,6 +864,7 @@ export const creditPurchases = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "credit_purchases_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -870,6 +885,7 @@ export const creditPurchases = opod.table(
     creditProductId: uuid("credit_product_id")
       .notNull()
       .references(() => creditProducts.id, {
+        name: "credit_purchases_credit_product_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -907,6 +923,7 @@ export const creditRefund = opod.table(
     purchaseId: uuid("purchase_id")
       .notNull()
       .references(() => creditPurchases.id, {
+        name: "credit_refund_purchase_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -970,6 +987,7 @@ export const creditReservations = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "credit_reservations_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -1005,12 +1023,14 @@ export const creditUsage = opod.table(
     usageLedgerId: uuid("usage_ledger_id")
       .notNull()
       .references(() => creditLedger.id, {
+        name: "credit_usage_usage_ledger_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
     grantLedgerId: uuid("grant_ledger_id")
       .notNull()
       .references(() => creditLedger.id, {
+        name: "credit_usage_grant_ledger_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -1037,6 +1057,7 @@ export const draftEvaluations = opod.table(
     draftId: uuid("draft_id")
       .notNull()
       .references(() => postDrafts.id, {
+        name: "draft_evaluations_draft_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
@@ -1150,12 +1171,14 @@ export const generationJobOutputs = opod.table(
     jobId: uuid("job_id")
       .notNull()
       .references(() => generationJobs.id, {
+        name: "generation_job_outputs_job_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
     mediaId: uuid("media_id")
       .notNull()
       .references(() => media.id, {
+        name: "generation_job_outputs_media_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -1192,6 +1215,7 @@ export const generationJobs = opod.table(
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
+        name: "generation_jobs_character_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -1201,6 +1225,7 @@ export const generationJobs = opod.table(
     candidateCount: integer("candidate_count"),
     status: generationJobStatus().default("queued").notNull(),
     outputMediaId: uuid("output_media_id").references(() => media.id, {
+      name: "generation_jobs_output_media_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
@@ -1222,6 +1247,7 @@ export const generationJobs = opod.table(
       .notNull()
       .$onUpdateFn(() => new Date()),
     draftId: uuid("draft_id").references(() => postDrafts.id, {
+      name: "generation_jobs_draft_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
@@ -1283,6 +1309,7 @@ export const inquiries = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "inquiries_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -1318,12 +1345,14 @@ export const llmLogMedia = opod.table(
     llmLogId: bigint("llm_log_id", { mode: "bigint" })
       .notNull()
       .references(() => llmLogs.id, {
+        name: "llm_log_media_llm_log_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
     mediaId: uuid("media_id")
       .notNull()
       .references(() => media.id, {
+        name: "llm_log_media_media_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -1358,7 +1387,11 @@ export const llmLogs = opod.table(
     characterId: text("character_id"),
     generationJobId: uuid("generation_job_id").references(
       () => generationJobs.id,
-      { onDelete: "set null", onUpdate: "cascade" },
+      {
+        name: "llm_logs_generation_job_id_fkey",
+        onDelete: "set null",
+        onUpdate: "cascade",
+      },
     ),
     systemPromptJson: jsonb("system_prompt_json"),
     userPromptJson: jsonb("user_prompt_json"),
@@ -1470,12 +1503,14 @@ export const messageConversations = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "message_conversations_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
+        name: "message_conversations_character_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -1508,6 +1543,7 @@ export const messageReplyJobs = opod.table(
     conversationId: uuid("conversation_id")
       .notNull()
       .references(() => messageConversations.id, {
+        name: "message_reply_jobs_conversation_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
@@ -1569,6 +1605,7 @@ export const messages = opod.table(
     conversationId: uuid("conversation_id")
       .notNull()
       .references(() => messageConversations.id, {
+        name: "messages_conversation_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
@@ -1578,6 +1615,7 @@ export const messages = opod.table(
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
     replyJobId: uuid("reply_job_id").references(() => messageReplyJobs.id, {
+      name: "messages_reply_job_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
@@ -1633,6 +1671,7 @@ export const notifications = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "notifications_user_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
@@ -1670,6 +1709,7 @@ export const paymentLedger = opod.table(
     paymentId: uuid("payment_id")
       .notNull()
       .references(() => payments.id, {
+        name: "payment_ledger_payment_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -1680,6 +1720,7 @@ export const paymentLedger = opod.table(
     providerTransactionId: text("provider_transaction_id"),
     providerEventId: text("provider_event_id"),
     adminId: uuid("admin_id").references(() => admins.id, {
+      name: "payment_ledger_admin_id_fkey",
       onDelete: "restrict",
       onUpdate: "cascade",
     }),
@@ -1725,6 +1766,7 @@ export const paymentProductMappings = opod.table(
     creditProductId: uuid("credit_product_id")
       .notNull()
       .references(() => creditProducts.id, {
+        name: "payment_product_mappings_credit_product_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -1779,6 +1821,7 @@ export const paymentProviderEvents = opod.table(
       .primaryKey()
       .$defaultFn(() => createUuidV7()),
     paymentId: uuid("payment_id").references(() => payments.id, {
+      name: "payment_provider_events_payment_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
@@ -1822,6 +1865,7 @@ export const payments = opod.table(
     purchaseId: uuid("purchase_id")
       .notNull()
       .references(() => creditPurchases.id, {
+        name: "payments_purchase_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -1890,14 +1934,17 @@ export const postComments = opod.table(
     postId: uuid("post_id")
       .notNull()
       .references(() => posts.id, {
+        name: "post_comments_post_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
     characterId: uuid("character_id").references(() => characters.id, {
+      name: "post_comments_character_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
     userId: uuid("user_id").references(() => users.id, {
+      name: "post_comments_user_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
@@ -1934,6 +1981,7 @@ export const postDrafts = opod.table(
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
+        name: "post_drafts_character_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -1956,10 +2004,12 @@ export const postDrafts = opod.table(
       withTimezone: true,
     }),
     publishedPostId: uuid("published_post_id").references(() => posts.id, {
+      name: "post_drafts_published_post_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
     publishedStoryId: uuid("published_story_id").references(() => stories.id, {
+      name: "post_drafts_published_story_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
@@ -1970,6 +2020,7 @@ export const postDrafts = opod.table(
       .notNull()
       .$onUpdateFn(() => new Date()),
     locationId: uuid("location_id").references(() => characterLocations.id, {
+      name: "post_drafts_location_id_fkey",
       onDelete: "restrict",
       onUpdate: "cascade",
     }),
@@ -2004,12 +2055,14 @@ export const postHashtags = opod.table(
     postId: uuid("post_id")
       .notNull()
       .references(() => posts.id, {
+        name: "post_hashtags_post_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
     hashtagId: uuid("hashtag_id")
       .notNull()
       .references(() => hashtags.id, {
+        name: "post_hashtags_hashtag_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
@@ -2032,12 +2085,14 @@ export const postMedia = opod.table(
     postId: uuid("post_id")
       .notNull()
       .references(() => posts.id, {
+        name: "post_media_post_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
     mediaId: uuid("media_id")
       .notNull()
       .references(() => media.id, {
+        name: "post_media_media_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -2060,14 +2115,17 @@ export const postReactions = opod.table(
     postId: uuid("post_id")
       .notNull()
       .references(() => posts.id, {
+        name: "post_reactions_post_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
     characterId: uuid("character_id").references(() => characters.id, {
+      name: "post_reactions_character_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
     userId: uuid("user_id").references(() => users.id, {
+      name: "post_reactions_user_id_fkey",
       onDelete: "set null",
       onUpdate: "cascade",
     }),
@@ -2108,6 +2166,7 @@ export const posts = opod.table("posts", {
   characterId: uuid("character_id")
     .notNull()
     .references(() => characters.id, {
+      name: "posts_character_id_fkey",
       onDelete: "restrict",
       onUpdate: "cascade",
     }),
@@ -2127,6 +2186,7 @@ export const reports = opod.table(
     reporterUserId: uuid("reporter_user_id")
       .notNull()
       .references(() => users.id, {
+        name: "reports_reporter_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -2192,12 +2252,14 @@ export const stories = opod.table(
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
+        name: "stories_character_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
     mediaId: uuid("media_id")
       .notNull()
       .references(() => media.id, {
+        name: "stories_media_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -2284,6 +2346,7 @@ export const userAccounts = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "user_accounts_user_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
@@ -2322,12 +2385,14 @@ export const userCharacterFollows = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "user_character_follows_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
+        name: "user_character_follows_character_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -2358,6 +2423,7 @@ export const userConsents = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "user_consents_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -2387,6 +2453,7 @@ export const userEvents = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "user_events_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
@@ -2418,12 +2485,14 @@ export const userHashtagPreferences = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "user_hashtag_preferences_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
     hashtagId: uuid("hashtag_id")
       .notNull()
       .references(() => hashtags.id, {
+        name: "user_hashtag_preferences_hashtag_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
@@ -2453,6 +2522,7 @@ export const userRefreshTokens = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
+        name: "user_refresh_tokens_user_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
