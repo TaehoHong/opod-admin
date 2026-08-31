@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { JsonValue } from "../../domain/database/json";
 import {
   decodeCursor,
   Page,
@@ -566,8 +566,8 @@ export class DraftsService {
       conceptJson: {
         ...concept,
         plan: { ...plan, caption, hashtags, shots: updatedPlanShots },
-      } as Prisma.InputJsonValue,
-      shots: shots as { jobId: string; paramsJson: Prisma.InputJsonValue }[],
+      } as JsonValue,
+      shots: shots as { jobId: string; paramsJson: JsonValue }[],
     });
     if (!transitioned) {
       throw new BadRequestException("Draft plan is no longer editable");
@@ -802,7 +802,7 @@ export class DraftsService {
         conceptJson: {
           ...concept,
           memoryCandidates: nextCandidates,
-        } as Prisma.InputJsonValue,
+        } as JsonValue,
       },
     );
     if (!transitioned) {
@@ -1112,7 +1112,7 @@ export class DraftsService {
       draftType: draft.draftType,
       contentType: draft.contentType,
       caption: draft.caption,
-      hashtags: draft.hashtags,
+      hashtags: draft.hashtags ?? [],
       status: draft.status,
       attemptCount: draft.attemptCount,
       ...(draft.errorMessage ? { errorMessage: draft.errorMessage } : {}),

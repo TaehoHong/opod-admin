@@ -4,7 +4,7 @@
 
 - Install: `npm install`
 - Reproducible install: `npm ci`
-- Prisma client: `npm run db:generate`
+- Drizzle migration generation: `npm run db:generate` (canonical schema owner 작업에서만)
 - Start API and served UI: `npm run start:dev`
 - Equivalent development alias: `npm run admin:dev`
 - Admin UI check: `npm run admin:check`
@@ -20,7 +20,7 @@ Node.js 26과 npm을 사용한다. `package-lock.json`을 변경 이력에 포�
 
 `npm run test:e2e`는 Testcontainers PostgreSQL과 Docker가 필요하다.
 `npm run schema:check`는 기본적으로
-`../opod-service-backend/prisma/schema.prisma`와 mirror를 비교한다.
+`../opod-service-backend/src/domain/database/schema.ts`와 mirror를 비교한다.
 
 ## Decision and Change Policy
 
@@ -51,14 +51,14 @@ Node.js 26과 npm을 사용한다. `package-lock.json`을 변경 이력에 포�
 
 - module은 entity 중심으로 구성한다.
 - 모든 DB 접근은 처음부터 해당 entity repository로 분리한다.
-- `PrismaService`는 repository에서만 사용한다.
+- `DatabaseService`는 repository에서만 사용한다.
 - application service는 repository concrete class를 직접 주입한다.
 - `BaseRepository<T>` 같은 범용 CRUD 추상화를 만들지 않는다.
 - repository는 실제 use case에 필요한 의도 중심 메서드만 제공한다.
-- application service가 Prisma `where`, `include` 또는 transaction client를
+- application service가 Drizzle 조건식 또는 transaction client를
   조립해 repository에 넘기지 않는다.
-- repository 내부 반환에는 Prisma generated type을 사용할 수 있다.
-- HTTP response에는 Prisma model을 직접 반환하지 않는다.
+- repository 내부 반환에는 Drizzle inferred type을 사용할 수 있다.
+- HTTP response에는 Drizzle model을 직접 반환하지 않는다.
 - 외부 API는 provider/gateway 뒤에 두고 application service는 capability
   interface와 Nest injection token에 의존한다.
 
@@ -67,20 +67,20 @@ Node.js 26과 npm을 사용한다. `package-lock.json`을 변경 이력에 포�
 
 ## Transactions and Concurrency
 
-- application service가 transaction 경계를 소유한다.
-- Prisma `$transaction`과 `nestjs-cls`의 `TransactionHost`를 사용해 같은
-  use case의 repository가 동일 transaction client를 공유한다.
+- 상태 전이와 함께 읽고 쓰는 repository 메서드가 Drizzle transaction
+  경계를 소유한다.
 - 어떤 use case에 transaction이 필요한지는 해당 기능 구현 시 판단한다.
 - DB로 표현 가능한 invariant는 constraint로 최종 보장한다.
 - 읽기-변경-쓰기 경쟁은 상태/version 기반 optimistic concurrency,
   atomic update, unique idempotency key를 먼저 검토한다.
-- 필요한 경우 `Serializable` transaction과 제한된 P2034 retry를 사용한다.
+- 필요한 경우 `Serializable` transaction과 제한된 PostgreSQL `40001`
+  retry를 사용한다.
 
-## Prisma and Raw SQL
+## Drizzle and Raw SQL
 
 우선순위:
 
-1. Prisma CRUD, nested write와 atomic update
+1. Drizzle query builder, transaction과 atomic update
 2. 상태 또는 version 기반 optimistic concurrency
 3. unique constraint와 idempotency key
 4. `Serializable` transaction과 충돌 retry
@@ -90,15 +90,15 @@ Node.js 26과 npm을 사용한다. `package-lock.json`을 변경 이력에 포�
 - 예외는 repository 내부에만 둔다.
 - 동시성 또는 성능 필요를 테스트나 실행 계획으로 입증해야 한다.
 - 허용된 예외도 parameter binding이 적용되는 tagged template을 사용한다.
-- `$queryRawUnsafe`, `$executeRawUnsafe`와 문자열 조합 SQL은 금지한다.
+- 사용자 입력을 이어 붙인 문자열 SQL은 금지한다.
 - 다중 worker queue에서 optimistic claim의 충돌이 실제 문제가 될 때
   `FOR UPDATE SKIP LOCKED`를 예외로 검토할 수 있다.
 
 ## Schema and Indexes
 
-- canonical Prisma schema와 migration은 `opod-service-backend`에서 먼저
+- canonical Drizzle schema와 migration은 `opod-service-backend`에서 먼저
   변경한다.
-- 이 저장소는 필요한 mirror와 generated client만 동기화한다.
+- 이 저장소는 동일한 `schema.ts` mirror를 동기화한다.
 - `NOT NULL`, foreign key, unique와 값 범위처럼 DB로 표현 가능한
   invariant는 constraint로 보장한다.
 - business entity의 기본 PK는 PostgreSQL UUIDv7을 사용한다. 다른 ID가
@@ -113,7 +113,7 @@ Node.js 26과 npm을 사용한다. `package-lock.json`을 변경 이력에 포�
 ## API and Serialization
 
 - 승인된 admin API 경로는 `/api/admin/v1/*`다.
-- Prisma model을 직접 반환하지 않고 controller 경계에서 명시적인
+- Drizzle model을 직접 반환하지 않고 controller 경계에서 명시적인
   TypeScript response contract로 변환한다.
 - 별도 mapper class는 변환이 실제로 반복될 때만 만든다.
 - 날짜·시간은 UTC ISO 8601 문자열로 전달한다.

@@ -5,9 +5,9 @@ Admin backend and admin UI for OPOD.
 ## Structure
 
 - `src/admin`: `/api/*` NestJS API
-- `src/domain/database`: Prisma database adapter only
+- `src/domain/database`: canonical Drizzle schema and database adapter
 - `packages/admin`: dependency-free admin UI and proxy server
-- `prisma`: schema mirror for Prisma client generation
+- `drizzle.config.ts`: Drizzle Kit configuration
 - `test`: admin-only tests
 
 ## Local
@@ -16,12 +16,12 @@ Run the service database from `../opod-service-backend` first, then:
 
 ```bash
 npm install
-npm run db:generate
+npm run schema:check
 npm run start:dev
 npm run admin:dev
 ```
 
-`opod-service-backend` owns schema changes and `db:push`.
+`opod-service-backend` owns canonical schema changes and production migrations.
 
 ## Production
 

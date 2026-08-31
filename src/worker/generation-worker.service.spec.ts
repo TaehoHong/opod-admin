@@ -60,7 +60,7 @@ function claimedJob(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// Prisma를 흉내내지 않고 repository를 대신 세운다
+// Drizzle를 흉내내지 않고 repository를 대신 세운다
 // (docs/02-development-rules.md "Module and Repository Rules"). 큐 전이의
 // 원자성 자체는 repository의 조건부 갱신이 책임지므로, 여기서는 워커가 어떤
 // 전이를 어떤 순서로 요구하는지만 본다.

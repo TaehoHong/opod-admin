@@ -5,7 +5,7 @@ All endpoints require an admin JWT.
 The reconciliation view walks `credit_purchases` and reads its evidence from
 `credit_ledger` and `credit_refund`. Schema ownership belongs to
 `opod-service-backend`; `npm run schema:check` guards the copy in
-`prisma/schema.prisma`.
+`src/domain/database/schema.ts`.
 
 ## List payment reconciliation
 

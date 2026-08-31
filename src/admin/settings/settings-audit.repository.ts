@@ -1,7 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import { PrismaService } from "../../domain/database/prisma.service";
+import { and, desc, gte, inArray, isNotNull, sum } from "drizzle-orm";
+import { DatabaseService } from "../../domain/database/database.service";
+import { consoleLogs, generationJobs } from "../../domain/database/schema";
 
-// entity repository — PrismaService는 이 계층에서만 쓴다
+// entity repository — DatabaseService는 이 계층에서만 쓴다
 // (docs/02-development-rules.md "Module and Repository Rules").
 
 export type SettingsChangeLog = {
@@ -26,14 +28,15 @@ const RECENT_CHANGE_LIMIT = 20;
 
 @Injectable()
 export class SettingsAuditRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly database: DatabaseService) {}
 
   async listRecentChanges(): Promise<SettingsChangeLog[]> {
-    const rows = await this.prisma.consoleLog.findMany({
-      where: { actionType: { in: SETTINGS_ACTION_TYPES } },
-      orderBy: { id: "desc" },
-      take: RECENT_CHANGE_LIMIT,
-    });
+    const rows = await this.database.client
+      .select()
+      .from(consoleLogs)
+      .where(inArray(consoleLogs.actionType, SETTINGS_ACTION_TYPES))
+      .orderBy(desc(consoleLogs.id))
+      .limit(RECENT_CHANGE_LIMIT);
     return rows.map((row) => ({
       id: String(row.id),
       adminEmail: row.adminEmail,
@@ -46,15 +49,20 @@ export class SettingsAuditRepository {
 
   async recordChanges(entries: SettingsChangeEntry[]): Promise<void> {
     if (entries.length === 0) return;
-    await this.prisma.consoleLog.createMany({ data: entries });
+    await this.database.client.insert(consoleLogs).values(entries);
   }
 
   // KST 기준 오늘 누적 생성 비용. 설정 화면의 예산 표시에만 쓴다.
   async sumGenerationCostSince(since: Date): Promise<string | null> {
-    const aggregate = await this.prisma.generationJob.aggregate({
-      _sum: { costUsd: true },
-      where: { updatedAt: { gte: since }, costUsd: { not: null } },
-    });
-    return aggregate._sum.costUsd?.toString() ?? null;
+    const [aggregate] = await this.database.client
+      .select({ value: sum(generationJobs.costUsd) })
+      .from(generationJobs)
+      .where(
+        and(
+          gte(generationJobs.updatedAt, since),
+          isNotNull(generationJobs.costUsd),
+        ),
+      );
+    return aggregate?.value ?? null;
   }
 }

@@ -1,31 +1,25 @@
 #!/usr/bin/env node
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { Client } from "pg";
 
 const refsDir = process.env.SEORIN_GYM_REFS_DIR;
-
 if (!refsDir) throw new Error("SEORIN_GYM_REFS_DIR is required");
 
-const required = [
+for (const key of [
   "DATABASE_URL",
   "S3_BUCKET",
   "AWS_REGION",
   "AWS_ACCESS_KEY_ID",
   "AWS_SECRET_ACCESS_KEY",
   "S3_PUBLIC_BASE_URL",
-];
-for (const key of required) {
+]) {
   if (!process.env[key]?.trim()) throw new Error(`${key} is required`);
 }
 
-const prisma = new PrismaClient({
-  adapter: new PrismaPg(process.env.DATABASE_URL),
-});
-
+const db = new Client({ connectionString: process.env.DATABASE_URL });
 const referenceDescriptions = [
   "메인 중앙 통로에서 본 전체 전경. 낮은 노출 천장, 은색 덕트, 보라·파랑·핑크 LED, 검정·빨강 머신의 높은 밀도와 깊은 원근을 보여준다.",
   "긴 벽면 거울 앞 촬영 구역. 거울에 대형 머신 플로어와 구조 기둥, 컬러 LED가 이어져 전신 거울샷 배경으로 사용한다.",
@@ -33,7 +27,6 @@ const referenceDescriptions = [
   "머신 플로어 가장자리의 스트레칭 존. 검정 매트와 폼롤러 너머로 같은 컬러 조명과 촘촘한 머신 배치가 이어진다.",
   "거울 옆 검정 벤치에 휴대폰 클램프를 둔 셀프 촬영 시점. 작은 촬영 여백 뒤로 검정·빨강 머신 숲이 보인다.",
 ];
-
 const locationData = {
   locationKey: "seorin-signature-gym",
   displayName: "서린이 다니는 헬스장",
@@ -46,48 +39,63 @@ const locationData = {
 };
 
 function pngSize(buffer) {
-  if (buffer.toString("ascii", 1, 4) !== "PNG") {
+  if (buffer.toString("ascii", 1, 4) !== "PNG")
     throw new Error("Only PNG references are supported");
-  }
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
-
 function publicUrl(storageKey) {
-  const base = process.env.S3_PUBLIC_BASE_URL.replace(/\/$/, "");
-  return `${base}/${storageKey.split("/").map(encodeURIComponent).join("/")}`;
+  return `${process.env.S3_PUBLIC_BASE_URL.replace(/\/$/, "")}/${storageKey.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 async function main() {
-  const character = await prisma.character.findUnique({
-    where: { publicId: "seorin" },
-    select: { id: true },
-  });
+  await db.connect();
+  const character = (
+    await db.query("select id from opod.characters where public_id = $1", [
+      "seorin",
+    ])
+  ).rows[0];
   if (!character) throw new Error("Character seorin was not found");
 
-  const location = await prisma.characterLocation.upsert({
-    where: {
-      characterId_locationKey: {
-        characterId: character.id,
-        locationKey: locationData.locationKey,
-      },
-    },
-    create: { characterId: character.id, ...locationData },
-    update: { ...locationData, deletedAt: null },
-    include: { references: true },
-  });
-
-  if (location.references.length === 5 && process.env.REPLACE_LOCATION_REFS !== "1") {
+  const location = (
+    await db.query(
+      `insert into opod.character_locations (character_id, location_key, display_name, description, visual_prompt, negative_prompt)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (character_id, location_key) do update set display_name = excluded.display_name, description = excluded.description,
+       visual_prompt = excluded.visual_prompt, negative_prompt = excluded.negative_prompt, deleted_at = null, updated_at = now()
+     returning id`,
+      [
+        character.id,
+        locationData.locationKey,
+        locationData.displayName,
+        locationData.description,
+        locationData.visualPrompt,
+        locationData.negativePrompt,
+      ],
+    )
+  ).rows[0];
+  const referenceCount = Number(
+    (
+      await db.query(
+        "select count(*)::int as count from opod.character_location_references where location_id = $1",
+        [location.id],
+      )
+    ).rows[0].count,
+  );
+  if (referenceCount === 5 && process.env.REPLACE_LOCATION_REFS !== "1") {
     console.log(`location=${location.id} references=5 (already registered)`);
     await verifyPlannerLookup(character.id, location.id);
     return;
   }
-  if (location.references.length > 0 && process.env.REPLACE_LOCATION_REFS !== "1") {
-    throw new Error("Location has a partial reference set; set REPLACE_LOCATION_REFS=1 to replace it");
-  }
+  if (referenceCount > 0 && process.env.REPLACE_LOCATION_REFS !== "1")
+    throw new Error(
+      "Location has a partial reference set; set REPLACE_LOCATION_REFS=1 to replace it",
+    );
 
-  const files = readdirSync(refsDir).filter((name) => name.endsWith(".png")).sort();
-  if (files.length !== 5) throw new Error(`Expected 5 PNG files, found ${files.length}`);
-
+  const files = readdirSync(refsDir)
+    .filter((name) => name.endsWith(".png"))
+    .sort();
+  if (files.length !== 5)
+    throw new Error(`Expected 5 PNG files, found ${files.length}`);
   const s3 = new S3Client({
     region: process.env.AWS_REGION,
     credentials: {
@@ -95,79 +103,72 @@ async function main() {
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     },
   });
-  const createdMediaIds = [];
-  for (const [sortOrder, fileName] of files.entries()) {
+  const mediaIds = [];
+  for (const fileName of files) {
     const body = readFileSync(path.join(refsDir, fileName));
     const { width, height } = pngSize(body);
     const storageKey = `character-locations/${location.id}/${randomUUID()}.png`;
-    await s3.send(new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET,
-      Key: storageKey,
-      Body: body,
-      ContentType: "image/png",
-    }));
-    const media = await prisma.media.create({
-      data: {
-        mediaType: "image",
-        url: publicUrl(storageKey),
-        storageKey,
-        contentType: "image/png",
-        byteSize: body.byteLength,
-        width,
-        height,
-        uploadedAt: new Date(),
-      },
-      select: { id: true },
-    });
-    createdMediaIds.push(media.id);
-    console.log(`uploaded ${fileName} -> ${media.id}`);
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.S3_BUCKET,
+        Key: storageKey,
+        Body: body,
+        ContentType: "image/png",
+      }),
+    );
+    const row = (
+      await db.query(
+        `insert into opod.media (media_type, url, storage_key, content_type, byte_size, width, height, uploaded_at)
+       values ('image', $1, $2, 'image/png', $3, $4, $5, now()) returning id`,
+        [publicUrl(storageKey), storageKey, body.byteLength, width, height],
+      )
+    ).rows[0];
+    mediaIds.push(row.id);
+    console.log(`uploaded ${fileName} -> ${row.id}`);
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.characterLocationReference.deleteMany({ where: { locationId: location.id } });
-    await tx.characterLocationReference.createMany({
-      data: createdMediaIds.map((mediaId, sortOrder) => ({
-        locationId: location.id,
-        mediaId,
-        sortOrder,
-        description: referenceDescriptions[sortOrder],
-      })),
-    });
-  });
-  console.log(`location=${location.id} references=${createdMediaIds.length}`);
+  await db.query("begin");
+  try {
+    await db.query(
+      "delete from opod.character_location_references where location_id = $1",
+      [location.id],
+    );
+    for (const [index, mediaId] of mediaIds.entries()) {
+      await db.query(
+        "insert into opod.character_location_references (location_id, media_id, sort_order, description) values ($1, $2, $3, $4)",
+        [location.id, mediaId, index, referenceDescriptions[index]],
+      );
+    }
+    await db.query("commit");
+  } catch (error) {
+    await db.query("rollback");
+    throw error;
+  }
+  console.log(`location=${location.id} references=${mediaIds.length}`);
   await verifyPlannerLookup(character.id, location.id);
 }
 
 async function verifyPlannerLookup(characterId, locationId) {
-  const locations = await prisma.characterLocation.findMany({
-    where: {
-      deletedAt: null,
-      OR: [{ characterId: null }, { characterId }],
-    },
-    include: {
-      references: {
-        orderBy: { sortOrder: "asc" },
-        include: { media: { select: { uploadedAt: true, storageKey: true } } },
-      },
-    },
-  });
-  const location = locations.find((item) => item.id === locationId);
-  if (!location) throw new Error("Location is not visible to the planner lookup");
-  if (
-    location.references.length !== 5 ||
-    location.references.some(
-      (reference) => !reference.media.uploadedAt || !reference.media.storageKey,
+  const rows = (
+    await db.query(
+      `select r.media_id, m.uploaded_at, m.storage_key from opod.character_locations l
+     join opod.character_location_references r on r.location_id = l.id join opod.media m on m.id = r.media_id
+     where l.id = $1 and l.deleted_at is null and (l.character_id is null or l.character_id = $2) order by r.sort_order`,
+      [locationId, characterId],
     )
-  ) {
+  ).rows;
+  if (
+    rows.length !== 5 ||
+    rows.some((row) => !row.uploaded_at || !row.storage_key)
+  )
     throw new Error("Location references are incomplete or not uploaded");
-  }
   console.log(
-    `verified plannerLookup=visible uploadedReferences=${location.references.length}`,
+    `verified plannerLookup=visible uploadedReferences=${rows.length}`,
   );
 }
 
 try {
   await main();
 } finally {
-  await prisma.$disconnect();
+  await db.end().catch(() => undefined);
 }

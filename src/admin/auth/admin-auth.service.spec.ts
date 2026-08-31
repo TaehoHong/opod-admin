@@ -22,7 +22,7 @@ function createService(
 ) {
   const rows = [...initialRows];
   // application service는 concrete repository를 주입받으므로
-  // (docs/02-development-rules.md:55) 테스트도 Prisma 대신 repository를 대체한다.
+  // (docs/02-development-rules.md:55) 테스트도 Drizzle 대신 repository를 대체한다.
   const admins = {
     countAll: jest.fn(() => Promise.resolve(rows.length)),
     findByEmailWithPassword: jest.fn((email: string) =>

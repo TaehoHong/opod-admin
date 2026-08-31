@@ -1,229 +1,321 @@
 import { Injectable } from "@nestjs/common";
-import { PostDraftStatus, Prisma } from "@prisma/client";
-import { PrismaService } from "../../domain/database/prisma.service";
+import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { DatabaseService } from "../../domain/database/database.service";
+import {
+  characterActionLogs,
+  characters,
+  generationJobOutputs,
+  generationJobs,
+  media,
+  postDrafts,
+} from "../../domain/database/schema";
 
-const draftJobFields = {
-  id: true,
-  sortOrder: true,
-  status: true,
-  prompt: true,
-  paramsJson: true,
-  candidateCount: true,
-  provider: true,
-  costUsd: true,
-  errorMessage: true,
-  attemptCount: true,
-  createdAt: true,
-  updatedAt: true,
-  outputs: {
-    orderBy: { candidateIndex: "asc" as const },
-    select: {
-      mediaId: true,
-      candidateIndex: true,
-      selected: true,
-      filterPreset: true,
-      media: { select: { url: true } },
-    },
-  },
-} as const;
-
-const regenerationSourceFields = {
-  id: true,
-  characterId: true,
-  sortOrder: true,
-  status: true,
-  inputPrompt: true,
-  prompt: true,
-  candidateCount: true,
-  paramsJson: true,
-} as const;
-
-export type DraftRow = Prisma.PostDraftGetPayload<Prisma.PostDraftDefaultArgs>;
-export type DraftJobRow = Prisma.GenerationJobGetPayload<{
-  select: typeof draftJobFields;
-}>;
-export type RegenerationSource = Prisma.GenerationJobGetPayload<{
-  select: typeof regenerationSourceFields;
-}>;
+export type PostDraftStatus = (typeof postDrafts.$inferSelect)["status"];
+export type DraftRow = typeof postDrafts.$inferSelect;
+export type DraftJobRow = Pick<
+  typeof generationJobs.$inferSelect,
+  | "id"
+  | "sortOrder"
+  | "status"
+  | "prompt"
+  | "paramsJson"
+  | "candidateCount"
+  | "provider"
+  | "costUsd"
+  | "errorMessage"
+  | "attemptCount"
+  | "createdAt"
+  | "updatedAt"
+> & {
+  outputs: Array<
+    Pick<
+      typeof generationJobOutputs.$inferSelect,
+      "mediaId" | "candidateIndex" | "selected" | "filterPreset"
+    > & { media: { url: string } }
+  >;
+};
+export type RegenerationSource = Pick<
+  typeof generationJobs.$inferSelect,
+  | "id"
+  | "characterId"
+  | "sortOrder"
+  | "status"
+  | "inputPrompt"
+  | "prompt"
+  | "candidateCount"
+  | "paramsJson"
+>;
 export type RegenerationResult =
   | { outcome: "regenerated"; jobId: string }
   | { outcome: "stale-job" }
   | { outcome: "draft-not-found" }
   | { outcome: "invalid-draft-status" };
+export type PlanEditDraft = Pick<
+  typeof postDrafts.$inferSelect,
+  "id" | "characterId" | "status" | "leaseExpiresAt" | "conceptJson"
+> & {
+  jobs: Array<
+    Pick<typeof generationJobs.$inferSelect, "id" | "sortOrder" | "paramsJson">
+  >;
+};
 
-// V4(검수 없음)에서 사람이 개입할 수 있는 정지 지점 — ⑤ 완료 후 ⑥ 캡션 대기,
-// ⑥ 완료 후 ⑦ 게시 대기. 둘 다 status=planned + pipeline.state=pending이다.
-// 편집 계열 4곳(캡션·마감 프리셋·컷 재생성)이 같은 술어를 쓴다.
-export function v4PausedAt(
-  stages: ("caption" | "publish")[],
-): Prisma.PostDraftWhereInput {
-  return {
-    status: "planned",
-    AND: [
-      {
-        OR: stages.map((stage) => ({
-          conceptJson: { path: ["pipeline", "stage"], equals: stage },
-        })),
-      },
-      { conceptJson: { path: ["pipeline", "state"], equals: "pending" } },
-    ],
-  };
+export function v4PausedAt(stages: ("caption" | "publish")[]): SQL {
+  return and(
+    eq(postDrafts.status, "planned"),
+    inArray(
+      sql<string>`${postDrafts.conceptJson}#>>'{pipeline,stage}'`,
+      stages,
+    ),
+    eq(sql<string>`${postDrafts.conceptJson}#>>'{pipeline,state}'`, "pending"),
+  )!;
 }
-
-const planEditFields = {
-  id: true,
-  characterId: true,
-  status: true,
-  leaseExpiresAt: true,
-  conceptJson: true,
-  jobs: {
-    where: { status: "draft" },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { id: true, sortOrder: true, paramsJson: true },
-  },
-} satisfies Prisma.PostDraftSelect;
-
-export type PlanEditDraft = Prisma.PostDraftGetPayload<{
-  select: typeof planEditFields;
-}>;
 
 @Injectable()
 export class DraftsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly database: DatabaseService) {}
 
   async cursorMatchesFilter(
     cursorId: string,
     filter: { status?: PostDraftStatus; characterId?: string },
   ): Promise<boolean> {
-    const row = await this.prisma.postDraft.findFirst({
-      where: { id: cursorId, ...filter },
-      select: { id: true },
-    });
-    return row !== null;
+    const rows = await this.database.client
+      .select({ id: postDrafts.id })
+      .from(postDrafts)
+      .where(and(eq(postDrafts.id, cursorId), this.draftFilter(filter)))
+      .limit(1);
+    return rows.length > 0;
   }
 
-  findMany(input: {
+  async findMany(input: {
     status?: PostDraftStatus;
     characterId?: string;
     take: number;
     cursorId?: string;
   }): Promise<DraftRow[]> {
-    return this.prisma.postDraft.findMany({
-      where: {
-        ...(input.status ? { status: input.status } : {}),
-        ...(input.characterId ? { characterId: input.characterId } : {}),
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.take,
-      ...(input.cursorId ? { cursor: { id: input.cursorId }, skip: 1 } : {}),
-    });
+    const [cursor] = input.cursorId
+      ? await this.database.client
+          .select({ id: postDrafts.id, createdAt: postDrafts.createdAt })
+          .from(postDrafts)
+          .where(eq(postDrafts.id, input.cursorId))
+          .limit(1)
+      : [];
+    return this.database.client
+      .select()
+      .from(postDrafts)
+      .where(
+        and(
+          this.draftFilter(input),
+          cursor
+            ? or(
+                lt(postDrafts.createdAt, cursor.createdAt),
+                and(
+                  eq(postDrafts.createdAt, cursor.createdAt),
+                  lt(postDrafts.id, cursor.id),
+                ),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(desc(postDrafts.createdAt), desc(postDrafts.id))
+      .limit(input.take);
   }
 
   findDraft(draftId: string): Promise<DraftRow | null> {
-    return this.prisma.postDraft.findUnique({ where: { id: draftId } });
+    return this.database.client
+      .select()
+      .from(postDrafts)
+      .where(eq(postDrafts.id, draftId))
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
 
-  findDraftJobs(draftId: string): Promise<DraftJobRow[]> {
-    return this.prisma.generationJob.findMany({
-      where: { draftId },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: draftJobFields,
-    });
+  async findDraftJobs(draftId: string): Promise<DraftJobRow[]> {
+    const jobs = await this.database.client
+      .select({
+        id: generationJobs.id,
+        sortOrder: generationJobs.sortOrder,
+        status: generationJobs.status,
+        prompt: generationJobs.prompt,
+        paramsJson: generationJobs.paramsJson,
+        candidateCount: generationJobs.candidateCount,
+        provider: generationJobs.provider,
+        costUsd: generationJobs.costUsd,
+        errorMessage: generationJobs.errorMessage,
+        attemptCount: generationJobs.attemptCount,
+        createdAt: generationJobs.createdAt,
+        updatedAt: generationJobs.updatedAt,
+      })
+      .from(generationJobs)
+      .where(eq(generationJobs.draftId, draftId))
+      .orderBy(desc(generationJobs.createdAt), desc(generationJobs.id));
+    return Promise.all(
+      jobs.map(async (job) => ({
+        ...job,
+        outputs: await this.database.client
+          .select({
+            mediaId: generationJobOutputs.mediaId,
+            candidateIndex: generationJobOutputs.candidateIndex,
+            selected: generationJobOutputs.selected,
+            filterPreset: generationJobOutputs.filterPreset,
+            media: { url: media.url },
+          })
+          .from(generationJobOutputs)
+          .innerJoin(media, eq(media.id, generationJobOutputs.mediaId))
+          .where(eq(generationJobOutputs.jobId, job.id))
+          .orderBy(generationJobOutputs.candidateIndex),
+      })),
+    );
   }
 
   findMediaUrls(ids: string[]): Promise<{ id: string; url: string }[]> {
-    return this.prisma.media.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, url: true },
-    });
+    if (ids.length === 0) return Promise.resolve([]);
+    return this.database.client
+      .select({ id: media.id, url: media.url })
+      .from(media)
+      .where(inArray(media.id, ids));
   }
 
   async characterExists(characterId: string): Promise<boolean> {
-    const character = await this.prisma.character.findUnique({
-      where: { id: characterId },
-      select: { id: true },
-    });
-    return character !== null;
+    return (
+      (
+        await this.database.client
+          .select({ id: characters.id })
+          .from(characters)
+          .where(eq(characters.id, characterId))
+          .limit(1)
+      ).length > 0
+    );
   }
 
-  createDraft(data: {
+  async createDraft(data: {
     characterId: string;
     contentType: "feed" | "reel";
-    conceptJson: Prisma.InputJsonValue;
+    conceptJson: unknown;
     scheduledAt?: Date;
   }): Promise<DraftRow> {
-    return this.prisma.postDraft.create({ data });
+    return (
+      await this.database.client.insert(postDrafts).values(data).returning()
+    )[0];
   }
 
-  findPlanEditDraft(draftId: string): Promise<PlanEditDraft | null> {
-    return this.prisma.postDraft.findUnique({
-      where: { id: draftId },
-      select: planEditFields,
-    });
+  async findPlanEditDraft(draftId: string): Promise<PlanEditDraft | null> {
+    const [draft] = await this.database.client
+      .select({
+        id: postDrafts.id,
+        characterId: postDrafts.characterId,
+        status: postDrafts.status,
+        leaseExpiresAt: postDrafts.leaseExpiresAt,
+        conceptJson: postDrafts.conceptJson,
+      })
+      .from(postDrafts)
+      .where(eq(postDrafts.id, draftId))
+      .limit(1);
+    if (!draft) return null;
+    const jobs = await this.database.client
+      .select({
+        id: generationJobs.id,
+        sortOrder: generationJobs.sortOrder,
+        paramsJson: generationJobs.paramsJson,
+      })
+      .from(generationJobs)
+      .where(
+        and(
+          eq(generationJobs.draftId, draftId),
+          eq(generationJobs.status, "draft"),
+        ),
+      )
+      .orderBy(desc(generationJobs.createdAt), desc(generationJobs.id));
+    return { ...draft, jobs };
   }
 
-  async updatePlan(input: {
+  updatePlan(input: {
     draftId: string;
     caption: string;
     hashtags: string[];
-    conceptJson: Prisma.InputJsonValue;
-    shots: { jobId: string; paramsJson: Prisma.InputJsonValue }[];
+    conceptJson: unknown;
+    shots: { jobId: string; paramsJson: unknown }[];
   }): Promise<boolean> {
-    return this.prisma.$transaction(async (tx) => {
-      const draft = await tx.postDraft.updateMany({
-        where: {
-          id: input.draftId,
-          status: "generating",
-          leaseExpiresAt: null,
-        },
-        data: {
+    return this.database.client.transaction(async (tx) => {
+      const draft = await tx
+        .update(postDrafts)
+        .set({
           caption: input.caption,
           hashtags: input.hashtags,
           conceptJson: input.conceptJson,
-        },
-      });
-      if (draft.count === 0) return false;
+        })
+        .where(
+          and(
+            eq(postDrafts.id, input.draftId),
+            eq(postDrafts.status, "generating"),
+            isNull(postDrafts.leaseExpiresAt),
+          ),
+        )
+        .returning({ id: postDrafts.id });
+      if (draft.length === 0) return false;
       for (const shot of input.shots) {
-        const updated = await tx.generationJob.updateMany({
-          where: { id: shot.jobId, draftId: input.draftId, status: "draft" },
-          data: { paramsJson: shot.paramsJson },
-        });
-        if (updated.count === 0) {
+        const updated = await tx
+          .update(generationJobs)
+          .set({ paramsJson: shot.paramsJson })
+          .where(
+            and(
+              eq(generationJobs.id, shot.jobId),
+              eq(generationJobs.draftId, input.draftId),
+              eq(generationJobs.status, "draft"),
+            ),
+          )
+          .returning({ id: generationJobs.id });
+        if (updated.length === 0)
           throw new Error("draft shot left editable state");
-        }
       }
       return true;
     });
   }
 
-  async updatePrompts(input: {
+  updatePrompts(input: {
     draftId: string;
     items: { jobId: string; prompt: string }[];
   }): Promise<boolean> {
-    return this.prisma.$transaction(async (tx) => {
+    return this.database.client.transaction(async (tx) => {
       for (const item of input.items) {
-        const updated = await tx.generationJob.updateMany({
-          where: { id: item.jobId, draftId: input.draftId, status: "draft" },
-          data: { prompt: item.prompt },
-        });
-        if (updated.count === 0) return false;
+        const updated = await tx
+          .update(generationJobs)
+          .set({ prompt: item.prompt })
+          .where(
+            and(
+              eq(generationJobs.id, item.jobId),
+              eq(generationJobs.draftId, input.draftId),
+              eq(generationJobs.status, "draft"),
+            ),
+          )
+          .returning({ id: generationJobs.id });
+        if (updated.length === 0) return false;
       }
-      const touched = await tx.postDraft.updateMany({
-        where: { id: input.draftId, status: "generating" },
-        data: { updatedAt: new Date() },
-      });
-      return touched.count > 0;
+      const touched = await tx
+        .update(postDrafts)
+        .set({ updatedAt: new Date() })
+        .where(
+          and(
+            eq(postDrafts.id, input.draftId),
+            eq(postDrafts.status, "generating"),
+          ),
+        )
+        .returning({ id: postDrafts.id });
+      return touched.length > 0;
     });
   }
 
   async markManual(draftId: string): Promise<void> {
-    const draft = await this.prisma.postDraft.findUnique({
-      where: { id: draftId },
-      select: { status: true, conceptJson: true },
-    });
-    if (!draft || draft.status === "published" || draft.status === "rejected") {
+    const [draft] = await this.database.client
+      .select({
+        status: postDrafts.status,
+        conceptJson: postDrafts.conceptJson,
+      })
+      .from(postDrafts)
+      .where(eq(postDrafts.id, draftId))
+      .limit(1);
+    if (!draft || draft.status === "published" || draft.status === "rejected")
       return;
-    }
     const concept =
       draft.conceptJson &&
       typeof draft.conceptJson === "object" &&
@@ -231,75 +323,87 @@ export class DraftsRepository {
         ? { ...(draft.conceptJson as Record<string, unknown>) }
         : {};
     if (concept.mode === "manual") return;
-    await this.prisma.postDraft.updateMany({
-      where: { id: draftId, status: { notIn: ["published", "rejected"] } },
-      data: {
-        conceptJson: { ...concept, mode: "manual" } as Prisma.InputJsonValue,
-      },
-    });
+    await this.database.client
+      .update(postDrafts)
+      .set({ conceptJson: { ...concept, mode: "manual" } })
+      .where(
+        and(
+          eq(postDrafts.id, draftId),
+          sql`${postDrafts.status} not in ('published', 'rejected')`,
+        ),
+      );
   }
 
-  async findDraftConcept(
-    draftId: string,
-  ): Promise<{ conceptJson: Prisma.JsonValue } | null> {
-    return this.prisma.postDraft.findUnique({
-      where: { id: draftId },
-      select: { conceptJson: true },
-    });
+  findDraftConcept(draftId: string): Promise<{ conceptJson: unknown } | null> {
+    return this.database.client
+      .select({ conceptJson: postDrafts.conceptJson })
+      .from(postDrafts)
+      .where(eq(postDrafts.id, draftId))
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
 
   async updateEditableDraft(
     draftId: string,
     statuses: PostDraftStatus[],
     data: Record<string, unknown>,
-    // V4는 상태가 아니라 정지 지점으로 편집 가능 여부를 정한다.
     v4Stages: ("caption" | "publish")[] = [],
   ): Promise<boolean> {
-    const result = await this.prisma.postDraft.updateMany({
-      where: {
-        id: draftId,
-        OR: [
-          { status: { in: statuses } },
-          ...(v4Stages.length ? [v4PausedAt(v4Stages)] : []),
-        ],
-      },
-      data: data as never,
-    });
-    return result.count > 0;
+    const rows = await this.database.client
+      .update(postDrafts)
+      .set(data as Partial<typeof postDrafts.$inferInsert>)
+      .where(
+        and(
+          eq(postDrafts.id, draftId),
+          or(
+            statuses.length ? inArray(postDrafts.status, statuses) : undefined,
+            v4Stages.length ? v4PausedAt(v4Stages) : undefined,
+          ),
+        ),
+      )
+      .returning({ id: postDrafts.id });
+    return rows.length > 0;
   }
 
-  async approveDraft(draftId: string): Promise<boolean> {
-    const result = await this.prisma.postDraft.updateMany({
-      where: { id: draftId, status: "needs_review" },
-      data: { status: "approved", errorMessage: null },
+  approveDraft(draftId: string): Promise<boolean> {
+    return this.transitionDraft(draftId, "needs_review", {
+      status: "approved",
+      errorMessage: null,
     });
-    return result.count > 0;
   }
-
-  async rejectDraft(draftId: string): Promise<boolean> {
-    const result = await this.prisma.postDraft.updateMany({
-      where: { id: draftId, status: "needs_review" },
-      data: { status: "rejected" },
+  rejectDraft(draftId: string): Promise<boolean> {
+    return this.transitionDraft(draftId, "needs_review", {
+      status: "rejected",
     });
-    return result.count > 0;
   }
-
   async draftExists(draftId: string): Promise<boolean> {
-    const draft = await this.prisma.postDraft.findUnique({
-      where: { id: draftId },
-      select: { id: true },
-    });
-    return draft !== null;
+    return (
+      (
+        await this.database.client
+          .select({ id: postDrafts.id })
+          .from(postDrafts)
+          .where(eq(postDrafts.id, draftId))
+          .limit(1)
+      ).length > 0
+    );
   }
 
   findDraftShotPrompt(
     draftId: string,
     jobId: string,
   ): Promise<{ prompt: string } | null> {
-    return this.prisma.generationJob.findFirst({
-      where: { id: jobId, draftId, status: "draft" },
-      select: { prompt: true },
-    });
+    return this.database.client
+      .select({ prompt: generationJobs.prompt })
+      .from(generationJobs)
+      .where(
+        and(
+          eq(generationJobs.id, jobId),
+          eq(generationJobs.draftId, draftId),
+          eq(generationJobs.status, "draft"),
+        ),
+      )
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
 
   async queueDraftShot(input: {
@@ -308,152 +412,198 @@ export class DraftsRepository {
     prompt?: string;
     candidateCount?: number;
   }): Promise<boolean> {
-    const result = await this.prisma.generationJob.updateMany({
-      where: { id: input.jobId, draftId: input.draftId, status: "draft" },
-      data: {
+    const rows = await this.database.client
+      .update(generationJobs)
+      .set({
         status: "queued",
         ...(input.prompt ? { prompt: input.prompt } : {}),
         ...(input.candidateCount != null
           ? { candidateCount: input.candidateCount }
           : {}),
-      },
-    });
-    return result.count > 0;
+      })
+      .where(
+        and(
+          eq(generationJobs.id, input.jobId),
+          eq(generationJobs.draftId, input.draftId),
+          eq(generationJobs.status, "draft"),
+        ),
+      )
+      .returning({ id: generationJobs.id });
+    return rows.length > 0;
   }
 
   findShotIdentity(
     jobId: string,
   ): Promise<{ characterId: string; sortOrder: number } | null> {
-    return this.prisma.generationJob.findUnique({
-      where: { id: jobId },
-      select: { characterId: true, sortOrder: true },
-    });
+    return this.database.client
+      .select({
+        characterId: generationJobs.characterId,
+        sortOrder: generationJobs.sortOrder,
+      })
+      .from(generationJobs)
+      .where(eq(generationJobs.id, jobId))
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
-
   async shotBelongsToDraft(draftId: string, jobId: string): Promise<boolean> {
-    const job = await this.prisma.generationJob.findFirst({
-      where: { id: jobId, draftId },
-      select: { id: true },
-    });
-    return job !== null;
+    return (
+      (
+        await this.database.client
+          .select({ id: generationJobs.id })
+          .from(generationJobs)
+          .where(
+            and(
+              eq(generationJobs.id, jobId),
+              eq(generationJobs.draftId, draftId),
+            ),
+          )
+          .limit(1)
+      ).length > 0
+    );
   }
-
   findRegenerationSource(
     draftId: string,
     jobId: string,
   ): Promise<RegenerationSource | null> {
-    return this.prisma.generationJob.findFirst({
-      where: { id: jobId, draftId },
-      select: regenerationSourceFields,
-    });
+    return this.database.client
+      .select({
+        id: generationJobs.id,
+        characterId: generationJobs.characterId,
+        sortOrder: generationJobs.sortOrder,
+        status: generationJobs.status,
+        inputPrompt: generationJobs.inputPrompt,
+        prompt: generationJobs.prompt,
+        candidateCount: generationJobs.candidateCount,
+        paramsJson: generationJobs.paramsJson,
+      })
+      .from(generationJobs)
+      .where(
+        and(eq(generationJobs.id, jobId), eq(generationJobs.draftId, draftId)),
+      )
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
 
-  async regenerateShot(input: {
+  regenerateShot(input: {
     draftId: string;
     source: RegenerationSource;
     prompt: string;
   }): Promise<RegenerationResult> {
-    return this.prisma.$transaction(async (tx) => {
-      const latest = await tx.generationJob.findFirst({
-        where: {
-          draftId: input.draftId,
-          sortOrder: input.source.sortOrder,
-        },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        select: { id: true },
-      });
-      if (latest?.id !== input.source.id) {
-        return { outcome: "stale-job" };
-      }
-      const transitioned = await tx.postDraft.updateMany({
-        where: {
-          id: input.draftId,
-          OR: [
-            { status: { in: ["needs_review", "failed"] } },
-            // 컷 하나가 실패해도 수동 초안은 generating에 머문다(집계 버튼은 전
-            // 컷 완료 때만 뜨고, 자동 모드처럼 집계가 failed로 넘겨주지 않는다).
-            // 실패한 컷을 그 자리에서 다시 만들 수 있어야 막히지 않는다 —
-            // 서비스가 이미 "완료·실패한 잡만"을 강제하므로 실행 중인 컷을
-            // 건드리는 일은 없다.
-            { status: { in: ["generating", "regenerating"] } },
-            // V4: 캡션·게시 대기 중에도 컷을 다시 만들 수 있다. 완료되면
-            // 집계가 다시 ⑥ 캡션 대기로 보내고 captionBuild는 stale이 된다.
-            v4PausedAt(["caption", "publish"]),
-          ],
-        },
-        data: { status: "regenerating", errorMessage: null },
-      });
-      if (transitioned.count === 0) {
-        const draft = await tx.postDraft.findUnique({
-          where: { id: input.draftId },
-          select: { id: true },
-        });
-        return draft
+    return this.database.client.transaction(async (tx) => {
+      const [latest] = await tx
+        .select({ id: generationJobs.id })
+        .from(generationJobs)
+        .where(
+          and(
+            eq(generationJobs.draftId, input.draftId),
+            eq(generationJobs.sortOrder, input.source.sortOrder),
+          ),
+        )
+        .orderBy(desc(generationJobs.createdAt), desc(generationJobs.id))
+        .limit(1);
+      if (latest?.id !== input.source.id) return { outcome: "stale-job" };
+      const transitioned = await tx
+        .update(postDrafts)
+        .set({ status: "regenerating", errorMessage: null })
+        .where(
+          and(
+            eq(postDrafts.id, input.draftId),
+            or(
+              inArray(postDrafts.status, [
+                "needs_review",
+                "failed",
+                "generating",
+                "regenerating",
+              ]),
+              v4PausedAt(["caption", "publish"]),
+            ),
+          ),
+        )
+        .returning({ id: postDrafts.id });
+      if (transitioned.length === 0) {
+        const exists =
+          (
+            await tx
+              .select({ id: postDrafts.id })
+              .from(postDrafts)
+              .where(eq(postDrafts.id, input.draftId))
+              .limit(1)
+          ).length > 0;
+        return exists
           ? { outcome: "invalid-draft-status" }
           : { outcome: "draft-not-found" };
       }
-      const created = await tx.generationJob.create({
-        select: { id: true },
-        data: {
+      const [created] = await tx
+        .insert(generationJobs)
+        .values({
           characterId: input.source.characterId,
           mediaType: "image",
-          ...(input.source.inputPrompt != null
-            ? { inputPrompt: input.source.inputPrompt }
-            : {}),
+          inputPrompt: input.source.inputPrompt,
           prompt: input.prompt,
-          ...(input.source.candidateCount != null
-            ? { candidateCount: input.source.candidateCount }
-            : {}),
-          ...(input.source.paramsJson != null
-            ? {
-                paramsJson: input.source.paramsJson as Prisma.InputJsonValue,
-              }
-            : {}),
+          candidateCount: input.source.candidateCount,
+          paramsJson: input.source.paramsJson,
           draftId: input.draftId,
           sortOrder: input.source.sortOrder,
           originJobId: input.source.id,
-        },
-      });
-      await tx.characterActionLog.create({
-        data: {
+        })
+        .returning({ id: generationJobs.id });
+      await tx
+        .insert(characterActionLogs)
+        .values({
           characterId: input.source.characterId,
           actionType: "DRAFT_SHOT_REGENERATED",
           targetTable: "post_drafts",
           targetId: input.draftId,
           reason: `shot ${input.source.sortOrder} regeneration queued`,
-        },
-      });
+        });
       return { outcome: "regenerated", jobId: created.id };
     });
   }
 
-  findCompletedShotCandidates(
+  async findCompletedShotCandidates(
     draftId: string,
     jobId: string,
   ): Promise<{ id: string; outputs: { mediaId: string }[] } | null> {
-    return this.prisma.generationJob.findFirst({
-      where: { id: jobId, draftId, status: "completed" },
-      select: {
-        id: true,
-        outputs: { select: { mediaId: true } },
-      },
-    });
+    const [job] = await this.database.client
+      .select({ id: generationJobs.id })
+      .from(generationJobs)
+      .where(
+        and(
+          eq(generationJobs.id, jobId),
+          eq(generationJobs.draftId, draftId),
+          eq(generationJobs.status, "completed"),
+        ),
+      )
+      .limit(1);
+    if (!job) return null;
+    return {
+      id: job.id,
+      outputs: await this.database.client
+        .select({ mediaId: generationJobOutputs.mediaId })
+        .from(generationJobOutputs)
+        .where(eq(generationJobOutputs.jobId, jobId)),
+    };
   }
 
   async selectShotOutput(jobId: string, mediaId: string): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      await tx.generationJobOutput.updateMany({
-        where: { jobId },
-        data: { selected: false },
-      });
-      await tx.generationJobOutput.updateMany({
-        where: { jobId, mediaId },
-        data: { selected: true },
-      });
-      await tx.generationJob.update({
-        where: { id: jobId },
-        data: { outputMediaId: mediaId },
-      });
+    await this.database.client.transaction(async (tx) => {
+      await tx
+        .update(generationJobOutputs)
+        .set({ selected: false })
+        .where(eq(generationJobOutputs.jobId, jobId));
+      await tx
+        .update(generationJobOutputs)
+        .set({ selected: true })
+        .where(
+          and(
+            eq(generationJobOutputs.jobId, jobId),
+            eq(generationJobOutputs.mediaId, mediaId),
+          ),
+        );
+      await tx
+        .update(generationJobs)
+        .set({ outputMediaId: mediaId })
+        .where(eq(generationJobs.id, jobId));
     });
   }
 
@@ -463,44 +613,76 @@ export class DraftsRepository {
     mediaId: string;
     draftStatuses: PostDraftStatus[];
   }): Promise<{ id: string } | null> {
-    return this.prisma.generationJobOutput.findFirst({
-      where: {
-        jobId: input.jobId,
-        mediaId: input.mediaId,
-        job: {
-          draftId: input.draftId,
-          status: "completed",
-          draft: { status: { in: input.draftStatuses } },
-        },
-      },
-      select: { id: true },
-    });
+    return this.database.client
+      .select({ id: generationJobOutputs.id })
+      .from(generationJobOutputs)
+      .innerJoin(
+        generationJobs,
+        eq(generationJobs.id, generationJobOutputs.jobId),
+      )
+      .innerJoin(postDrafts, eq(postDrafts.id, generationJobs.draftId))
+      .where(
+        and(
+          eq(generationJobOutputs.jobId, input.jobId),
+          eq(generationJobOutputs.mediaId, input.mediaId),
+          eq(generationJobs.draftId, input.draftId),
+          eq(generationJobs.status, "completed"),
+          inArray(postDrafts.status, input.draftStatuses),
+        ),
+      )
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
-
   async updateOutputFilter(
     outputId: string,
     filterPreset: string,
   ): Promise<void> {
-    await this.prisma.generationJobOutput.update({
-      where: { id: outputId },
-      data: { filterPreset },
-    });
+    await this.database.client
+      .update(generationJobOutputs)
+      .set({ filterPreset })
+      .where(eq(generationJobOutputs.id, outputId));
   }
-
   async recordActionLog(input: {
     characterId: string;
     draftId: string;
     actionType: string;
     reason: string;
   }): Promise<void> {
-    await this.prisma.characterActionLog.create({
-      data: {
+    await this.database.client
+      .insert(characterActionLogs)
+      .values({
         characterId: input.characterId,
         actionType: input.actionType,
         targetTable: "post_drafts",
         targetId: input.draftId,
         reason: input.reason,
-      },
-    });
+      });
+  }
+
+  private draftFilter(input: {
+    status?: PostDraftStatus;
+    characterId?: string;
+  }) {
+    return and(
+      input.status ? eq(postDrafts.status, input.status) : undefined,
+      input.characterId
+        ? eq(postDrafts.characterId, input.characterId)
+        : undefined,
+    );
+  }
+  private async transitionDraft(
+    draftId: string,
+    from: PostDraftStatus,
+    set: Partial<typeof postDrafts.$inferInsert>,
+  ): Promise<boolean> {
+    return (
+      (
+        await this.database.client
+          .update(postDrafts)
+          .set(set)
+          .where(and(eq(postDrafts.id, draftId), eq(postDrafts.status, from)))
+          .returning({ id: postDrafts.id })
+      ).length > 0
+    );
   }
 }

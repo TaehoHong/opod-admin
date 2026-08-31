@@ -21,7 +21,7 @@ const createService = ({
     AdminService as unknown as new (...dependencies: object[]) => AdminService
   )(user, content, credit, moderation, analytics, generation);
 
-// 구매는 결제 수단·금액을 payments 행에서 가져온다 (schema.prisma CreditPurchase).
+// 구매는 결제 수단·금액을 payments 행에서 가져온다 (schema.Drizzle CreditPurchase).
 const purchase = (
   overrides: Partial<{
     id: string;

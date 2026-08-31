@@ -3,7 +3,6 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
 import {
   generationSetHash,
   isPostPipelineV3,
@@ -12,6 +11,7 @@ import {
 import {
   PostWorkspaceRepository,
   PostWorkDraft,
+  PostDraftFilter,
   StandalonePost,
 } from "./post-workspace.repository";
 
@@ -307,7 +307,7 @@ function parseFilter(value?: string): PostWorkFilter {
   return filter as PostWorkFilter;
 }
 
-function draftWhere(filter: PostWorkFilter): Prisma.PostDraftWhereInput {
+function draftWhere(filter: PostWorkFilter): PostDraftFilter {
   if (filter === "published") return { status: "published" };
   if (filter === "publish_waiting") return { status: "approved" };
   if (filter === "failed") return { status: "failed" };

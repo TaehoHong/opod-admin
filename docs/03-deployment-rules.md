@@ -9,8 +9,8 @@
 
 ## Environments
 
-- Local: sibling `opod-service-backend`의 database를 먼저 실행하고
-  Prisma client를 생성한 뒤 admin을 시작한다.
+- Local: sibling `opod-service-backend`의 database를 먼저 실행하고 admin을
+  시작한다.
 - Staging: POC 필수 환경으로 두지 않는다.
 - Production: 단일 운영 서버에 Docker image를 수동 배포한다.
 - GitHub Actions CI, CI/CD와 자동 rollback은 사용하지 않는다.
@@ -37,7 +37,7 @@ worktree 상태를 확인한다.
   `npm run build`
 - auth, payment, refund, permission, transaction 또는 API contract:
   관련 focused test와 `npm run test:e2e`
-- Prisma mirror: `npm run schema:check`, `npm run db:generate`
+- Drizzle schema mirror: `npm run schema:check`, `npm run build`
 
 모든 변경에 가장 느린 검증을 일괄 적용하지 않는다. 위험이 높은 경계에는
 강한 검증을 적용하되 기본 개발 피드백 경로는 빠르게 유지한다.
@@ -46,7 +46,7 @@ worktree 상태를 확인한다.
 
 - production migration은 이 저장소에서 실행하지 않는다.
 - migration은 canonical owner인 `opod-service-backend`에서 생성·검증·배포한다.
-- admin은 호환 가능한 mirror와 Prisma client를 동기화한다.
+- admin은 canonical과 동일한 Drizzle `schema.ts` mirror를 동기화한다.
 - backward compatibility가 필요한 schema rollout은 backend migration,
   admin deploy와 public service deploy 순서를 해당 변경에서 계획한다.
 

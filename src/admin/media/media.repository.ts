@@ -1,11 +1,12 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
-import { PrismaService } from "../../domain/database/prisma.service";
+import { eq } from "drizzle-orm";
+import { DatabaseService } from "../../domain/database/database.service";
+import { media } from "../../domain/database/schema";
 
-// entity repository — PrismaService는 이 계층에서만 쓴다
+// entity repository — DatabaseService는 이 계층에서만 쓴다
 // (docs/02-development-rules.md "Module and Repository Rules").
 
-export type MediaRow = Prisma.MediaGetPayload<object>;
+export type MediaRow = typeof media.$inferSelect;
 
 export type MediaSource = {
   mediaType: string;
@@ -15,31 +16,44 @@ export type MediaSource = {
 
 @Injectable()
 export class MediaRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly database: DatabaseService) {}
 
-  create(data: Prisma.MediaUncheckedCreateInput): Promise<MediaRow> {
-    return this.prisma.media.create({ data });
+  async create(data: typeof media.$inferInsert): Promise<MediaRow> {
+    const [row] = await this.database.client
+      .insert(media)
+      .values(data)
+      .returning();
+    return row;
   }
 
   async exists(mediaId: string): Promise<boolean> {
-    const row = await this.prisma.media.findUnique({
-      where: { id: mediaId },
-      select: { id: true },
-    });
+    const [row] = await this.database.client
+      .select({ id: media.id })
+      .from(media)
+      .where(eq(media.id, mediaId))
+      .limit(1);
     return row !== null;
   }
 
-  markUploaded(mediaId: string, uploadedAt: Date): Promise<MediaRow> {
-    return this.prisma.media.update({
-      where: { id: mediaId },
-      data: { uploadedAt },
-    });
+  async markUploaded(mediaId: string, uploadedAt: Date): Promise<MediaRow> {
+    const [row] = await this.database.client
+      .update(media)
+      .set({ uploadedAt })
+      .where(eq(media.id, mediaId))
+      .returning();
+    return row;
   }
 
   findSource(mediaId: string): Promise<MediaSource | null> {
-    return this.prisma.media.findUnique({
-      where: { id: mediaId },
-      select: { mediaType: true, url: true, storageKey: true },
-    });
+    return this.database.client
+      .select({
+        mediaType: media.mediaType,
+        url: media.url,
+        storageKey: media.storageKey,
+      })
+      .from(media)
+      .where(eq(media.id, mediaId))
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
 }

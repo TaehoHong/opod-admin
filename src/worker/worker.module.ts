@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 import { S3Config } from "../domain/config/app-config";
 import { AppConfigService } from "../domain/config/app-config.service";
-import { PrismaModule } from "../domain/database/prisma.module";
+import { DatabaseModule } from "../domain/database/database.module";
 import { GenerationSettingsService } from "../domain/settings/generation-settings.service";
 import { SettingsModule } from "../domain/settings/settings.module";
 import { resolveContentPlanner } from "./content-planner";
@@ -35,7 +35,7 @@ function storageEnv(config: S3Config | undefined) {
 // (docs/media-generation-pipeline.md D1). admin HTTP 모듈에 대한 역참조를
 // 두지 않는다 — 추후 별도 이미지 분리 시 엔트리포인트만 추가하면 되는 구조 유지.
 @Module({
-  imports: [PrismaModule, SettingsModule],
+  imports: [DatabaseModule, SettingsModule],
   providers: [
     GenerationJobRepository,
     DraftWorkerRepository,

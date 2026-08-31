@@ -1,7 +1,13 @@
 import { Injectable } from "@nestjs/common";
-import { PrismaService } from "../domain/database/prisma.service";
+import { eq } from "drizzle-orm";
+import { DatabaseService } from "../domain/database/database.service";
+import {
+  characterActionLogs,
+  characterPostingPolicies,
+  characters,
+} from "../domain/database/schema";
 
-// entity repository — PrismaService는 이 계층에서만 쓴다
+// entity repository — DatabaseService는 이 계층에서만 쓴다
 // (docs/02-development-rules.md "Module and Repository Rules").
 
 export type PostingPolicyRow = {
@@ -20,42 +26,62 @@ export type PostingPolicyValues = Omit<
 
 @Injectable()
 export class PostingPolicyRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly database: DatabaseService) {}
 
   findByCharacter(characterId: string): Promise<PostingPolicyRow | null> {
-    return this.prisma.characterPostingPolicy.findUnique({
-      where: { characterId },
-    });
+    return this.database.client
+      .select({
+        characterId: characterPostingPolicies.characterId,
+        enabled: characterPostingPolicies.enabled,
+        weeklyCadence: characterPostingPolicies.weeklyCadence,
+        hourStartKst: characterPostingPolicies.hourStartKst,
+        hourEndKst: characterPostingPolicies.hourEndKst,
+        updatedAt: characterPostingPolicies.updatedAt,
+      })
+      .from(characterPostingPolicies)
+      .where(eq(characterPostingPolicies.characterId, characterId))
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
 
-  upsert(
+  async upsert(
     characterId: string,
     values: PostingPolicyValues,
   ): Promise<PostingPolicyRow> {
-    return this.prisma.characterPostingPolicy.upsert({
-      where: { characterId },
-      create: { characterId, ...values },
-      update: values,
-    });
+    const [row] = await this.database.client
+      .insert(characterPostingPolicies)
+      .values({ characterId, ...values })
+      .onConflictDoUpdate({
+        target: characterPostingPolicies.characterId,
+        set: values,
+      })
+      .returning({
+        characterId: characterPostingPolicies.characterId,
+        enabled: characterPostingPolicies.enabled,
+        weeklyCadence: characterPostingPolicies.weeklyCadence,
+        hourStartKst: characterPostingPolicies.hourStartKst,
+        hourEndKst: characterPostingPolicies.hourEndKst,
+        updatedAt: characterPostingPolicies.updatedAt,
+      });
+    return row;
   }
 
   async characterExists(characterId: string): Promise<boolean> {
-    const row = await this.prisma.character.findUnique({
-      where: { id: characterId },
-      select: { id: true },
-    });
+    const [row] = await this.database.client
+      .select({ id: characters.id })
+      .from(characters)
+      .where(eq(characters.id, characterId))
+      .limit(1);
     return row !== null;
   }
 
   async recordPolicyChange(characterId: string, reason: string): Promise<void> {
-    await this.prisma.characterActionLog.create({
-      data: {
-        characterId,
-        actionType: "POSTING_POLICY_UPDATED",
-        targetTable: "character_posting_policies",
-        targetId: characterId,
-        reason,
-      },
+    await this.database.client.insert(characterActionLogs).values({
+      characterId,
+      actionType: "POSTING_POLICY_UPDATED",
+      targetTable: "character_posting_policies",
+      targetId: characterId,
+      reason,
     });
   }
 }

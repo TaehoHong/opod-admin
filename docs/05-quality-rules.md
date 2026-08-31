@@ -77,7 +77,7 @@
 | Backend logic                              | 관련 `*.spec.ts`       | `npm run test`                                  |
 | API/worker                                 | 관련 spec              | `npm run lint`, `npm run test`, `npm run build` |
 | Auth/payment/refund/permission/transaction | 관련 unit              | `npm run test:e2e`                              |
-| Prisma mirror                              | `npm run schema:check` | `npm run db:generate`, `npm run build`          |
+| Drizzle schema mirror                      | `npm run schema:check` | `npm run db:generate`, `npm run build`          |
 | PAVE/docs                                  | link/path review       | PAVE doctor, `git diff --check`                 |
 
 `npm run admin:check`는 TypeScript와 Vitest/RTL/MSW suite를 실행하는 빠른

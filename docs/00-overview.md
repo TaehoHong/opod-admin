@@ -106,12 +106,12 @@
 
 | 영역        | 현재 저장소 사실                                                           | 승인된 목표                                                  |
 | ----------- | -------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Backend     | NestJS 10, Prisma, API와 worker가 한 process                               | modular monolith 유지, entity 중심 module과 repository 적용  |
+| Backend     | NestJS 10, Drizzle, API와 worker가 한 process                              | modular monolith 유지, entity 중심 module과 repository 적용  |
 | Admin API   | controller가 `/api/admin/v1/*` 아래에 있고 Swagger/OpenAPI는 제거됨        | `/api/admin/v1/*`, Swagger/OpenAPI 미사용                    |
 | Auth        | 7일 `__Host-` HttpOnly cookie JWT, 최초 계정은 bootstrap 환경변수로만 생성 | 7일 HttpOnly cookie JWT, bootstrap 환경변수로 최초 계정 생성 |
 | Admin UI    | `packages/admin`의 정적 HTML/CSS/JavaScript                                | React, TypeScript, Vite, Mantine                             |
 | 게시 자동화 | worker와 수동 승인 흐름이 있으며 자동 실행은 꺼짐                          | 튜닝 중 승인 게시, 최종 단계는 생성부터 게시까지 자동 완료   |
-| DB schema   | 이 저장소에 Prisma mirror가 있음                                           | canonical 변경은 backend에서 먼저 수행하고 mirror 동기화     |
+| DB schema   | 이 저장소에 Drizzle schema mirror가 있음                                   | canonical 변경은 backend에서 먼저 수행하고 mirror 동기화     |
 
 목표 구조는 project-init에서 제품 코드로 구현하지 않는다. 각 변경은 별도
 기능 또는 리팩터링 작업에서 현재 동작과 migration 위험을 확인한 뒤

@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import type { JsonValue } from "../../domain/database/json";
 import { IsObject, IsOptional, IsString } from "class-validator";
 
 export class UpsertVisualProfileDto {
@@ -18,5 +18,5 @@ export class UpsertVisualProfileDto {
   // nested DTO here.
   @IsOptional()
   @IsObject()
-  providerConfig?: Prisma.InputJsonValue;
+  providerConfig?: JsonValue;
 }

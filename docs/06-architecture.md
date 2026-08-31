@@ -17,7 +17,7 @@
 
 - `opod-admin`: 운영자 UI, admin API, 운영자용 moderation/payment/refund/
   credit control, 자동화 추적과 중단
-- `opod-service-backend`: public/user API, canonical Prisma schema,
+- `opod-service-backend`: public/user API, canonical Drizzle schema,
   production migration
 - admin은 공유 DB를 직접 조회·변경하지만 schema owner는 아니다.
 
@@ -46,7 +46,7 @@ Controller
       -> Optional Domain Service
       -> External Capability Port
 Entity Repository
-  -> PrismaService / TransactionHost
+  -> DatabaseService
 External Adapter
   -> Provider SDK or HTTP
 ```
@@ -61,19 +61,16 @@ External Adapter
 
 ## Data Access and Transactions
 
-- `PrismaService`는 repository만 사용한다.
+- `DatabaseService`는 repository만 사용한다.
 - 범용 base repository는 만들지 않는다.
 - repository method는 use-case 의도를 드러낸다.
-- application service가 transaction boundary를 소유한다.
-- Prisma `$transaction`과 `nestjs-cls` `TransactionHost`로 repository가
-  동일 transaction client를 공유한다.
-- Prisma API, optimistic concurrency, constraint와 Serializable retry를
+- 원자적 상태 전이를 수행하는 repository 메서드가 Drizzle transaction
+  boundary를 소유한다.
+- Drizzle API, optimistic concurrency, constraint와 Serializable retry를
   Raw SQL보다 우선한다.
 - Raw SQL 예외는 repository에 격리하고 필요를 검증한다.
 
-현재 서비스가 Prisma를 직접 호출하는 부분은 목표 구조와의 구현 공백이다.
-별도 기능 작업에서 점진적으로 이동하며 project-init에서 대규모
-리팩터링하지 않는다.
+application service와 controller는 Drizzle client를 직접 사용하지 않는다.
 
 ## API
 
@@ -82,7 +79,7 @@ External Adapter
 - realtime: POC 동안 비활성
 - request validation: Nest DTO + class-validator/class-transformer
 - response: framework-free TypeScript contract
-- Prisma model direct response: 금지
+- Drizzle model direct response: 금지
 - Swagger/OpenAPI: 사용하지 않음
 
 날짜는 UTC ISO 8601, UUID/BigInt ID는 string, 정밀도가 중요한
@@ -186,7 +183,7 @@ runtime log는 위 business/audit log와 분리한다.
 | Modular monolith, API+worker 같은 process         | decided  |
 | Entity 중심 module과 repository                   | decided  |
 | Application service 중심 business flow            | decided  |
-| Prisma/CLS transaction                            | decided  |
+| Drizzle/CLS transaction                           | decided  |
 | Concrete repository injection                     | decided  |
 | External capability interface/token               | decided  |
 | React/Vite/Mantine frontend                       | decided  |
@@ -197,7 +194,7 @@ runtime log는 위 business/audit log와 분리한다.
 ## Known Implementation Gaps
 
 - 최초 계정은 bootstrap 환경변수로만 만든다.
-- application service와 controller는 Prisma를 직접 사용하지 않는다.
+- application service와 controller는 Drizzle를 직접 사용하지 않는다.
   query, transaction과 raw SQL은 feature/entity repository가 소유한다.
 - frontend는 React/TypeScript/Vite 단일 앱이다. Nest와 Docker build는 root
   `npm run build`에서 React bundle을 먼저 만든다.

@@ -68,7 +68,7 @@ flowchart LR
     subgraph DOMAIN["Domain / Infra"]
         SET["GenerationSettingsService<br/>DB 설정 > env 폴백"]
         LOG["LlmLogService<br/>모든 LLM 호출 기록"]
-        PR["PrismaModule"]
+        PR["DatabaseModule"]
     end
 
     subgraph EXT["외부 시스템"]
@@ -153,7 +153,7 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant DW as DraftWorkerService
-    participant DB as PostgreSQL (Prisma)
+    participant DB as PostgreSQL (Drizzle)
     participant LLM as LLM API
     participant GW as GenerationWorkerService
     participant IMAGE_PROVIDER as Image Provider

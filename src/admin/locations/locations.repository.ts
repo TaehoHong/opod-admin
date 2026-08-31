@@ -1,102 +1,148 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
-import { PrismaService } from "../../domain/database/prisma.service";
 import {
-  assertableMediaFields,
-  type AssertableMedia,
-} from "../media/media.service";
+  and,
+  asc,
+  desc,
+  eq,
+  isNotNull,
+  isNull,
+  lt,
+  notInArray,
+  or,
+} from "drizzle-orm";
+import type { AssertableMedia } from "../media/media.service";
+import { DatabaseService } from "../../domain/database/database.service";
+import {
+  characterLocationReferences,
+  characterLocations,
+  characters,
+  media,
+} from "../../domain/database/schema";
 
-const locationInclude = {
-  character: { select: { id: true, displayName: true, publicId: true } },
-  references: {
-    orderBy: { sortOrder: "asc" as const },
-    include: {
-      media: {
-        select: {
-          id: true,
-          url: true,
-          width: true,
-          height: true,
-          uploadedAt: true,
-        },
-      },
-    },
-  },
-} as const;
-
-export type LocationRow = Prisma.CharacterLocationGetPayload<{
-  include: typeof locationInclude;
-}>;
-
+export type LocationRow = typeof characterLocations.$inferSelect & {
+  character: { id: string; displayName: string; publicId: string } | null;
+  references: Array<
+    typeof characterLocationReferences.$inferSelect & {
+      media: Pick<
+        typeof media.$inferSelect,
+        "id" | "url" | "width" | "height" | "uploadedAt"
+      >;
+    }
+  >;
+};
 export type LocationScope = "all" | "global" | "character";
-
 export class DuplicateLocationKeyError extends Error {}
 
 @Injectable()
 export class LocationsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly database: DatabaseService) {}
 
-  characterExists(characterId: string): Promise<boolean> {
-    return this.prisma.character
-      .findUnique({ where: { id: characterId }, select: { id: true } })
-      .then((row) => row !== null);
+  async characterExists(characterId: string): Promise<boolean> {
+    const rows = await this.database.client
+      .select({ id: characters.id })
+      .from(characters)
+      .where(eq(characters.id, characterId))
+      .limit(1);
+    return rows.length > 0;
   }
 
   findUploadedMedia(mediaId: string): Promise<AssertableMedia | null> {
-    return this.prisma.media.findUnique({
-      where: { id: mediaId },
-      select: assertableMediaFields,
-    });
+    return this.database.client
+      .select({
+        id: media.id,
+        mediaType: media.mediaType,
+        url: media.url,
+        width: media.width,
+        height: media.height,
+        durationSeconds: media.durationSeconds,
+        uploadedAt: media.uploadedAt,
+      })
+      .from(media)
+      .where(eq(media.id, mediaId))
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
 
-  cursorMatchesFilter(
+  async cursorMatchesFilter(
     cursorId: string,
     filter: { characterId?: string; scope: LocationScope },
   ): Promise<boolean> {
-    return this.prisma.characterLocation
-      .findFirst({
-        where: { id: cursorId, deletedAt: null, ...this.scopeWhere(filter) },
-        select: { id: true },
-      })
-      .then((row) => row !== null);
+    const rows = await this.database.client
+      .select({ id: characterLocations.id })
+      .from(characterLocations)
+      .where(
+        and(
+          eq(characterLocations.id, cursorId),
+          isNull(characterLocations.deletedAt),
+          this.scopeCondition(filter),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
   }
 
-  findMany(input: {
+  async findMany(input: {
     characterId?: string;
     scope: LocationScope;
     take: number;
     cursorId?: string;
   }): Promise<LocationRow[]> {
-    return this.prisma.characterLocation.findMany({
-      where: { deletedAt: null, ...this.scopeWhere(input) },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-      take: input.take,
-      ...(input.cursorId ? { cursor: { id: input.cursorId }, skip: 1 } : {}),
-      include: locationInclude,
-    });
+    const [cursor] = input.cursorId
+      ? await this.database.client
+          .select({
+            id: characterLocations.id,
+            updatedAt: characterLocations.updatedAt,
+          })
+          .from(characterLocations)
+          .where(eq(characterLocations.id, input.cursorId))
+          .limit(1)
+      : [];
+    const rows = await this.database.client
+      .select()
+      .from(characterLocations)
+      .where(
+        and(
+          isNull(characterLocations.deletedAt),
+          this.scopeCondition(input),
+          cursor
+            ? or(
+                lt(characterLocations.updatedAt, cursor.updatedAt),
+                and(
+                  eq(characterLocations.updatedAt, cursor.updatedAt),
+                  lt(characterLocations.id, cursor.id),
+                ),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(desc(characterLocations.updatedAt), desc(characterLocations.id))
+      .limit(input.take);
+    return this.hydrate(rows);
   }
 
-  findById(locationId: string): Promise<LocationRow | null> {
-    return this.prisma.characterLocation.findFirst({
-      where: { id: locationId, deletedAt: null },
-      include: locationInclude,
-    });
+  async findById(locationId: string): Promise<LocationRow | null> {
+    const [row] = await this.database.client
+      .select()
+      .from(characterLocations)
+      .where(
+        and(
+          eq(characterLocations.id, locationId),
+          isNull(characterLocations.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ? (await this.hydrate([row]))[0] : null;
   }
 
-  async create(data: {
-    characterId: string | null;
-    locationKey: string;
-    displayName: string;
-    description: string;
-    visualPrompt: string;
-    negativePrompt: string;
-    referenceNegativePrompt: string;
-  }): Promise<LocationRow> {
+  async create(
+    data: typeof characterLocations.$inferInsert,
+  ): Promise<LocationRow> {
     try {
-      return await this.prisma.characterLocation.create({
-        data,
-        include: locationInclude,
-      });
+      const [row] = await this.database.client
+        .insert(characterLocations)
+        .values(data)
+        .returning();
+      return (await this.hydrate([row]))[0];
     } catch (error) {
       this.rethrowDuplicate(error, data.locationKey);
     }
@@ -104,85 +150,134 @@ export class LocationsRepository {
 
   async update(
     locationId: string,
-    data: {
-      characterId?: string | null;
-      locationKey?: string;
-      displayName?: string;
-      description?: string;
-      visualPrompt?: string;
-      negativePrompt?: string;
-      referenceNegativePrompt?: string;
-    },
+    data: Partial<
+      Pick<
+        typeof characterLocations.$inferInsert,
+        | "characterId"
+        | "locationKey"
+        | "displayName"
+        | "description"
+        | "visualPrompt"
+        | "negativePrompt"
+        | "referenceNegativePrompt"
+      >
+    >,
   ): Promise<LocationRow> {
     try {
-      return await this.prisma.characterLocation.update({
-        where: { id: locationId },
-        data,
-        include: locationInclude,
-      });
+      const [row] = await this.database.client
+        .update(characterLocations)
+        .set(data)
+        .where(eq(characterLocations.id, locationId))
+        .returning();
+      return (await this.hydrate([row]))[0];
     } catch (error) {
       this.rethrowDuplicate(error, data.locationKey ?? "");
     }
   }
 
   async softDelete(locationId: string): Promise<void> {
-    await this.prisma.characterLocation.update({
-      where: { id: locationId },
-      data: { deletedAt: new Date() },
-    });
+    await this.database.client
+      .update(characterLocations)
+      .set({ deletedAt: new Date() })
+      .where(eq(characterLocations.id, locationId));
   }
 
-  replaceReferences(
+  async replaceReferences(
     locationId: string,
     references: Array<{ mediaId: string; description: string }>,
   ): Promise<LocationRow> {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.characterLocationReference.deleteMany({
-        where: {
-          locationId,
-          ...(references.length > 0
-            ? { mediaId: { notIn: references.map((item) => item.mediaId) } }
-            : {}),
-        },
-      });
+    await this.database.client.transaction(async (tx) => {
+      await tx.delete(characterLocationReferences).where(
+        and(
+          eq(characterLocationReferences.locationId, locationId),
+          references.length > 0
+            ? notInArray(
+                characterLocationReferences.mediaId,
+                references.map((item) => item.mediaId),
+              )
+            : undefined,
+        ),
+      );
       for (const [index, reference] of references.entries()) {
-        await tx.characterLocationReference.upsert({
-          where: {
-            locationId_mediaId: { locationId, mediaId: reference.mediaId },
-          },
-          create: {
-            locationId,
-            mediaId: reference.mediaId,
-            description: reference.description,
-            sortOrder: (index + 1) * 10,
-          },
-          update: {
-            description: reference.description,
-            sortOrder: (index + 1) * 10,
-          },
-        });
+        await tx
+          .insert(characterLocationReferences)
+          .values({ locationId, ...reference, sortOrder: (index + 1) * 10 })
+          .onConflictDoUpdate({
+            target: [
+              characterLocationReferences.locationId,
+              characterLocationReferences.mediaId,
+            ],
+            set: {
+              description: reference.description,
+              sortOrder: (index + 1) * 10,
+            },
+          });
       }
-      return tx.characterLocation.findUniqueOrThrow({
-        where: { id: locationId },
-        include: locationInclude,
-      });
     });
+    return (await this.findById(locationId))!;
   }
 
-  private scopeWhere(input: {
+  private scopeCondition(input: {
     characterId?: string;
     scope: LocationScope;
-  }): Prisma.CharacterLocationWhereInput {
-    if (input.characterId) return { characterId: input.characterId };
-    if (input.scope === "global") return { characterId: null };
-    if (input.scope === "character") return { characterId: { not: null } };
-    return {};
+  }) {
+    if (input.characterId)
+      return eq(characterLocations.characterId, input.characterId);
+    if (input.scope === "global") return isNull(characterLocations.characterId);
+    if (input.scope === "character")
+      return isNotNull(characterLocations.characterId);
+    return undefined;
+  }
+
+  private async hydrate(
+    rows: Array<typeof characterLocations.$inferSelect>,
+  ): Promise<LocationRow[]> {
+    return Promise.all(
+      rows.map(async (row) => {
+        const [character, references] = await Promise.all([
+          row.characterId
+            ? this.database.client
+                .select({
+                  id: characters.id,
+                  displayName: characters.displayName,
+                  publicId: characters.publicId,
+                })
+                .from(characters)
+                .where(eq(characters.id, row.characterId))
+                .limit(1)
+                .then(([value]) => value ?? null)
+            : null,
+          this.database.client
+            .select({
+              locationId: characterLocationReferences.locationId,
+              mediaId: characterLocationReferences.mediaId,
+              sortOrder: characterLocationReferences.sortOrder,
+              description: characterLocationReferences.description,
+              createdAt: characterLocationReferences.createdAt,
+              updatedAt: characterLocationReferences.updatedAt,
+              media: {
+                id: media.id,
+                url: media.url,
+                width: media.width,
+                height: media.height,
+                uploadedAt: media.uploadedAt,
+              },
+            })
+            .from(characterLocationReferences)
+            .innerJoin(media, eq(media.id, characterLocationReferences.mediaId))
+            .where(eq(characterLocationReferences.locationId, row.id))
+            .orderBy(asc(characterLocationReferences.sortOrder)),
+        ]);
+        return { ...row, character, references };
+      }),
+    );
   }
 
   private rethrowDuplicate(error: unknown, locationKey: string): never {
-    if ((error as { code?: string }).code === "P2002") {
-      throw new DuplicateLocationKeyError(locationKey);
-    }
+    const code =
+      (error as { code?: string }).code ??
+      (error as { cause?: { code?: string } }).cause?.code;
+    if (code === "23505") throw new DuplicateLocationKeyError(locationKey);
     throw error;
   }
 }

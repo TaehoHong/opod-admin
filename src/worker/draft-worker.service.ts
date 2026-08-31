@@ -4,7 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { JsonValue } from "../domain/database/json";
 import { AppConfig } from "../domain/config/app-config";
 import {
   assertVisibleCharacterHasReference,
@@ -349,7 +349,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         conceptJson: {
           ...concept,
           builderName: builder.name,
-        } as Prisma.InputJsonValue,
+        } as JsonValue,
         jobs: targets.map((job, index) => {
           const targetModelId = buildShots[index].targetModelId;
           return {
@@ -563,7 +563,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           ...(builder ? { builderName: builder.name } : {}),
           planInput: planInput as unknown as Record<string, unknown>,
           plan: plan as unknown as Record<string, unknown>,
-        } as Prisma.InputJsonValue,
+        } as JsonValue,
         jobs: plan.shots.map((shot, index) => {
           // 커스텀/구버전 플래너가 referenceIds를 생략해도 동작해야 한다.
           const referenceIds = shot.referenceIds ?? [];
@@ -694,7 +694,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
               state: "pending",
               reasonCodes: [],
             },
-          } as Prisma.InputJsonValue,
+          } as JsonValue,
         );
         if (transitioned) {
           await this.recordActionLog(
@@ -1027,7 +1027,7 @@ function withShotBuildMetadata(
   identityReferenceMediaIds: string[],
   environmentReferenceMediaIds: string[],
   targetModelId?: string,
-): Prisma.InputJsonValue {
+): JsonValue {
   const params = isRecord(paramsJson) ? paramsJson : {};
   const shot = isRecord(params._shot) ? params._shot : {};
   return {
@@ -1042,7 +1042,7 @@ function withShotBuildMetadata(
       ],
       ...(targetModelId ? { targetModelId } : {}),
     },
-  } as Prisma.InputJsonValue;
+  } as JsonValue;
 }
 
 export function publishedMemoryContent(

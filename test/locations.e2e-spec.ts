@@ -4,11 +4,13 @@ import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
 import { ADMIN_REQUEST_HEADER } from "../src/admin/auth/admin-session";
-import { PrismaService } from "../src/domain/database/prisma.service";
+import { eq } from "drizzle-orm";
+import { DatabaseService } from "../src/domain/database/database.service";
+import { media } from "../src/domain/database/schema";
 
 describe("location management", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let database: DatabaseService;
   let headers: Record<string, string>;
 
   beforeAll(async () => {
@@ -17,7 +19,7 @@ describe("location management", () => {
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    database = app.get(DatabaseService);
     const login = await request(app.getHttpServer())
       .post("/api/admin/v1/auth/login")
       .set(ADMIN_REQUEST_HEADER, "e2e")
@@ -88,33 +90,41 @@ describe("location management", () => {
       });
 
     const [first, second, video, pending] = await Promise.all([
-      prisma.media.create({
-        data: {
+      database.client
+        .insert(media)
+        .values({
           mediaType: "image",
           url: `https://cdn.example/${suffix}-first.jpg`,
           uploadedAt: new Date(),
-        },
-      }),
-      prisma.media.create({
-        data: {
+        })
+        .returning()
+        .then(([row]) => row),
+      database.client
+        .insert(media)
+        .values({
           mediaType: "image",
           url: `https://cdn.example/${suffix}-second.jpg`,
           uploadedAt: new Date(),
-        },
-      }),
-      prisma.media.create({
-        data: {
+        })
+        .returning()
+        .then(([row]) => row),
+      database.client
+        .insert(media)
+        .values({
           mediaType: "video",
           url: `https://cdn.example/${suffix}.mp4`,
           uploadedAt: new Date(),
-        },
-      }),
-      prisma.media.create({
-        data: {
+        })
+        .returning()
+        .then(([row]) => row),
+      database.client
+        .insert(media)
+        .values({
           mediaType: "image",
           url: `https://cdn.example/${suffix}-pending.jpg`,
-        },
-      }),
+        })
+        .returning()
+        .then(([row]) => row),
     ]);
 
     await request(app.getHttpServer())
@@ -153,7 +163,12 @@ describe("location management", () => {
       .set(headers)
       .expect(400);
     await expect(
-      prisma.media.findUnique({ where: { id: first.id } }),
+      database.client
+        .select()
+        .from(media)
+        .where(eq(media.id, first.id))
+        .limit(1)
+        .then(([row]) => row ?? null),
     ).resolves.not.toBeNull();
   });
 });

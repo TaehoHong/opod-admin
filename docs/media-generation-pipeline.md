@@ -170,14 +170,14 @@ docs/api/admin-settings.md를 따른다.
 
 ## 스키마 소유권
 
-opod-service-backend/prisma/schema.prisma가 canonical schema다. 변경 적용은
-**Prisma Migrate**로 한다 (2026-07-19 도입, 상세 절차·baseline·pgvector 확장
+opod-service-backend/src/domain/database/schema.ts가 canonical schema다. 변경 적용은
+**Drizzle Kit**로 한다 (2026-07-19 도입, 상세 절차·baseline·pgvector 확장
 설계는 opod-service-backend/docs/db-management.md).
 
 1. backend에서 schema 변경 + `npm run db:migrate`로 마이그레이션 생성·커밋.
 2. admin schema mirror를 동일하게 갱신한다 (admin은 마이그레이션을 갖지
    않는다 — 적용 주체가 아님). `scripts/check-schema-sync.mjs`로 drift 검사.
-3. 양쪽 Prisma client를 다시 생성한다.
+3. 양쪽 Drizzle schema tooling를 다시 생성한다.
 4. 배포 순서: 스키마 변경 릴리스는 **backend 먼저**(컨테이너 시작 시
    `migrate deploy` 자동 실행) → admin. admin은 스키마를 전제만 한다.
 

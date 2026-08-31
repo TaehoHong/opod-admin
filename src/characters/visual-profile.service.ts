@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { JsonValue } from "../domain/database/json";
 import { compileImagePrompt } from "../../prompts/image-prompt";
 import { assertUploadedMediaRow } from "../admin/media/media.service";
 import {
@@ -120,7 +120,7 @@ export class VisualProfileService {
     appearancePrompt?: string;
     stylePrompt?: string;
     negativePrompt?: string;
-    providerConfig?: Prisma.InputJsonValue;
+    providerConfig?: JsonValue;
   }): Promise<VisualProfile> {
     await this.assertCharacter(input.characterId);
     const data = {

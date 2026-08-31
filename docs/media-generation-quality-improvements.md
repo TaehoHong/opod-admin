@@ -259,7 +259,7 @@ identity conditioning이 조용히 사라진다.
 삭제하고 다시 생성한다. 재생성 시 기존 `description`을 보존하지 않는다.
 
 - `src/characters/visual-profile.service.ts:189-237`
-- `prisma/schema.prisma:794-800`
+- `src/domain/database/schema.ts:794-800`
 - `packages/admin/main.js:5152-5173`
 - `packages/admin/main.js:5693-5730`
 
@@ -651,7 +651,7 @@ UI는 최대 5장으로 표시하지만 서버는 20장까지 허용한다.
 ### 6.3 프롬프트 빌더 규칙
 
 - 충돌 우선순위를 `최종 프레임과 가시성 → 물리 가능성 → 보이는 정체성 →
-  상황·분위기 → 스타일` 순으로 둔다.
+상황·분위기 → 스타일` 순으로 둔다.
 - `captureSetup`은 시점과 촬영 기하에만 반영한다.
 - 프레임 밖 촬영자를 인물, 손, 신체 일부나 카메라를 든 피사체로 만들지
   않는다.
@@ -769,7 +769,7 @@ UI는 최대 5장으로 표시하지만 서버는 20장까지 허용한다.
 1. **완료** — 재생성·재시도에서 `_shot`과 후보 수 보존
 2. **완료** — 재생성 상태 전이, 새 잡 생성과 감사 로그 트랜잭션화
 3. **완료** — `scene / captureSetup / characterVisible / referenceIds /
-   sortOrder / targetModelId` 계약 추가
+sortOrder / targetModelId` 계약 추가
 4. **완료** — 인물 비노출 샷에서 외모와 레퍼런스 제외
 5. **완료** — 샷별 실제 생성 모델과 프롬프트 대상 모델 비교·경고
 6. **완료** — provider 예약 키 덮어쓰기 차단

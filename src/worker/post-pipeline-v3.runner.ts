@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { JsonValue } from "../domain/database/json";
 import {
   IMAGE_PLAN_CONTRACT_VERSION,
   IMAGE_PLANNER_PROMPT_VERSION,
@@ -136,7 +136,7 @@ export class PostPipelineV3Runner {
             reasonCodes: [failure.code],
             failure,
           },
-        } as Prisma.InputJsonValue,
+        } as JsonValue,
         message,
         terminal,
       });
@@ -200,7 +200,7 @@ export class PostPipelineV3Runner {
             state: "conflict",
             reasonCodes: ["semantic_conflict"],
           },
-        } as Prisma.InputJsonValue,
+        } as JsonValue,
         reason: "Post Planning Agent returned conflict",
       });
       return;
@@ -237,7 +237,7 @@ export class PostPipelineV3Runner {
         artifactKey: "postPlanning",
         revision: artifactRevision(concept.postPlanning) || null,
       },
-      conceptJson: nextConcept as Prisma.InputJsonValue,
+      conceptJson: nextConcept as JsonValue,
       actionType: "DRAFT_V3_POST_PLAN_READY",
       reason: `PostPlan revision ${revision} stored`,
     });
@@ -349,7 +349,7 @@ export class PostPipelineV3Runner {
             artifactKey: "imagePlanning",
             revision: artifactRevision(concept.imagePlanning) || null,
           },
-          conceptJson: adjusted as Prisma.InputJsonValue,
+          conceptJson: adjusted as JsonValue,
           actionType: "DRAFT_V3_IMAGE_COUNT_REDUCED",
           reason: `imageCount reduced from ${imageCount} to ${imageCount - 1}`,
         });
@@ -377,7 +377,7 @@ export class PostPipelineV3Runner {
             state: "blocked",
             reasonCodes: result.output.reasons.map((reason) => reason.code),
           },
-        } as Prisma.InputJsonValue,
+        } as JsonValue,
         reason: `Image Planning blocked: ${result.output.reasons.map((reason) => reason.code).join(",")}`,
       });
       return;
@@ -410,7 +410,7 @@ export class PostPipelineV3Runner {
         artifactKey: "imagePlanning",
         revision: artifactRevision(concept.imagePlanning) || null,
       },
-      conceptJson: nextConcept as Prisma.InputJsonValue,
+      conceptJson: nextConcept as JsonValue,
       actionType: "DRAFT_V3_IMAGE_PLAN_READY",
       reason: `ImagePlan revision ${revision} stored`,
     });
@@ -505,7 +505,7 @@ export class PostPipelineV3Runner {
       characterId: draft.characterId,
       ...(legacyColumns ? { columns: legacyColumns } : {}),
       locationId: imagePlan.locationId,
-      conceptJson: nextConcept as Prisma.InputJsonValue,
+      conceptJson: nextConcept as JsonValue,
       manual: concept.mode === "manual",
       // V4: 프롬프트당 1장 — 후보·선택 단계가 없다(§20.0 결정 3).
       ...(isPostPipelineV4(concept) ? { candidateCount: 1 } : {}),
@@ -553,7 +553,7 @@ export class PostPipelineV3Runner {
               })),
               negativePrompt: shot.negativePrompt,
             },
-          } as Prisma.InputJsonValue,
+          } as JsonValue,
         };
       }),
     });
@@ -670,7 +670,7 @@ export class PostPipelineV3Runner {
           state: "pending",
           reasonCodes: [],
         },
-      } as Prisma.InputJsonValue,
+      } as JsonValue,
       columns: {
         caption: result.output.caption,
         hashtags: result.output.hashtags,
@@ -695,7 +695,7 @@ export class PostPipelineV3Runner {
       conceptJson: {
         ...concept,
         pipeline: { ...concept.pipeline, state: "pending", reasonCodes: [] },
-      } as Prisma.InputJsonValue,
+      } as JsonValue,
       reason: `released: ${String(concept.pipeline.stage)} is not an agent stage`,
     });
   }
@@ -713,7 +713,7 @@ export class PostPipelineV3Runner {
       conceptJson: {
         ...concept,
         pipeline: { ...concept.pipeline, state, reasonCodes },
-      } as Prisma.InputJsonValue,
+      } as JsonValue,
       reason: `${state}: ${reasonCodes.join(",")}`,
     });
   }

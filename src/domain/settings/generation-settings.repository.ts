@@ -1,5 +1,7 @@
 import { Injectable } from "@nestjs/common";
-import { PrismaService } from "../database/prisma.service";
+import { eq, inArray } from "drizzle-orm";
+import { DatabaseService } from "../database/database.service";
+import { adminSettings } from "../database/schema";
 
 export type GenerationSettingRow = {
   key: string;
@@ -8,24 +10,26 @@ export type GenerationSettingRow = {
 
 @Injectable()
 export class GenerationSettingsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly database: DatabaseService) {}
 
   findByKeys(keys: string[]): Promise<GenerationSettingRow[]> {
-    return this.prisma.adminSetting.findMany({
-      where: { key: { in: keys } },
-      select: { key: true, value: true },
-    });
+    if (keys.length === 0) return Promise.resolve([]);
+    return this.database.client
+      .select({ key: adminSettings.key, value: adminSettings.value })
+      .from(adminSettings)
+      .where(inArray(adminSettings.key, keys));
   }
 
   async upsertValue(key: string, value: string): Promise<void> {
-    await this.prisma.adminSetting.upsert({
-      where: { key },
-      create: { key, value },
-      update: { value },
-    });
+    await this.database.client
+      .insert(adminSettings)
+      .values({ key, value })
+      .onConflictDoUpdate({ target: adminSettings.key, set: { value } });
   }
 
   async deleteByKey(key: string): Promise<void> {
-    await this.prisma.adminSetting.deleteMany({ where: { key } });
+    await this.database.client
+      .delete(adminSettings)
+      .where(eq(adminSettings.key, key));
   }
 }

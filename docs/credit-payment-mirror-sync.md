@@ -10,12 +10,12 @@
 조회하던 상태**였다. 미러와 admin 코드를 새 구조로 옮겼고 선언된 검증은 전부
 통과했다. 남은 것은 **제거된 "결제 정산 복구 액션" 4종에 대한 제품 결정**이다.
 
-| 항목 | 값 |
-| --- | --- |
+| 항목       | 값                                          |
+| ---------- | ------------------------------------------- |
 | admin HEAD | `c098ab4` (커밋 없음, 워킹트리 21파일 수정) |
-| 정본 HEAD | `opod-service-backend` `8f6e340` |
-| 변경 규모 | 21 files, +589 / −913 |
-| 커밋 여부 | **안 함** |
+| 정본 HEAD  | `opod-service-backend` `8f6e340`            |
+| 변경 규모  | 21 files, +589 / −913                       |
+| 커밋 여부  | **안 함**                                   |
 
 ## 1. 왜 이 작업이 필요했나
 
@@ -33,23 +33,23 @@ admin은 정본 스키마의 **부분 복사본(미러)** 을 들고 같은 DB�
 
 ## 2. 구조 변경 요약
 
-| 옛 구조 | 새 구조 |
-| --- | --- |
-| `CreditLedgerEntry.remainingAmount` (가변 컬럼) | `CreditLedger` + `CreditUsage` — **append-only**, 잔액은 파생 계산 |
-| `CreditAccount.paidDebt` | 소멸 → 파생 `recoveryDebt` + `UnsettledCreditDebt` |
-| `CreditRefundAllocation` | `CreditRefund` 스칼라(`lockedAmount`·`recoveryAmount`·`debtAmount`) + `CreditUsage` |
-| `CreditPurchase`의 provider·금액·통화 | `Payment` 모델로 이동 |
-| `CreditEntryType` (grant/debit) | `CreditLedgerType` (grant/usage/refund_recovery/adjustment) |
-| `CreditPurchaseStatus.paid` | `completed` (+ `payment_processing`·`reversed` 추가) |
-| `CreditRefundStatus` (DB 타입 `credit_refund_status`) | 6종 확대, DB 타입 `credit_refund_state` |
-| `CreditReconciliationAction` | 소멸 (§4 참조) |
+| 옛 구조                                               | 새 구조                                                                             |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `CreditLedgerEntry.remainingAmount` (가변 컬럼)       | `CreditLedger` + `CreditUsage` — **append-only**, 잔액은 파생 계산                  |
+| `CreditAccount.paidDebt`                              | 소멸 → 파생 `recoveryDebt` + `UnsettledCreditDebt`                                  |
+| `CreditRefundAllocation`                              | `CreditRefund` 스칼라(`lockedAmount`·`recoveryAmount`·`debtAmount`) + `CreditUsage` |
+| `CreditPurchase`의 provider·금액·통화                 | `Payment` 모델로 이동                                                               |
+| `CreditEntryType` (grant/debit)                       | `CreditLedgerType` (grant/usage/refund_recovery/adjustment)                         |
+| `CreditPurchaseStatus.paid`                           | `completed` (+ `payment_processing`·`reversed` 추가)                                |
+| `CreditRefundStatus` (DB 타입 `credit_refund_status`) | 6종 확대, DB 타입 `credit_refund_state`                                             |
+| `CreditReconciliationAction`                          | 소멸 (§4 참조)                                                                      |
 
 정본에서 그대로 복사해 온 신규 블록: `CreditProduct`, `PaymentProductMapping`,
 `Payment`, `PaymentLedger`, `PaymentProviderEvent`, `CreditUsage` + 결제 enum 5종.
 
 ## 3. 수정한 파일
 
-**스키마** — `prisma/schema.prisma` (74블록이 정본과 바이트 단위 일치)
+**스키마** — `src/domain/database/schema.ts` (74블록이 정본과 바이트 단위 일치)
 
 **백엔드**
 
@@ -113,17 +113,17 @@ admin은 정본 스키마의 **부분 복사본(미러)** 을 들고 같은 DB�
 
 ## 5. 검증 결과 (2026-08-06, 재확인 완료)
 
-| 명령 | 결과 |
-| --- | --- |
-| `npm run schema:check` | PASS — 74블록 일치 |
-| `npm run db:generate` | PASS |
-| `npm run lint` | PASS |
-| `npm run test` | PASS — 30 suites / 278 tests |
-| `npm run build` | PASS |
-| `npm run admin:check` | PASS — 14 files / 36 tests |
-| `npm run test:e2e` | PASS — 5 suites / 11 tests (Docker) |
+| 명령                   | 결과                                |
+| ---------------------- | ----------------------------------- |
+| `npm run schema:check` | PASS — 74블록 일치                  |
+| `npm run db:generate`  | PASS                                |
+| `npm run lint`         | PASS                                |
+| `npm run test`         | PASS — 30 suites / 278 tests        |
+| `npm run build`        | PASS                                |
+| `npm run admin:check`  | PASS — 14 files / 36 tests          |
+| `npm run test:e2e`     | PASS — 5 suites / 11 tests (Docker) |
 
-e2e는 `prisma db push`로 새 미러를 실제 PostgreSQL에 생성한 뒤 돌기 때문에,
+e2e는 `legacy DDL fixture application`로 새 미러를 실제 PostgreSQL에 생성한 뒤 돌기 때문에,
 미러가 유효한 스키마라는 것까지 검증됐다.
 
 `npm run format`은 `src/worker/*`와 `prompts/content-planner.ts` **7파일이 이번

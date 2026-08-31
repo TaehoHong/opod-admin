@@ -1,225 +1,300 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
-import { PrismaService } from "../domain/database/prisma.service";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  ilike,
+  inArray,
+  isNull,
+  lt,
+  or,
+  sql,
+  sum,
+} from "drizzle-orm";
+import { DatabaseService } from "../domain/database/database.service";
+import {
+  creditLedger,
+  creditReservations,
+  creditUsage,
+  hashtags,
+  postHashtags,
+  userAccounts,
+  userCharacterFollows,
+  userEvents,
+  userHashtagPreferences,
+  users,
+} from "../domain/database/schema";
 
-export const adminUserFields = {
-  id: true,
-  displayName: true,
-  email: true,
-  createdAt: true,
-  _count: { select: { characterFollows: true } },
-} as const;
-
-export type AdminUserRecord = Prisma.UserGetPayload<{
-  select: typeof adminUserFields;
-}>;
-
-// 소셜 로그인은 service-backend 소관이다. admin은 유저 지원을 위해 연결
-// 상태만 읽는다 — provider_account_id(sub)는 내부 신원 키라 노출하지 않는다.
-export const adminUserAccountFields = {
-  provider: true,
-  email: true,
-  createdAt: true,
-} as const;
-
-export type AdminUserAccountRecord = Prisma.UserAccountGetPayload<{
-  select: typeof adminUserAccountFields;
-}>;
-
-export type AdminUserEventRecord =
-  Prisma.UserEventGetPayload<Prisma.UserEventDefaultArgs>;
-
+export type AdminUserRecord = Pick<
+  typeof users.$inferSelect,
+  "id" | "displayName" | "email" | "createdAt"
+> & {
+  _count: { characterFollows: number };
+};
+export type AdminUserAccountRecord = Pick<
+  typeof userAccounts.$inferSelect,
+  "provider" | "email" | "createdAt"
+>;
+export type AdminUserEventRecord = typeof userEvents.$inferSelect;
 export type AdminHashtagPreferenceRecord =
-  Prisma.UserHashtagPreferenceGetPayload<{
-    include: { hashtag: { select: { name: true } } };
-  }>;
+  typeof userHashtagPreferences.$inferSelect & { hashtag: { name: string } };
+
+const adminUserFields = {
+  id: users.id,
+  displayName: users.displayName,
+  email: users.email,
+  createdAt: users.createdAt,
+  _count: {
+    characterFollows: sql<number>`(select count(*)::int from ${userCharacterFollows} where ${userCharacterFollows.userId} = ${users.id})`,
+  },
+} as const;
 
 @Injectable()
 export class AdminUserRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly database: DatabaseService) {}
 
   async hasUserCursor(cursorId: string, term?: string): Promise<boolean> {
-    return (
-      (await this.prisma.user.findFirst({
-        where: { id: cursorId, ...this.userSearchWhere(term) },
-        select: { id: true },
-      })) !== null
-    );
+    const rows = await this.database.client
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, cursorId), this.userSearchCondition(term)))
+      .limit(1);
+    return rows.length > 0;
   }
 
-  listUsers(input: {
+  async listUsers(input: {
     term?: string;
     cursorId?: string;
     limit: number;
   }): Promise<AdminUserRecord[]> {
-    return this.prisma.user.findMany({
-      where: this.userSearchWhere(input.term),
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(input.cursorId ? { cursor: { id: input.cursorId }, skip: 1 } : {}),
-      select: adminUserFields,
-    });
+    const [cursor] = input.cursorId
+      ? await this.database.client
+          .select({ id: users.id, createdAt: users.createdAt })
+          .from(users)
+          .where(eq(users.id, input.cursorId))
+          .limit(1)
+      : [];
+    return this.database.client
+      .select(adminUserFields)
+      .from(users)
+      .where(
+        and(
+          this.userSearchCondition(input.term),
+          cursor
+            ? or(
+                lt(users.createdAt, cursor.createdAt),
+                and(
+                  eq(users.createdAt, cursor.createdAt),
+                  lt(users.id, cursor.id),
+                ),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(desc(users.createdAt), desc(users.id))
+      .limit(input.limit + 1);
   }
 
   async getSpendableBalances(
     userIds: string[],
     now: Date,
   ): Promise<Map<string, { granted: number; reserved: number }>> {
-    if (userIds.length === 0) {
-      return new Map();
-    }
-    // 남은 지급분은 컬럼이 아니라 파생값이다: 미만료 지급액 - 사용액 - 환불 회수액.
-    // canonical은 회수를 purchase 단위로 0에서 끊지만(grantState), 목록의 잔액
-    // 칼럼에는 사용자 합계로 충분해서 합산 한 번으로 계산한다.
+    if (userIds.length === 0) return new Map();
     const [grants, usages, recoveries, reservations] = await Promise.all([
-      this.prisma.creditLedger.groupBy({
-        by: ["userId"],
-        where: {
-          userId: { in: userIds },
-          type: "grant",
-          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-        },
-        _sum: { amount: true },
-      }),
-      this.prisma.creditUsage.groupBy({
-        by: ["grantLedgerId"],
-        where: { grantLedger: { userId: { in: userIds } } },
-        _sum: { amount: true },
-      }),
-      this.prisma.creditLedger.groupBy({
-        by: ["userId"],
-        where: { userId: { in: userIds }, type: "refund_recovery" },
-        _sum: { amount: true },
-      }),
-      this.prisma.creditReservation.groupBy({
-        by: ["userId"],
-        where: {
-          userId: { in: userIds },
-          status: "reserved",
-          expiresAt: { gt: now },
-        },
-        _sum: { amount: true },
-      }),
+      this.database.client
+        .select({
+          userId: creditLedger.userId,
+          amount: sum(creditLedger.amount),
+        })
+        .from(creditLedger)
+        .where(
+          and(
+            inArray(creditLedger.userId, userIds),
+            eq(creditLedger.type, "grant"),
+            or(isNull(creditLedger.expiresAt), gt(creditLedger.expiresAt, now)),
+          ),
+        )
+        .groupBy(creditLedger.userId),
+      this.database.client
+        .select({
+          userId: creditLedger.userId,
+          amount: sum(creditUsage.amount),
+        })
+        .from(creditUsage)
+        .innerJoin(creditLedger, eq(creditLedger.id, creditUsage.grantLedgerId))
+        .where(inArray(creditLedger.userId, userIds))
+        .groupBy(creditLedger.userId),
+      this.database.client
+        .select({
+          userId: creditLedger.userId,
+          amount: sum(creditLedger.amount),
+        })
+        .from(creditLedger)
+        .where(
+          and(
+            inArray(creditLedger.userId, userIds),
+            eq(creditLedger.type, "refund_recovery"),
+          ),
+        )
+        .groupBy(creditLedger.userId),
+      this.database.client
+        .select({
+          userId: creditReservations.userId,
+          amount: sum(creditReservations.amount),
+        })
+        .from(creditReservations)
+        .where(
+          and(
+            inArray(creditReservations.userId, userIds),
+            eq(creditReservations.status, "reserved"),
+            gt(creditReservations.expiresAt, now),
+          ),
+        )
+        .groupBy(creditReservations.userId),
     ]);
-    const usedByUser = await this.usageByUser(usages);
-    const reservedByUser = new Map(
-      reservations.map((row) => [row.userId, row._sum.amount ?? 0]),
-    );
-    const recoveredByUser = new Map(
-      recoveries.map((row) => [row.userId, row._sum.amount ?? 0]),
-    );
+    const amountMap = (
+      rows: Array<{ userId: string; amount: string | null }>,
+    ) => new Map(rows.map((row) => [row.userId, Number(row.amount ?? 0)]));
+    const grantedByUser = amountMap(grants);
+    const usedByUser = amountMap(usages);
+    const recoveredByUser = amountMap(recoveries);
+    const reservedByUser = amountMap(reservations);
     return new Map(
-      userIds.map((userId) => {
-        const granted = grants.find((row) => row.userId === userId);
-        return [
-          userId,
-          {
-            granted: Math.max(
-              0,
-              (granted?._sum.amount ?? 0) -
-                (usedByUser.get(userId) ?? 0) -
-                (recoveredByUser.get(userId) ?? 0),
-            ),
-            reserved: reservedByUser.get(userId) ?? 0,
-          },
-        ];
-      }),
+      userIds.map((userId) => [
+        userId,
+        {
+          granted: Math.max(
+            0,
+            (grantedByUser.get(userId) ?? 0) -
+              (usedByUser.get(userId) ?? 0) -
+              (recoveredByUser.get(userId) ?? 0),
+          ),
+          reserved: reservedByUser.get(userId) ?? 0,
+        },
+      ]),
     );
-  }
-
-  // creditUsage는 지급 행에만 묶여 있어 사용자별 합계를 바로 낼 수 없다.
-  // 지급 행 → 사용자 매핑을 한 번 더 읽어 접는다.
-  private async usageByUser(
-    usages: Array<{ grantLedgerId: string; _sum: { amount: number | null } }>,
-  ): Promise<Map<string, number>> {
-    if (usages.length === 0) {
-      return new Map();
-    }
-    const grants = await this.prisma.creditLedger.findMany({
-      where: { id: { in: usages.map((row) => row.grantLedgerId) } },
-      select: { id: true, userId: true },
-    });
-    const ownerByGrant = new Map(grants.map((row) => [row.id, row.userId]));
-    const totals = new Map<string, number>();
-    for (const row of usages) {
-      const userId = ownerByGrant.get(row.grantLedgerId);
-      if (!userId) {
-        continue;
-      }
-      totals.set(userId, (totals.get(userId) ?? 0) + (row._sum.amount ?? 0));
-    }
-    return totals;
   }
 
   getUser(userId: string): Promise<AdminUserRecord | null> {
-    return this.prisma.user.findUnique({
-      where: { id: userId },
-      select: adminUserFields,
-    });
+    return this.database.client
+      .select(adminUserFields)
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
 
   listUserAccounts(userId: string): Promise<AdminUserAccountRecord[]> {
-    return this.prisma.userAccount.findMany({
-      where: { userId },
-      orderBy: { createdAt: "asc" },
-      select: adminUserAccountFields,
-    });
+    return this.database.client
+      .select({
+        provider: userAccounts.provider,
+        email: userAccounts.email,
+        createdAt: userAccounts.createdAt,
+      })
+      .from(userAccounts)
+      .where(eq(userAccounts.userId, userId))
+      .orderBy(asc(userAccounts.createdAt));
   }
 
   async hasEventCursor(
     cursorId: string,
     filters: { userId?: string; targetType?: string; targetId?: string },
   ): Promise<boolean> {
-    return (
-      (await this.prisma.userEvent.findFirst({
-        where: { id: cursorId, ...filters },
-        select: { id: true },
-      })) !== null
-    );
+    const rows = await this.database.client
+      .select({ id: userEvents.id })
+      .from(userEvents)
+      .where(and(eq(userEvents.id, cursorId), this.eventConditions(filters)))
+      .limit(1);
+    return rows.length > 0;
   }
 
-  listEvents(input: {
+  async listEvents(input: {
     filters: { userId?: string; targetType?: string; targetId?: string };
     cursorId?: string;
     limit: number;
   }): Promise<AdminUserEventRecord[]> {
-    return this.prisma.userEvent.findMany({
-      where: input.filters,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.limit + 1,
-      ...(input.cursorId ? { cursor: { id: input.cursorId }, skip: 1 } : {}),
-    });
+    const [cursor] = input.cursorId
+      ? await this.database.client
+          .select({ id: userEvents.id, createdAt: userEvents.createdAt })
+          .from(userEvents)
+          .where(eq(userEvents.id, input.cursorId))
+          .limit(1)
+      : [];
+    return this.database.client
+      .select()
+      .from(userEvents)
+      .where(
+        and(
+          this.eventConditions(input.filters),
+          cursor
+            ? or(
+                lt(userEvents.createdAt, cursor.createdAt),
+                and(
+                  eq(userEvents.createdAt, cursor.createdAt),
+                  lt(userEvents.id, cursor.id),
+                ),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(desc(userEvents.createdAt), desc(userEvents.id))
+      .limit(input.limit + 1);
   }
 
   listHashtagPreferences(
     userId?: string,
   ): Promise<AdminHashtagPreferenceRecord[]> {
-    return this.prisma.userHashtagPreference.findMany({
-      where: userId ? { userId } : {},
-      orderBy: [{ score: "desc" }, { hashtag: { name: "asc" } }],
-      include: { hashtag: { select: { name: true } } },
-    });
+    return this.database.client
+      .select({
+        userId: userHashtagPreferences.userId,
+        hashtagId: userHashtagPreferences.hashtagId,
+        score: userHashtagPreferences.score,
+        updatedAt: userHashtagPreferences.updatedAt,
+        hashtag: { name: hashtags.name },
+      })
+      .from(userHashtagPreferences)
+      .innerJoin(hashtags, eq(hashtags.id, userHashtagPreferences.hashtagId))
+      .where(userId ? eq(userHashtagPreferences.userId, userId) : undefined)
+      .orderBy(desc(userHashtagPreferences.score), asc(hashtags.name));
   }
 
-  listTopHashtags(limit: number) {
-    return this.prisma.hashtag.findMany({
-      orderBy: [{ posts: { _count: "desc" } }, { name: "asc" }],
-      take: limit,
-      select: {
-        name: true,
-        _count: { select: { posts: true } },
-      },
-    });
+  listTopHashtags(
+    limit: number,
+  ): Promise<Array<{ name: string; _count: { posts: number } }>> {
+    return this.database.client
+      .select({
+        name: hashtags.name,
+        _count: { posts: sql<number>`count(${postHashtags.postId})::int` },
+      })
+      .from(hashtags)
+      .leftJoin(postHashtags, eq(postHashtags.hashtagId, hashtags.id))
+      .groupBy(hashtags.id, hashtags.name)
+      .orderBy(desc(sql`count(${postHashtags.postId})`), asc(hashtags.name))
+      .limit(limit);
   }
 
-  private userSearchWhere(term?: string): Prisma.UserWhereInput {
+  private userSearchCondition(term?: string) {
     return term
-      ? {
-          OR: [
-            { email: { contains: term, mode: "insensitive" } },
-            { displayName: { contains: term, mode: "insensitive" } },
-          ],
-        }
-      : {};
+      ? or(
+          ilike(users.email, `%${term}%`),
+          ilike(users.displayName, `%${term}%`),
+        )
+      : undefined;
+  }
+
+  private eventConditions(filters: {
+    userId?: string;
+    targetType?: string;
+    targetId?: string;
+  }) {
+    return and(
+      filters.userId ? eq(userEvents.userId, filters.userId) : undefined,
+      filters.targetType
+        ? eq(userEvents.targetType, filters.targetType)
+        : undefined,
+      filters.targetId ? eq(userEvents.targetId, filters.targetId) : undefined,
+    );
   }
 }

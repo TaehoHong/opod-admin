@@ -4,11 +4,13 @@ import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
 import { ADMIN_REQUEST_HEADER } from "../src/admin/auth/admin-session";
-import { PrismaService } from "../src/domain/database/prisma.service";
+import { eq } from "drizzle-orm";
+import { DatabaseService } from "../src/domain/database/database.service";
+import { media } from "../src/domain/database/schema";
 
 describe("character profile image", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let database: DatabaseService;
   let headers: Record<string, string>;
 
   beforeAll(async () => {
@@ -17,7 +19,7 @@ describe("character profile image", () => {
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    database = app.get(DatabaseService);
     const login = await request(app.getHttpServer())
       .post("/api/admin/v1/auth/login")
       .set(ADMIN_REQUEST_HEADER, "e2e")
@@ -47,28 +49,34 @@ describe("character profile image", () => {
       .expect(201);
 
     const [image, video, pendingImage] = await Promise.all([
-      prisma.media.create({
-        data: {
+      database.client
+        .insert(media)
+        .values({
           mediaType: "image",
           url: "https://cdn.example/profile.png",
           width: 1200,
           height: 1600,
           uploadedAt: new Date(),
-        },
-      }),
-      prisma.media.create({
-        data: {
+        })
+        .returning()
+        .then(([row]) => row),
+      database.client
+        .insert(media)
+        .values({
           mediaType: "video",
           url: "https://cdn.example/profile.mp4",
           uploadedAt: new Date(),
-        },
-      }),
-      prisma.media.create({
-        data: {
+        })
+        .returning()
+        .then(([row]) => row),
+      database.client
+        .insert(media)
+        .values({
           mediaType: "image",
           url: "https://cdn.example/pending.png",
-        },
-      }),
+        })
+        .returning()
+        .then(([row]) => row),
     ]);
 
     await request(app.getHttpServer())
@@ -124,7 +132,12 @@ describe("character profile image", () => {
       });
 
     await expect(
-      prisma.media.findUnique({ where: { id: image.id } }),
+      database.client
+        .select()
+        .from(media)
+        .where(eq(media.id, image.id))
+        .limit(1)
+        .then(([row]) => row ?? null),
     ).resolves.not.toBeNull();
   });
 });

@@ -1,100 +1,182 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
-import { PrismaService } from "../../domain/database/prisma.service";
+import { and, asc, desc, eq, inArray, isNull, lte } from "drizzle-orm";
+import { DatabaseService } from "../../domain/database/database.service";
+import {
+  generationJobOutputs,
+  generationJobs,
+  media,
+  postDrafts,
+  postMedia,
+  posts,
+} from "../../domain/database/schema";
 
-const draftWorkItemInclude = {
-  publishedPost: {
-    include: {
-      postMedia: {
-        orderBy: { sortOrder: "asc" as const },
-        include: { media: { select: { url: true } } },
-      },
-    },
-  },
-  jobs: {
-    // 컷별 "최신 잡" 판정은 생산자(집계·게시·캡션·평가)와 같은 정렬이어야
-    // 한다 — 다르면 stale 판정이 화면에서만 어긋난다.
-    orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }],
-    select: {
-      id: true,
-      sortOrder: true,
-      status: true,
-      prompt: true,
-      updatedAt: true,
-      outputs: {
-        orderBy: { candidateIndex: "asc" as const },
-        select: {
-          selected: true,
-          mediaId: true,
-          media: { select: { url: true } },
-        },
-      },
-    },
-  },
-} satisfies Prisma.PostDraftInclude;
-
-const standalonePostInclude = {
-  postMedia: {
-    orderBy: { sortOrder: "asc" as const },
-    include: { media: { select: { url: true } } },
-  },
-} satisfies Prisma.PostInclude;
-
-export type PostWorkDraft = Prisma.PostDraftGetPayload<{
-  include: typeof draftWorkItemInclude;
-}>;
-
-export type StandalonePost = Prisma.PostGetPayload<{
-  include: typeof standalonePostInclude;
-}>;
+type JobOutput = Pick<
+  typeof generationJobOutputs.$inferSelect,
+  "selected" | "mediaId"
+> & { media: { url: string } };
+type DraftJob = Pick<
+  typeof generationJobs.$inferSelect,
+  "id" | "sortOrder" | "status" | "prompt" | "updatedAt" | "createdAt"
+> & { outputs: JobOutput[] };
+type PublishedPost = typeof posts.$inferSelect & {
+  postMedia: Array<typeof postMedia.$inferSelect & { media: { url: string } }>;
+};
+export type PostWorkDraft = typeof postDrafts.$inferSelect & {
+  publishedPost: PublishedPost | null;
+  jobs: DraftJob[];
+};
+export type StandalonePost = typeof posts.$inferSelect & {
+  postMedia: Array<typeof postMedia.$inferSelect & { media: { url: string } }>;
+};
+type PostDraftStatus = (typeof postDrafts.$inferSelect)["status"];
+export type PostDraftFilter = {
+  status?: PostDraftStatus | { in: PostDraftStatus[] };
+};
 
 @Injectable()
 export class PostWorkspaceRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly database: DatabaseService) {}
 
-  findDrafts(input: {
-    where: Prisma.PostDraftWhereInput;
+  async findDrafts(input: {
+    where: PostDraftFilter;
     before?: Date;
     take: number;
   }): Promise<PostWorkDraft[]> {
-    return this.prisma.postDraft.findMany({
-      where: {
-        ...input.where,
-        ...(input.before ? { updatedAt: { lte: input.before } } : {}),
-      },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-      take: input.take,
-      include: draftWorkItemInclude,
-    });
+    const status = input.where.status;
+    const rows = await this.database.client
+      .select()
+      .from(postDrafts)
+      .where(
+        and(
+          typeof status === "string"
+            ? eq(postDrafts.status, status)
+            : status
+              ? inArray(postDrafts.status, status.in)
+              : undefined,
+          input.before ? lte(postDrafts.updatedAt, input.before) : undefined,
+        ),
+      )
+      .orderBy(desc(postDrafts.updatedAt), desc(postDrafts.id))
+      .limit(input.take);
+    return this.hydrateDrafts(rows);
   }
 
-  findStandalonePosts(input: {
+  async findStandalonePosts(input: {
     onlyStandalone: true;
     before?: Date;
     take: number;
   }): Promise<StandalonePost[]> {
-    return this.prisma.post.findMany({
-      where: {
-        sourceDrafts: { none: {} },
-        ...(input.before ? { createdAt: { lte: input.before } } : {}),
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.take,
-      include: standalonePostInclude,
-    });
+    const rows = await this.database.client
+      .select({ post: posts })
+      .from(posts)
+      .leftJoin(postDrafts, eq(postDrafts.publishedPostId, posts.id))
+      .where(
+        and(
+          isNull(postDrafts.id),
+          input.before ? lte(posts.createdAt, input.before) : undefined,
+        ),
+      )
+      .orderBy(desc(posts.createdAt), desc(posts.id))
+      .limit(input.take);
+    return this.hydratePosts(rows.map(({ post }) => post));
   }
 
-  findDraft(id: string): Promise<PostWorkDraft | null> {
-    return this.prisma.postDraft.findUnique({
-      where: { id },
-      include: draftWorkItemInclude,
-    });
+  async findDraft(id: string): Promise<PostWorkDraft | null> {
+    const [row] = await this.database.client
+      .select()
+      .from(postDrafts)
+      .where(eq(postDrafts.id, id))
+      .limit(1);
+    return row ? (await this.hydrateDrafts([row]))[0] : null;
   }
 
-  findStandalonePost(id: string): Promise<StandalonePost | null> {
-    return this.prisma.post.findFirst({
-      where: { id, sourceDrafts: { none: {} } },
-      include: standalonePostInclude,
-    });
+  async findStandalonePost(id: string): Promise<StandalonePost | null> {
+    const [row] = await this.database.client
+      .select({ post: posts })
+      .from(posts)
+      .leftJoin(postDrafts, eq(postDrafts.publishedPostId, posts.id))
+      .where(and(eq(posts.id, id), isNull(postDrafts.id)))
+      .limit(1);
+    return row ? (await this.hydratePosts([row.post]))[0] : null;
+  }
+
+  private async hydrateDrafts(
+    rows: Array<typeof postDrafts.$inferSelect>,
+  ): Promise<PostWorkDraft[]> {
+    return Promise.all(
+      rows.map(async (draft) => {
+        const [publishedPost, jobs] = await Promise.all([
+          draft.publishedPostId
+            ? this.findPostWithMedia(draft.publishedPostId)
+            : null,
+          this.database.client
+            .select({
+              id: generationJobs.id,
+              sortOrder: generationJobs.sortOrder,
+              status: generationJobs.status,
+              prompt: generationJobs.prompt,
+              updatedAt: generationJobs.updatedAt,
+              createdAt: generationJobs.createdAt,
+            })
+            .from(generationJobs)
+            .where(eq(generationJobs.draftId, draft.id))
+            .orderBy(desc(generationJobs.createdAt), desc(generationJobs.id)),
+        ]);
+        const hydratedJobs = await Promise.all(
+          jobs.map(async (job) => ({
+            ...job,
+            outputs: await this.database.client
+              .select({
+                selected: generationJobOutputs.selected,
+                mediaId: generationJobOutputs.mediaId,
+                media: { url: media.url },
+              })
+              .from(generationJobOutputs)
+              .innerJoin(media, eq(media.id, generationJobOutputs.mediaId))
+              .where(eq(generationJobOutputs.jobId, job.id))
+              .orderBy(asc(generationJobOutputs.candidateIndex)),
+          })),
+        );
+        return { ...draft, publishedPost, jobs: hydratedJobs };
+      }),
+    );
+  }
+
+  private hydratePosts(
+    rows: Array<typeof posts.$inferSelect>,
+  ): Promise<StandalonePost[]> {
+    return Promise.all(
+      rows.map(async (post) => ({
+        ...post,
+        postMedia: await this.listPostMedia(post.id),
+      })),
+    );
+  }
+
+  private async findPostWithMedia(
+    postId: string,
+  ): Promise<PublishedPost | null> {
+    const [post] = await this.database.client
+      .select()
+      .from(posts)
+      .where(eq(posts.id, postId))
+      .limit(1);
+    return post
+      ? { ...post, postMedia: await this.listPostMedia(post.id) }
+      : null;
+  }
+
+  private listPostMedia(postId: string) {
+    return this.database.client
+      .select({
+        postId: postMedia.postId,
+        mediaId: postMedia.mediaId,
+        sortOrder: postMedia.sortOrder,
+        media: { url: media.url },
+      })
+      .from(postMedia)
+      .innerJoin(media, eq(media.id, postMedia.mediaId))
+      .where(eq(postMedia.postId, postId))
+      .orderBy(asc(postMedia.sortOrder));
   }
 }

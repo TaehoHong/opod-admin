@@ -2,7 +2,7 @@ import { Module } from "@nestjs/common";
 import { S3Config } from "../domain/config/app-config";
 import { AppConfigService } from "../domain/config/app-config.service";
 import { CharactersModule } from "../characters/characters.module";
-import { PrismaModule } from "../domain/database/prisma.module";
+import { DatabaseModule } from "../domain/database/database.module";
 import { GenerationSettingsService } from "../domain/settings/generation-settings.service";
 import { SettingsModule } from "../domain/settings/settings.module";
 import { createLlmContentPlanner } from "../worker/content-planner";
@@ -55,7 +55,7 @@ function storageEnv(config: S3Config | undefined) {
   // WorkerModule은 수동 실행(generation/worker/run)용 — 의존 방향은
   // admin → worker만 허용 (역방향 금지, docs/media-generation-pipeline.md D1).
   imports: [
-    PrismaModule,
+    DatabaseModule,
     AdminAuthModule,
     CharactersModule,
     SettingsModule,

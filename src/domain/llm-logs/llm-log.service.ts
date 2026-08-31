@@ -4,7 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { JsonValue } from "../database/json";
 import { isUUID } from "class-validator";
 import { decodeCursor, PageInput, pageFromRows } from "../database/page";
 import { LlmLogRepository, type LlmLogStatus } from "./llm-log.repository";
@@ -228,17 +228,13 @@ export class LlmLogService {
       characterId: context?.characterId,
       generationJobId: context?.generationJobId,
       systemPromptJson:
-        systemPromptJson.length > 0
-          ? (systemPromptJson as Prisma.InputJsonValue)
-          : null,
+        systemPromptJson.length > 0 ? (systemPromptJson as JsonValue) : null,
       userPromptJson:
-        userPromptJson.length > 0
-          ? (userPromptJson as Prisma.InputJsonValue)
-          : null,
-      requestJson: request.value as Prisma.InputJsonValue,
+        userPromptJson.length > 0 ? (userPromptJson as JsonValue) : null,
+      requestJson: request.value as JsonValue,
       ...(metadata.value == null
         ? {}
-        : { metadataJson: metadata.value as Prisma.InputJsonValue }),
+        : { metadataJson: metadata.value as JsonValue }),
       redactedPaths,
       ...(context?.inputMediaIds?.length
         ? { inputMediaIds: context.inputMediaIds }
@@ -294,7 +290,7 @@ export class LlmLogService {
     try {
       await this.logs.finish(handle.id, {
         status: "succeeded",
-        responseJson: (response.value ?? null) as Prisma.InputJsonValue | null,
+        responseJson: (response.value ?? null) as JsonValue | null,
         redactedPaths: uniquePaths(
           handle.redactedPaths,
           response.redactedPaths,
@@ -306,7 +302,7 @@ export class LlmLogService {
         outputTokens: usage.outputTokens,
         totalTokens: usage.totalTokens,
         responseModel: usage.responseModel,
-        usageJson: (usage.usageJson ?? null) as Prisma.InputJsonValue | null,
+        usageJson: (usage.usageJson ?? null) as JsonValue | null,
         finishReason: usage.finishReason,
         cachedInputTokens: usage.cachedInputTokens,
         cacheWriteTokens: usage.cacheWriteTokens,
@@ -337,7 +333,7 @@ export class LlmLogService {
     try {
       await this.logs.finish(handle.id, {
         status: "failed",
-        responseJson: (response.value ?? null) as Prisma.InputJsonValue | null,
+        responseJson: (response.value ?? null) as JsonValue | null,
         redactedPaths: uniquePaths(
           handle.redactedPaths,
           response.redactedPaths,

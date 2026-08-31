@@ -1,7 +1,7 @@
 import { LlmLogRepository, type LlmLogListRow } from "./llm-log.repository";
 import { LlmLogService, redactLlmPayload } from "./llm-log.service";
 
-// Prisma를 흉내내지 않고 repository를 대신 세운다
+// Drizzle를 흉내내지 않고 repository를 대신 세운다
 // (docs/02-development-rules.md "Module and Repository Rules").
 function serviceWith(repository: Partial<LlmLogRepository>): LlmLogService {
   return new LlmLogService(repository as LlmLogRepository);

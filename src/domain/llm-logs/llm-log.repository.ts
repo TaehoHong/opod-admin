@@ -1,16 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
-import { PrismaService } from "../database/prisma.service";
-
-// entity repository — PrismaService는 이 계층에서만 쓴다
-// (docs/02-development-rules.md "Module and Repository Rules").
-//
-// 서비스는 요청·응답 payload의 마스킹과 토큰 집계를 담당하고, 여기서는
-// 질의만 맡는다. 서비스가 Prisma 타입을 몰라도 되도록 입력 형태를 직접
-// 선언한다.
+import { and, asc, desc, eq, gte, ilike, lte, lt, or, sql } from "drizzle-orm";
+import { DatabaseService } from "../database/database.service";
+import { llmLogMedia, llmLogs, media } from "../database/schema";
 
 export type LlmLogStatus = "running" | "succeeded" | "failed";
-
 export type LlmLogListFilter = {
   status?: LlmLogStatus;
   type?: string;
@@ -23,45 +16,74 @@ export type LlmLogListFilter = {
 };
 
 const listFields = {
-  id: true,
-  type: true,
-  provider: true,
-  model: true,
-  status: true,
-  isStreaming: true,
-  requestId: true,
-  providerRequestId: true,
-  userId: true,
-  characterId: true,
-  generationJobId: true,
-  httpStatus: true,
-  errorType: true,
-  durationMs: true,
-  inputTokens: true,
-  outputTokens: true,
-  totalTokens: true,
-  responseModel: true,
-  finishReason: true,
-  timeToFirstTokenMs: true,
-  cachedInputTokens: true,
-  cacheWriteTokens: true,
-  reasoningTokens: true,
-  cost: true,
-  upstreamCost: true,
-  createdAt: true,
-  completedAt: true,
-  _count: { select: { media: true } },
+  id: llmLogs.id,
+  type: llmLogs.type,
+  provider: llmLogs.provider,
+  model: llmLogs.model,
+  status: llmLogs.status,
+  isStreaming: llmLogs.isStreaming,
+  requestId: llmLogs.requestId,
+  providerRequestId: llmLogs.providerRequestId,
+  userId: llmLogs.userId,
+  characterId: llmLogs.characterId,
+  generationJobId: llmLogs.generationJobId,
+  httpStatus: llmLogs.httpStatus,
+  errorType: llmLogs.errorType,
+  durationMs: llmLogs.durationMs,
+  inputTokens: llmLogs.inputTokens,
+  outputTokens: llmLogs.outputTokens,
+  totalTokens: llmLogs.totalTokens,
+  responseModel: llmLogs.responseModel,
+  finishReason: llmLogs.finishReason,
+  timeToFirstTokenMs: llmLogs.timeToFirstTokenMs,
+  cachedInputTokens: llmLogs.cachedInputTokens,
+  cacheWriteTokens: llmLogs.cacheWriteTokens,
+  reasoningTokens: llmLogs.reasoningTokens,
+  cost: llmLogs.cost,
+  upstreamCost: llmLogs.upstreamCost,
+  createdAt: llmLogs.createdAt,
+  completedAt: llmLogs.completedAt,
+  _count: {
+    media: sql<number>`(select count(*)::int from ${llmLogMedia} where ${llmLogMedia.llmLogId} = ${llmLogs.id})`,
+  },
 } as const;
 
-export type LlmLogListRow = Prisma.LlmLogGetPayload<{
-  select: typeof listFields;
-}>;
-
-export type LlmLogDetailRow = Prisma.LlmLogGetPayload<{
-  include: { media: { include: { media: true } } };
-}>;
-
-// 시작 시점에 기록하는 값. 마스킹은 이미 끝난 상태로 들어온다.
+export type LlmLogListRow = Pick<
+  typeof llmLogs.$inferSelect,
+  | "id"
+  | "type"
+  | "provider"
+  | "model"
+  | "status"
+  | "isStreaming"
+  | "requestId"
+  | "providerRequestId"
+  | "userId"
+  | "characterId"
+  | "generationJobId"
+  | "httpStatus"
+  | "errorType"
+  | "durationMs"
+  | "inputTokens"
+  | "outputTokens"
+  | "totalTokens"
+  | "responseModel"
+  | "finishReason"
+  | "timeToFirstTokenMs"
+  | "cachedInputTokens"
+  | "cacheWriteTokens"
+  | "reasoningTokens"
+  | "cost"
+  | "upstreamCost"
+  | "createdAt"
+  | "completedAt"
+> & { _count: { media: number } };
+export type LlmLogDetailRow = typeof llmLogs.$inferSelect & {
+  media: Array<
+    typeof llmLogMedia.$inferSelect & { media: typeof media.$inferSelect }
+  >;
+};
+export type JsonValue = unknown;
 export type LlmLogCreateInput = {
   type: string;
   provider: string;
@@ -72,20 +94,16 @@ export type LlmLogCreateInput = {
   userId?: string;
   characterId?: string;
   generationJobId?: string;
-  // null은 컬럼의 JSON null을 뜻한다 (SQL NULL이 아니다) — 기존 저장 형태를
-  // 그대로 유지한다.
-  systemPromptJson: Prisma.InputJsonValue | null;
-  userPromptJson: Prisma.InputJsonValue | null;
-  requestJson: Prisma.InputJsonValue;
-  metadataJson?: Prisma.InputJsonValue;
+  systemPromptJson: JsonValue | null;
+  userPromptJson: JsonValue | null;
+  requestJson: JsonValue;
+  metadataJson?: JsonValue;
   redactedPaths: string[];
   inputMediaIds?: string[];
 };
-
-// 완료·실패 시 덮어쓰는 값.
 export type LlmLogFinishInput = {
   status?: LlmLogStatus;
-  responseJson?: Prisma.InputJsonValue | null;
+  responseJson?: JsonValue | null;
   redactedPaths?: string[];
   providerRequestId?: string;
   httpStatus?: number;
@@ -96,7 +114,7 @@ export type LlmLogFinishInput = {
   outputTokens?: number;
   totalTokens?: number;
   responseModel?: string;
-  usageJson?: Prisma.InputJsonValue | null;
+  usageJson?: JsonValue | null;
   finishReason?: string;
   timeToFirstTokenMs?: number;
   cachedInputTokens?: number;
@@ -106,7 +124,6 @@ export type LlmLogFinishInput = {
   upstreamCost?: number;
   completedAt?: Date;
 };
-
 export type LlmLogHandleRow = {
   id: bigint;
   redactedPaths: string[];
@@ -115,140 +132,158 @@ export type LlmLogHandleRow = {
 
 @Injectable()
 export class LlmLogRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly database: DatabaseService) {}
 
-  // take는 서비스가 limit + 1로 넘긴다 — 다음 페이지 존재 판정을 위해서다.
-  findManyForList(input: {
+  async findManyForList(input: {
     filter: LlmLogListFilter;
     take: number;
     cursor?: bigint;
   }): Promise<LlmLogListRow[]> {
     const { filter } = input;
-    const where: Prisma.LlmLogWhereInput = {
-      ...(filter.status ? { status: filter.status } : {}),
-      ...(filter.type ? { type: filter.type } : {}),
-      ...(filter.provider ? { provider: filter.provider } : {}),
-      ...(filter.model
-        ? {
-            OR: [
-              { model: { contains: filter.model, mode: "insensitive" } },
-              {
-                responseModel: {
-                  contains: filter.model,
-                  mode: "insensitive",
-                },
-              },
-            ],
-          }
-        : {}),
-      ...(filter.requestId ? { requestId: filter.requestId } : {}),
-      ...(filter.generationJobId
-        ? { generationJobId: filter.generationJobId }
-        : {}),
-      ...(filter.from || filter.to
-        ? {
-            createdAt: {
-              ...(filter.from ? { gte: filter.from } : {}),
-              ...(filter.to ? { lte: filter.to } : {}),
-            },
-          }
-        : {}),
-    };
-    return this.prisma.llmLog.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: input.take,
-      ...(input.cursor !== undefined
-        ? { cursor: { id: input.cursor }, skip: 1 }
-        : {}),
-      select: listFields,
-    });
+    const [cursor] =
+      input.cursor !== undefined
+        ? await this.database.client
+            .select({ id: llmLogs.id, createdAt: llmLogs.createdAt })
+            .from(llmLogs)
+            .where(eq(llmLogs.id, input.cursor))
+            .limit(1)
+        : [];
+    return this.database.client
+      .select(listFields)
+      .from(llmLogs)
+      .where(
+        and(
+          filter.status ? eq(llmLogs.status, filter.status) : undefined,
+          filter.type ? eq(llmLogs.type, filter.type) : undefined,
+          filter.provider ? eq(llmLogs.provider, filter.provider) : undefined,
+          filter.model
+            ? or(
+                ilike(llmLogs.model, `%${filter.model}%`),
+                ilike(llmLogs.responseModel, `%${filter.model}%`),
+              )
+            : undefined,
+          filter.requestId
+            ? eq(llmLogs.requestId, filter.requestId)
+            : undefined,
+          filter.generationJobId
+            ? eq(llmLogs.generationJobId, filter.generationJobId)
+            : undefined,
+          filter.from ? gte(llmLogs.createdAt, filter.from) : undefined,
+          filter.to ? lte(llmLogs.createdAt, filter.to) : undefined,
+          cursor
+            ? or(
+                lt(llmLogs.createdAt, cursor.createdAt),
+                and(
+                  eq(llmLogs.createdAt, cursor.createdAt),
+                  lt(llmLogs.id, cursor.id),
+                ),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(desc(llmLogs.createdAt), desc(llmLogs.id))
+      .limit(input.take);
   }
 
-  findByIdWithMedia(id: bigint): Promise<LlmLogDetailRow | null> {
-    return this.prisma.llmLog.findUnique({
-      where: { id },
-      include: {
-        media: {
-          orderBy: [{ role: "asc" }, { sortOrder: "asc" }],
-          include: { media: true },
-        },
-      },
-    });
+  async findByIdWithMedia(id: bigint): Promise<LlmLogDetailRow | null> {
+    const [log] = await this.database.client
+      .select()
+      .from(llmLogs)
+      .where(eq(llmLogs.id, id))
+      .limit(1);
+    if (!log) return null;
+    const relations = await this.database.client
+      .select({
+        llmLogId: llmLogMedia.llmLogId,
+        mediaId: llmLogMedia.mediaId,
+        role: llmLogMedia.role,
+        sortOrder: llmLogMedia.sortOrder,
+        media,
+      })
+      .from(llmLogMedia)
+      .innerJoin(media, eq(media.id, llmLogMedia.mediaId))
+      .where(eq(llmLogMedia.llmLogId, id))
+      .orderBy(asc(llmLogMedia.role), asc(llmLogMedia.sortOrder));
+    return { ...log, media: relations };
   }
 
   async create(input: LlmLogCreateInput): Promise<bigint> {
-    const mediaIds = [...new Set(input.inputMediaIds ?? [])];
-    const log = await this.prisma.llmLog.create({
-      data: {
-        type: input.type,
-        provider: input.provider,
-        model: input.model,
-        endpoint: input.endpoint,
-        isStreaming: input.isStreaming,
-        requestId: input.requestId,
-        userId: input.userId,
-        characterId: input.characterId,
-        generationJobId: input.generationJobId,
-        systemPromptJson: input.systemPromptJson ?? Prisma.JsonNull,
-        userPromptJson: input.userPromptJson ?? Prisma.JsonNull,
-        requestJson: input.requestJson,
-        ...(input.metadataJson === undefined
-          ? {}
-          : { metadataJson: input.metadataJson }),
-        redactedPaths: input.redactedPaths,
-        ...(mediaIds.length
-          ? {
-              media: {
-                create: mediaIds.map((mediaId, sortOrder) => ({
-                  mediaId,
-                  role: "input" as const,
-                  sortOrder,
-                })),
-              },
-            }
-          : {}),
-      },
-      select: { id: true },
+    return this.database.client.transaction(async (tx) => {
+      const mediaIds = [...new Set(input.inputMediaIds ?? [])];
+      const [log] = await tx
+        .insert(llmLogs)
+        .values({
+          type: input.type,
+          provider: input.provider,
+          model: input.model,
+          endpoint: input.endpoint,
+          isStreaming: input.isStreaming,
+          requestId: input.requestId,
+          userId: input.userId,
+          characterId: input.characterId,
+          generationJobId: input.generationJobId,
+          systemPromptJson: input.systemPromptJson,
+          userPromptJson: input.userPromptJson,
+          requestJson: input.requestJson,
+          metadataJson: input.metadataJson,
+          redactedPaths: input.redactedPaths,
+        })
+        .returning({ id: llmLogs.id });
+      if (mediaIds.length > 0) {
+        await tx
+          .insert(llmLogMedia)
+          .values(
+            mediaIds.map((mediaId, sortOrder) => ({
+              llmLogId: log.id,
+              mediaId,
+              role: "input" as const,
+              sortOrder,
+            })),
+          );
+      }
+      return log.id;
     });
-    return log.id;
   }
 
-  // provider가 요청 id를 나중에 알려주는 경로에서 진행 중인 로그를 되찾는다.
   findRunning(input: {
     type: string;
     generationJobId: string;
     providerRequestId: string;
   }): Promise<LlmLogHandleRow | null> {
-    return this.prisma.llmLog.findFirst({
-      where: {
-        type: input.type,
-        generationJobId: input.generationJobId,
-        status: "running",
-        OR: [
-          { providerRequestId: input.providerRequestId },
-          { providerRequestId: null },
-        ],
-      },
-      orderBy: { id: "desc" },
-      select: { id: true, redactedPaths: true, createdAt: true },
-    });
+    return this.database.client
+      .select({
+        id: llmLogs.id,
+        redactedPaths: llmLogs.redactedPaths,
+        createdAt: llmLogs.createdAt,
+      })
+      .from(llmLogs)
+      .where(
+        and(
+          eq(llmLogs.type, input.type),
+          eq(llmLogs.generationJobId, input.generationJobId),
+          eq(llmLogs.status, "running"),
+          or(
+            eq(llmLogs.providerRequestId, input.providerRequestId),
+            sql`${llmLogs.providerRequestId} is null`,
+          ),
+        ),
+      )
+      .orderBy(desc(llmLogs.id))
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
 
   async finish(id: bigint, input: LlmLogFinishInput): Promise<void> {
-    // nullable JSON은 null을 SQL NULL이 아니라 JSON null로 명시해야 한다.
-    const { responseJson, usageJson, ...rest } = input;
-    await this.prisma.llmLog.update({
-      where: { id },
-      data: {
+    const { cost, upstreamCost, ...rest } = input;
+    await this.database.client
+      .update(llmLogs)
+      .set({
         ...rest,
-        ...(responseJson === undefined
+        ...(cost === undefined ? {} : { cost: String(cost) }),
+        ...(upstreamCost === undefined
           ? {}
-          : { responseJson: responseJson ?? Prisma.JsonNull }),
-        ...(usageJson === undefined
-          ? {}
-          : { usageJson: usageJson ?? Prisma.JsonNull }),
-      },
-    });
+          : { upstreamCost: String(upstreamCost) }),
+      })
+      .where(eq(llmLogs.id, id));
   }
 }

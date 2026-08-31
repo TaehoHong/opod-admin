@@ -14,7 +14,7 @@ import { MediaRepository } from "./media.repository";
 export type MediaType = "image" | "video";
 type UploadMethod = "PUT";
 
-type PrismaMedia = {
+type StoredMedia = {
   id: string;
   mediaType: MediaType;
   url: string;
@@ -212,7 +212,7 @@ export class MediaService {
     return value;
   }
 
-  private toMedia(media: PrismaMedia): Media {
+  private toMedia(media: StoredMedia): Media {
     return {
       id: media.id,
       mediaType: media.mediaType,
@@ -231,7 +231,7 @@ export class MediaService {
 }
 
 // 확인에 필요한 최소 필드. repository가 이 형태로 읽어 오면 검증은 순수
-// 함수로 끝난다 — prisma를 넘겨받지 않아도 된다.
+// 함수로 끝난다 — DB client를 넘겨받지 않아도 된다.
 export type AssertableMedia = {
   id: string;
   mediaType: MediaType;

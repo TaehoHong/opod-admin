@@ -1,7 +1,7 @@
 import { CharacterRepository } from "./character.repository";
 import { CharactersService } from "./characters.service";
 
-// Prisma를 흉내내지 않고 repository를 대신 세운다
+// Drizzle를 흉내내지 않고 repository를 대신 세운다
 // (docs/02-development-rules.md "Module and Repository Rules").
 type RepositoryFake = jest.Mocked<CharacterRepository>;
 

@@ -1,94 +1,67 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import type { AssertableMedia } from "../media/media.service";
+import { DatabaseService } from "../../domain/database/database.service";
 import {
-  assertableMediaFields,
-  type AssertableMedia,
-} from "../media/media.service";
-import { PrismaService } from "../../domain/database/prisma.service";
+  characterActionLogs,
+  characterMemories,
+  characterPersonas,
+  characterVisualProfileReferences,
+  characterVisualProfiles,
+  characters,
+  generationJobOutputs,
+  generationJobs,
+  media,
+  posts,
+} from "../../domain/database/schema";
 
-const jobWithOutput = {
-  outputMedia: true,
-} as const;
-
-const jobWithOutputs = {
-  outputMedia: true,
-  outputs: {
-    orderBy: { candidateIndex: "asc" },
-    include: { media: { select: { url: true } } },
-  },
-  character: {
-    select: {
-      visualProfile: {
-        select: {
-          negativePrompt: true,
-          referenceMedia: {
-            where: { isActive: true },
-            select: { media: { select: { uploadedAt: true } } },
-          },
-        },
-      },
-    },
-  },
-} as const;
-
-const imageDraftCharacter = {
-  id: true,
-  displayName: true,
-  bio: true,
-  interests: true,
-  personas: {
-    where: { deletedAt: null },
-    orderBy: { sortOrder: "asc" },
-    select: { title: true, content: true },
-  },
-  memories: {
-    where: { deletedAt: null },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-    select: { content: true },
-  },
-  posts: {
-    orderBy: { createdAt: "desc" },
-    take: 20,
-    select: { content: true },
-  },
-  visualProfile: {
-    select: {
-      appearancePrompt: true,
-      stylePrompt: true,
-      negativePrompt: true,
-      referenceMedia: {
-        where: { isActive: true },
-        orderBy: { sortOrder: "asc" },
-        select: {
-          mediaId: true,
-          description: true,
-          media: { select: { uploadedAt: true } },
-        },
-      },
-    },
-  },
-} as const;
-
-export type GenerationJobRow = Prisma.GenerationJobGetPayload<{
-  include: typeof jobWithOutput;
-}>;
-export type GenerationJobDetailRow = Prisma.GenerationJobGetPayload<{
-  include: typeof jobWithOutputs;
-}>;
-export type ImageDraftCharacterRow = Prisma.CharacterGetPayload<{
-  select: typeof imageDraftCharacter;
-}>;
 export type GenerationParams = unknown;
 export type GenerationParamsObject = Record<string, unknown>;
 export type GenerationParamsValue = unknown;
-
 export type OutputSelectionResult = "missing" | "unchanged" | "selected";
+type OutputMedia = typeof media.$inferSelect;
+export type GenerationJobRow = typeof generationJobs.$inferSelect & {
+  outputMedia: OutputMedia | null;
+};
+export type GenerationJobDetailRow = GenerationJobRow & {
+  outputs: Array<
+    typeof generationJobOutputs.$inferSelect & { media: { url: string } }
+  >;
+  character: {
+    visualProfile: {
+      negativePrompt: string;
+      referenceMedia: Array<{ media: { uploadedAt: Date | null } }>;
+    } | null;
+  };
+};
+export type ImageDraftCharacterRow = Pick<
+  typeof characters.$inferSelect,
+  "id" | "displayName" | "bio"
+> & {
+  interests: string[];
+  personas: Array<
+    Pick<typeof characterPersonas.$inferSelect, "title" | "content">
+  >;
+  memories: Array<Pick<typeof characterMemories.$inferSelect, "content">>;
+  posts: Array<Pick<typeof posts.$inferSelect, "content">>;
+  visualProfile:
+    | (Pick<
+        typeof characterVisualProfiles.$inferSelect,
+        "appearancePrompt" | "stylePrompt" | "negativePrompt"
+      > & {
+        referenceMedia: Array<
+          Pick<
+            typeof characterVisualProfileReferences.$inferSelect,
+            "mediaId" | "description"
+          > & { media: { uploadedAt: Date | null } }
+        >;
+      })
+    | null;
+};
 
 function paramsWithoutProviderProgress(value: unknown): unknown {
-  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+  if (value == null || typeof value !== "object" || Array.isArray(value))
     return value;
-  }
   const params = { ...(value as Record<string, unknown>) };
   delete params._providerProgress;
   return params;
@@ -96,26 +69,106 @@ function paramsWithoutProviderProgress(value: unknown): unknown {
 
 @Injectable()
 export class GenerationRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly database: DatabaseService) {}
 
-  findCharacterForImageDraft(
+  async findCharacterForImageDraft(
     characterId: string,
   ): Promise<ImageDraftCharacterRow | null> {
-    return this.prisma.character.findUnique({
-      where: { id: characterId },
-      select: imageDraftCharacter,
-    });
+    const [character] = await this.database.client
+      .select({
+        id: characters.id,
+        displayName: characters.displayName,
+        bio: characters.bio,
+        interests: sql<
+          string[]
+        >`coalesce(${characters.interests}, ARRAY[]::text[])`,
+      })
+      .from(characters)
+      .where(eq(characters.id, characterId))
+      .limit(1);
+    if (!character) return null;
+    const [personas, memories, recentPosts, profile] = await Promise.all([
+      this.database.client
+        .select({
+          title: characterPersonas.title,
+          content: characterPersonas.content,
+        })
+        .from(characterPersonas)
+        .where(
+          and(
+            eq(characterPersonas.characterId, characterId),
+            isNull(characterPersonas.deletedAt),
+          ),
+        )
+        .orderBy(asc(characterPersonas.sortOrder)),
+      this.database.client
+        .select({ content: characterMemories.content })
+        .from(characterMemories)
+        .where(
+          and(
+            eq(characterMemories.characterId, characterId),
+            isNull(characterMemories.deletedAt),
+          ),
+        )
+        .orderBy(desc(characterMemories.createdAt))
+        .limit(20),
+      this.database.client
+        .select({ content: posts.content })
+        .from(posts)
+        .where(eq(posts.characterId, characterId))
+        .orderBy(desc(posts.createdAt))
+        .limit(20),
+      this.database.client
+        .select({
+          id: characterVisualProfiles.id,
+          appearancePrompt: characterVisualProfiles.appearancePrompt,
+          stylePrompt: characterVisualProfiles.stylePrompt,
+          negativePrompt: characterVisualProfiles.negativePrompt,
+        })
+        .from(characterVisualProfiles)
+        .where(eq(characterVisualProfiles.characterId, characterId))
+        .limit(1)
+        .then(([row]) => row ?? null),
+    ]);
+    const referenceMedia = profile
+      ? await this.database.client
+          .select({
+            mediaId: characterVisualProfileReferences.mediaId,
+            description: characterVisualProfileReferences.description,
+            media: { uploadedAt: media.uploadedAt },
+          })
+          .from(characterVisualProfileReferences)
+          .innerJoin(
+            media,
+            eq(media.id, characterVisualProfileReferences.mediaId),
+          )
+          .where(
+            and(
+              eq(characterVisualProfileReferences.profileId, profile.id),
+              eq(characterVisualProfileReferences.isActive, true),
+            ),
+          )
+          .orderBy(asc(characterVisualProfileReferences.sortOrder))
+      : [];
+    return {
+      ...character,
+      personas,
+      memories,
+      posts: recentPosts,
+      visualProfile: profile ? { ...profile, referenceMedia } : null,
+    };
   }
 
-  createImageDraft(input: {
+  async createImageDraft(input: {
     characterId: string;
     inputPrompt: string;
     prompt: string;
     candidateCount: number;
     paramsJson: GenerationParamsObject;
   }): Promise<GenerationJobRow> {
-    return this.prisma.generationJob.create({
-      data: {
+    const [job] = await this.database.client
+      .insert(generationJobs)
+      .values({
         characterId: input.characterId,
         mediaType: "image",
         status: "draft",
@@ -123,111 +176,123 @@ export class GenerationRepository {
         prompt: input.prompt,
         candidateCount: input.candidateCount,
         ...(Object.keys(input.paramsJson).length > 0
-          ? { paramsJson: input.paramsJson as Prisma.InputJsonValue }
+          ? { paramsJson: input.paramsJson }
           : {}),
-      },
-      include: jobWithOutput,
-    });
+      })
+      .returning();
+    return { ...job, outputMedia: null };
   }
 
   async updateImageDraft(
     jobId: string,
     input: { prompt: string; candidateCount: number },
   ): Promise<boolean> {
-    const transitioned = await this.prisma.generationJob.updateMany({
-      where: { id: jobId, status: "draft" },
-      data: input,
-    });
-    return transitioned.count > 0;
+    return (
+      (
+        await this.database.client
+          .update(generationJobs)
+          .set(input)
+          .where(
+            and(
+              eq(generationJobs.id, jobId),
+              eq(generationJobs.status, "draft"),
+            ),
+          )
+          .returning({ id: generationJobs.id })
+      ).length > 0
+    );
   }
 
-  async confirmImageDraft(jobId: string): Promise<boolean> {
-    return this.prisma.$transaction(async (tx) => {
-      const transitioned = await tx.generationJob.updateMany({
-        where: { id: jobId, status: "draft" },
-        data: { status: "queued" },
-      });
-      if (transitioned.count === 0) {
-        return false;
-      }
-      const confirmed = await tx.generationJob.findUniqueOrThrow({
-        where: { id: jobId },
-        select: { characterId: true },
-      });
-      await tx.characterActionLog.create({
-        data: {
+  confirmImageDraft(jobId: string): Promise<boolean> {
+    return this.database.client.transaction(async (tx) => {
+      const [confirmed] = await tx
+        .update(generationJobs)
+        .set({ status: "queued" })
+        .where(
+          and(eq(generationJobs.id, jobId), eq(generationJobs.status, "draft")),
+        )
+        .returning({ characterId: generationJobs.characterId });
+      if (!confirmed) return false;
+      await tx
+        .insert(characterActionLogs)
+        .values({
           characterId: confirmed.characterId,
           actionType: "GENERATION_DRAFT_CONFIRMED",
           targetTable: "generation_jobs",
           targetId: jobId,
           reason: "generation draft confirmed",
-        },
-      });
+        });
       return true;
     });
   }
 
-  async selectOutput(
-    jobId: string,
-    mediaId: string,
-  ): Promise<OutputSelectionResult> {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`
-        SELECT id
-        FROM opod.generation_jobs
-        WHERE id = ${jobId}::uuid
-        FOR UPDATE
-      `;
-      const output = await tx.generationJobOutput.findFirst({
-        where: { jobId, mediaId, job: { status: "completed" } },
-        select: {
-          selected: true,
-          job: { select: { characterId: true, outputMediaId: true } },
-        },
-      });
-      if (!output) {
-        return "missing";
-      }
-      if (output.selected && output.job.outputMediaId === mediaId) {
+  selectOutput(jobId: string, mediaId: string): Promise<OutputSelectionResult> {
+    return this.database.client.transaction(async (tx) => {
+      await tx.execute(
+        sql`select id from opod.generation_jobs where id = ${jobId}::uuid for update`,
+      );
+      const [output] = await tx
+        .select({
+          selected: generationJobOutputs.selected,
+          characterId: generationJobs.characterId,
+          outputMediaId: generationJobs.outputMediaId,
+        })
+        .from(generationJobOutputs)
+        .innerJoin(
+          generationJobs,
+          eq(generationJobs.id, generationJobOutputs.jobId),
+        )
+        .where(
+          and(
+            eq(generationJobOutputs.jobId, jobId),
+            eq(generationJobOutputs.mediaId, mediaId),
+            eq(generationJobs.status, "completed"),
+          ),
+        )
+        .limit(1);
+      if (!output) return "missing";
+      if (output.selected && output.outputMediaId === mediaId)
         return "unchanged";
-      }
-      await tx.generationJobOutput.updateMany({
-        where: { jobId },
-        data: { selected: false },
-      });
-      await tx.generationJobOutput.updateMany({
-        where: { jobId, mediaId },
-        data: { selected: true },
-      });
-      await tx.generationJob.update({
-        where: { id: jobId },
-        data: { outputMediaId: mediaId },
-      });
-      await tx.characterActionLog.create({
-        data: {
-          characterId: output.job.characterId,
+      await tx
+        .update(generationJobOutputs)
+        .set({ selected: false })
+        .where(eq(generationJobOutputs.jobId, jobId));
+      await tx
+        .update(generationJobOutputs)
+        .set({ selected: true })
+        .where(
+          and(
+            eq(generationJobOutputs.jobId, jobId),
+            eq(generationJobOutputs.mediaId, mediaId),
+          ),
+        );
+      await tx
+        .update(generationJobs)
+        .set({ outputMediaId: mediaId })
+        .where(eq(generationJobs.id, jobId));
+      await tx
+        .insert(characterActionLogs)
+        .values({
+          characterId: output.characterId,
           actionType: "GENERATION_OUTPUT_SELECTED",
           targetTable: "generation_jobs",
           targetId: jobId,
           reason: `selected generation output ${mediaId}`,
-        },
-      });
+        });
       return "selected";
     });
   }
 
   findJob(jobId: string): Promise<GenerationJobRow | null> {
-    return this.prisma.generationJob.findUnique({
-      where: { id: jobId },
-      include: jobWithOutput,
-    });
+    return this.findJobWithOutput(jobId);
   }
 
-  createRegeneratedImageJob(
+  async createRegeneratedImageJob(
     source: GenerationJobRow,
   ): Promise<GenerationJobRow> {
-    return this.prisma.generationJob.create({
-      data: {
+    const [job] = await this.database.client
+      .insert(generationJobs)
+      .values({
         characterId: source.characterId,
         mediaType: "image",
         status: "draft",
@@ -235,58 +300,72 @@ export class GenerationRepository {
         prompt: source.prompt,
         candidateCount: source.candidateCount,
         ...(source.paramsJson != null
-          ? {
-              paramsJson: paramsWithoutProviderProgress(
-                source.paramsJson,
-              ) as Prisma.InputJsonValue,
-            }
+          ? { paramsJson: paramsWithoutProviderProgress(source.paramsJson) }
           : {}),
         originJobId: source.id,
-      },
-      include: jobWithOutput,
-    });
+      })
+      .returning();
+    return { ...job, outputMedia: null };
   }
 
   async cursorMatchesFilter(
     cursorId: string,
     filter: {
       characterId?: string;
-      status?: "draft" | "queued" | "running" | "completed" | "failed";
+      status?: (typeof generationJobs.$inferSelect)["status"];
       mediaType?: "image" | "video";
       draftId?: null;
     },
   ): Promise<boolean> {
-    const row = await this.prisma.generationJob.findFirst({
-      where: { id: cursorId, ...filter },
-      select: { id: true },
-    });
-    return row !== null;
+    const rows = await this.database.client
+      .select({ id: generationJobs.id })
+      .from(generationJobs)
+      .where(and(eq(generationJobs.id, cursorId), this.filterCondition(filter)))
+      .limit(1);
+    return rows.length > 0;
   }
 
-  findManyForList(input: {
+  async findManyForList(input: {
     characterId?: string;
-    status?: "draft" | "queued" | "running" | "completed" | "failed";
+    status?: (typeof generationJobs.$inferSelect)["status"];
     mediaType?: "image" | "video";
     draftId?: null;
     take: number;
     cursor?: string;
   }): Promise<GenerationJobRow[]> {
-    const { take, cursor, characterId, status, mediaType, draftId } = input;
-    return this.prisma.generationJob.findMany({
-      where: {
-        ...(characterId ? { characterId } : {}),
-        ...(status ? { status } : {}),
-        ...(mediaType ? { mediaType } : {}),
-        ...(draftId === null ? { draftId: null } : {}),
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      include: jobWithOutput,
-    });
+    const [cursor] = input.cursor
+      ? await this.database.client
+          .select({
+            id: generationJobs.id,
+            createdAt: generationJobs.createdAt,
+          })
+          .from(generationJobs)
+          .where(eq(generationJobs.id, input.cursor))
+          .limit(1)
+      : [];
+    const jobs = await this.database.client
+      .select()
+      .from(generationJobs)
+      .where(
+        and(
+          this.filterCondition(input),
+          cursor
+            ? or(
+                lt(generationJobs.createdAt, cursor.createdAt),
+                and(
+                  eq(generationJobs.createdAt, cursor.createdAt),
+                  lt(generationJobs.id, cursor.id),
+                ),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(desc(generationJobs.createdAt), desc(generationJobs.id))
+      .limit(input.take);
+    return Promise.all(jobs.map((job) => this.attachOutput(job)));
   }
 
-  enqueueJob(input: {
+  async enqueueJob(input: {
     characterId: string;
     mediaType: "image" | "video";
     prompt: string;
@@ -294,102 +373,114 @@ export class GenerationRepository {
     paramsJson?: GenerationParams;
     originJobId?: string;
   }): Promise<GenerationJobRow> {
-    return this.prisma.generationJob.create({
-      data: {
-        characterId: input.characterId,
-        mediaType: input.mediaType,
-        prompt: input.prompt,
-        ...(input.provider ? { provider: input.provider } : {}),
-        ...(input.paramsJson !== undefined
-          ? { paramsJson: input.paramsJson as Prisma.InputJsonValue }
-          : {}),
-        ...(input.originJobId ? { originJobId: input.originJobId } : {}),
-      },
-      include: jobWithOutput,
-    });
+    const [job] = await this.database.client
+      .insert(generationJobs)
+      .values(input)
+      .returning();
+    return { ...job, outputMedia: null };
   }
 
   async startJob(jobId: string, leaseExpiresAt: Date): Promise<boolean> {
-    const transitioned = await this.prisma.generationJob.updateMany({
-      where: { id: jobId, status: "queued" },
-      data: {
+    const rows = await this.database.client
+      .update(generationJobs)
+      .set({
         status: "running",
         leaseExpiresAt,
-        attemptCount: { increment: 1 },
-      },
-    });
-    return transitioned.count > 0;
+        attemptCount: sql`${generationJobs.attemptCount} + 1`,
+      })
+      .where(
+        and(eq(generationJobs.id, jobId), eq(generationJobs.status, "queued")),
+      )
+      .returning({ id: generationJobs.id });
+    return rows.length > 0;
   }
 
   retryJob(
     source: GenerationJobRow,
     reason: string,
   ): Promise<GenerationJobRow> {
-    return this.prisma.$transaction(async (tx) => {
-      const created = await tx.generationJob.create({
-        data: {
+    return this.database.client.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(generationJobs)
+        .values({
           characterId: source.characterId,
           mediaType: source.mediaType,
-          ...(source.inputPrompt != null
-            ? { inputPrompt: source.inputPrompt }
-            : {}),
+          inputPrompt: source.inputPrompt,
           prompt: source.prompt,
-          ...(source.candidateCount != null
-            ? { candidateCount: source.candidateCount }
-            : {}),
+          candidateCount: source.candidateCount,
           ...(source.paramsJson != null
-            ? {
-                paramsJson: paramsWithoutProviderProgress(
-                  source.paramsJson,
-                ) as Prisma.InputJsonValue,
-              }
+            ? { paramsJson: paramsWithoutProviderProgress(source.paramsJson) }
             : {}),
           sortOrder: source.sortOrder,
           originJobId: source.id,
-        },
-        include: jobWithOutput,
-      });
-      await tx.characterActionLog.create({
-        data: {
+        })
+        .returning();
+      await tx
+        .insert(characterActionLogs)
+        .values({
           characterId: source.characterId,
           actionType: "GENERATION_JOB_RETRIED",
           targetTable: "generation_jobs",
           targetId: created.id,
           reason,
-        },
-      });
-      return created;
+        });
+      return { ...created, outputMedia: null };
     });
   }
 
   async failJob(jobId: string, errorMessage: string): Promise<boolean> {
-    const transitioned = await this.prisma.generationJob.updateMany({
-      where: { id: jobId, status: { in: ["queued", "running"] } },
-      data: { status: "failed", errorMessage, leaseExpiresAt: null },
-    });
-    return transitioned.count > 0;
+    const rows = await this.database.client
+      .update(generationJobs)
+      .set({ status: "failed", errorMessage, leaseExpiresAt: null })
+      .where(
+        and(
+          eq(generationJobs.id, jobId),
+          inArray(generationJobs.status, ["queued", "running"]),
+        ),
+      )
+      .returning({ id: generationJobs.id });
+    return rows.length > 0;
   }
 
   findUploadedMedia(mediaId: string): Promise<AssertableMedia | null> {
-    return this.prisma.media.findUnique({
-      where: { id: mediaId },
-      select: assertableMediaFields,
-    });
+    return this.database.client
+      .select({
+        id: media.id,
+        mediaType: media.mediaType,
+        url: media.url,
+        width: media.width,
+        height: media.height,
+        durationSeconds: media.durationSeconds,
+        uploadedAt: media.uploadedAt,
+      })
+      .from(media)
+      .where(eq(media.id, mediaId))
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
 
   async completeJobWithMediaId(
     jobId: string,
     mediaId: string,
   ): Promise<boolean> {
-    const transitioned = await this.prisma.generationJob.updateMany({
-      where: { id: jobId, status: "running" },
-      data: {
-        status: "completed",
-        outputMediaId: mediaId,
-        leaseExpiresAt: null,
-      },
-    });
-    return transitioned.count > 0;
+    return (
+      (
+        await this.database.client
+          .update(generationJobs)
+          .set({
+            status: "completed",
+            outputMediaId: mediaId,
+            leaseExpiresAt: null,
+          })
+          .where(
+            and(
+              eq(generationJobs.id, jobId),
+              eq(generationJobs.status, "running"),
+            ),
+          )
+          .returning({ id: generationJobs.id })
+      ).length > 0
+    );
   }
 
   completeJobWithUrl(input: {
@@ -400,33 +491,125 @@ export class GenerationRepository {
     height?: number;
     durationSeconds?: number;
   }): Promise<boolean> {
-    return this.prisma.$transaction(async (tx) => {
-      const media = await tx.media.create({
-        data: {
+    return this.database.client.transaction(async (tx) => {
+      const [createdMedia] = await tx
+        .insert(media)
+        .values({
           mediaType: input.mediaType,
           url: input.url,
           width: input.width,
           height: input.height,
           durationSeconds: input.durationSeconds,
-        },
-        select: { id: true },
-      });
-      const transitioned = await tx.generationJob.updateMany({
-        where: { id: input.jobId, status: "running" },
-        data: {
+        })
+        .returning({ id: media.id });
+      const rows = await tx
+        .update(generationJobs)
+        .set({
           status: "completed",
-          outputMediaId: media.id,
+          outputMediaId: createdMedia.id,
           leaseExpiresAt: null,
-        },
-      });
-      return transitioned.count > 0;
+        })
+        .where(
+          and(
+            eq(generationJobs.id, input.jobId),
+            eq(generationJobs.status, "running"),
+          ),
+        )
+        .returning({ id: generationJobs.id });
+      return rows.length > 0;
     });
   }
 
-  findJobDetail(jobId: string): Promise<GenerationJobDetailRow | null> {
-    return this.prisma.generationJob.findUnique({
-      where: { id: jobId },
-      include: jobWithOutputs,
-    });
+  async findJobDetail(jobId: string): Promise<GenerationJobDetailRow | null> {
+    const job = await this.findJobWithOutput(jobId);
+    if (!job) return null;
+    const outputs = await this.database.client
+      .select({
+        id: generationJobOutputs.id,
+        jobId: generationJobOutputs.jobId,
+        mediaId: generationJobOutputs.mediaId,
+        candidateIndex: generationJobOutputs.candidateIndex,
+        selected: generationJobOutputs.selected,
+        createdAt: generationJobOutputs.createdAt,
+        filterPreset: generationJobOutputs.filterPreset,
+        media: { url: media.url },
+      })
+      .from(generationJobOutputs)
+      .innerJoin(media, eq(media.id, generationJobOutputs.mediaId))
+      .where(eq(generationJobOutputs.jobId, jobId))
+      .orderBy(asc(generationJobOutputs.candidateIndex));
+    const [profile] = await this.database.client
+      .select({
+        id: characterVisualProfiles.id,
+        negativePrompt: characterVisualProfiles.negativePrompt,
+      })
+      .from(characterVisualProfiles)
+      .where(eq(characterVisualProfiles.characterId, job.characterId))
+      .limit(1);
+    const referenceMedia = profile
+      ? await this.database.client
+          .select({ media: { uploadedAt: media.uploadedAt } })
+          .from(characterVisualProfileReferences)
+          .innerJoin(
+            media,
+            eq(media.id, characterVisualProfileReferences.mediaId),
+          )
+          .where(
+            and(
+              eq(characterVisualProfileReferences.profileId, profile.id),
+              eq(characterVisualProfileReferences.isActive, true),
+            ),
+          )
+      : [];
+    return {
+      ...job,
+      outputs,
+      character: {
+        visualProfile: profile
+          ? { negativePrompt: profile.negativePrompt, referenceMedia }
+          : null,
+      },
+    };
+  }
+
+  private async findJobWithOutput(
+    jobId: string,
+  ): Promise<GenerationJobRow | null> {
+    const [job] = await this.database.client
+      .select()
+      .from(generationJobs)
+      .where(eq(generationJobs.id, jobId))
+      .limit(1);
+    return job ? this.attachOutput(job) : null;
+  }
+  private async attachOutput(
+    job: typeof generationJobs.$inferSelect,
+  ): Promise<GenerationJobRow> {
+    const outputMedia = job.outputMediaId
+      ? await this.database.client
+          .select()
+          .from(media)
+          .where(eq(media.id, job.outputMediaId))
+          .limit(1)
+          .then(([row]) => row ?? null)
+      : null;
+    return { ...job, outputMedia };
+  }
+  private filterCondition(input: {
+    characterId?: string;
+    status?: (typeof generationJobs.$inferSelect)["status"];
+    mediaType?: "image" | "video";
+    draftId?: null;
+  }) {
+    return and(
+      input.characterId
+        ? eq(generationJobs.characterId, input.characterId)
+        : undefined,
+      input.status ? eq(generationJobs.status, input.status) : undefined,
+      input.mediaType
+        ? eq(generationJobs.mediaType, input.mediaType)
+        : undefined,
+      input.draftId === null ? isNull(generationJobs.draftId) : undefined,
+    );
   }
 }

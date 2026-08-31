@@ -1,92 +1,135 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { and, asc, desc, eq, isNotNull, notInArray } from "drizzle-orm";
+import type { AssertableMedia } from "../admin/media/media.service";
+import { DatabaseService } from "../domain/database/database.service";
 import {
-  assertableMediaFields,
-  type AssertableMedia,
-} from "../admin/media/media.service";
-import { PrismaService } from "../domain/database/prisma.service";
+  characterActionLogs,
+  characterVisualProfileReferences,
+  characterVisualProfiles,
+  characters,
+  generationJobs,
+  media,
+} from "../domain/database/schema";
 
-// entity repository — PrismaService는 이 계층에서만 쓴다
-// (docs/02-development-rules.md "Module and Repository Rules").
-
-const profileInclude = {
-  referenceMedia: {
-    orderBy: [{ isActive: "desc" }, { sortOrder: "asc" }],
-    include: { media: { select: { url: true } } },
-  },
-} satisfies Prisma.CharacterVisualProfileInclude;
-
-export type VisualProfileRow = Prisma.CharacterVisualProfileGetPayload<{
-  include: typeof profileInclude;
-}>;
-
+type ReferenceRow = typeof characterVisualProfileReferences.$inferSelect & {
+  media: { url: string };
+};
+export type VisualProfileRow = typeof characterVisualProfiles.$inferSelect & {
+  referenceMedia: ReferenceRow[];
+};
 export type UncaptionedReference = {
   profileId: string;
   mediaId: string;
   media: { url: string; storageKey: string | null; contentType: string | null };
 };
-
 export type VisualProfilePrompts = {
   appearancePrompt: string;
   stylePrompt: string;
   negativePrompt: string;
-  providerConfig?: Prisma.InputJsonValue;
+  providerConfig?: unknown;
 };
 
 @Injectable()
 export class VisualProfileRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly database: DatabaseService) {}
 
-  characterExists(characterId: string): Promise<boolean> {
-    return this.prisma.character
-      .findUnique({ where: { id: characterId }, select: { id: true } })
-      .then((row) => row !== null);
+  async characterExists(characterId: string): Promise<boolean> {
+    const rows = await this.database.client
+      .select({ id: characters.id })
+      .from(characters)
+      .where(eq(characters.id, characterId))
+      .limit(1);
+    return rows.length > 0;
   }
 
   findUploadedMedia(mediaId: string): Promise<AssertableMedia | null> {
-    return this.prisma.media.findUnique({
-      where: { id: mediaId },
-      select: assertableMediaFields,
-    });
+    return this.database.client
+      .select({
+        id: media.id,
+        mediaType: media.mediaType,
+        url: media.url,
+        width: media.width,
+        height: media.height,
+        durationSeconds: media.durationSeconds,
+        uploadedAt: media.uploadedAt,
+      })
+      .from(media)
+      .where(eq(media.id, mediaId))
+      .limit(1)
+      .then(([row]) => row ?? null);
   }
 
-  findProfile(characterId: string): Promise<VisualProfileRow | null> {
-    return this.prisma.characterVisualProfile.findUnique({
-      where: { characterId },
-      include: profileInclude,
-    });
+  async findProfile(characterId: string): Promise<VisualProfileRow | null> {
+    const [profile] = await this.database.client
+      .select()
+      .from(characterVisualProfiles)
+      .where(eq(characterVisualProfiles.characterId, characterId))
+      .limit(1);
+    if (!profile) return null;
+    const references = await this.database.client
+      .select({
+        profileId: characterVisualProfileReferences.profileId,
+        mediaId: characterVisualProfileReferences.mediaId,
+        sortOrder: characterVisualProfileReferences.sortOrder,
+        description: characterVisualProfileReferences.description,
+        isActive: characterVisualProfileReferences.isActive,
+        media: { url: media.url },
+      })
+      .from(characterVisualProfileReferences)
+      .innerJoin(media, eq(media.id, characterVisualProfileReferences.mediaId))
+      .where(eq(characterVisualProfileReferences.profileId, profile.id))
+      .orderBy(
+        desc(characterVisualProfileReferences.isActive),
+        asc(characterVisualProfileReferences.sortOrder),
+      );
+    return { ...profile, referenceMedia: references };
   }
 
-  upsertProfile(
+  async upsertProfile(
     characterId: string,
     data: VisualProfilePrompts,
   ): Promise<VisualProfileRow> {
-    return this.prisma.characterVisualProfile.upsert({
-      where: { characterId },
-      create: { characterId, ...data },
-      update: data,
-      include: profileInclude,
-    });
+    await this.database.client
+      .insert(characterVisualProfiles)
+      .values({ characterId, ...data })
+      .onConflictDoUpdate({
+        target: characterVisualProfiles.characterId,
+        set: data,
+      });
+    return (await this.findProfile(characterId))!;
   }
 
-  // 캡션이 비어 있고 업로드가 끝난 레퍼런스만 — 캡셔닝 대상이다.
   findUncaptionedReferences(
     characterId: string,
   ): Promise<UncaptionedReference[]> {
-    return this.prisma.characterVisualProfileReference.findMany({
-      where: {
-        profile: { characterId },
-        isActive: true,
-        description: "",
-        media: { uploadedAt: { not: null } },
-      },
-      orderBy: { sortOrder: "asc" },
-      select: {
-        profileId: true,
-        mediaId: true,
-        media: { select: { url: true, storageKey: true, contentType: true } },
-      },
-    });
+    return this.database.client
+      .select({
+        profileId: characterVisualProfileReferences.profileId,
+        mediaId: characterVisualProfileReferences.mediaId,
+        media: {
+          url: media.url,
+          storageKey: media.storageKey,
+          contentType: media.contentType,
+        },
+      })
+      .from(characterVisualProfileReferences)
+      .innerJoin(
+        characterVisualProfiles,
+        eq(
+          characterVisualProfiles.id,
+          characterVisualProfileReferences.profileId,
+        ),
+      )
+      .innerJoin(media, eq(media.id, characterVisualProfileReferences.mediaId))
+      .where(
+        and(
+          eq(characterVisualProfiles.characterId, characterId),
+          eq(characterVisualProfileReferences.isActive, true),
+          eq(characterVisualProfileReferences.description, ""),
+          isNotNull(media.uploadedAt),
+        ),
+      )
+      .orderBy(asc(characterVisualProfileReferences.sortOrder));
   }
 
   async setReferenceDescription(
@@ -94,67 +137,72 @@ export class VisualProfileRepository {
     mediaId: string,
     description: string,
   ): Promise<void> {
-    await this.prisma.characterVisualProfileReference.update({
-      where: { profileId_mediaId: { profileId, mediaId } },
-      data: { description },
-    });
+    await this.database.client
+      .update(characterVisualProfileReferences)
+      .set({ description })
+      .where(
+        and(
+          eq(characterVisualProfileReferences.profileId, profileId),
+          eq(characterVisualProfileReferences.mediaId, mediaId),
+        ),
+      );
   }
 
-  // 활성 레퍼런스 세트 동기화는 한 트랜잭션이어야 한다. 선택 해제된 관계는
-  // 삭제하지 않고 비활성화해 캡션과 정렬을 보존한다.
-  replaceReferences(
+  async replaceReferences(
     characterId: string,
     mediaIds: string[],
   ): Promise<VisualProfileRow> {
-    return this.prisma.$transaction(async (tx) => {
-      const upserted = await tx.characterVisualProfile.upsert({
-        where: { characterId },
-        create: { characterId },
-        update: {},
-        select: { id: true },
-      });
-      await tx.characterVisualProfileReference.updateMany({
-        where: {
-          profileId: upserted.id,
-          isActive: true,
-          ...(mediaIds.length > 0 ? { mediaId: { notIn: mediaIds } } : {}),
-        },
-        data: { isActive: false },
-      });
+    await this.database.client.transaction(async (tx) => {
+      const [profile] = await tx
+        .insert(characterVisualProfiles)
+        .values({ characterId })
+        .onConflictDoUpdate({
+          target: characterVisualProfiles.characterId,
+          set: { characterId },
+        })
+        .returning({ id: characterVisualProfiles.id });
+      await tx
+        .update(characterVisualProfileReferences)
+        .set({ isActive: false })
+        .where(
+          and(
+            eq(characterVisualProfileReferences.profileId, profile.id),
+            eq(characterVisualProfileReferences.isActive, true),
+            mediaIds.length > 0
+              ? notInArray(characterVisualProfileReferences.mediaId, mediaIds)
+              : undefined,
+          ),
+        );
       for (const [index, mediaId] of mediaIds.entries()) {
         const sortOrder = (index + 1) * 10;
-        await tx.characterVisualProfileReference.upsert({
-          where: { profileId_mediaId: { profileId: upserted.id, mediaId } },
-          create: {
-            profileId: upserted.id,
-            mediaId,
-            sortOrder,
-            isActive: true,
-          },
-          update: { sortOrder, isActive: true },
-        });
+        await tx
+          .insert(characterVisualProfileReferences)
+          .values({ profileId: profile.id, mediaId, sortOrder, isActive: true })
+          .onConflictDoUpdate({
+            target: [
+              characterVisualProfileReferences.profileId,
+              characterVisualProfileReferences.mediaId,
+            ],
+            set: { sortOrder, isActive: true },
+          });
       }
-      // 방금 upsert한 행이라 반드시 있다 — 없으면 트랜잭션이 깨진 것이므로
-      // null을 흘려보내지 않고 여기서 실패시킨다.
-      return tx.characterVisualProfile.findUniqueOrThrow({
-        where: { id: upserted.id },
-        include: profileInclude,
-      });
     });
+    return (await this.findProfile(characterId))!;
   }
 
   async createTestGenerationJob(input: {
     characterId: string;
     prompt: string;
   }): Promise<{ id: string; status: string }> {
-    return this.prisma.generationJob.create({
-      data: {
+    const [row] = await this.database.client
+      .insert(generationJobs)
+      .values({
         characterId: input.characterId,
         mediaType: "image",
         prompt: input.prompt,
-      },
-      select: { id: true, status: true },
-    });
+      })
+      .returning({ id: generationJobs.id, status: generationJobs.status });
+    return row;
   }
 
   async recordActionLog(input: {
@@ -164,6 +212,6 @@ export class VisualProfileRepository {
     targetId: string;
     reason: string;
   }): Promise<void> {
-    await this.prisma.characterActionLog.create({ data: input });
+    await this.database.client.insert(characterActionLogs).values(input);
   }
 }

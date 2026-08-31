@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AdminAuthModule } from "../admin/auth/admin-auth.module";
 import { AppConfigService } from "../domain/config/app-config.service";
-import { PrismaModule } from "../domain/database/prisma.module";
+import { DatabaseModule } from "../domain/database/database.module";
 import { GenerationSettingsService } from "../domain/settings/generation-settings.service";
 import { SettingsModule } from "../domain/settings/settings.module";
 import {
@@ -20,7 +20,7 @@ import { VisualProfileService } from "./visual-profile.service";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 
 @Module({
-  imports: [PrismaModule, AdminAuthModule, SettingsModule],
+  imports: [DatabaseModule, AdminAuthModule, SettingsModule],
   controllers: [CharactersController],
   providers: [
     CharacterRepository,

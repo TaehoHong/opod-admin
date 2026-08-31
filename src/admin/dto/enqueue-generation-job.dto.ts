@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import type { JsonValue } from "../../domain/database/json";
 import {
   IsNotEmpty,
   IsObject,
@@ -29,7 +29,7 @@ export class EnqueueGenerationJobDto {
   // nested DTO here.
   @IsOptional()
   @IsObject()
-  paramsJson?: Prisma.InputJsonValue;
+  paramsJson?: JsonValue;
 
   @IsOptional()
   @IsString()

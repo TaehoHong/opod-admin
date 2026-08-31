@@ -9,7 +9,7 @@
 - Approved API target is `/api/admin/v1/*`; migrate backend and UI together in
   a separate implementation task.
 - Owns admin UI under `packages/admin`.
-- Uses Prisma against the shared OPOD database.
+- Uses Drizzle ORM against the shared OPOD database.
 - Does not own canonical database schema migrations; those belong to
   `opod-service-backend`.
 
@@ -41,7 +41,7 @@
 - Runtime: Node.js 26 and npm
 - Install: `npm install`
 - Reproducible install: `npm ci`
-- Prisma client: `npm run db:generate`
+- Generate Drizzle migration: `npm run db:generate`
 - Start admin API: `npm run start:dev`
 - Start admin UI/API alias: `npm run admin:dev`
 - Admin UI check: `npm run admin:check`
@@ -73,7 +73,7 @@
   `npm run build`.
 - Auth, payment, permission, database state-transition, or API-contract changes
   require relevant focused tests and `npm run test:e2e`.
-- Prisma mirror changes require `npm run schema:check` and
+- Drizzle schema mirror changes require `npm run schema:check` and
   `npm run db:generate`.
 
 ## Boundaries
@@ -86,10 +86,10 @@
 - Current admin UI is static HTML/CSS/JavaScript. The approved target is
   React, TypeScript, Vite, Mantine, React Router, and TanStack Query.
 - New database access belongs in entity repositories. Do not inject
-  `PrismaService` into new controllers or application/domain services.
+  `DatabaseService` into new controllers or application/domain services.
 - Do not introduce a generic base repository.
-- Prefer Prisma APIs, constraints, optimistic concurrency, and serializable
-  transactions over Raw SQL. Keep justified Raw SQL exceptions in repositories
+- Prefer Drizzle query builders, constraints, optimistic concurrency, and
+  serializable transactions over Raw SQL. Keep justified Raw SQL exceptions in repositories
   and never use unsafe/string-built SQL.
 - Keep pure LLM prompt construction under `prompts/`; network calls, parsing,
   persistence, and orchestration belong under `src/`.

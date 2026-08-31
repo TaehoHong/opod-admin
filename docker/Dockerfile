@@ -14,14 +14,11 @@ RUN npm ci --ignore-scripts --no-audit --no-fund
 FROM deps AS build
 WORKDIR /app
 
-COPY nest-cli.json prisma.config.ts tsconfig.build.json tsconfig.json ./
-COPY prisma ./prisma
+COPY nest-cli.json drizzle.config.ts tsconfig.build.json tsconfig.json ./
 COPY prompts ./prompts
 COPY src ./src
 COPY packages ./packages
 
-ENV DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=opod
-RUN npm run db:generate
 RUN npm run build
 RUN npm prune --omit=dev
 

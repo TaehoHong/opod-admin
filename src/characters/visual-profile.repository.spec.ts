@@ -1,90 +1,63 @@
+import { createDrizzleMock } from "../../test/drizzle-mock";
 import { VisualProfileRepository } from "./visual-profile.repository";
 
 describe("VisualProfileRepository", () => {
-  it("deactivates deselected references without deleting their metadata", async () => {
-    const references = {
-      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      upsert: jest.fn().mockResolvedValue({}),
-      deleteMany: jest.fn(),
-    };
-    const tx = {
-      characterVisualProfile: {
-        upsert: jest.fn().mockResolvedValue({ id: "profile-1" }),
-        findUniqueOrThrow: jest.fn().mockResolvedValue({}),
-      },
-      characterVisualProfileReference: references,
-    };
-    const prisma = {
-      $transaction: jest.fn(
-        (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
-      ),
-    };
-    const repository = new VisualProfileRepository(prisma as never);
+  it("비활성화와 레퍼런스 upsert를 한 트랜잭션에서 수행한다", async () => {
+    const mock = createDrizzleMock([
+      [{ id: "profile-1" }],
+      [],
+      [],
+      [
+        {
+          id: "profile-1",
+          characterId: "character-1",
+          appearancePrompt: "",
+          stylePrompt: "",
+          negativePrompt: "",
+          providerConfig: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      [],
+    ]);
+    const repository = new VisualProfileRepository(mock.database as never);
 
     await repository.replaceReferences("character-1", ["media-1"]);
 
-    expect(references.updateMany).toHaveBeenCalledWith({
-      where: {
-        profileId: "profile-1",
-        isActive: true,
-        mediaId: { notIn: ["media-1"] },
-      },
-      data: { isActive: false },
+    expect(mock.client.transaction).toHaveBeenCalledTimes(1);
+    expect(mock.operations.map((operation) => operation.kind)).toEqual([
+      "insert",
+      "update",
+      "insert",
+      "select",
+      "select",
+    ]);
+    expect(mock.operations[2].values).toMatchObject({
+      profileId: "profile-1",
+      mediaId: "media-1",
+      sortOrder: 10,
+      isActive: true,
     });
-    expect(references.upsert).toHaveBeenCalledWith({
-      where: {
-        profileId_mediaId: { profileId: "profile-1", mediaId: "media-1" },
-      },
-      create: {
+  });
+
+  it("활성·업로드 완료·미캡션 레퍼런스만 조회한다", async () => {
+    const rows = [
+      {
         profileId: "profile-1",
         mediaId: "media-1",
-        sortOrder: 10,
-        isActive: true,
+        media: {
+          url: "https://example.com/a.jpg",
+          storageKey: null,
+          contentType: "image/jpeg",
+        },
       },
-      update: { sortOrder: 10, isActive: true },
-    });
-    expect(references.deleteMany).not.toHaveBeenCalled();
-  });
+    ];
+    const mock = createDrizzleMock([rows]);
+    const repository = new VisualProfileRepository(mock.database as never);
 
-  it("deactivates every active reference when the active set is empty", async () => {
-    const updateMany = jest.fn().mockResolvedValue({ count: 2 });
-    const tx = {
-      characterVisualProfile: {
-        upsert: jest.fn().mockResolvedValue({ id: "profile-1" }),
-        findUniqueOrThrow: jest.fn().mockResolvedValue({}),
-      },
-      characterVisualProfileReference: {
-        updateMany,
-        upsert: jest.fn(),
-      },
-    };
-    const repository = new VisualProfileRepository({
-      $transaction: jest.fn(
-        (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
-      ),
-    } as never);
-
-    await repository.replaceReferences("character-1", []);
-
-    expect(updateMany).toHaveBeenCalledWith({
-      where: { profileId: "profile-1", isActive: true },
-      data: { isActive: false },
-    });
-    expect(tx.characterVisualProfileReference.upsert).not.toHaveBeenCalled();
-  });
-
-  it("only captions active uploaded references", async () => {
-    const findMany = jest.fn().mockResolvedValue([]);
-    const repository = new VisualProfileRepository({
-      characterVisualProfileReference: { findMany },
-    } as never);
-
-    await repository.findUncaptionedReferences("character-1");
-
-    expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ isActive: true }),
-      }),
-    );
+    await expect(
+      repository.findUncaptionedReferences("character-1"),
+    ).resolves.toEqual(rows);
   });
 });
