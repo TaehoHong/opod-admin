@@ -15,6 +15,7 @@ import {
   foreignKey,
   primaryKey,
   check,
+  vector,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { v7 as createUuidV7 } from "uuid";
@@ -22,7 +23,7 @@ import { v7 as createUuidV7 } from "uuid";
 export const opod = pgSchema("opod");
 export const mediaType = opod.enum("media_type", ["image", "video"]);
 export const postContentType = opod.enum("post_content_type", ["feed", "reel"]);
-export const messageSenderType = opod.enum("message_sender_type", [
+export const messageSenderType = opod.enum("chat_message_sender_role", [
   "user",
   "character",
 ]);
@@ -68,16 +69,18 @@ export const inquiryStatus = opod.enum("inquiry_status", [
   "submitted",
   "answered",
 ]);
-export const agentMemoryKind = opod.enum("agent_memory_kind", [
+export const agentMemoryKind = opod.enum("chat_memory_derivation_type", [
   "observation",
   "reflection",
 ]);
-export const agentJobStatus = opod.enum("agent_job_status", [
-  "queued",
-  "running",
-  "completed",
-  "failed",
-]);
+export const chatMemoryContextInjectionMode = opod.enum(
+  "chat_memory_context_injection_mode",
+  ["always", "retrieved"],
+);
+export const agentJobStatus = opod.enum(
+  "chat_memory_consolidation_job_status",
+  ["queued", "running", "completed", "failed"],
+);
 export const creditKind = opod.enum("credit_kind", ["free", "paid"]);
 export const consentType = opod.enum("consent_type", [
   "terms_of_service",
@@ -158,12 +161,10 @@ export const draftEvaluationStatus = opod.enum("draft_evaluation_status", [
   "completed",
   "failed",
 ]);
-export const messageReplyJobStatus = opod.enum("message_reply_job_status", [
-  "queued",
-  "running",
-  "completed",
-  "failed",
-]);
+export const messageReplyJobStatus = opod.enum(
+  "chat_reply_generation_job_status",
+  ["queued", "running", "completed", "failed"],
+);
 
 export const adminSettings = opod.table("admin_settings", {
   key: text().primaryKey(),
@@ -204,26 +205,40 @@ export const admins = opod.table(
 );
 
 export const agentArchivalMemories = opod.table(
-  "agent_archival_memories",
+  "chat_memory_entries",
   {
     id: uuid()
       .primaryKey()
       .$defaultFn(() => createUuidV7()),
     userId: text("user_id").notNull(),
     characterId: text("character_id").notNull(),
-    content: text().notNull(),
-    kind: agentMemoryKind().notNull(),
-    importance: doublePrecision().notNull(),
-    embedding: doublePrecision().array(),
-    evidence: text()
+    content: text("memory_text").notNull(),
+    kind: agentMemoryKind("derivation_type").notNull(),
+    importance: doublePrecision("importance_score").notNull(),
+    embedding: doublePrecision("memory_embedding").array(),
+    embeddingModel: text("embedding_model"),
+    embeddingSourceSha256: text("embedded_text_sha256"),
+    sourceSessionId: text("source_session_id"),
+    sourceMessages: jsonb("source_message_snapshots"),
+    memoryType: text("memory_category"),
+    contextInjectionMode: chatMemoryContextInjectionMode(
+      "context_injection_mode",
+    )
+      .default("retrieved")
+      .notNull(),
+    occurredAt: timestamp("event_occurred_at", {
+      precision: 6,
+      withTimezone: true,
+    }),
+    evidence: text("supporting_memory_ids")
       .array()
       .default(sql`ARRAY[]::text[]`),
-    operationKey: text("operation_key"),
-    ordinal: integer().default(0).notNull(),
+    operationKey: text("write_operation_key"),
+    ordinal: integer("write_batch_index").default(0).notNull(),
     createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
-    lastAccessedAt: timestamp("last_accessed_at", {
+    lastAccessedAt: timestamp("last_recalled_at", {
       precision: 6,
       withTimezone: true,
     })
@@ -231,25 +246,29 @@ export const agentArchivalMemories = opod.table(
       .notNull(),
   },
   (table) => [
-    index(
-      "agent_archival_memories_user_id_character_id_kind_created_a_idx",
-    ).using(
+    check(
+      "chat_memory_entries_source_message_snapshots_check",
+      sql`${table.sourceMessages} IS NULL OR jsonb_typeof(${table.sourceMessages}) = 'array'`,
+    ),
+    check(
+      "chat_memory_entries_memory_category_check",
+      sql`${table.memoryType} IS NULL OR ${table.memoryType} IN ('user_fact', 'shared_episode', 'interpretation')`,
+    ),
+    index("chat_memory_entries_user_character_derivation_created_idx").using(
       "btree",
       table.userId.asc().nullsLast(),
       table.characterId.asc().nullsLast(),
       table.kind.asc().nullsLast(),
       table.createdAt.asc().nullsLast(),
     ),
-    index(
-      "agent_archival_memories_user_id_character_id_last_accessed__idx",
-    ).using(
+    index("chat_memory_entries_user_character_last_recalled_idx").using(
       "btree",
       table.userId.asc().nullsLast(),
       table.characterId.asc().nullsLast(),
       table.lastAccessedAt.asc().nullsLast(),
     ),
     uniqueIndex(
-      "agent_archival_memories_user_id_character_id_operation_key__key",
+      "chat_memory_entries_user_character_write_operation_batch_key",
     ).using(
       "btree",
       table.userId.asc().nullsLast(),
@@ -260,39 +279,21 @@ export const agentArchivalMemories = opod.table(
   ],
 );
 
-export const agentCoreMemories = opod.table(
-  "agent_core_memories",
-  {
-    userId: text("user_id").notNull(),
-    characterId: text("character_id").notNull(),
-    content: text().notNull(),
-    updatedAt: timestamp("updated_at", { precision: 6, withTimezone: true })
-      .notNull()
-      .$onUpdateFn(() => new Date()),
-  },
-  (table) => [
-    primaryKey({
-      columns: [table.userId, table.characterId],
-      name: "agent_core_memories_pkey",
-    }),
-  ],
-);
-
 export const agentMemoryJobs = opod.table(
-  "agent_memory_jobs",
+  "chat_memory_consolidation_jobs",
   {
     id: uuid()
       .primaryKey()
       .$defaultFn(() => createUuidV7()),
     idempotencyKey: text("idempotency_key").notNull(),
-    payloadJson: jsonb("payload_json").notNull(),
-    status: agentJobStatus().default("queued").notNull(),
+    payloadJson: jsonb("consolidation_request").notNull(),
+    status: agentJobStatus("processing_status").default("queued").notNull(),
     attemptCount: integer("attempt_count").default(0).notNull(),
-    leaseExpiresAt: timestamp("lease_expires_at", {
+    leaseExpiresAt: timestamp("processing_lease_expires_at", {
       precision: 6,
       withTimezone: true,
     }),
-    errorMessage: text("error_message"),
+    errorMessage: text("last_error_message"),
     createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
@@ -303,16 +304,16 @@ export const agentMemoryJobs = opod.table(
     userId: text("user_id").notNull(),
   },
   (table) => [
-    uniqueIndex("agent_memory_jobs_idempotency_key_key").using(
+    uniqueIndex("chat_memory_consolidation_jobs_idempotency_key_key").using(
       "btree",
       table.idempotencyKey.asc().nullsLast(),
     ),
-    index("agent_memory_jobs_status_lease_expires_at_idx").using(
+    index("chat_memory_consolidation_jobs_status_lease_idx").using(
       "btree",
       table.status.asc().nullsLast(),
       table.leaseExpiresAt.asc().nullsLast(),
     ),
-    index("agent_memory_jobs_user_id_character_id_status_idx").using(
+    index("chat_memory_consolidation_jobs_user_character_status_idx").using(
       "btree",
       table.userId.asc().nullsLast(),
       table.characterId.asc().nullsLast(),
@@ -322,21 +323,21 @@ export const agentMemoryJobs = opod.table(
 );
 
 export const agentMemoryOperations = opod.table(
-  "agent_memory_operations",
+  "chat_applied_state_changes",
   {
     id: uuid()
       .primaryKey()
       .$defaultFn(() => createUuidV7()),
     userId: text("user_id").notNull(),
     characterId: text("character_id").notNull(),
-    operationKey: text("operation_key").notNull(),
-    createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
+    operationKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("applied_at", { precision: 6, withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
   },
   (table) => [
     uniqueIndex(
-      "agent_memory_operations_user_id_character_id_operation_key_key",
+      "chat_applied_state_changes_user_character_idempotency_key",
     ).using(
       "btree",
       table.userId.asc().nullsLast(),
@@ -347,45 +348,44 @@ export const agentMemoryOperations = opod.table(
 );
 
 export const agentRelationshipState = opod.table(
-  "agent_relationship_state",
+  "chat_relationship_states",
   {
     userId: text("user_id").notNull(),
     characterId: text("character_id").notNull(),
-    importanceSinceReflection: doublePrecision("importance_since_reflection")
+    importanceSinceReflection: doublePrecision("unreflected_importance_score")
       .default(0)
       .notNull(),
     updatedAt: timestamp("updated_at", { precision: 6, withTimezone: true })
       .notNull()
       .$onUpdateFn(() => new Date()),
-    bondXp: integer("bond_xp").default(0).notNull(),
+    bondXp: integer("bond_experience_points").default(0).notNull(),
     bondLevel: integer("bond_level").default(1).notNull(),
-    warmth: doublePrecision().default(20).notNull(),
-    lastDecayAt: timestamp("last_decay_at", {
+    lastDecayAt: timestamp("last_exchange_at", {
       precision: 6,
       withTimezone: true,
     })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
-    dailyBondDate: text("daily_bond_date").default("").notNull(),
-    dailyBondXp: integer("daily_bond_xp").default(0).notNull(),
+    dailyBondDate: text("daily_bond_experience_date").default("").notNull(),
+    dailyBondXp: integer("daily_bond_experience_points").default(0).notNull(),
   },
   (table) => [
     primaryKey({
       columns: [table.userId, table.characterId],
-      name: "agent_relationship_state_pkey",
+      name: "chat_relationship_states_pkey",
     }),
   ],
 );
 
 export const agentSummaries = opod.table(
-  "agent_summaries",
+  "chat_memory_session_summaries",
   {
     userId: text("user_id").notNull(),
     characterId: text("character_id").notNull(),
     sessionId: text("session_id").notNull(),
-    content: text().notNull(),
-    turnsCovered: integer("turns_covered").notNull(),
-    revision: integer().notNull(),
+    content: text("summary_text").notNull(),
+    turnsCovered: integer("summarized_message_count").notNull(),
+    revision: integer("revision_number").notNull(),
     updatedAt: timestamp("updated_at", { precision: 6, withTimezone: true })
       .notNull()
       .$onUpdateFn(() => new Date()),
@@ -393,7 +393,7 @@ export const agentSummaries = opod.table(
   (table) => [
     primaryKey({
       columns: [table.userId, table.characterId, table.sessionId],
-      name: "agent_summaries_pkey",
+      name: "chat_memory_session_summaries_pkey",
     }),
   ],
 );
@@ -445,6 +445,12 @@ export const characterLocationReferences = opod.table(
       }),
     sortOrder: integer("sort_order").default(0).notNull(),
     description: text().default("").notNull(),
+    embedding: vector({ dimensions: 1024 }),
+    embeddingModel: text("embedding_model"),
+    embeddedAt: timestamp("embedded_at", {
+      precision: 6,
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
@@ -511,7 +517,7 @@ export const characterLocations = opod.table(
 );
 
 export const characterMemories = opod.table(
-  "character_memories",
+  "character_canon_memories",
   {
     id: uuid()
       .primaryKey()
@@ -519,12 +525,26 @@ export const characterMemories = opod.table(
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
-        name: "character_memories_character_id_fkey",
+        name: "character_canon_memories_character_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
-    content: text().notNull(),
-    reason: text().notNull(),
+    content: text("canon_text").notNull(),
+    embedding: vector("canon_embedding", { dimensions: 1024 }),
+    embeddingModel: text("embedding_model"),
+    embeddingSourceSha256: text("embedded_text_sha256"),
+    occurredAt: timestamp("event_occurred_at", {
+      precision: 6,
+      withTimezone: true,
+    }),
+    sourceRefs: jsonb("source_references"),
+    occurredLabel: text("event_time_label"),
+    occurredPrecision: text("event_time_precision"),
+    embeddedAt: timestamp("embedding_generated_at", {
+      precision: 6,
+      withTimezone: true,
+    }),
+    reason: text("authoring_reason").notNull(),
     createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
@@ -532,10 +552,42 @@ export const characterMemories = opod.table(
       .notNull()
       .$onUpdateFn(() => new Date()),
     deletedAt: timestamp("deleted_at", { precision: 6, withTimezone: true }),
-    type: text().default("fact").notNull(),
+    type: text("authoring_category").default("fact").notNull(),
+    kind: text("temporal_kind"),
+    injection: text("context_injection_mode"),
+    recallKeys: text("retrieval_keywords")
+      .array()
+      .default(sql`ARRAY[]::text[]`)
+      .notNull(),
   },
   (table) => [
-    index("character_memories_character_id_deleted_at_created_at_idx").using(
+    check(
+      "character_canon_memories_routing_check",
+      sql`
+      (${table.kind} IS NULL AND ${table.injection} IS NULL)
+      OR (${table.kind} IS NOT NULL AND ${table.injection} IS NOT NULL
+        AND ${table.kind} IN ('fact', 'event')
+        AND ${table.injection} IN ('always', 'retrieved')
+        AND (${table.kind} <> 'event' OR ${table.injection} = 'retrieved'))
+    `,
+    ),
+    check(
+      "character_canon_memories_source_references_check",
+      sql`${table.sourceRefs} IS NULL OR jsonb_typeof(${table.sourceRefs}) = 'array'`,
+    ),
+    check(
+      "character_canon_memories_event_time_precision_check",
+      sql`${table.occurredPrecision} IS NULL OR ${table.occurredPrecision} IN ('year', 'month', 'day', 'instant', 'approximate')`,
+    ),
+    check(
+      "character_canon_memories_event_time_fields_check",
+      sql`(${table.occurredPrecision} IS NULL AND ${table.occurredLabel} IS NULL)
+        OR (${table.occurredPrecision} IS NOT NULL AND ${table.occurredLabel} IS NOT NULL
+          AND length(trim(${table.occurredLabel})) > 0
+          AND ((${table.occurredPrecision} = 'instant' AND ${table.occurredAt} IS NOT NULL)
+            OR (${table.occurredPrecision} <> 'instant' AND ${table.occurredAt} IS NULL)))`,
+    ),
+    index("character_canon_memories_character_deleted_created_idx").using(
       "btree",
       table.characterId.asc().nullsLast(),
       table.deletedAt.asc().nullsLast(),
@@ -575,6 +627,90 @@ export const characterPersonas = opod.table(
       table.deletedAt.asc().nullsLast(),
       table.sortOrder.asc().nullsLast(),
     ),
+  ],
+);
+
+// Authored fragments remain attached to their complete, recoverable source.
+export const characterPersonaFragments = opod.table(
+  "character_persona_fragments",
+  {
+    id: uuid()
+      .primaryKey()
+      .$defaultFn(() => createUuidV7()),
+    personaId: uuid("persona_id")
+      .notNull()
+      .references(() => characterPersonas.id, {
+        name: "character_persona_fragments_persona_id_fkey",
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    ordinal: integer().notNull(),
+    content: text().notNull(),
+    embedding: vector({ dimensions: 1024 }),
+    embeddingModel: text("embedding_model"),
+    embeddingSourceSha256: text("embedding_source_sha256"),
+    embeddedAt: timestamp("embedded_at", { precision: 6, withTimezone: true }),
+    kind: text().notNull(),
+    injection: text().notNull(),
+    recallKeys: text("recall_keys")
+      .array()
+      .default(sql`ARRAY[]::text[]`)
+      .notNull(),
+    createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp("updated_at", { precision: 6, withTimezone: true })
+      .notNull()
+      .$onUpdateFn(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("character_persona_fragments_persona_ordinal_idx").on(
+      table.personaId,
+      table.ordinal,
+    ),
+    check(
+      "character_persona_fragments_ordinal_check",
+      sql`${table.ordinal} >= 0`,
+    ),
+    check(
+      "character_persona_fragments_content_check",
+      sql`length(${table.content}) > 0`,
+    ),
+    check(
+      "character_persona_fragments_kind_check",
+      sql`${table.kind} IN ('identity', 'behavior', 'voice', 'example', 'greeting', 'lore', 'creator_note')`,
+    ),
+    check(
+      "character_persona_fragments_injection_check",
+      sql`${table.injection} IN ('always', 'start_only', 'retrieved', 'never_prompt')`,
+    ),
+  ],
+);
+
+// Links record provenance, never a command to retrieve the canonical record.
+export const characterPersonaCanonLinks = opod.table(
+  "character_persona_canon_links",
+  {
+    fragmentId: uuid("fragment_id")
+      .notNull()
+      .references(() => characterPersonaFragments.id, {
+        name: "character_persona_canon_links_fragment_id_fkey",
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    memoryId: uuid("memory_id")
+      .notNull()
+      .references(() => characterMemories.id, {
+        name: "character_persona_canon_links_memory_id_fkey",
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.fragmentId, table.memoryId],
+      name: "character_persona_canon_links_pkey",
+    }),
   ],
 );
 
@@ -629,6 +765,12 @@ export const characterVisualProfileReferences = opod.table(
       }),
     sortOrder: integer("sort_order").default(0).notNull(),
     description: text().default("").notNull(),
+    embedding: vector({ dimensions: 1024 }),
+    embeddingModel: text("embedding_model"),
+    embeddedAt: timestamp("embedded_at", {
+      precision: 6,
+      withTimezone: true,
+    }),
     isActive: boolean("is_active").default(true).notNull(),
   },
   (table) => [
@@ -1495,7 +1637,7 @@ export const media = opod.table(
 );
 
 export const messageConversations = opod.table(
-  "message_conversations",
+  "chat_conversations",
   {
     id: uuid()
       .primaryKey()
@@ -1503,22 +1645,25 @@ export const messageConversations = opod.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, {
-        name: "message_conversations_user_id_fkey",
+        name: "chat_conversations_user_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
     characterId: uuid("character_id")
       .notNull()
       .references(() => characters.id, {
-        name: "message_conversations_character_id_fkey",
+        name: "chat_conversations_character_id_fkey",
         onDelete: "restrict",
         onUpdate: "cascade",
       }),
     createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
-    lastReadAt: timestamp("last_read_at", { precision: 6, withTimezone: true }),
-    lastMessageAt: timestamp("last_message_at", {
+    lastReadAt: timestamp("user_last_read_at", {
+      precision: 6,
+      withTimezone: true,
+    }),
+    lastMessageAt: timestamp("latest_message_at", {
       precision: 6,
       withTimezone: true,
     })
@@ -1526,7 +1671,7 @@ export const messageConversations = opod.table(
       .notNull(),
   },
   (table) => [
-    uniqueIndex("message_conversations_user_id_character_id_key").using(
+    uniqueIndex("chat_conversations_user_id_character_id_key").using(
       "btree",
       table.userId.asc().nullsLast(),
       table.characterId.asc().nullsLast(),
@@ -1535,7 +1680,7 @@ export const messageConversations = opod.table(
 );
 
 export const messageReplyJobs = opod.table(
-  "message_reply_jobs",
+  "chat_reply_generation_jobs",
   {
     id: uuid()
       .primaryKey()
@@ -1543,23 +1688,34 @@ export const messageReplyJobs = opod.table(
     conversationId: uuid("conversation_id")
       .notNull()
       .references(() => messageConversations.id, {
-        name: "message_reply_jobs_conversation_id_fkey",
+        name: "chat_reply_generation_jobs_conversation_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
-    turnId: uuid("turn_id").notNull(),
-    status: messageReplyJobStatus().default("queued").notNull(),
-    reservationReference: text("reservation_reference"),
-    readyAt: timestamp("ready_at", { precision: 6, withTimezone: true })
+    turnId: uuid("trigger_message_id").notNull(),
+    status: messageReplyJobStatus("generation_status")
+      .default("queued")
+      .notNull(),
+    reservationReference: text("credit_reservation_reference"),
+    readyAt: timestamp("next_attempt_at", {
+      precision: 6,
+      withTimezone: true,
+    })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
     attemptCount: integer("attempt_count").default(0).notNull(),
-    leaseExpiresAt: timestamp("lease_expires_at", {
+    leaseExpiresAt: timestamp("processing_lease_expires_at", {
       precision: 6,
       withTimezone: true,
     }),
-    startedAt: timestamp("started_at", { precision: 6, withTimezone: true }),
-    deadlineAt: timestamp("deadline_at", { precision: 6, withTimezone: true }),
+    startedAt: timestamp("first_attempt_started_at", {
+      precision: 6,
+      withTimezone: true,
+    }),
+    deadlineAt: timestamp("processing_deadline_at", {
+      precision: 6,
+      withTimezone: true,
+    }),
     completedAt: timestamp("completed_at", {
       precision: 6,
       withTimezone: true,
@@ -1574,22 +1730,22 @@ export const messageReplyJobs = opod.table(
       .$onUpdateFn(() => new Date()),
   },
   (table) => [
-    index("message_reply_jobs_conversation_id_status_idx").using(
+    index("chat_reply_generation_jobs_conversation_status_idx").using(
       "btree",
       table.conversationId.asc().nullsLast(),
       table.status.asc().nullsLast(),
     ),
-    index("message_reply_jobs_status_lease_expires_at_idx").using(
+    index("chat_reply_generation_jobs_status_lease_idx").using(
       "btree",
       table.status.asc().nullsLast(),
       table.leaseExpiresAt.asc().nullsLast(),
     ),
-    index("message_reply_jobs_status_ready_at_idx").using(
+    index("chat_reply_generation_jobs_status_next_attempt_idx").using(
       "btree",
       table.status.asc().nullsLast(),
       table.readyAt.asc().nullsLast(),
     ),
-    uniqueIndex("message_reply_jobs_turn_id_key").using(
+    uniqueIndex("chat_reply_generation_jobs_trigger_message_id_key").using(
       "btree",
       table.turnId.asc().nullsLast(),
     ),
@@ -1597,7 +1753,7 @@ export const messageReplyJobs = opod.table(
 );
 
 export const messages = opod.table(
-  "messages",
+  "chat_messages",
   {
     id: uuid()
       .primaryKey()
@@ -1605,28 +1761,31 @@ export const messages = opod.table(
     conversationId: uuid("conversation_id")
       .notNull()
       .references(() => messageConversations.id, {
-        name: "messages_conversation_id_fkey",
+        name: "chat_messages_conversation_id_fkey",
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
-    senderType: messageSenderType("sender_type").notNull(),
-    body: text().notNull(),
-    createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
+    senderType: messageSenderType("sender_role").notNull(),
+    body: text("message_text").notNull(),
+    createdAt: timestamp("sent_at", { precision: 6, withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
-    replyJobId: uuid("reply_job_id").references(() => messageReplyJobs.id, {
-      name: "messages_reply_job_id_fkey",
-      onDelete: "set null",
-      onUpdate: "cascade",
-    }),
+    replyJobId: uuid("reply_generation_job_id").references(
+      () => messageReplyJobs.id,
+      {
+        name: "chat_messages_reply_generation_job_id_fkey",
+        onDelete: "set null",
+        onUpdate: "cascade",
+      },
+    ),
   },
   (table) => [
-    index("messages_conversation_id_created_at_idx").using(
+    index("chat_messages_conversation_sent_at_idx").using(
       "btree",
       table.conversationId.asc().nullsLast(),
       table.createdAt.asc().nullsLast(),
     ),
-    index("messages_reply_job_id_idx").using(
+    index("chat_messages_reply_generation_job_id_idx").using(
       "btree",
       table.replyJobId.asc().nullsLast(),
     ),

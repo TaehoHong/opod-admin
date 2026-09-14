@@ -215,3 +215,44 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   완성되지 않았다.
 - `GET /api/health`가 DB 도달성을 확인한다. automated smoke와 rollback
   절차는 아직 없다.
+
+## Authored character context — 2026-09-08 verified boundary
+
+### 2026-09-11 추가 검증
+
+- 정본 연결 확장은 `canonIds`가 있는 조각을 `never_prompt`로 제한하고, 같은 캐릭터의 활성 memory만
+  연결한다. 연결 전후 구조 편집은 `structureSha256`, 연결된 memory 편집은 `memorySha256` CAS를 요구한다.
+  memory PATCH는 persona/post 출처의 소유권·인용문 UTF-8 바이트 범위·SHA와 사건 시점 정밀도를 검증하며,
+  연결된 memory/persona의 기존 삭제 API는 연결 해제 전 409를 반환한다.
+- `manual` source ref는 검증 가능한 승인 기록 owner가 아직 없으므로 UUID만 신뢰하지 않고 400으로
+  거부한다. 승인 기록 테이블/서비스가 별도 설계될 때까지 지원하지 않는다.
+- E2E setup은 backend 소유 `20260911074900_character_canon_sources` migration도 직접 적용한다.
+
+- backend 정본 `20260911063302_character_chat_context`를 미러링한다. E2E setup은 이 migration을
+  backend 파일에서 직접 읽으며 새로운 SQL 사본을 만들지 않는다.
+- `CharacterRepository.updateMemory`는 canon 본문이 실제로 변경된 경우만 embedding/model/
+  source SHA/embeddedAt을 같은 UPDATE에서 초기화한다. 동일 본문·라우팅 변경은 유지한다.
+- `replacePersonaStructure`는 원문 CAS/트랜잭션과 새 fragment 행 ID를 유지한다. 지워진 조각의
+  ID로 늦게 도착한 색인 쓰기는 새 조각을 갱신할 수 없다. 구조 API는 embedding 필드를 노출하지 않는다.
+- 회귀 증거: `test/character-context.e2e-spec.ts` 9개, 단위445개, build/lint/schema:check 통과.
+  최신 정본 이관은55433 원본에서 만든 격리 복제본에서만 리허설하고 API로 논리 복구했다.
+  개발 DB와55433 원본에 이번 DDL/내용을 적용한 기록이 아니다.
+
+- schema 정본은 backend의 `20260908093302_persist_character_context` migration이며 admin은
+  동일한 `schema.ts`를 미러링한다. 테스트용 SQL 사본은 `test/fixtures/legacy-migrations/`에 있다.
+  새 schema 없이 변경된 reader/admin을 먼저 배포하지 않는다.
+- 기존 CharactersController → CharactersService → CharacterRepository에 구조 API를 추가했다.
+  `GET/PUT /api/admin/v1/characters/:id/personas/:personaId/structure`는 원문+조각을 읽고 저장한다.
+  PUT의 `sourceSha256`은 원문 버전 검증, 선택 `content`는 새 원문, `fragments`는 순서대로
+  저장하는 content/kind/injection/recallKeys다. 원문과 조각 연결이 정확히 같아야 한다.
+- CharacterRepository가 행 잠금, 원문 SHA 확인, 조각 교체와 action log의 트랜잭션을 소유한다.
+  SHA가 다른 오래된 본문 수정 또는 구조화 원문에 대한 기존 본문-only PATCH는409다.
+  분류-only 수정은 원문 timestamp를 보존한다. `structureSha256`이 있으면 분류 간 충돌도409다.
+  연결이 없고 새 토큰도 없는 구버전 요청만 정책 last-write-wins 호환을 유지한다.
+- `PUT /api/admin/v1/characters/:id/memory/:memoryId/routing`은 canon kind/injection/recallKeys를
+  저장한다. 명시적 event는 retrieved만 허용하며 목록 응답에서도 정책을 읽을 수 있다.
+  JWT/CSRF 경계를 유지하고 경로UUID/DTO/캐릭터 소유권을 검사한다. 새 시각적 편집기는 없다.
+- `test/character-context.e2e-spec.ts`가 실제 DB 저장/새 앱 재조회/원자 수정/충돌/오류 rollback/
+  인증/캐릭터 격리/DB event 제약을 검증한다. 좁은 명령은
+  `npm run test:e2e -- --runTestsByPath test/character-context.e2e-spec.ts`.
+  전체 단위445/E2E16/build/lint/schema check를 확인했다. 개발 DB에는 적용하지 않았다.

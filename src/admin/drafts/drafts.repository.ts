@@ -547,15 +547,13 @@ export class DraftsRepository {
           originJobId: input.source.id,
         })
         .returning({ id: generationJobs.id });
-      await tx
-        .insert(characterActionLogs)
-        .values({
-          characterId: input.source.characterId,
-          actionType: "DRAFT_SHOT_REGENERATED",
-          targetTable: "post_drafts",
-          targetId: input.draftId,
-          reason: `shot ${input.source.sortOrder} regeneration queued`,
-        });
+      await tx.insert(characterActionLogs).values({
+        characterId: input.source.characterId,
+        actionType: "DRAFT_SHOT_REGENERATED",
+        targetTable: "post_drafts",
+        targetId: input.draftId,
+        reason: `shot ${input.source.sortOrder} regeneration queued`,
+      });
       return { outcome: "regenerated", jobId: created.id };
     });
   }
@@ -648,15 +646,13 @@ export class DraftsRepository {
     actionType: string;
     reason: string;
   }): Promise<void> {
-    await this.database.client
-      .insert(characterActionLogs)
-      .values({
-        characterId: input.characterId,
-        actionType: input.actionType,
-        targetTable: "post_drafts",
-        targetId: input.draftId,
-        reason: input.reason,
-      });
+    await this.database.client.insert(characterActionLogs).values({
+      characterId: input.characterId,
+      actionType: input.actionType,
+      targetTable: "post_drafts",
+      targetId: input.draftId,
+      reason: input.reason,
+    });
   }
 
   private draftFilter(input: {

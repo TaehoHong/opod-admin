@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { PutPersonaStructureDto } from "./dto/put-persona-structure.dto";
+import { PutMemoryRoutingDto } from "./dto/put-memory-routing.dto";
 import {
   decodeCursor,
   Page,
@@ -46,6 +48,14 @@ type CharacterMemory = {
   content: string;
   type: string;
   reason: string;
+  kind?: string;
+  injection?: string;
+  recallKeys?: string[];
+  sourceRefs?: unknown[] | null;
+  occurredLabel?: string | null;
+  occurredPrecision?: string | null;
+  occurredAt?: string | null;
+  memorySha256?: string;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
@@ -242,6 +252,50 @@ export class CharactersService {
     return { items: memories.map((memory) => this.toCharacterMemory(memory)) };
   }
 
+  getPersonaStructure(characterId: string, personaId: string) {
+    return this.characters.findPersonaStructure(characterId, personaId);
+  }
+
+  putPersonaStructure(
+    characterId: string,
+    personaId: string,
+    input: PutPersonaStructureDto,
+  ) {
+    return this.characters.replacePersonaStructure({
+      ...input,
+      characterId,
+      personaId,
+      fragments: input.fragments.map((f) => ({
+        ...f,
+        recallKeys: this.parseRecallKeys(f.recallKeys),
+      })),
+    });
+  }
+
+  async putMemoryRouting(
+    characterId: string,
+    memoryId: string,
+    input: PutMemoryRoutingDto,
+  ) {
+    if (input.kind === "event" && input.injection !== "retrieved") {
+      throw new BadRequestException(
+        "Authored events must be retrieved, never always injected",
+      );
+    }
+    return this.toCharacterMemory(
+      await this.characters.updateMemoryRouting(characterId, memoryId, {
+        ...input,
+        recallKeys: this.parseRecallKeys(input.recallKeys),
+      }),
+    );
+  }
+
+  private parseRecallKeys(keys: string[]): string[] {
+    if (keys.some((key) => !key.trim()))
+      throw new BadRequestException("Recall keys must not be blank");
+    return [...new Set(keys.map((key) => key.trim()))];
+  }
+
   async createCharacterMemory(input: {
     characterId: string;
     content: string;
@@ -260,11 +314,14 @@ export class CharactersService {
       content,
       type,
       reason,
+      ...(type === "fact" || type === "event"
+        ? { kind: type, injection: type === "event" ? "retrieved" : "always" }
+        : {}),
     });
     await this.recordCharacterActionLog({
       characterId: input.characterId,
       actionType: "MEMORY_CREATED",
-      targetTable: "character_memories",
+      targetTable: "character_canon_memories",
       targetId: memory.id,
       reason: "memory created",
     });
@@ -297,11 +354,17 @@ export class CharactersService {
       const memory = await this.characters.createMemory({
         characterId: input.characterId,
         ...item,
+        ...(item.type === "fact" || item.type === "event"
+          ? {
+              kind: item.type,
+              injection: item.type === "event" ? "retrieved" : "always",
+            }
+          : {}),
       });
       await this.recordCharacterActionLog({
         characterId: input.characterId,
         actionType: "MEMORY_CREATED",
-        targetTable: "character_memories",
+        targetTable: "character_canon_memories",
         targetId: memory.id,
         reason: "memory created (bulk)",
       });
@@ -316,26 +379,61 @@ export class CharactersService {
     content?: string;
     type?: string;
     reason?: string;
+    memorySha256?: string;
+    sourceRefs?: unknown[];
+    occurredLabel?: string;
+    occurredPrecision?: string;
+    occurredAt?: string;
   }): Promise<CharacterMemory> {
     await this.assertCharacterMemory(input.characterId, input.memoryId);
-    const data: { content?: string; type?: string; reason?: string } = {};
+    const data: {
+      content?: string;
+      type?: string;
+      reason?: string;
+      kind?: string;
+      sourceRefs?: unknown[];
+      occurredLabel?: string | null;
+      occurredPrecision?: string | null;
+      occurredAt?: Date | null;
+      memorySha256?: string;
+    } = {};
+    data.memorySha256 = input.memorySha256;
     if (input.content !== undefined) {
       data.content = this.parseMemoryContent(input.content, "Character memory");
     }
     if (input.type !== undefined) {
       data.type = this.parseMemoryType(input.type);
+      if (input.type === "fact" || input.type === "event")
+        data.kind = input.type;
     }
     if (input.reason !== undefined) {
       data.reason = this.parseMemoryReason(input.reason, "Character memory");
     }
-    if (Object.keys(data).length === 0) {
+    if (input.sourceRefs !== undefined) data.sourceRefs = input.sourceRefs;
+    if (
+      input.occurredPrecision !== undefined ||
+      input.occurredLabel !== undefined ||
+      input.occurredAt !== undefined
+    ) {
+      const time = this.parseOccurredTime(
+        input.occurredPrecision,
+        input.occurredLabel,
+        input.occurredAt,
+      );
+      Object.assign(data, time);
+    }
+    if (Object.keys(data).every((key) => key === "memorySha256")) {
       throw new BadRequestException("Character memory update is empty");
     }
-    const memory = await this.characters.updateMemory(input.memoryId, data);
+    const memory = await this.characters.updateMemory(
+      input.characterId,
+      input.memoryId,
+      data,
+    );
     await this.recordCharacterActionLog({
       characterId: input.characterId,
       actionType: "MEMORY_UPDATED",
-      targetTable: "character_memories",
+      targetTable: "character_canon_memories",
       targetId: memory.id,
       reason: "memory updated",
     });
@@ -357,7 +455,7 @@ export class CharactersService {
     await this.recordCharacterActionLog({
       characterId: input.characterId,
       actionType: "MEMORY_DELETED",
-      targetTable: "character_memories",
+      targetTable: "character_canon_memories",
       targetId: memory.id,
       reason: "memory soft-deleted",
     });
@@ -622,11 +720,88 @@ export class CharactersService {
       content: memory.content,
       type: memory.type,
       reason: memory.reason,
+      ...(memory.kind == null
+        ? {}
+        : {
+            kind: memory.kind,
+            injection: memory.injection!,
+            recallKeys: memory.recallKeys,
+          }),
+      ...(memory.sourceRefs === undefined
+        ? {}
+        : { sourceRefs: memory.sourceRefs as unknown[] | null }),
+      ...(memory.occurredLabel === undefined
+        ? {}
+        : { occurredLabel: memory.occurredLabel }),
+      ...(memory.occurredPrecision === undefined
+        ? {}
+        : { occurredPrecision: memory.occurredPrecision }),
+      ...(memory.occurredAt === undefined
+        ? {}
+        : { occurredAt: memory.occurredAt?.toISOString() ?? null }),
+      ...("memorySha256" in memory
+        ? {
+            memorySha256: (memory as MemoryRow & { memorySha256: string })
+              .memorySha256,
+          }
+        : {}),
       createdAt: memory.createdAt.toISOString(),
       updatedAt: memory.updatedAt.toISOString(),
       ...(memory.deletedAt
         ? { deletedAt: memory.deletedAt.toISOString() }
         : {}),
+    };
+  }
+
+  private parseOccurredTime(
+    precision?: string,
+    label?: string,
+    occurredAt?: string,
+  ) {
+    if (!precision && !label && !occurredAt)
+      return { occurredPrecision: null, occurredLabel: null, occurredAt: null };
+    if (!precision || !label?.trim())
+      throw new BadRequestException(
+        "Occurred precision and label are required together",
+      );
+    const normalized = label.trim();
+    if (precision === "year" && !/^(?!0000)\d{4}$/.test(normalized))
+      throw new BadRequestException("Year label must be YYYY");
+    if (
+      precision === "month" &&
+      !/^(?!0000)\d{4}-(0[1-9]|1[0-2])$/.test(normalized)
+    )
+      throw new BadRequestException("Month label must be YYYY-MM");
+    if (precision === "day") {
+      const parsed = new Date(`${normalized}T00:00:00Z`);
+      if (
+        !/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(normalized) ||
+        !Number.isFinite(parsed.getTime()) ||
+        parsed.toISOString().slice(0, 10) !== normalized
+      )
+        throw new BadRequestException(
+          "Day label must be a valid YYYY-MM-DD date",
+        );
+    }
+    if (precision === "instant") {
+      if (!occurredAt || !/(Z|[+-]\d{2}:\d{2})$/.test(occurredAt))
+        throw new BadRequestException(
+          "Instant requires a timezone-qualified occurredAt",
+        );
+      return {
+        occurredPrecision: precision,
+        occurredLabel: normalized,
+        occurredAt: new Date(occurredAt),
+      };
+    }
+    if (occurredAt)
+      throw new BadRequestException(
+        "Only instant precision accepts occurredAt",
+      );
+    return {
+      occurredPrecision: precision,
+      occurredLabel: normalized,
+      occurredAt: null,
     };
   }
 

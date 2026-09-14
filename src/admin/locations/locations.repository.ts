@@ -22,7 +22,10 @@ import {
 export type LocationRow = typeof characterLocations.$inferSelect & {
   character: { id: string; displayName: string; publicId: string } | null;
   references: Array<
-    typeof characterLocationReferences.$inferSelect & {
+    Omit<
+      typeof characterLocationReferences.$inferSelect,
+      "embedding" | "embeddingModel" | "embeddedAt"
+    > & {
       media: Pick<
         typeof media.$inferSelect,
         "id" | "url" | "width" | "height" | "uploadedAt"

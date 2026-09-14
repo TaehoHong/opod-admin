@@ -464,15 +464,13 @@ export class DraftWorkerRepository {
         .update(postDrafts)
         .set({ conceptJson: input.conceptJson })
         .where(eq(postDrafts.id, input.draftId));
-      await tx
-        .insert(characterActionLogs)
-        .values({
-          characterId: input.characterId,
-          actionType: "DRAFT_PROMPTS_BUILT",
-          targetTable: "post_drafts",
-          targetId: input.draftId,
-          reason: `shot prompts built via ${input.builderName} (${input.jobs.length} shot(s))`,
-        });
+      await tx.insert(characterActionLogs).values({
+        characterId: input.characterId,
+        actionType: "DRAFT_PROMPTS_BUILT",
+        targetTable: "post_drafts",
+        targetId: input.draftId,
+        reason: `shot prompts built via ${input.builderName} (${input.jobs.length} shot(s))`,
+      });
     });
   }
 
@@ -523,15 +521,13 @@ export class DraftWorkerRepository {
         )
         .returning({ id: postDrafts.id });
       if (updated.length !== 1) return false;
-      await tx
-        .insert(characterActionLogs)
-        .values({
-          characterId: input.characterId,
-          actionType: input.actionType,
-          targetTable: "post_drafts",
-          targetId: input.draftId,
-          reason: input.reason,
-        });
+      await tx.insert(characterActionLogs).values({
+        characterId: input.characterId,
+        actionType: input.actionType,
+        targetTable: "post_drafts",
+        targetId: input.draftId,
+        reason: input.reason,
+      });
       return true;
     });
   }
@@ -662,15 +658,13 @@ export class DraftWorkerRepository {
         )
         .returning({ id: postDrafts.id });
       if (updated.length !== 1) return false;
-      await tx
-        .insert(characterActionLogs)
-        .values({
-          characterId: input.characterId,
-          actionType: "DRAFT_V3_PAUSED",
-          targetTable: "post_drafts",
-          targetId: input.draftId,
-          reason: input.reason,
-        });
+      await tx.insert(characterActionLogs).values({
+        characterId: input.characterId,
+        actionType: "DRAFT_V3_PAUSED",
+        targetTable: "post_drafts",
+        targetId: input.draftId,
+        reason: input.reason,
+      });
       return true;
     });
   }
@@ -713,31 +707,27 @@ export class DraftWorkerRepository {
         .returning({ id: postDrafts.id });
       if (updated.length !== 1) return false;
       if (input.jobs.length > 0)
-        await tx
-          .insert(generationJobs)
-          .values(
-            input.jobs.map((job) => ({
-              characterId: input.characterId,
-              mediaType: "image" as const,
-              prompt: job.prompt,
-              draftId: input.draftId,
-              sortOrder: job.sortOrder,
-              ...(input.manual ? { status: "draft" as const } : {}),
-              ...(input.candidateCount !== undefined
-                ? { candidateCount: input.candidateCount }
-                : {}),
-              paramsJson: job.paramsJson,
-            })),
-          );
-      await tx
-        .insert(characterActionLogs)
-        .values({
-          characterId: input.characterId,
-          actionType: "DRAFT_V3_PROMPTS_READY",
-          targetTable: "post_drafts",
-          targetId: input.draftId,
-          reason: `${input.jobs.length} V3 prompt job(s) stored`,
-        });
+        await tx.insert(generationJobs).values(
+          input.jobs.map((job) => ({
+            characterId: input.characterId,
+            mediaType: "image" as const,
+            prompt: job.prompt,
+            draftId: input.draftId,
+            sortOrder: job.sortOrder,
+            ...(input.manual ? { status: "draft" as const } : {}),
+            ...(input.candidateCount !== undefined
+              ? { candidateCount: input.candidateCount }
+              : {}),
+            paramsJson: job.paramsJson,
+          })),
+        );
+      await tx.insert(characterActionLogs).values({
+        characterId: input.characterId,
+        actionType: "DRAFT_V3_PROMPTS_READY",
+        targetTable: "post_drafts",
+        targetId: input.draftId,
+        reason: `${input.jobs.length} V3 prompt job(s) stored`,
+      });
       return true;
     });
   }
@@ -823,28 +813,24 @@ export class DraftWorkerRepository {
       if (transitioned.length === 0)
         throw new Error("draft left the generating state during planning");
       if (input.jobs.length > 0)
-        await tx
-          .insert(generationJobs)
-          .values(
-            input.jobs.map((job) => ({
-              characterId: input.characterId,
-              mediaType: "image" as const,
-              prompt: job.prompt,
-              draftId: input.draftId,
-              sortOrder: job.sortOrder,
-              ...(job.status ? { status: job.status } : {}),
-              paramsJson: job.paramsJson,
-            })),
-          );
-      await tx
-        .insert(characterActionLogs)
-        .values({
-          characterId: input.characterId,
-          actionType: "DRAFT_PLANNED",
-          targetTable: "post_drafts",
-          targetId: input.draftId,
-          reason: `draft planned via ${input.plannerName}${input.builderName ? `, prompts via ${input.builderName}` : ""} (${input.jobs.length} shot(s))`,
-        });
+        await tx.insert(generationJobs).values(
+          input.jobs.map((job) => ({
+            characterId: input.characterId,
+            mediaType: "image" as const,
+            prompt: job.prompt,
+            draftId: input.draftId,
+            sortOrder: job.sortOrder,
+            ...(job.status ? { status: job.status } : {}),
+            paramsJson: job.paramsJson,
+          })),
+        );
+      await tx.insert(characterActionLogs).values({
+        characterId: input.characterId,
+        actionType: "DRAFT_PLANNED",
+        targetTable: "post_drafts",
+        targetId: input.draftId,
+        reason: `draft planned via ${input.plannerName}${input.builderName ? `, prompts via ${input.builderName}` : ""} (${input.jobs.length} shot(s))`,
+      });
     });
   }
 
@@ -943,18 +929,16 @@ export class DraftWorkerRepository {
       input.leaseExpiresAt,
     );
     try {
-      await this.database.client
-        .insert(serviceLogs)
-        .values({
-          source: "admin-worker",
-          level: "error",
-          eventType: "DRAFT_PUBLISH_FAILED",
-          message: input.message,
-          contextJson: {
-            draftId: input.draftId,
-            characterId: input.characterId,
-          },
-        });
+      await this.database.client.insert(serviceLogs).values({
+        source: "admin-worker",
+        level: "error",
+        eventType: "DRAFT_PUBLISH_FAILED",
+        message: input.message,
+        contextJson: {
+          draftId: input.draftId,
+          characterId: input.characterId,
+        },
+      });
     } catch {}
   }
 
@@ -1091,28 +1075,24 @@ export class DraftWorkerRepository {
           .values({ postId: post.id, hashtagId: tag.id });
       }
       if (publishMediaIds.length > 0)
-        await tx
-          .insert(postMedia)
-          .values(
-            publishMediaIds.map((mediaId, sortOrder) => ({
-              postId: post.id,
-              mediaId,
-              sortOrder,
-            })),
-          );
+        await tx.insert(postMedia).values(
+          publishMediaIds.map((mediaId, sortOrder) => ({
+            postId: post.id,
+            mediaId,
+            sortOrder,
+          })),
+        );
       await tx
         .update(postDrafts)
         .set({ publishedPostId: post.id })
         .where(eq(postDrafts.id, input.draftId));
-      await tx
-        .insert(characterActionLogs)
-        .values({
-          characterId: input.characterId,
-          actionType: "POST_CREATED",
-          targetTable: "posts",
-          targetId: post.id,
-          reason: `auto-published from draft ${input.draftId}`,
-        });
+      await tx.insert(characterActionLogs).values({
+        characterId: input.characterId,
+        actionType: "POST_CREATED",
+        targetTable: "posts",
+        targetId: post.id,
+        reason: `auto-published from draft ${input.draftId}`,
+      });
       const memories =
         input.memories ??
         (input.memoryContent
@@ -1247,15 +1227,13 @@ export class DraftWorkerRepository {
         )
         .limit(1);
       if (pending.length > 0) return false;
-      await tx
-        .insert(postDrafts)
-        .values({
-          characterId,
-          conceptJson: pipelineV3Enabled
-            ? createPostPipelineV3Concept({ source: "scheduler", mode: "auto" })
-            : { source: "scheduler" },
-          scheduledAt,
-        });
+      await tx.insert(postDrafts).values({
+        characterId,
+        conceptJson: pipelineV3Enabled
+          ? createPostPipelineV3Concept({ source: "scheduler", mode: "auto" })
+          : { source: "scheduler" },
+        scheduledAt,
+      });
       return true;
     });
   }
@@ -1266,15 +1244,13 @@ export class DraftWorkerRepository {
     actionType: string;
     reason: string;
   }): Promise<void> {
-    await this.database.client
-      .insert(characterActionLogs)
-      .values({
-        characterId: input.characterId,
-        actionType: input.actionType,
-        targetTable: "post_drafts",
-        targetId: input.targetId,
-        reason: input.reason,
-      });
+    await this.database.client.insert(characterActionLogs).values({
+      characterId: input.characterId,
+      actionType: input.actionType,
+      targetTable: "post_drafts",
+      targetId: input.targetId,
+      reason: input.reason,
+    });
   }
 
   private aggregateJobs(draftId: string) {

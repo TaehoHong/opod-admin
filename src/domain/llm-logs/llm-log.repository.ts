@@ -230,16 +230,14 @@ export class LlmLogRepository {
         })
         .returning({ id: llmLogs.id });
       if (mediaIds.length > 0) {
-        await tx
-          .insert(llmLogMedia)
-          .values(
-            mediaIds.map((mediaId, sortOrder) => ({
-              llmLogId: log.id,
-              mediaId,
-              role: "input" as const,
-              sortOrder,
-            })),
-          );
+        await tx.insert(llmLogMedia).values(
+          mediaIds.map((mediaId, sortOrder) => ({
+            llmLogId: log.id,
+            mediaId,
+            role: "input" as const,
+            sortOrder,
+          })),
+        );
       }
       return log.id;
     });

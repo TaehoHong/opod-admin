@@ -166,9 +166,7 @@ export class AdminCreditPaymentRepository {
     return rows.map((row) => ({ ...row.purchase, payment: row.payment }));
   }
 
-  async listReconciliationEvidence(
-    purchaseIds: string[],
-  ): Promise<{
+  async listReconciliationEvidence(purchaseIds: string[]): Promise<{
     entries: AdminReconciliationLedgerRow[];
     refunds: AdminReconciliationRefundRow[];
   }> {

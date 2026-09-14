@@ -44,6 +44,24 @@ export type CharacterMemory = {
   updatedAt: string;
 };
 
+export type PersonaStructure = {
+  fragments: Array<{
+    id: string;
+    ordinal: number;
+    kind: string;
+    injection: string;
+  }>;
+};
+
+export function fetchPersonaStructure(
+  characterId: string,
+  personaId: string,
+): Promise<PersonaStructure> {
+  return apiRequest(
+    `${characterPath(characterId)}/personas/${encodeURIComponent(personaId)}/structure`,
+  );
+}
+
 export type CharacterDetail = CharacterListItem & {
   personas: CharacterPersona[];
   memories: CharacterMemory[];

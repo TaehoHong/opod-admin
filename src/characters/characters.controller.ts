@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -13,6 +14,8 @@ import {
 import { AdminJwtGuard } from "../admin/auth/admin-jwt.guard";
 import { parsePageQuery } from "../domain/database/page";
 import { CharactersService } from "./characters.service";
+import { PutPersonaStructureDto } from "./dto/put-persona-structure.dto";
+import { PutMemoryRoutingDto } from "./dto/put-memory-routing.dto";
 import { CreateCharacterMemoriesDto } from "./dto/create-character-memories.dto";
 import { CreateCharacterMemoryDto } from "./dto/create-character-memory.dto";
 import { CreateCharacterPersonaDto } from "./dto/create-character-persona.dto";
@@ -113,6 +116,36 @@ export class CharactersController {
   @Get(":id/personas")
   listCharacterPersonas(@Param("id") characterId: string) {
     return this.charactersService.listCharacterPersonas(characterId);
+  }
+
+  @Get(":id/personas/:personaId/structure")
+  getPersonaStructure(
+    @Param("id", new ParseUUIDPipe()) characterId: string,
+    @Param("personaId", new ParseUUIDPipe()) personaId: string,
+  ) {
+    return this.charactersService.getPersonaStructure(characterId, personaId);
+  }
+
+  @Put(":id/personas/:personaId/structure")
+  putPersonaStructure(
+    @Param("id", new ParseUUIDPipe()) characterId: string,
+    @Param("personaId", new ParseUUIDPipe()) personaId: string,
+    @Body() body: PutPersonaStructureDto,
+  ) {
+    return this.charactersService.putPersonaStructure(
+      characterId,
+      personaId,
+      body,
+    );
+  }
+
+  @Put(":id/memory/:memoryId/routing")
+  putMemoryRouting(
+    @Param("id", new ParseUUIDPipe()) characterId: string,
+    @Param("memoryId", new ParseUUIDPipe()) memoryId: string,
+    @Body() body: PutMemoryRoutingDto,
+  ) {
+    return this.charactersService.putMemoryRouting(characterId, memoryId, body);
   }
 
   @Post(":id/personas")

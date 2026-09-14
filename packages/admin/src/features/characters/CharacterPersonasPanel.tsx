@@ -11,24 +11,28 @@ import {
   Title,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MutationAlert } from "../../shared/ui/MutationAlert";
+import { OperationErrorAlert } from "../../shared/ui/OperationErrorAlert";
 import {
   createPersona,
   createPersonas,
   deletePersona,
+  fetchPersonaStructure,
   reorderPersonas,
   updatePersona,
   type CharacterPersona,
 } from "./api";
 
-// 표준 블록 13종. 제목은 Agent와 기획 프롬프트에 원문 그대로 들어가므로
+// 작성용 제목 목록이다. 실제 처리 역할·주입 방식은 구조 API가 소유한다.
 // 저장값은 영문 키로 두고 한글은 화면 라벨로만 쓴다. 목록 순서가 곧 관례상의
 // 블록 순서지만 실제 순서는 sortOrder가 담당한다 — 제목에 번호를 붙이지 않는다.
 const PERSONA_TITLES = [
   { value: "identity", label: "기본 프로필" },
+  { value: "appearance", label: "외형" },
   { value: "personality", label: "성격" },
   { value: "values", label: "가치관" },
+  { value: "social_style", label: "대인 반응" },
   { value: "emotions", label: "감정·대인" },
   { value: "voice", label: "말투" },
   { value: "world", label: "배경" },
@@ -36,6 +40,7 @@ const PERSONA_TITLES = [
   { value: "capture_style", label: "촬영 방식" },
   { value: "relationships", label: "관계" },
   { value: "preferences", label: "취향" },
+  { value: "goals", label: "목표" },
   { value: "boundaries", label: "가드레일" },
   { value: "greeting", label: "첫인사" },
   { value: "examples", label: "대화 예시" },
@@ -49,27 +54,31 @@ const PERSONA_TITLE_OPTIONS = PERSONA_TITLES.map(({ value, label }) => ({
 // 프리셋은 제목 입력을 채워 주는 보조 장치다. 표준 블록에 없는 제목도 그대로
 // 저장할 수 있어야 하므로 제목 입력이 값의 주인이고 select는 강제하지 않는다.
 function PersonaTitlePreset({
-  defaultTitle,
+  title,
   onPick,
 }: {
-  defaultTitle: string;
+  title: string;
   onPick: (title: string) => void;
 }) {
   return (
     <Select
-      label="제목 타입"
+      label="내용 분류"
+      description="제목 입력용 분류이며, 채팅 처리 정책은 바꾸지 않습니다."
       placeholder="직접 입력"
-      data={PERSONA_TITLE_OPTIONS}
-      defaultValue={
-        PERSONA_TITLES.some((preset) => preset.value === defaultTitle)
-          ? defaultTitle
-          : null
+      data={
+        !title || PERSONA_TITLES.some((preset) => preset.value === title)
+          ? PERSONA_TITLE_OPTIONS
+          : [
+              ...PERSONA_TITLE_OPTIONS,
+              { value: title, label: `직접 입력 (${title})` },
+            ]
       }
+      value={title || null}
       onChange={(value) => {
         if (value) onPick(value);
       }}
       searchable
-      clearable
+      allowDeselect={false}
     />
   );
 }
@@ -87,7 +96,7 @@ export function CharacterPersonasPanel({
     content: string;
     sortOrder: number | string;
   }>({
-    mode: "uncontrolled",
+    mode: "controlled",
     initialValues: { title: "", content: "", sortOrder: "" },
     validate: {
       title: required("제목을 입력해 주세요"),
@@ -130,12 +139,12 @@ export function CharacterPersonasPanel({
             <Stack gap="sm">
               <Title order={5}>페르소나 추가</Title>
               <Text c="dimmed" size="sm">
-                제목 타입을 고르면 제목에 반영됩니다. 표준 블록에 없는 제목은
-                직접 입력하세요. 한 블록에는 하나의 관심사만 담습니다.
+                내용 분류를 고르면 제목에 반영됩니다. 목록에 없는 제목은 직접
+                입력하세요. 한 블록에는 하나의 관심사만 담습니다.
               </Text>
               <Group grow align="flex-start">
                 <PersonaTitlePreset
-                  defaultTitle=""
+                  title={form.values.title}
                   onPick={(title) => form.setFieldValue("title", title)}
                 />
                 <TextInput
@@ -208,7 +217,7 @@ function PersonaForm({
 }) {
   const queryClient = useQueryClient();
   const form = useForm({
-    mode: "uncontrolled",
+    mode: "controlled",
     initialValues: {
       title: persona.title,
       content: persona.content,
@@ -239,7 +248,7 @@ function PersonaForm({
         <Stack gap="sm">
           <Group grow align="flex-start">
             <PersonaTitlePreset
-              defaultTitle={persona.title}
+              title={form.values.title}
               onPick={(title) => form.setFieldValue("title", title)}
             />
             <TextInput
@@ -253,6 +262,7 @@ function PersonaForm({
               {...form.getInputProps("sortOrder")}
             />
           </Group>
+          <PersonaProcessing characterId={characterId} personaId={persona.id} />
           <Textarea
             label="페르소나 내용"
             rows={4}
@@ -294,6 +304,93 @@ function PersonaForm({
         </Stack>
       </form>
     </Paper>
+  );
+}
+
+const PERSONA_ROLES: Record<string, string> = {
+  identity: "정체성",
+  behavior: "행동 성향",
+  voice: "말투",
+  lore: "배경 정보",
+  example: "대화 예시",
+  greeting: "첫인사",
+  creator_note: "제작자 메모",
+};
+const PERSONA_INJECTIONS: Record<string, string> = {
+  always: "항상 주입",
+  start_only: "대화 시작 시",
+  retrieved: "관련 문맥에서 선별 주입",
+  never_prompt: "직접 주입 제외",
+};
+
+function PersonaProcessing({
+  characterId,
+  personaId,
+}: {
+  characterId: string;
+  personaId: string;
+}) {
+  const structure = useQuery({
+    queryKey: ["character", characterId, "persona-structure", personaId],
+    queryFn: () => fetchPersonaStructure(characterId, personaId),
+  });
+  if (structure.isPending)
+    return (
+      <Text size="sm" role="status">
+        채팅 처리 정보 조회 중…
+      </Text>
+    );
+  if (structure.isError)
+    return (
+      <Stack gap="xs">
+        <OperationErrorAlert
+          failure={{
+            problem: "채팅 처리 정보를 불러오지 못했습니다.",
+            cause: "조회에 실패하여 현재 저장된 정책을 확인할 수 없습니다.",
+            nextAction:
+              "다시 조회하세요. 계속 실패하면 서버 연결을 확인하세요.",
+            technicalDetail: structure.error.message,
+          }}
+        />
+        <Button
+          type="button"
+          variant="default"
+          loading={structure.isFetching}
+          onClick={() => void structure.refetch()}
+        >
+          처리 정보 다시 조회
+        </Button>
+      </Stack>
+    );
+  return (
+    <Stack gap="xs" aria-label="저장된 채팅 처리 정책">
+      <Text size="sm" fw={500}>
+        채팅 처리 · 저장된 정책 (읽기 전용)
+      </Text>
+      {structure.data.fragments.length === 0 ? (
+        <Text size="sm" c="dimmed">
+          저장된 처리 역할·주입 방식이 없습니다. 기존 처리 규칙을 사용하며,
+          제목으로 추정해 표시하지 않습니다.
+        </Text>
+      ) : (
+        structure.data.fragments.map((fragment) => (
+          <Group key={fragment.id} gap="sm">
+            {structure.data.fragments.length > 1 && (
+              <Text size="sm">조각 {fragment.ordinal + 1}</Text>
+            )}
+            <Text size="sm">
+              처리 역할: {PERSONA_ROLES[fragment.kind] ?? "알 수 없는 역할"} (
+              {fragment.kind})
+            </Text>
+            <Text size="sm">
+              주입 방식:{" "}
+              {PERSONA_INJECTIONS[fragment.injection] ?? "알 수 없는 방식"} (
+              {fragment.injection})
+            </Text>
+          </Group>
+        ))
+      )}
+    </Stack>
   );
 }
 

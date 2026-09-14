@@ -99,7 +99,7 @@ describe("CharactersService", () => {
       expect.objectContaining({
         characterId: "character-1",
         actionType: "MEMORY_CREATED",
-        targetTable: "character_memories",
+        targetTable: "character_canon_memories",
         targetId: "memory-1",
       }),
     );

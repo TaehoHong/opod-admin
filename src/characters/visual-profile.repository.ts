@@ -11,9 +11,10 @@ import {
   media,
 } from "../domain/database/schema";
 
-type ReferenceRow = typeof characterVisualProfileReferences.$inferSelect & {
-  media: { url: string };
-};
+type ReferenceRow = Omit<
+  typeof characterVisualProfileReferences.$inferSelect,
+  "embedding" | "embeddingModel" | "embeddedAt"
+> & { media: { url: string } };
 export type VisualProfileRow = typeof characterVisualProfiles.$inferSelect & {
   referenceMedia: ReferenceRow[];
 };

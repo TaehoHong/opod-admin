@@ -213,15 +213,13 @@ export class GenerationRepository {
         )
         .returning({ characterId: generationJobs.characterId });
       if (!confirmed) return false;
-      await tx
-        .insert(characterActionLogs)
-        .values({
-          characterId: confirmed.characterId,
-          actionType: "GENERATION_DRAFT_CONFIRMED",
-          targetTable: "generation_jobs",
-          targetId: jobId,
-          reason: "generation draft confirmed",
-        });
+      await tx.insert(characterActionLogs).values({
+        characterId: confirmed.characterId,
+        actionType: "GENERATION_DRAFT_CONFIRMED",
+        targetTable: "generation_jobs",
+        targetId: jobId,
+        reason: "generation draft confirmed",
+      });
       return true;
     });
   }
@@ -270,15 +268,13 @@ export class GenerationRepository {
         .update(generationJobs)
         .set({ outputMediaId: mediaId })
         .where(eq(generationJobs.id, jobId));
-      await tx
-        .insert(characterActionLogs)
-        .values({
-          characterId: output.characterId,
-          actionType: "GENERATION_OUTPUT_SELECTED",
-          targetTable: "generation_jobs",
-          targetId: jobId,
-          reason: `selected generation output ${mediaId}`,
-        });
+      await tx.insert(characterActionLogs).values({
+        characterId: output.characterId,
+        actionType: "GENERATION_OUTPUT_SELECTED",
+        targetTable: "generation_jobs",
+        targetId: jobId,
+        reason: `selected generation output ${mediaId}`,
+      });
       return "selected";
     });
   }
@@ -415,15 +411,13 @@ export class GenerationRepository {
           originJobId: source.id,
         })
         .returning();
-      await tx
-        .insert(characterActionLogs)
-        .values({
-          characterId: source.characterId,
-          actionType: "GENERATION_JOB_RETRIED",
-          targetTable: "generation_jobs",
-          targetId: created.id,
-          reason,
-        });
+      await tx.insert(characterActionLogs).values({
+        characterId: source.characterId,
+        actionType: "GENERATION_JOB_RETRIED",
+        targetTable: "generation_jobs",
+        targetId: created.id,
+        reason,
+      });
       return { ...created, outputMedia: null };
     });
   }

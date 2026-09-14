@@ -361,16 +361,14 @@ export class GenerationJobRepository {
       if (transitioned.length === 0)
         throw new Error("job left the running state during persistence");
       if (mediaIds.length > 0) {
-        await tx
-          .insert(generationJobOutputs)
-          .values(
-            mediaIds.map((mediaId, candidateIndex) => ({
-              jobId: input.jobId,
-              mediaId,
-              candidateIndex,
-              selected: mediaId === soleMediaId,
-            })),
-          );
+        await tx.insert(generationJobOutputs).values(
+          mediaIds.map((mediaId, candidateIndex) => ({
+            jobId: input.jobId,
+            mediaId,
+            candidateIndex,
+            selected: mediaId === soleMediaId,
+          })),
+        );
       }
       const [log] = await tx
         .select({ id: llmLogs.id })

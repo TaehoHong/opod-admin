@@ -12,6 +12,9 @@ import type { CharacterCreate } from "./api";
 function renderCharacterRoutes() {
   server.use(
     http.get("/api/admin/v1/media", () => HttpResponse.json({ items: [] })),
+    http.get("/api/admin/v1/characters/:id/personas/:personaId/structure", () =>
+      HttpResponse.json({ fragments: [] }),
+    ),
   );
   render(
     <AppProviders>
@@ -194,7 +197,7 @@ describe("character management", () => {
         { title: "말투", content: "짧고 친근하게 말한다." },
       ]),
     );
-    expect(await screen.findByDisplayValue("말투")).toBeInTheDocument();
+    expect(await screen.findByLabelText("페르소나 제목")).toHaveValue("말투");
   });
 
   it("fills the persona title from a standard block preset", async () => {
@@ -249,7 +252,7 @@ describe("character management", () => {
 
     // 첫인사는 React 이관 전까지 admin에서 만들 수 없던 표준 블록이다.
     await userEvent.click(
-      await screen.findByRole("combobox", { name: "제목 타입" }),
+      await screen.findByRole("combobox", { name: "내용 분류" }),
     );
     await userEvent.click(await screen.findByText("첫인사 (greeting)"));
 
@@ -473,7 +476,7 @@ describe("character management", () => {
               id: "log-1",
               characterId: character.id,
               actionType: "MEMORY_CREATED",
-              targetTable: "character_memories",
+              targetTable: "character_canon_memories",
               targetId: "memory-123456789",
               reason: "운영 메모리",
               createdAt: "2026-07-31T02:00:00.000Z",
@@ -494,7 +497,7 @@ describe("character management", () => {
     expect(await screen.findByText("MEMORY_CREATED")).toBeInTheDocument();
     expect(screen.getByText("운영 메모리")).toBeInTheDocument();
     expect(
-      screen.getByText(/character_memories · memory-1…/),
+      screen.getByText(/character_canon_memories · memory-1…/),
     ).toBeInTheDocument();
   });
 });

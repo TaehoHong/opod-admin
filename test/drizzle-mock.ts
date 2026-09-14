@@ -10,18 +10,44 @@ class QueryMock implements PromiseLike<unknown> {
     private readonly operation: Operation,
   ) {}
 
-  from() { return this; }
-  innerJoin() { return this; }
-  leftJoin() { return this; }
-  where() { return this; }
-  orderBy() { return this; }
-  groupBy() { return this; }
-  limit() { return this; }
-  onConflictDoUpdate() { return this; }
-  onConflictDoNothing() { return this; }
-  set(value: unknown) { this.operation.set = value; return this; }
-  values(value: unknown) { this.operation.values = value; return this; }
-  returning() { return Promise.resolve(this.result); }
+  from() {
+    return this;
+  }
+  innerJoin() {
+    return this;
+  }
+  leftJoin() {
+    return this;
+  }
+  where() {
+    return this;
+  }
+  orderBy() {
+    return this;
+  }
+  groupBy() {
+    return this;
+  }
+  limit() {
+    return this;
+  }
+  onConflictDoUpdate() {
+    return this;
+  }
+  onConflictDoNothing() {
+    return this;
+  }
+  set(value: unknown) {
+    this.operation.set = value;
+    return this;
+  }
+  values(value: unknown) {
+    this.operation.values = value;
+    return this;
+  }
+  returning() {
+    return Promise.resolve(this.result);
+  }
   then<TResult1 = unknown, TResult2 = never>(
     onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
@@ -46,13 +72,17 @@ export function createDrizzleMock(results: unknown[] = []) {
     update: jest.fn(() => next("update")),
     delete: jest.fn(() => next("delete")),
     execute,
-    transaction: jest.fn(async (work: (tx: unknown) => unknown): Promise<unknown> => work(client)),
+    transaction: jest.fn(
+      async (work: (tx: unknown) => unknown): Promise<unknown> => work(client),
+    ),
   });
   return {
     database: { client },
     client,
     operations,
-    enqueue(...values: unknown[]) { queue.push(...values); },
+    enqueue(...values: unknown[]) {
+      queue.push(...values);
+    },
   };
 }
 
