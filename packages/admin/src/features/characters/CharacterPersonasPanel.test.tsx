@@ -19,6 +19,7 @@ function show(title = "social_style") {
             characterId: "character-1",
             title,
             content: "테스트 설정",
+            schemaVersion: 1,
             sortOrder: 0,
             createdAt: "2026-09-12T00:00:00Z",
             updatedAt: "2026-09-12T00:00:00Z",
@@ -52,21 +53,36 @@ describe("persona classification display", () => {
     server.use(
       http.get(endpoint, () =>
         HttpResponse.json({
+          schemaVersion: 2,
           fragments: [
-            { id: "f1", ordinal: 0, kind: "lore", injection: "never_prompt" },
-            { id: "f2", ordinal: 1, kind: "voice", injection: "start_only" },
+            {
+              id: "f1",
+              ordinal: 0,
+              kind: "motivation",
+              injection: "always",
+            },
+            {
+              id: "f2",
+              ordinal: 1,
+              kind: "boundary",
+              injection: "retrieved",
+            },
           ],
         }),
       ),
     );
     show();
-    expect(await screen.findByText(/배경 정보 \(lore\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/페르소나 스키마 v2/)).toBeInTheDocument();
     expect(
-      screen.getByText(/직접 주입 제외 \(never_prompt\)/),
+      screen.getByText(/처리 역할: 욕구·동기 \(motivation\)/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/처리 역할: 말투 \(voice\)/)).toBeInTheDocument();
-    expect(screen.getByText(/대화 시작 시 \(start_only\)/)).toBeInTheDocument();
-    expect(screen.queryByText(/항상 주입 \(always\)/)).not.toBeInTheDocument();
+    expect(screen.getByText(/항상 주입 \(always\)/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/처리 역할: 행동 경계 \(boundary\)/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/관련 문맥에서 선별 주입 \(retrieved\)/),
+    ).toBeInTheDocument();
   });
 
   it("distinguishes lookup failure from missing policy and lets the operator retry", async () => {

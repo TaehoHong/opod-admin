@@ -43,6 +43,7 @@ function personaRow(overrides: Record<string, unknown> = {}) {
     characterId: "character-1",
     title: "Core",
     content: "Warm",
+    schemaVersion: 2,
     sortOrder: 30,
     createdAt,
     updatedAt: createdAt,
@@ -166,6 +167,7 @@ describe("CharactersService", () => {
           characterId: "character-1",
           title: "Core",
           content: "Warm and concise",
+          schemaVersion: 2,
           sortOrder: 10,
           createdAt: createdAt.toISOString(),
           updatedAt: createdAt.toISOString(),
@@ -248,14 +250,19 @@ describe("CharactersService", () => {
         title: " Core ",
         content: " Warm ",
       }),
-    ).resolves.toMatchObject({ title: "Core", content: "Warm", sortOrder: 30 });
+    ).resolves.toMatchObject({
+      title: "Core",
+      content: "Warm",
+      schemaVersion: 2,
+      sortOrder: 30,
+    });
     await expect(
       service.updateCharacterPersona({
         characterId: "character-1",
         personaId: "persona-1",
         content: " Warmer ",
       }),
-    ).resolves.toMatchObject({ content: "Warmer" });
+    ).resolves.toMatchObject({ content: "Warmer", schemaVersion: 2 });
     await expect(
       service.deleteCharacterPersona({
         characterId: "character-1",

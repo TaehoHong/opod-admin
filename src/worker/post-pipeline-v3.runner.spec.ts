@@ -147,7 +147,174 @@ function captionStageDraft() {
   });
 }
 
+function readyPostPlan() {
+  return {
+    status: "ready",
+    intent: {
+      premise: "카페에 먼저 도착했다.",
+      primaryPurpose: "일찍 온 민망함을 기록한다.",
+      secondaryPurpose: null,
+    },
+    newMemoryCandidates: [],
+  };
+}
+
 describe("PostPipelineV3Runner", () => {
+  it.each([
+    ["post-pipeline-v3", "content_guidance"],
+    ["post-pipeline-v4", "content_guidance"],
+    ["post-pipeline-v4", "content_style"],
+  ])(
+    "accepts %s drafts with the %s editorial policy title",
+    async (pipelineVersion, policyTitle) => {
+      const current = draft(
+        {
+          pipelineVersion,
+          pipeline: {
+            stage: "post_plan",
+            state: "running",
+            imageCount: null,
+            reasonCodes: [],
+          },
+        },
+        {
+          character: {
+            ...draft({}).character,
+            personas: [
+              { title: policyTitle, content: "사소한 일상을 구체적으로 쓴다" },
+              { title: "voice", content: "짧은 반말" },
+            ],
+          },
+        },
+      );
+      const { runner, repository, fetchMock } = setup(current, readyPostPlan());
+
+      await runner.runCurrentStage("draft-1");
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(repository.persistV3Artifact).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conceptJson: expect.objectContaining({
+            postPlanning: expect.objectContaining({
+              input: expect.objectContaining({
+                persona: expect.objectContaining({
+                  writingProfile: expect.objectContaining({
+                    contentStyle: [
+                      {
+                        title: "content_style",
+                        content: "사소한 일상을 구체적으로 쓴다",
+                      },
+                    ],
+                  }),
+                  additionalContext: [],
+                }),
+              }),
+            }),
+          }),
+        }),
+      );
+    },
+  );
+
+  it("deduplicates identical editorial policy aliases", async () => {
+    const current = draft(
+      {
+        pipelineVersion: "post-pipeline-v4",
+        pipeline: {
+          stage: "post_plan",
+          state: "running",
+          imageCount: null,
+          reasonCodes: [],
+        },
+      },
+      {
+        character: {
+          ...draft({}).character,
+          personas: [
+            {
+              title: "content_style",
+              content: "  사소한 일상을 구체적으로 쓴다  ",
+            },
+            {
+              title: "content_guidance",
+              content: "사소한 일상을 구체적으로 쓴다",
+            },
+            { title: "voice", content: "짧은 반말" },
+          ],
+        },
+      },
+    );
+    const { runner, repository, fetchMock } = setup(current, readyPostPlan());
+
+    await runner.runCurrentStage("draft-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const stored = repository.persistV3Artifact.mock.calls[0][0] as {
+      conceptJson: {
+        postPlanning: {
+          input: {
+            persona: {
+              writingProfile: { contentStyle: unknown[] };
+              additionalContext: unknown[];
+            };
+          };
+        };
+      };
+    };
+    expect(
+      stored.conceptJson.postPlanning.input.persona.writingProfile.contentStyle,
+    ).toEqual([
+      {
+        title: "content_style",
+        content: "사소한 일상을 구체적으로 쓴다",
+      },
+    ]);
+    expect(
+      stored.conceptJson.postPlanning.input.persona.additionalContext,
+    ).toEqual([]);
+  });
+
+  it("pauses conflicting editorial policy aliases before an LLM call", async () => {
+    const current = draft(
+      {
+        pipelineVersion: "post-pipeline-v4",
+        pipeline: {
+          stage: "post_plan",
+          state: "running",
+          imageCount: null,
+          reasonCodes: [],
+        },
+      },
+      {
+        character: {
+          ...draft({}).character,
+          personas: [
+            { title: "content_style", content: "짧게 쓴다" },
+            { title: "content_guidance", content: "길게 설명한다" },
+            { title: "voice", content: "짧은 반말" },
+          ],
+        },
+      },
+    );
+    const { runner, repository, fetchMock } = setup(current, readyPostPlan());
+
+    await runner.runCurrentStage("draft-1");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(repository.persistV3Paused).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedStage: "post_plan",
+        conceptJson: expect.objectContaining({
+          pipeline: expect.objectContaining({
+            state: "conflict",
+            reasonCodes: ["persona_content_policy_conflict"],
+          }),
+        }),
+      }),
+    );
+    expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+  });
+
   it("pauses before an LLM call when the writing profile is incomplete", async () => {
     const current = draft(
       {

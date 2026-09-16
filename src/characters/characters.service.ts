@@ -66,6 +66,7 @@ type CharacterPersona = {
   characterId: string;
   title: string;
   content: string;
+  schemaVersion: number;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -811,6 +812,7 @@ export class CharactersService {
       characterId: persona.characterId,
       title: persona.title,
       content: persona.content,
+      schemaVersion: persona.schemaVersion,
       sortOrder: persona.sortOrder,
       createdAt: persona.createdAt.toISOString(),
       updatedAt: persona.updatedAt.toISOString(),

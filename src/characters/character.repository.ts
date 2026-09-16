@@ -46,6 +46,7 @@ const personaFields = {
   characterId: characterPersonas.characterId,
   title: characterPersonas.title,
   content: characterPersonas.content,
+  schemaVersion: characterPersonas.schemaVersion,
   sortOrder: characterPersonas.sortOrder,
   createdAt: characterPersonas.createdAt,
   updatedAt: characterPersonas.updatedAt,
@@ -112,11 +113,12 @@ const sourceHash = (content: string) =>
   createHash("sha256").update(content).digest("hex");
 const objectHash = (value: unknown) => sourceHash(JSON.stringify(value));
 const structureHash = (
-  source: { content: string },
+  source: { content: string; schemaVersion: number },
   fragments: Array<FragmentInput>,
 ) =>
   objectHash({
     source: source.content,
+    schemaVersion: source.schemaVersion,
     fragments: fragments.map((f) => ({
       content: f.content,
       kind: f.kind,
@@ -125,6 +127,45 @@ const structureHash = (
       canonIds: [...new Set(f.canonIds ?? [])].sort(),
     })),
   });
+const personaV2Kinds = new Set([
+  "identity",
+  "motivation",
+  "judgment",
+  "tension",
+  "relationship",
+  "voice",
+  "boundary",
+  "example",
+  "greeting",
+  "creator_note",
+]);
+const personaV2OnlyKinds = new Set([
+  "motivation",
+  "judgment",
+  "tension",
+  "relationship",
+  "boundary",
+]);
+
+function validatePersonaV2(fragments: FragmentInput[]) {
+  for (const fragment of fragments) {
+    if (!personaV2Kinds.has(fragment.kind))
+      throw new BadRequestException(
+        `Persona schema v2 does not allow kind: ${fragment.kind}`,
+      );
+    if (
+      fragment.kind === "creator_note" &&
+      fragment.injection !== "never_prompt"
+    )
+      throw new BadRequestException(
+        "Persona schema v2 creator notes must be never_prompt",
+      );
+    if (fragment.kind === "greeting" && fragment.injection !== "start_only")
+      throw new BadRequestException(
+        "Persona schema v2 greetings must be start_only",
+      );
+  }
+}
 const memoryHash = (
   memory: Pick<
     MemoryRow,
@@ -416,6 +457,7 @@ export class CharacterRepository {
     personaId: string;
     sourceSha256: string;
     structureSha256?: string;
+    schemaVersion?: number;
     content?: string;
     fragments: FragmentInput[];
   }) {
@@ -441,6 +483,17 @@ export class CharacterRepository {
         throw new ConflictException(
           "Persona source changed; reread before saving",
         );
+      const schemaVersion = input.schemaVersion ?? source.schemaVersion;
+      if (
+        schemaVersion !== 2 &&
+        input.fragments.some((fragment) =>
+          personaV2OnlyKinds.has(fragment.kind),
+        )
+      )
+        throw new BadRequestException(
+          "Persona v2 kinds require schemaVersion 2",
+        );
+      if (schemaVersion === 2) validatePersonaV2(input.fragments);
       const currentFragments = await tx
         .select(fragmentFields)
         .from(characterPersonaFragments)
@@ -540,11 +593,11 @@ export class CharacterRepository {
       if (linkValues.length)
         await tx.insert(characterPersonaCanonLinks).values(linkValues);
       const [updated] =
-        content === source.content
+        content === source.content && schemaVersion === source.schemaVersion
           ? [source]
           : await tx
               .update(characterPersonas)
-              .set({ content })
+              .set({ content, schemaVersion })
               .where(eq(characterPersonas.id, input.personaId))
               .returning(personaFields);
       await tx.insert(characterActionLogs).values({
@@ -557,7 +610,10 @@ export class CharacterRepository {
       return {
         ...updated,
         sourceSha256: sourceHash(content),
-        structureSha256: structureHash({ content }, input.fragments),
+        structureSha256: structureHash(
+          { content, schemaVersion },
+          input.fragments,
+        ),
         fragments: fragments
           .sort((a, b) => a.ordinal - b.ordinal)
           .map((fragment, ordinal) => ({

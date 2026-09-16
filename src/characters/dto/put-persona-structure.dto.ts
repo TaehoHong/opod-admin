@@ -5,6 +5,7 @@ import {
   IsArray,
   IsHash,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -27,6 +28,11 @@ export class PersonaFragmentDto {
     "greeting",
     "lore",
     "creator_note",
+    "motivation",
+    "judgment",
+    "tension",
+    "relationship",
+    "boundary",
   ])
   kind!: string;
 
@@ -48,6 +54,11 @@ export class PersonaFragmentDto {
 }
 
 export class PutPersonaStructureDto {
+  @IsOptional()
+  @IsInt()
+  @IsIn([1, 2])
+  schemaVersion?: number;
+
   @IsHash("sha256")
   sourceSha256!: string;
 

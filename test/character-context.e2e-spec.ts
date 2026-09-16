@@ -100,6 +100,79 @@ describe("persisted character context", () => {
       });
   });
 
+  it("saves v2 persona facets and rejects legacy or unsafe v2 policies", async () => {
+    const v2Fragments = [
+      {
+        content: fragments[0].content,
+        kind: "motivation",
+        injection: "always",
+        recallKeys: [],
+      },
+      {
+        content: fragments[1].content,
+        kind: "tension",
+        injection: "retrieved",
+        recallKeys: ["여행"],
+      },
+    ];
+    await request(app.getHttpServer())
+      .put(path())
+      .set(headers)
+      .send({ sourceSha256: hash(content), fragments: v2Fragments })
+      .expect(400);
+    const saved = await request(app.getHttpServer())
+      .put(path())
+      .set(headers)
+      .send({
+        schemaVersion: 2,
+        sourceSha256: hash(content),
+        fragments: v2Fragments,
+      })
+      .expect(200);
+    expect(saved.body).toMatchObject({ schemaVersion: 2 });
+    expect(saved.body.fragments).toEqual(
+      v2Fragments.map((fragment, ordinal) =>
+        expect.objectContaining({ ...fragment, ordinal }),
+      ),
+    );
+
+    for (const invalidFragments of [
+      [{ ...v2Fragments[0], kind: "behavior" }, v2Fragments[1]],
+      [
+        {
+          ...v2Fragments[0],
+          kind: "creator_note",
+          injection: "always",
+        },
+        v2Fragments[1],
+      ],
+      [
+        { ...v2Fragments[0], kind: "greeting", injection: "retrieved" },
+        v2Fragments[1],
+      ],
+    ]) {
+      await request(app.getHttpServer())
+        .put(path())
+        .set(headers)
+        .send({
+          schemaVersion: 2,
+          sourceSha256: hash(content),
+          structureSha256: saved.body.structureSha256,
+          fragments: invalidFragments,
+        })
+        .expect(400);
+    }
+
+    await request(app.getHttpServer())
+      .get(path())
+      .set(headers)
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.schemaVersion).toBe(2);
+        expect(res.body.fragments).toEqual(saved.body.fragments);
+      });
+  });
+
   it("updates source and fragments atomically and rejects stale or legacy source-only edits", async () => {
     await request(app.getHttpServer())
       .put(path())

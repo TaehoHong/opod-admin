@@ -76,6 +76,15 @@ export default async function globalSetup(): Promise<void> {
           "utf8",
         ),
       );
+      await client.query(
+        readFileSync(
+          join(
+            __dirname,
+            "../../opod-service-backend/drizzle/20260916062345_persona_schema_v2/migration.sql",
+          ),
+          "utf8",
+        ),
+      );
     } finally {
       await client.end();
     }

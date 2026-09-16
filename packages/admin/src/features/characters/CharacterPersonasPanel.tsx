@@ -315,6 +315,11 @@ const PERSONA_ROLES: Record<string, string> = {
   example: "대화 예시",
   greeting: "첫인사",
   creator_note: "제작자 메모",
+  motivation: "욕구·동기",
+  judgment: "판단 기준",
+  tension: "내적 긴장",
+  relationship: "관계 방식",
+  boundary: "행동 경계",
 };
 const PERSONA_INJECTIONS: Record<string, string> = {
   always: "항상 주입",
@@ -365,7 +370,8 @@ function PersonaProcessing({
   return (
     <Stack gap="xs" aria-label="저장된 채팅 처리 정책">
       <Text size="sm" fw={500}>
-        채팅 처리 · 저장된 정책 (읽기 전용)
+        채팅 처리 · 페르소나 스키마 v{structure.data.schemaVersion ?? 1} ·
+        저장된 정책 (읽기 전용)
       </Text>
       {structure.data.fragments.length === 0 ? (
         <Text size="sm" c="dimmed">

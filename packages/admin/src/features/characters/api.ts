@@ -29,6 +29,7 @@ export type CharacterPersona = {
   characterId: string;
   title: string;
   content: string;
+  schemaVersion: number;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -45,6 +46,7 @@ export type CharacterMemory = {
 };
 
 export type PersonaStructure = {
+  schemaVersion: number;
   fragments: Array<{
     id: string;
     ordinal: number;

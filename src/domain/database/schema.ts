@@ -5,6 +5,7 @@ import {
   bigserial,
   text,
   integer,
+  smallint,
   timestamp,
   boolean,
   doublePrecision,
@@ -611,6 +612,7 @@ export const characterPersonas = opod.table(
       }),
     title: text().notNull(),
     content: text().notNull(),
+    schemaVersion: smallint("schema_version").default(1).notNull(),
     sortOrder: integer("sort_order").default(0).notNull(),
     createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
@@ -678,7 +680,7 @@ export const characterPersonaFragments = opod.table(
     ),
     check(
       "character_persona_fragments_kind_check",
-      sql`${table.kind} IN ('identity', 'behavior', 'voice', 'example', 'greeting', 'lore', 'creator_note')`,
+      sql`${table.kind} IN ('identity', 'behavior', 'voice', 'example', 'greeting', 'lore', 'creator_note', 'motivation', 'judgment', 'tension', 'relationship', 'boundary')`,
     ),
     check(
       "character_persona_fragments_injection_check",

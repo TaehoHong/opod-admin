@@ -216,7 +216,29 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
 - `GET /api/health`가 DB 도달성을 확인한다. automated smoke와 rollback
   절차는 아직 없다.
 
+## Persona response and post policy normalization — 2026-09-16 verified
+
+- `CharactersService.toCharacterPersona`가 persona 목록·상세·생성·수정 응답의 공통 mapper다. repository가
+  선택한 `schemaVersion`을 응답에 그대로 포함하며 `src/characters/characters.service.spec.ts`가 이 API
+  field 계약을 보호한다. 좁은 명령은
+  `npm run test -- src/characters/characters.service.spec.ts --runInBand`다.
+- `PostPipelineV3Runner`가 V3/V4의 `content_style`/`content_guidance` alias를 LLM 호출 전에 하나의
+  `content_style` owner로 정규화한다. trim 후 내용이 같으면 하나로 합치고 다르면 `conflict`와
+  `persona_content_policy_conflict`로 pause한다. 둘 다 없을 때의 `missing_content_style` pause는 유지한다.
+  정규화된 persona 집합은 post planning, image planning, caption에 공통으로 전달한다. 좁은 회귀 명령은
+  `npm run test -- src/worker/post-pipeline-v3.runner.spec.ts --runInBand`다.
+
 ## Authored character context — 2026-09-08 verified boundary
+
+### 2026-09-16 persona schema v2 검증
+
+- 구조 API는 선택 `schemaVersion`을 받아 source와 fragment를 같은 트랜잭션에서 저장한다. 신규
+  `motivation`/`judgment`/`tension`/`relationship`/`boundary` kind는 v2에서만 저장할 수 있고,
+  v2의 `creator_note`는 `never_prompt`, `greeting`은 `start_only`만 허용한다. v1 요청과 기존
+  `behavior`/`lore` 자료는 계속 읽고 저장한다.
+- UI의 기존 읽기 전용 처리 정책 패널은 schema version과 v2 역할명을 표시한다. E2E setup은 backend
+  정본 `20260916062345_persona_schema_v2` migration을 직접 적용하며 별도 SQL 사본을 두지 않는다.
+  `test/character-context.e2e-spec.ts` 10개와 전체 admin E2E 21개가 일회용 DB에서 통과했다.
 
 ### 2026-09-11 추가 검증
 

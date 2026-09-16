@@ -87,6 +87,23 @@ export class PostPipelineV3Runner {
     const concept = draft.conceptJson as V3Concept;
     const stage = concept.pipeline.stage;
     try {
+      const personaPolicy =
+        stage === "post_plan" || stage === "image_plan" || stage === "caption"
+          ? resolvePersonaPolicyAliases(draft.character.personas)
+          : { status: "ready" as const, personas: draft.character.personas };
+      if (personaPolicy.status === "conflict") {
+        await this.pause(draft, concept, "conflict", [
+          "persona_content_policy_conflict",
+        ]);
+        return;
+      }
+      const normalizedDraft: PlannedDraft = {
+        ...draft,
+        character: {
+          ...draft.character,
+          personas: personaPolicy.personas,
+        },
+      };
       const planner = await this.settings.resolvePlannerSettings();
       if (!planner.apiUrl || !planner.apiKey || !planner.model) {
         await this.pause(draft, concept, "needs_configuration", [
@@ -104,13 +121,18 @@ export class PostPipelineV3Runner {
         this.llmLogs,
       );
       if (stage === "post_plan") {
-        await this.runPostPlanning(draft, concept, client);
+        await this.runPostPlanning(normalizedDraft, concept, client);
       } else if (stage === "image_plan") {
-        await this.runImagePlanning(draft, concept, client);
+        await this.runImagePlanning(normalizedDraft, concept, client);
       } else if (stage === "image_prompt") {
-        await this.runPromptGeneration(draft, concept, client);
+        await this.runPromptGeneration(normalizedDraft, concept, client);
       } else if (stage === "caption") {
-        await this.runCaption(draft, concept, client, options?.operatorNote);
+        await this.runCaption(
+          normalizedDraft,
+          concept,
+          client,
+          options?.operatorNote,
+        );
       } else {
         // ⑦ 게시·⑧ 메모리는 러너의 단계가 아니다. 여기까지 왔다면 claim 게이트가
         // 뚫린 것이므로 초안을 죽이지 말고 집기 전(pending)으로 돌려놓는다 —
@@ -930,6 +952,62 @@ function operatorRequest(concept: V3Concept): string | undefined {
 function normalizeTitle(value: string): string {
   return value.trim().toLowerCase().replace(/[ -]+/g, "_");
 }
+
+type PersonaEntry = PlannedDraft["character"]["personas"][number];
+
+function resolvePersonaPolicyAliases(
+  personas: PersonaEntry[],
+): { status: "ready"; personas: PersonaEntry[] } | { status: "conflict" } {
+  const aliases = personas.filter((entry) =>
+    ["content_style", "content_guidance"].includes(normalizeTitle(entry.title)),
+  );
+  const hasContentStyle = aliases.some(
+    (entry) => normalizeTitle(entry.title) === "content_style",
+  );
+  const hasContentGuidance = aliases.some(
+    (entry) => normalizeTitle(entry.title) === "content_guidance",
+  );
+  const normalizedContents = [
+    ...new Set(
+      aliases.map((entry) => entry.content.trim()).filter((content) => content),
+    ),
+  ];
+
+  if (hasContentStyle && hasContentGuidance && normalizedContents.length > 1) {
+    return { status: "conflict" };
+  }
+  if (!aliases.length) return { status: "ready", personas };
+
+  const policies =
+    hasContentStyle && hasContentGuidance
+      ? normalizedContents.slice(0, 1)
+      : aliases
+          .map((entry) => entry.content.trim())
+          .filter((content) => content);
+  let inserted = false;
+  const normalized: PersonaEntry[] = [];
+  for (const entry of personas) {
+    if (
+      ["content_style", "content_guidance"].includes(
+        normalizeTitle(entry.title),
+      )
+    ) {
+      if (!inserted) {
+        normalized.push(
+          ...policies.map((content) => ({
+            title: "content_style",
+            content,
+          })),
+        );
+        inserted = true;
+      }
+      continue;
+    }
+    normalized.push(entry);
+  }
+  return { status: "ready", personas: normalized };
+}
+
 function personaContents(draft: PlannedDraft, title: string): string[] {
   return draft.character.personas
     .filter(
