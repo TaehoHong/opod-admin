@@ -1,6 +1,6 @@
 # Persona v2 consumer hardening and Nahee cleanup
 
-Status: complete; Astra final review approved
+Status: complete; Astra final review approved; deployed to development 2026-09-16
 
 ## Scope
 
@@ -23,3 +23,9 @@ Status: complete; Astra final review approved
 - Agent focused store/router/integration tests plus the repository `check` command.
 - Independent local-DB readback for Nahee active rows, fragments, keywords, canon, and visual profile.
 - Final Astra review uses the integrated diff and fresh verification evidence.
+
+## Development deployment
+
+- Backend migration, Admin consumer changes, and Agent source-version validation are deployed and healthy.
+- Nahee reads as 10 active schema-v2 sources and 12 fragments with zero reconstruction mismatches.
+- A development schema-v1 character reads through the legacy fallback; deployment created no posts, drafts, or media.
