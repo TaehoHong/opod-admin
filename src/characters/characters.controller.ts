@@ -87,6 +87,11 @@ export class CharactersController {
     return this.charactersService.getCharacter(characterId);
   }
 
+  @Get(":id/metrics")
+  getCharacterMetrics(@Param("id") characterId: string) {
+    return this.charactersService.getCharacterMetrics(characterId);
+  }
+
   @Delete(":id")
   deleteCharacter(
     @Param("id") characterId: string,

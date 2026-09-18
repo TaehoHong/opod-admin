@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { AppProviders } from "../../app/providers";
 import { server } from "../../test/server";
 import { CharacterManagerPage } from "./CharacterManagerPage";
@@ -10,12 +10,6 @@ import { CharactersPage } from "./CharactersPage";
 import type { CharacterCreate } from "./api";
 
 function renderCharacterRoutes() {
-  server.use(
-    http.get("/api/admin/v1/media", () => HttpResponse.json({ items: [] })),
-    http.get("/api/admin/v1/characters/:id/personas/:personaId/structure", () =>
-      HttpResponse.json({ fragments: [] }),
-    ),
-  );
   render(
     <AppProviders>
       <MemoryRouter initialEntries={["/characters"]}>
@@ -30,6 +24,47 @@ function renderCharacterRoutes() {
     </AppProviders>,
   );
 }
+
+beforeEach(() => {
+  server.use(
+    http.get("/api/admin/v1/media", () => HttpResponse.json({ items: [] })),
+    http.get("/api/admin/v1/characters/:id/metrics", () =>
+      HttpResponse.json({
+        lastPostAt: null,
+        postsLast7Days: 0,
+        postsLast30Days: 0,
+        commentsLast30Days: 0,
+        reactionsLast30Days: 0,
+      }),
+    ),
+    http.get("/api/admin/v1/characters/:id/posting-policy", ({ params }) =>
+      HttpResponse.json({
+        characterId: params.id,
+        enabled: false,
+        weeklyCadence: 3,
+        hourStartKst: 18,
+        hourEndKst: 22,
+        lastRun: null,
+      }),
+    ),
+    http.get("/api/admin/v1/characters/:id/visual-profile", ({ params }) =>
+      HttpResponse.json({
+        characterId: params.id,
+        appearancePrompt: "",
+        stylePrompt: "",
+        negativePrompt: "",
+        referenceMedia: [],
+      }),
+    ),
+    http.get("/api/admin/v1/posts", () => HttpResponse.json({ items: [] })),
+    http.get("/api/admin/v1/character-action-logs", () =>
+      HttpResponse.json({ items: [] }),
+    ),
+    http.get("/api/admin/v1/characters/:id/personas/:personaId/structure", () =>
+      HttpResponse.json({ fragments: [] }),
+    ),
+  );
+});
 
 describe("character management", () => {
   it("creates a character and opens its management page", async () => {
@@ -166,6 +201,13 @@ describe("character management", () => {
     ).not.toBeInTheDocument();
     await userEvent.click(screen.getByLabelText("기존 캐릭터 관리"));
 
+    expect(
+      await screen.findByRole("tab", { name: "운영 개요", selected: true }),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "프로필" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "프로필 수정" }),
+    );
     const displayName = await screen.findByLabelText("표시 이름");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await userEvent.clear(displayName);
@@ -183,13 +225,16 @@ describe("character management", () => {
     );
 
     await userEvent.click(screen.getByRole("tab", { name: "페르소나" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "페르소나 추가" }),
+    );
     await userEvent.type(screen.getByLabelText("새 페르소나 제목"), "말투");
     await userEvent.type(
       screen.getByLabelText("새 페르소나 내용"),
       "짧고 친근하게 말한다.",
     );
     await userEvent.click(
-      screen.getByRole("button", { name: "페르소나 추가" }),
+      screen.getByRole("button", { name: "페르소나 저장" }),
     );
 
     await waitFor(() =>
@@ -197,7 +242,7 @@ describe("character management", () => {
         { title: "말투", content: "짧고 친근하게 말한다." },
       ]),
     );
-    expect(await screen.findByLabelText("페르소나 제목")).toHaveValue("말투");
+    expect(await screen.findByText("말투")).toBeInTheDocument();
   });
 
   it("fills the persona title from a standard block preset", async () => {
@@ -247,8 +292,10 @@ describe("character management", () => {
 
     await screen.findByText("기존 캐릭터");
     await userEvent.click(screen.getByText("기존 캐릭터"));
-    await screen.findByLabelText("표시 이름");
     await userEvent.click(screen.getByRole("tab", { name: "페르소나" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "페르소나 추가" }),
+    );
 
     // 첫인사는 React 이관 전까지 admin에서 만들 수 없던 표준 블록이다.
     await userEvent.click(
@@ -263,7 +310,7 @@ describe("character management", () => {
       "오랜만이야, 잘 지냈어?",
     );
     await userEvent.click(
-      screen.getByRole("button", { name: "페르소나 추가" }),
+      screen.getByRole("button", { name: "페르소나 저장" }),
     );
 
     await waitFor(() =>
@@ -364,6 +411,7 @@ describe("character management", () => {
     await userEvent.click(screen.getByText("기존 캐릭터"));
 
     await userEvent.click(screen.getByRole("tab", { name: "메모리" }));
+    await userEvent.click(screen.getByRole("button", { name: "메모리 추가" }));
     await userEvent.type(
       await screen.findByLabelText("새 메모리 내용"),
       "  제주에 산다.  ",
@@ -372,9 +420,12 @@ describe("character management", () => {
       screen.getByLabelText("등록 출처·사유"),
       "  초기 설정  ",
     );
-    await userEvent.click(screen.getByRole("button", { name: "메모리 추가" }));
+    await userEvent.click(screen.getByRole("button", { name: "메모리 저장" }));
 
     await userEvent.click(screen.getByRole("tab", { name: "비주얼" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "비주얼 수정" }),
+    );
     await userEvent.type(
       await screen.findByLabelText("외모 프롬프트"),
       "  shoulder-length hair  ",
@@ -388,6 +439,9 @@ describe("character management", () => {
     );
 
     await userEvent.click(screen.getByRole("tab", { name: "자동화" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "정책 수정" }),
+    );
     await userEvent.click(
       await screen.findByRole("checkbox", { name: "자동 포스팅 활성화" }),
     );
@@ -490,12 +544,16 @@ describe("character management", () => {
 
     await screen.findByText("기존 캐릭터");
     await userEvent.click(screen.getByText("기존 캐릭터"));
-    await userEvent.click(await screen.findByRole("tab", { name: "게시글" }));
-    expect(await screen.findByText("캐릭터 전용 게시글")).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("tab", { name: "게시물" }));
+    expect(
+      (await screen.findAllByText("캐릭터 전용 게시글")).length,
+    ).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole("tab", { name: "활동" }));
-    expect(await screen.findByText("MEMORY_CREATED")).toBeInTheDocument();
-    expect(screen.getByText("운영 메모리")).toBeInTheDocument();
+    expect(
+      (await screen.findAllByText("MEMORY_CREATED")).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText("운영 메모리").length).toBeGreaterThan(0);
     expect(
       screen.getByText(/character_canon_memories · memory-1…/),
     ).toBeInTheDocument();
@@ -597,6 +655,9 @@ describe("visual reference promotion", () => {
 
     await userEvent.click(await screen.findByLabelText("기존 캐릭터 관리"));
     await userEvent.click(await screen.findByRole("tab", { name: "비주얼" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "비주얼 수정" }),
+    );
     await userEvent.click(await screen.findByRole("button", { name: "승격" }));
 
     await waitFor(() =>
@@ -696,7 +757,11 @@ describe("visual reference promotion", () => {
     await userEvent.click(await screen.findByLabelText("기존 캐릭터 관리"));
     await userEvent.click(await screen.findByRole("tab", { name: "비주얼" }));
     expect(await screen.findByText("inactive portrait")).toBeInTheDocument();
-    expect(screen.getByText("비활성")).toBeInTheDocument();
+    expect(screen.getAllByText("비활성").length).toBeGreaterThan(0);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "비주얼 수정" }),
+    );
 
     const activeSelect = screen.getByRole("combobox", {
       name: "활성 레퍼런스",
@@ -708,14 +773,15 @@ describe("visual reference promotion", () => {
     );
 
     await waitFor(() => expect(referenceUpdates).toEqual([{ mediaIds: [] }]));
-    expect(screen.getAllByText("비활성")).toHaveLength(2);
+    expect(screen.getAllByText("비활성").length).toBeGreaterThanOrEqual(2);
+    await userEvent.click(screen.getByRole("button", { name: "비주얼 수정" }));
     expect(screen.getByRole("button", { name: "빈 캡션 생성" })).toBeDisabled();
 
     await userEvent.click(
       screen.getByRole("combobox", { name: "활성 레퍼런스" }),
     );
     await userEvent.click(
-      await screen.findByText("media-inactive", {
+      await screen.findByText("inactive.png", {
         selector: '[role="option"] span',
       }),
     );

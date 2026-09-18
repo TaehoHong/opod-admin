@@ -1,11 +1,12 @@
 import { Badge, Button, Group, Paper, Stack, Tabs, Text } from "@mantine/core";
 import { UserCircle } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { DataPage } from "../../shared/ui/DataPage";
 import { CharacterActivityPanel } from "./CharacterActivityPanel";
 import { CharacterAutomationPanel } from "./CharacterAutomationPanel";
 import { CharacterMemoriesPanel } from "./CharacterMemoriesPanel";
+import { CharacterOverviewPanel } from "./CharacterOverviewPanel";
 import { CharacterPersonasPanel } from "./CharacterPersonasPanel";
 import { CharacterPostsPanel } from "./CharacterPostsPanel";
 import { CharacterProfilePanel } from "./CharacterProfilePanel";
@@ -15,6 +16,7 @@ import styles from "./CharacterManagerPage.module.css";
 
 export function CharacterManagerPage() {
   const { characterId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const character = useQuery({
     queryKey: ["character", characterId],
     queryFn: () => fetchCharacter(characterId!),
@@ -22,6 +24,7 @@ export function CharacterManagerPage() {
   });
 
   if (!characterId) return <Navigate to="/characters" replace />;
+  const section = validSection(searchParams.get("section"));
 
   return (
     <DataPage
@@ -76,16 +79,28 @@ export function CharacterManagerPage() {
             </Group>
           </Paper>
           <Paper className={styles.workspace} p={0} component="section">
-            <Tabs defaultValue="profile">
+            <Tabs
+              value={section}
+              onChange={(value) => {
+                const next = new URLSearchParams(searchParams);
+                if (!value || value === "overview") next.delete("section");
+                else next.set("section", value);
+                setSearchParams(next, { replace: true });
+              }}
+            >
               <Tabs.List className={styles.tabsList}>
+                <Tabs.Tab value="overview">운영 개요</Tabs.Tab>
                 <Tabs.Tab value="profile">프로필</Tabs.Tab>
                 <Tabs.Tab value="personas">페르소나</Tabs.Tab>
                 <Tabs.Tab value="memory">메모리</Tabs.Tab>
-                <Tabs.Tab value="posts">게시글</Tabs.Tab>
+                <Tabs.Tab value="posts">게시물</Tabs.Tab>
                 <Tabs.Tab value="activity">활동</Tabs.Tab>
                 <Tabs.Tab value="visual">비주얼</Tabs.Tab>
                 <Tabs.Tab value="automation">자동화</Tabs.Tab>
               </Tabs.List>
+              <Tabs.Panel value="overview" className={styles.panel}>
+                <CharacterOverviewPanel character={character.data} />
+              </Tabs.Panel>
               <Tabs.Panel value="profile" className={styles.panel}>
                 <CharacterProfilePanel
                   key={character.data.id}
@@ -122,4 +137,19 @@ export function CharacterManagerPage() {
       ) : null}
     </DataPage>
   );
+}
+
+const SECTIONS = new Set([
+  "overview",
+  "profile",
+  "personas",
+  "memory",
+  "posts",
+  "activity",
+  "visual",
+  "automation",
+]);
+
+function validSection(value: string | null) {
+  return value && SECTIONS.has(value) ? value : "overview";
 }

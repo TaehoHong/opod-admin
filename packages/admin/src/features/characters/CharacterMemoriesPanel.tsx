@@ -11,6 +11,7 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { MutationAlert } from "../../shared/ui/MutationAlert";
 import {
   createMemories,
@@ -37,6 +38,7 @@ export function CharacterMemoriesPanel({
   characterId: string;
   memories: CharacterMemory[];
 }) {
+  const [creating, setCreating] = useState(false);
   const queryClient = useQueryClient();
   const form = useForm({
     mode: "uncontrolled",
@@ -52,54 +54,74 @@ export function CharacterMemoriesPanel({
       createMemory(characterId, trimMemory(values)),
     onSuccess: () => {
       form.reset();
+      setCreating(false);
       invalidate(queryClient, characterId);
     },
   });
 
   return (
     <Stack>
-      <Paper p="md" component="section">
-        <Stack gap="sm">
-          <form onSubmit={form.onSubmit((values) => create.mutate(values))}>
-            <Stack gap="sm">
-              <Title order={5}>메모리 추가</Title>
-              <Text size="sm" c="dimmed">
-                캐릭터의 확정된 사실만 한 메모리에 하나씩 작성합니다.
-              </Text>
-              <Textarea
-                label="새 메모리 내용"
-                rows={3}
-                key={form.key("content")}
-                {...form.getInputProps("content")}
-              />
-              <Group grow align="flex-start">
-                <Select
-                  label="타입"
-                  data={MEMORY_TYPES}
-                  allowDeselect={false}
-                  key={form.key("type")}
-                  {...form.getInputProps("type")}
-                />
-                <TextInput
-                  label="등록 출처·사유"
-                  key={form.key("reason")}
-                  {...form.getInputProps("reason")}
-                />
-              </Group>
-              <MutationAlert
-                mutation={create}
-                success="메모리를 추가했습니다."
-              />
-              <Group>
-                <Button type="submit" loading={create.isPending}>
-                  메모리 추가
-                </Button>
-              </Group>
-            </Stack>
-          </form>
-          <MemoryBulkCreate characterId={characterId} />
+      <Group justify="space-between" align="flex-start">
+        <Stack gap={2}>
+          <Title order={4}>메모리</Title>
+          <Text size="sm" c="dimmed">
+            캐릭터가 유지하는 확정 사실 {memories.length}개
+          </Text>
         </Stack>
-      </Paper>
+        <Button onClick={() => setCreating(true)}>메모리 추가</Button>
+      </Group>
+      {creating ? (
+        <Paper p="md" component="section">
+          <Stack gap="sm">
+            <form onSubmit={form.onSubmit((values) => create.mutate(values))}>
+              <Stack gap="sm">
+                <Title order={5}>새 메모리</Title>
+                <Text size="sm" c="dimmed">
+                  캐릭터의 확정된 사실만 한 메모리에 하나씩 작성합니다.
+                </Text>
+                <Textarea
+                  label="새 메모리 내용"
+                  rows={3}
+                  key={form.key("content")}
+                  {...form.getInputProps("content")}
+                />
+                <Group grow align="flex-start">
+                  <Select
+                    label="타입"
+                    data={MEMORY_TYPES}
+                    allowDeselect={false}
+                    key={form.key("type")}
+                    {...form.getInputProps("type")}
+                  />
+                  <TextInput
+                    label="등록 출처·사유"
+                    key={form.key("reason")}
+                    {...form.getInputProps("reason")}
+                  />
+                </Group>
+                <MutationAlert
+                  mutation={create}
+                  success="메모리를 추가했습니다."
+                />
+                <Group>
+                  <Button type="submit" loading={create.isPending}>
+                    메모리 저장
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="default"
+                    disabled={create.isPending}
+                    onClick={() => setCreating(false)}
+                  >
+                    취소
+                  </Button>
+                </Group>
+              </Stack>
+            </form>
+            <MemoryBulkCreate characterId={characterId} />
+          </Stack>
+        </Paper>
+      ) : null}
       {memories.length === 0 ? (
         <Text c="dimmed">등록된 메모리가 없습니다.</Text>
       ) : (
@@ -122,6 +144,7 @@ function MemoryForm({
   characterId: string;
   memory: CharacterMemory;
 }) {
+  const [editing, setEditing] = useState(false);
   const queryClient = useQueryClient();
   const form = useForm({
     mode: "uncontrolled",
@@ -139,12 +162,42 @@ function MemoryForm({
   const save = useMutation({
     mutationFn: (values: typeof form.values) =>
       updateMemory(characterId, memory.id, trimMemory(values)),
-    onSuccess: () => invalidate(queryClient, characterId),
+    onSuccess: () => {
+      setEditing(false);
+      invalidate(queryClient, characterId);
+    },
   });
   const remove = useMutation({
     mutationFn: () => deleteMemory(characterId, memory.id),
     onSuccess: () => invalidate(queryClient, characterId),
   });
+
+  if (!editing) {
+    return (
+      <Paper p="md" component="section">
+        <Stack gap="sm">
+          <Group justify="space-between" align="flex-start" wrap="nowrap">
+            <Stack gap={3} miw={0}>
+              <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                {memory.content}
+              </Text>
+              <Group gap="xs">
+                <Text size="xs" fw={700}>
+                  {memoryTypeLabel(memory.type)}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {memory.reason}
+                </Text>
+              </Group>
+            </Stack>
+            <Button variant="default" onClick={() => setEditing(true)}>
+              수정
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
+    );
+  }
 
   return (
     <Paper p="md" component="section">
@@ -178,6 +231,14 @@ function MemoryForm({
             </Button>
             <Button
               type="button"
+              variant="default"
+              disabled={save.isPending || remove.isPending}
+              onClick={() => setEditing(false)}
+            >
+              취소
+            </Button>
+            <Button
+              type="button"
               variant="subtle"
               color="red"
               loading={remove.isPending}
@@ -190,6 +251,10 @@ function MemoryForm({
       </form>
     </Paper>
   );
+}
+
+function memoryTypeLabel(value: string) {
+  return MEMORY_TYPES.find((type) => type.value === value)?.label ?? value;
 }
 
 function MemoryBulkCreate({ characterId }: { characterId: string }) {

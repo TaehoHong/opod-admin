@@ -1,9 +1,10 @@
 import { Injectable } from "@nestjs/common";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { DatabaseService } from "../domain/database/database.service";
 import {
   characterActionLogs,
   characterPostingPolicies,
+  characterSocialActivityJobs,
   characters,
 } from "../domain/database/schema";
 
@@ -24,6 +25,15 @@ export type PostingPolicyValues = Omit<
   "characterId" | "updatedAt"
 >;
 
+export type PostingRunRow = Pick<
+  typeof characterSocialActivityJobs.$inferSelect,
+  | "processingStatus"
+  | "scheduledAt"
+  | "finishedAt"
+  | "attemptCount"
+  | "lastErrorMessage"
+>;
+
 @Injectable()
 export class PostingPolicyRepository {
   constructor(private readonly database: DatabaseService) {}
@@ -40,6 +50,25 @@ export class PostingPolicyRepository {
       })
       .from(characterPostingPolicies)
       .where(eq(characterPostingPolicies.characterId, characterId))
+      .limit(1)
+      .then(([row]) => row ?? null);
+  }
+
+  findLatestRun(characterId: string): Promise<PostingRunRow | null> {
+    return this.database.client
+      .select({
+        processingStatus: characterSocialActivityJobs.processingStatus,
+        scheduledAt: characterSocialActivityJobs.scheduledAt,
+        finishedAt: characterSocialActivityJobs.finishedAt,
+        attemptCount: characterSocialActivityJobs.attemptCount,
+        lastErrorMessage: characterSocialActivityJobs.lastErrorMessage,
+      })
+      .from(characterSocialActivityJobs)
+      .where(eq(characterSocialActivityJobs.characterId, characterId))
+      .orderBy(
+        desc(characterSocialActivityJobs.scheduledAt),
+        desc(characterSocialActivityJobs.id),
+      )
       .limit(1)
       .then(([row]) => row ?? null);
   }

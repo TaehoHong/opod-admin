@@ -69,6 +69,14 @@ export type CharacterDetail = CharacterListItem & {
   memories: CharacterMemory[];
 };
 
+export type CharacterMetrics = {
+  lastPostAt: string | null;
+  postsLast7Days: number;
+  postsLast30Days: number;
+  commentsLast30Days: number;
+  reactionsLast30Days: number;
+};
+
 export type CharacterProfileImage = {
   characterId: string;
   image: {
@@ -103,6 +111,13 @@ export type PostingPolicy = {
   hourStartKst: number;
   hourEndKst: number;
   updatedAt?: string;
+  lastRun: {
+    status: "queued" | "running" | "completed" | "failed" | "cancelled";
+    scheduledAt: string;
+    finishedAt: string | null;
+    attemptCount: number;
+    errorMessage: string | null;
+  } | null;
 };
 
 export type CharacterActionLog = {
@@ -137,6 +152,12 @@ export function createCharacter(body: CharacterCreate): Promise<Character> {
 
 export function fetchCharacter(characterId: string): Promise<CharacterDetail> {
   return apiRequest(characterPath(characterId));
+}
+
+export function fetchCharacterMetrics(
+  characterId: string,
+): Promise<CharacterMetrics> {
+  return apiRequest(`${characterPath(characterId)}/metrics`);
 }
 
 export function updateCharacter(
@@ -345,7 +366,7 @@ export function fetchPostingPolicy(
 
 export function updatePostingPolicy(
   characterId: string,
-  body: Omit<PostingPolicy, "characterId" | "updatedAt">,
+  body: Omit<PostingPolicy, "characterId" | "updatedAt" | "lastRun">,
 ): Promise<PostingPolicy> {
   return apiRequest(`${characterPath(characterId)}/posting-policy`, {
     method: "PUT",

@@ -12,6 +12,13 @@ function repositoryFake(overrides: Partial<CharacterRepository> = {}) {
     update: jest.fn(),
     updateStatus: jest.fn(),
     findDetail: jest.fn(),
+    findMetrics: jest.fn().mockResolvedValue({
+      lastPostAt: null,
+      postsLast7Days: 0,
+      postsLast30Days: 0,
+      commentsLast30Days: 0,
+      reactionsLast30Days: 0,
+    }),
     cursorMatchesFilter: jest.fn().mockResolvedValue(true),
     findManyForList: jest.fn().mockResolvedValue([]),
     findPersonas: jest.fn().mockResolvedValue([]),
@@ -67,6 +74,27 @@ function memoryRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe("CharactersService", () => {
+  it("returns character publishing and engagement metrics", async () => {
+    const repository = repositoryFake({
+      findMetrics: jest.fn().mockResolvedValue({
+        lastPostAt: new Date("2026-09-17T12:00:00.000Z"),
+        postsLast7Days: 2,
+        postsLast30Days: 6,
+        commentsLast30Days: 11,
+        reactionsLast30Days: 19,
+      }),
+    });
+    const service = makeService(repository);
+
+    await expect(service.getCharacterMetrics("character-1")).resolves.toEqual({
+      lastPostAt: "2026-09-17T12:00:00.000Z",
+      postsLast7Days: 2,
+      postsLast30Days: 6,
+      commentsLast30Days: 11,
+      reactionsLast30Days: 19,
+    });
+  });
+
   it("creates character memory without a scope", async () => {
     const repository = repositoryFake({
       createMemory: jest.fn().mockResolvedValue(memoryRow()),

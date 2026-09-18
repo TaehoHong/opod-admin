@@ -12,6 +12,7 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { MutationAlert } from "../../shared/ui/MutationAlert";
 import { OperationErrorAlert } from "../../shared/ui/OperationErrorAlert";
 import {
@@ -90,6 +91,7 @@ export function CharacterPersonasPanel({
   characterId: string;
   personas: CharacterPersona[];
 }) {
+  const [creating, setCreating] = useState(false);
   const queryClient = useQueryClient();
   const form = useForm<{
     title: string;
@@ -114,6 +116,7 @@ export function CharacterPersonasPanel({
       }),
     onSuccess: () => {
       form.reset();
+      setCreating(false);
       invalidate(queryClient, characterId);
     },
   });
@@ -133,52 +136,71 @@ export function CharacterPersonasPanel({
 
   return (
     <Stack>
-      <Paper p="md" component="section">
-        <Stack gap="sm">
-          <form onSubmit={form.onSubmit((values) => create.mutate(values))}>
-            <Stack gap="sm">
-              <Title order={5}>페르소나 추가</Title>
-              <Text c="dimmed" size="sm">
-                내용 분류를 고르면 제목에 반영됩니다. 목록에 없는 제목은 직접
-                입력하세요. 한 블록에는 하나의 관심사만 담습니다.
-              </Text>
-              <Group grow align="flex-start">
-                <PersonaTitlePreset
-                  title={form.values.title}
-                  onPick={(title) => form.setFieldValue("title", title)}
-                />
-                <TextInput
-                  label="새 페르소나 제목"
-                  key={form.key("title")}
-                  {...form.getInputProps("title")}
-                />
-                <NumberInput
-                  label="정렬 순서"
-                  description="선택"
-                  key={form.key("sortOrder")}
-                  {...form.getInputProps("sortOrder")}
-                />
-              </Group>
-              <Textarea
-                label="새 페르소나 내용"
-                rows={4}
-                key={form.key("content")}
-                {...form.getInputProps("content")}
-              />
-              <MutationAlert
-                mutation={create}
-                success="페르소나를 추가했습니다."
-              />
-              <Group>
-                <Button type="submit" loading={create.isPending}>
-                  페르소나 추가
-                </Button>
-              </Group>
-            </Stack>
-          </form>
-          <PersonaBulkCreate characterId={characterId} />
+      <Group justify="space-between" align="flex-start">
+        <Stack gap={2}>
+          <Title order={4}>페르소나</Title>
+          <Text size="sm" c="dimmed">
+            캐릭터 판단과 표현에 사용하는 {personas.length}개 블록
+          </Text>
         </Stack>
-      </Paper>
+        <Button onClick={() => setCreating(true)}>페르소나 추가</Button>
+      </Group>
+      {creating ? (
+        <Paper p="md" component="section">
+          <Stack gap="sm">
+            <form onSubmit={form.onSubmit((values) => create.mutate(values))}>
+              <Stack gap="sm">
+                <Title order={5}>새 페르소나</Title>
+                <Text c="dimmed" size="sm">
+                  내용 분류를 고르면 제목에 반영됩니다. 목록에 없는 제목은 직접
+                  입력하세요. 한 블록에는 하나의 관심사만 담습니다.
+                </Text>
+                <Group grow align="flex-start">
+                  <PersonaTitlePreset
+                    title={form.values.title}
+                    onPick={(title) => form.setFieldValue("title", title)}
+                  />
+                  <TextInput
+                    label="새 페르소나 제목"
+                    key={form.key("title")}
+                    {...form.getInputProps("title")}
+                  />
+                  <NumberInput
+                    label="정렬 순서"
+                    description="선택"
+                    key={form.key("sortOrder")}
+                    {...form.getInputProps("sortOrder")}
+                  />
+                </Group>
+                <Textarea
+                  label="새 페르소나 내용"
+                  rows={4}
+                  key={form.key("content")}
+                  {...form.getInputProps("content")}
+                />
+                <MutationAlert
+                  mutation={create}
+                  success="페르소나를 추가했습니다."
+                />
+                <Group>
+                  <Button type="submit" loading={create.isPending}>
+                    페르소나 저장
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="default"
+                    disabled={create.isPending}
+                    onClick={() => setCreating(false)}
+                  >
+                    취소
+                  </Button>
+                </Group>
+              </Stack>
+            </form>
+            <PersonaBulkCreate characterId={characterId} />
+          </Stack>
+        </Paper>
+      ) : null}
 
       {personas.length === 0 ? (
         <Text c="dimmed">등록된 페르소나가 없습니다.</Text>
@@ -215,6 +237,7 @@ function PersonaForm({
   moving: boolean;
   onMove: (offset: number) => void;
 }) {
+  const [editing, setEditing] = useState(false);
   const queryClient = useQueryClient();
   const form = useForm({
     mode: "controlled",
@@ -235,12 +258,39 @@ function PersonaForm({
         content: values.content.trim(),
         sortOrder: Number(values.sortOrder),
       }),
-    onSuccess: () => invalidate(queryClient, characterId),
+    onSuccess: () => {
+      setEditing(false);
+      invalidate(queryClient, characterId);
+    },
   });
   const remove = useMutation({
     mutationFn: () => deletePersona(characterId, persona.id),
     onSuccess: () => invalidate(queryClient, characterId),
   });
+
+  if (!editing) {
+    return (
+      <Paper p="md" component="section">
+        <Stack gap="sm">
+          <Group justify="space-between" align="flex-start" wrap="nowrap">
+            <Stack gap={2} miw={0}>
+              <Text fw={750}>{persona.title}</Text>
+              <Text size="xs" c="dimmed">
+                정렬 순서 {persona.sortOrder} · 스키마 v{persona.schemaVersion}
+              </Text>
+            </Stack>
+            <Button variant="default" onClick={() => setEditing(true)}>
+              수정
+            </Button>
+          </Group>
+          <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+            {persona.content}
+          </Text>
+          <PersonaProcessing characterId={characterId} personaId={persona.id} />
+        </Stack>
+      </Paper>
+    );
+  }
 
   return (
     <Paper p="md" component="section">
@@ -274,6 +324,14 @@ function PersonaForm({
           <Group>
             <Button type="submit" loading={save.isPending}>
               저장
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              disabled={save.isPending || remove.isPending}
+              onClick={() => setEditing(false)}
+            >
+              취소
             </Button>
             <Button
               type="button"

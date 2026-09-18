@@ -42,6 +42,7 @@ export function CharacterProfilePanel({
 }: {
   character: CharacterDetail;
 }) {
+  const [editing, setEditing] = useState(false);
   const queryClient = useQueryClient();
   const form = useForm({
     mode: "uncontrolled",
@@ -65,46 +66,101 @@ export function CharacterProfilePanel({
           .map((value) => value.trim())
           .filter(Boolean),
       }),
-    onSuccess: () => invalidateCharacter(queryClient, character.id),
+    onSuccess: () => {
+      setEditing(false);
+      invalidateCharacter(queryClient, character.id);
+    },
   });
 
   return (
     <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
       <Paper p="md" component="section">
-        <form onSubmit={form.onSubmit((values) => save.mutate(values))}>
+        {editing ? (
+          <form onSubmit={form.onSubmit((values) => save.mutate(values))}>
+            <Stack gap="sm">
+              <Title order={5}>기본 프로필 수정</Title>
+              <TextInput label="핸들" value={character.publicId} disabled />
+              <TextInput
+                label="표시 이름"
+                key={form.key("displayName")}
+                {...form.getInputProps("displayName")}
+              />
+              <Textarea
+                label="소개"
+                rows={4}
+                key={form.key("bio")}
+                {...form.getInputProps("bio")}
+              />
+              <TagsInput
+                label="관심사"
+                description="쉼표 또는 Enter로 구분합니다"
+                splitChars={[","]}
+                key={form.key("interests")}
+                {...form.getInputProps("interests")}
+              />
+              <MutationState
+                mutation={save}
+                success="프로필을 저장했습니다."
+                errorTitle="프로필을 저장하지 못했습니다"
+              />
+              <Group>
+                <Button type="submit" loading={save.isPending}>
+                  프로필 저장
+                </Button>
+                <Button
+                  type="button"
+                  variant="default"
+                  disabled={save.isPending}
+                  onClick={() => setEditing(false)}
+                >
+                  취소
+                </Button>
+              </Group>
+            </Stack>
+          </form>
+        ) : (
           <Stack gap="sm">
-            <Title order={5}>기본 프로필</Title>
-            <TextInput label="핸들" value={character.publicId} disabled />
-            <TextInput
-              label="표시 이름"
-              key={form.key("displayName")}
-              {...form.getInputProps("displayName")}
-            />
-            <Textarea
-              label="소개"
-              rows={4}
-              key={form.key("bio")}
-              {...form.getInputProps("bio")}
-            />
-            <TagsInput
-              label="관심사"
-              description="쉼표 또는 Enter로 구분합니다"
-              splitChars={[","]}
-              key={form.key("interests")}
-              {...form.getInputProps("interests")}
-            />
-            <MutationState
-              mutation={save}
-              success="프로필을 저장했습니다."
-              errorTitle="프로필을 저장하지 못했습니다"
-            />
-            <Group>
-              <Button type="submit" loading={save.isPending}>
-                프로필 저장
+            <Group justify="space-between" align="flex-start">
+              <Stack gap={2}>
+                <Title order={5}>기본 프로필</Title>
+                <Text size="sm" c="dimmed">
+                  @{character.publicId}
+                </Text>
+              </Stack>
+              <Button variant="default" onClick={() => setEditing(true)}>
+                프로필 수정
               </Button>
             </Group>
+            <Stack gap={3}>
+              <Text size="xs" c="dimmed">
+                표시 이름
+              </Text>
+              <Text fw={700}>{character.displayName}</Text>
+            </Stack>
+            <Stack gap={3}>
+              <Text size="xs" c="dimmed">
+                소개
+              </Text>
+              <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                {character.bio}
+              </Text>
+            </Stack>
+            <Stack gap={3}>
+              <Text size="xs" c="dimmed">
+                관심사
+              </Text>
+              <Group gap="xs">
+                {character.interests.length
+                  ? character.interests.map((interest) => (
+                      <Text key={interest} size="sm">
+                        {interest}
+                      </Text>
+                    ))
+                  : "—"}
+              </Group>
+            </Stack>
           </Stack>
-        </form>
+        )}
       </Paper>
 
       <Stack>
@@ -116,6 +172,7 @@ export function CharacterProfilePanel({
 }
 
 function ProfileImageForm({ characterId }: { characterId: string }) {
+  const [editing, setEditing] = useState(false);
   const profile = useQuery({
     queryKey: ["character", characterId, "profile-image"],
     queryFn: () => fetchCharacterProfileImage(characterId),
@@ -139,6 +196,41 @@ function ProfileImageForm({ characterId }: { characterId: string }) {
   }
   if (!profile.data) return null;
 
+  const source = profile.data.image ? previewUrl(profile.data.image.url) : null;
+  if (!editing) {
+    const cropStyle = {
+      "--crop-x": `${profile.data.crop.x * 100}%`,
+      "--crop-y": `${profile.data.crop.y * 100}%`,
+      "--crop-zoom": String(profile.data.crop.zoom),
+    } as CSSProperties;
+    return (
+      <Paper p="md" component="section">
+        <Stack gap="sm">
+          <Group justify="space-between" align="flex-start">
+            <Stack gap={2}>
+              <Title order={5}>프로필 이미지</Title>
+              <Text size="sm" c="dimmed">
+                공개 프로필에 표시되는 정사각형 이미지
+              </Text>
+            </Stack>
+            <Button variant="default" onClick={() => setEditing(true)}>
+              이미지 수정
+            </Button>
+          </Group>
+          {source ? (
+            <div className={classes.preview} style={cropStyle}>
+              <img src={source} alt={`${characterId} 프로필 이미지`} />
+            </div>
+          ) : (
+            <Text size="sm" c="dimmed">
+              설정된 이미지가 없습니다.
+            </Text>
+          )}
+        </Stack>
+      </Paper>
+    );
+  }
+
   return (
     <ProfileImageEditor
       key={`${profile.data.image?.id ?? "empty"}:${profile.data.crop.x}:${
@@ -151,6 +243,7 @@ function ProfileImageForm({ characterId }: { characterId: string }) {
       hasMoreMedia={media.hasNextPage}
       isLoadingMoreMedia={media.isFetchingNextPage}
       onLoadMoreMedia={() => void media.fetchNextPage()}
+      onDone={() => setEditing(false)}
     />
   );
 }
@@ -163,6 +256,7 @@ function ProfileImageEditor({
   hasMoreMedia,
   isLoadingMoreMedia,
   onLoadMoreMedia,
+  onDone,
 }: {
   characterId: string;
   profile: Awaited<ReturnType<typeof fetchCharacterProfileImage>>;
@@ -171,6 +265,7 @@ function ProfileImageEditor({
   hasMoreMedia: boolean;
   isLoadingMoreMedia: boolean;
   onLoadMoreMedia: () => void;
+  onDone: () => void;
 }) {
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
@@ -205,17 +300,21 @@ function ProfileImageEditor({
           zoom: Number(values.cropZoom),
         },
       }),
-    onSuccess: () =>
+    onSuccess: () => {
+      onDone();
       void queryClient.invalidateQueries({
         queryKey: ["character", characterId, "profile-image"],
-      }),
+      });
+    },
   });
   const clear = useMutation({
     mutationFn: () => clearCharacterProfileImage(characterId),
-    onSuccess: () =>
+    onSuccess: () => {
+      onDone();
       void queryClient.invalidateQueries({
         queryKey: ["character", characterId, "profile-image"],
-      }),
+      });
+    },
   });
   const upload = useMutation({
     mutationFn: async (selected: File) => {
@@ -236,6 +335,7 @@ function ProfileImageEditor({
     },
     onSuccess: () => {
       setFile(null);
+      onDone();
       void queryClient.invalidateQueries({ queryKey: ["media"] });
       void queryClient.invalidateQueries({
         queryKey: ["character", characterId, "profile-image"],
@@ -423,6 +523,14 @@ function ProfileImageEditor({
                 이미지 제거
               </Button>
             ) : null}
+            <Button
+              type="button"
+              variant="default"
+              disabled={save.isPending || upload.isPending || clear.isPending}
+              onClick={onDone}
+            >
+              취소
+            </Button>
           </Group>
         </Stack>
       </form>
@@ -431,6 +539,7 @@ function ProfileImageEditor({
 }
 
 function CharacterStatusForm({ character }: { character: CharacterDetail }) {
+  const [managing, setManaging] = useState(false);
   const queryClient = useQueryClient();
   const statusForm = useForm({
     mode: "uncontrolled",
@@ -448,13 +557,47 @@ function CharacterStatusForm({ character }: { character: CharacterDetail }) {
         status: character.status === "active" ? "inactive" : "active",
         reason: reason.trim(),
       }),
-    onSuccess: () => invalidateCharacter(queryClient, character.id),
+    onSuccess: () => {
+      setManaging(false);
+      invalidateCharacter(queryClient, character.id);
+    },
   });
   const remove = useMutation({
     mutationFn: (reason: string) =>
       deleteCharacter(character.id, reason.trim()),
-    onSuccess: () => invalidateCharacter(queryClient, character.id),
+    onSuccess: () => {
+      setManaging(false);
+      invalidateCharacter(queryClient, character.id);
+    },
   });
+
+  if (!managing) {
+    return (
+      <Paper p="md" component="section">
+        <Stack gap="sm">
+          <Group justify="space-between" align="flex-start">
+            <Stack gap={2}>
+              <Title order={5}>운영 상태</Title>
+              <Text size="sm" c="dimmed">
+                현재 상태 ·{" "}
+                {character.status === "active" ? "운영 중" : "비활성"}
+              </Text>
+            </Stack>
+            <Button
+              variant="default"
+              color={character.status === "active" ? "red" : undefined}
+              onClick={() => setManaging(true)}
+            >
+              상태 관리
+            </Button>
+          </Group>
+          <Text size="xs" c="dimmed">
+            상태 변경은 캐릭터 노출과 자동화에 영향을 줍니다.
+          </Text>
+        </Stack>
+      </Paper>
+    );
+  }
 
   return (
     <Paper p="md" component="section">
@@ -507,6 +650,13 @@ function CharacterStatusForm({ character }: { character: CharacterDetail }) {
             />
           </>
         ) : null}
+        <Button
+          variant="default"
+          disabled={status.isPending || remove.isPending}
+          onClick={() => setManaging(false)}
+        >
+          취소
+        </Button>
       </Stack>
     </Paper>
   );

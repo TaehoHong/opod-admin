@@ -37,8 +37,11 @@
 }
 
 .tabsList {
+  flex-wrap: nowrap;
+  overflow-x: auto;
   padding-inline: var(--mantine-spacing-md);
   background: var(--mantine-color-ink-0);
+  scrollbar-width: thin;
 }
 
 .panel {

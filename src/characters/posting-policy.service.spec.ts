@@ -6,6 +6,7 @@ function repositoryMock() {
   return {
     characterExists: jest.fn().mockResolvedValue(true),
     findByCharacter: jest.fn().mockResolvedValue(null),
+    findLatestRun: jest.fn().mockResolvedValue(null),
     upsert: jest.fn(),
     recordPolicyChange: jest.fn().mockResolvedValue(undefined),
   };
@@ -26,6 +27,29 @@ describe("PostingPolicyService", () => {
       weeklyCadence: 3,
       hourStartKst: 18,
       hourEndKst: 22,
+      lastRun: null,
+    });
+  });
+
+  it("returns the latest automation run with the posting policy", async () => {
+    const policies = repositoryMock();
+    policies.findLatestRun.mockResolvedValue({
+      processingStatus: "failed",
+      scheduledAt: new Date("2026-09-17T09:00:00.000Z"),
+      finishedAt: new Date("2026-09-17T09:01:00.000Z"),
+      attemptCount: 3,
+      lastErrorMessage: "provider timeout",
+    });
+    const service = makeService(policies);
+
+    await expect(service.getPolicy("ai-1")).resolves.toMatchObject({
+      lastRun: {
+        status: "failed",
+        scheduledAt: "2026-09-17T09:00:00.000Z",
+        finishedAt: "2026-09-17T09:01:00.000Z",
+        attemptCount: 3,
+        errorMessage: "provider timeout",
+      },
     });
   });
 

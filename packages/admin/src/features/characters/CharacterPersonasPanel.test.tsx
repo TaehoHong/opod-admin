@@ -42,9 +42,10 @@ describe("persona classification display", () => {
         http.get(endpoint, () => HttpResponse.json({ fragments: [] })),
       );
       show(title);
-      expect(
-        screen.getAllByRole("combobox", { name: "내용 분류" })[1],
-      ).toHaveValue(label);
+      await userEvent.click(screen.getByRole("button", { name: "수정" }));
+      expect(screen.getByRole("combobox", { name: "내용 분류" })).toHaveValue(
+        label,
+      );
       await screen.findByText(/저장된 처리 역할·주입 방식이 없습니다/);
     },
   );
@@ -114,14 +115,15 @@ describe("persona classification display", () => {
   it("keeps custom titles visible and follows direct title edits", async () => {
     server.use(http.get(endpoint, () => HttpResponse.json({ fragments: [] })));
     show("custom_notes");
+    await userEvent.click(screen.getByRole("button", { name: "수정" }));
     const title = screen.getByLabelText("페르소나 제목");
-    expect(
-      screen.getAllByRole("combobox", { name: "내용 분류" })[1],
-    ).toHaveValue("직접 입력 (custom_notes)");
+    expect(screen.getByRole("combobox", { name: "내용 분류" })).toHaveValue(
+      "직접 입력 (custom_notes)",
+    );
     await userEvent.clear(title);
     await userEvent.type(title, "appearance");
-    expect(
-      screen.getAllByRole("combobox", { name: "내용 분류" })[1],
-    ).toHaveValue("외형 (appearance)");
+    expect(screen.getByRole("combobox", { name: "내용 분류" })).toHaveValue(
+      "외형 (appearance)",
+    );
   });
 });

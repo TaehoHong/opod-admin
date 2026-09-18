@@ -8,6 +8,13 @@ type PostingPolicy = {
   hourStartKst: number;
   hourEndKst: number;
   updatedAt?: string;
+  lastRun: {
+    status: string;
+    scheduledAt: string;
+    finishedAt: string | null;
+    attemptCount: number;
+    errorMessage: string | null;
+  } | null;
 };
 
 const CADENCE_MIN = 1;
@@ -20,7 +27,10 @@ export class PostingPolicyService {
 
   async getPolicy(characterId: string): Promise<PostingPolicy> {
     await this.assertCharacter(characterId);
-    const policy = await this.policies.findByCharacter(characterId);
+    const [policy, lastRun] = await Promise.all([
+      this.policies.findByCharacter(characterId),
+      this.policies.findLatestRun(characterId),
+    ]);
     if (!policy) {
       return {
         characterId,
@@ -28,9 +38,10 @@ export class PostingPolicyService {
         weeklyCadence: 3,
         hourStartKst: 18,
         hourEndKst: 22,
+        lastRun: this.toLastRun(lastRun),
       };
     }
-    return this.toPolicy(policy);
+    return { ...this.toPolicy(policy), lastRun: this.toLastRun(lastRun) };
   }
 
   async upsertPolicy(input: {
@@ -72,7 +83,7 @@ export class PostingPolicyService {
       input.characterId,
       `posting policy ${enabled ? "enabled" : "disabled"} (${weeklyCadence}/week, ${hourStartKst}-${hourEndKst} KST)`,
     );
-    return this.toPolicy(policy);
+    return { ...this.toPolicy(policy), lastRun: null };
   }
 
   private parseIntInRange(
@@ -102,7 +113,7 @@ export class PostingPolicyService {
     hourStartKst: number;
     hourEndKst: number;
     updatedAt: Date;
-  }): PostingPolicy {
+  }): Omit<PostingPolicy, "lastRun"> {
     return {
       characterId: policy.characterId,
       enabled: policy.enabled,
@@ -111,5 +122,19 @@ export class PostingPolicyService {
       hourEndKst: policy.hourEndKst,
       updatedAt: policy.updatedAt.toISOString(),
     };
+  }
+
+  private toLastRun(
+    run: Awaited<ReturnType<PostingPolicyRepository["findLatestRun"]>>,
+  ): PostingPolicy["lastRun"] {
+    return run
+      ? {
+          status: run.processingStatus,
+          scheduledAt: run.scheduledAt.toISOString(),
+          finishedAt: run.finishedAt?.toISOString() ?? null,
+          attemptCount: run.attemptCount,
+          errorMessage: run.lastErrorMessage,
+        }
+      : null;
   }
 }

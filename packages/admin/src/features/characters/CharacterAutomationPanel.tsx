@@ -14,6 +14,7 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { draftTitle, fetchDrafts, type Draft } from "../drafts/api";
 
@@ -128,6 +129,7 @@ function PostingPolicyForm({
   characterId: string;
   policy: PostingPolicy;
 }) {
+  const [editing, setEditing] = useState(false);
   const queryClient = useQueryClient();
   const form = useForm<{
     enabled: boolean;
@@ -156,11 +158,62 @@ function PostingPolicyForm({
         hourStartKst: Number(values.hourStartKst),
         hourEndKst: Number(values.hourEndKst),
       }),
-    onSuccess: () =>
+    onSuccess: () => {
+      setEditing(false);
       void queryClient.invalidateQueries({
         queryKey: ["character", characterId, "posting-policy"],
-      }),
+      });
+    },
   });
+
+  if (!editing) {
+    return (
+      <Paper p="md" maw={680} component="section">
+        <Stack gap="md">
+          <Group justify="space-between" align="flex-start">
+            <Stack gap={3}>
+              <Title order={5}>포스팅 정책</Title>
+              <Text size="sm" c="dimmed">
+                자동 초안의 빈도와 운영 시간
+              </Text>
+            </Stack>
+            <Button variant="default" onClick={() => setEditing(true)}>
+              정책 수정
+            </Button>
+          </Group>
+          <Group gap="xl" align="flex-start">
+            <Stack gap={2}>
+              <Text size="xs" c="dimmed">
+                상태
+              </Text>
+              <Badge color={policy.enabled ? "teal" : "gray"}>
+                {policy.enabled ? "활성" : "비활성"}
+              </Badge>
+            </Stack>
+            <Stack gap={2}>
+              <Text size="xs" c="dimmed">
+                게시 빈도
+              </Text>
+              <Text size="sm" fw={700}>
+                주 {policy.weeklyCadence}회
+              </Text>
+            </Stack>
+            <Stack gap={2}>
+              <Text size="xs" c="dimmed">
+                운영 시간
+              </Text>
+              <Text size="sm" fw={700}>
+                {policy.hourStartKst}:00–{policy.hourEndKst}:00 KST
+              </Text>
+            </Stack>
+          </Group>
+          <Text size="xs" c="dimmed">
+            최근 실행 · {formatLastRun(policy)}
+          </Text>
+        </Stack>
+      </Paper>
+    );
+  }
 
   return (
     <Paper p="md" maw={680} component="section">
@@ -208,13 +261,36 @@ function PostingPolicyForm({
               포스팅 정책을 저장했습니다.
             </Alert>
           ) : null}
-          <Button type="submit" loading={save.isPending}>
-            정책 저장
-          </Button>
+          <Group>
+            <Button type="submit" loading={save.isPending}>
+              정책 저장
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              disabled={save.isPending}
+              onClick={() => setEditing(false)}
+            >
+              취소
+            </Button>
+          </Group>
         </Stack>
       </form>
     </Paper>
   );
+}
+
+function formatLastRun(policy: PostingPolicy) {
+  if (!policy.lastRun) return "실행 기록 없음";
+  const labels = {
+    queued: "대기",
+    running: "진행 중",
+    completed: "완료",
+    failed: "실패",
+    cancelled: "취소",
+  };
+  const at = policy.lastRun.finishedAt ?? policy.lastRun.scheduledAt;
+  return `${labels[policy.lastRun.status]} · ${at.replace("T", " ").slice(0, 16)} · ${policy.lastRun.attemptCount}회 시도`;
 }
 
 function range(min: number, max: number) {

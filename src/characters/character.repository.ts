@@ -16,6 +16,8 @@ import {
   characterPersonaFragments,
   characterPersonaCanonLinks,
   characters,
+  postComments,
+  postReactions,
   posts,
   userCharacterFollows,
 } from "../domain/database/schema";
@@ -104,6 +106,13 @@ export type MemoryRow = Pick<
   keyof typeof memoryFields
 >;
 export type CharacterStatus = "active" | "inactive";
+export type CharacterMetricsRow = {
+  lastPostAt: Date | string | null;
+  postsLast7Days: number;
+  postsLast30Days: number;
+  commentsLast30Days: number;
+  reactionsLast30Days: number;
+};
 type FragmentInput = Pick<
   typeof characterPersonaFragments.$inferInsert,
   "content" | "kind" | "injection" | "recallKeys"
@@ -203,6 +212,44 @@ export class CharacterRepository {
       .where(eq(characters.id, characterId))
       .limit(1);
     return rows.length > 0;
+  }
+
+  async findMetrics(characterId: string): Promise<CharacterMetricsRow> {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+    const result = await this.database.client.execute<CharacterMetricsRow>(sql`
+      select
+        max(${posts.createdAt}) as "lastPostAt",
+        count(*) filter (where ${posts.createdAt} >= ${sevenDaysAgo})::int as "postsLast7Days",
+        count(*) filter (where ${posts.createdAt} >= ${thirtyDaysAgo})::int as "postsLast30Days",
+        (
+          select count(*)::int
+          from ${postComments}
+          inner join ${posts} as comment_posts
+            on comment_posts.id = ${postComments.postId}
+          where comment_posts.character_id = ${characterId}
+            and ${postComments.createdAt} >= ${thirtyDaysAgo}
+        ) as "commentsLast30Days",
+        (
+          select count(*)::int
+          from ${postReactions}
+          inner join ${posts} as reaction_posts
+            on reaction_posts.id = ${postReactions.postId}
+          where reaction_posts.character_id = ${characterId}
+            and ${postReactions.createdAt} >= ${thirtyDaysAgo}
+        ) as "reactionsLast30Days"
+      from ${posts}
+      where ${posts.characterId} = ${characterId}
+    `);
+    return (
+      result.rows[0] ?? {
+        lastPostAt: null,
+        postsLast7Days: 0,
+        postsLast30Days: 0,
+        commentsLast30Days: 0,
+        reactionsLast30Days: 0,
+      }
+    );
   }
 
   async create(data: {

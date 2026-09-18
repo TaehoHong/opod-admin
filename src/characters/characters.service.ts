@@ -36,6 +36,14 @@ type AdminCharacterDetail = AdminCharacterListItem & {
   memories: CharacterMemory[];
 };
 
+type CharacterMetrics = {
+  lastPostAt: string | null;
+  postsLast7Days: number;
+  postsLast30Days: number;
+  commentsLast30Days: number;
+  reactionsLast30Days: number;
+};
+
 type CharacterStatusReceipt = {
   id: string;
   status: CharacterStatus;
@@ -217,6 +225,19 @@ export class CharactersService {
       ...this.toCharacterListItem(character),
       personas: personas.map((persona) => this.toCharacterPersona(persona)),
       memories: memories.map((memory) => this.toCharacterMemory(memory)),
+    };
+  }
+
+  async getCharacterMetrics(characterId: string): Promise<CharacterMetrics> {
+    if (!(await this.hasCharacter(characterId))) {
+      throw new BadRequestException("Character not found");
+    }
+    const metrics = await this.characters.findMetrics(characterId);
+    return {
+      ...metrics,
+      lastPostAt: metrics.lastPostAt
+        ? new Date(metrics.lastPostAt).toISOString()
+        : null,
     };
   }
 
