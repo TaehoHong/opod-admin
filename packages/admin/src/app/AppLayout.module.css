@@ -1,0 +1,193 @@
+.shell {
+  background: var(--mantine-color-ink-0);
+}
+
+.header {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  border-bottom: 1px solid var(--mantine-color-ink-1);
+  background: var(--mantine-color-white);
+}
+
+.brandCell {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  height: 100%;
+  padding-inline: var(--mantine-spacing-lg);
+  background: var(--mantine-color-ink-9);
+  color: var(--mantine-color-white);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.brandMark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--mantine-color-accent-3);
+  color: var(--mantine-color-ink-9);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.brandName {
+  display: block;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.brandMeta {
+  display: block;
+  color: var(--mantine-color-ink-4);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.topbar {
+  min-width: 0;
+  padding-inline: var(--mantine-spacing-xl);
+}
+
+.routeLabel {
+  color: var(--mantine-color-ink-8);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 700;
+}
+
+.account {
+  min-width: 0;
+}
+
+.avatar {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--mantine-color-ink-1);
+  color: var(--mantine-color-ink-7);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.navbar {
+  border-right: 0;
+  background: var(--mantine-color-ink-9);
+  color: var(--mantine-color-white);
+}
+
+.nav {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: var(--mantine-spacing-md);
+}
+
+.navGroup + .navGroup {
+  margin-top: var(--mantine-spacing-lg);
+}
+
+.navGroupLabel {
+  margin: 0 0 6px 12px;
+  color: var(--mantine-color-ink-4);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.navLink {
+  min-height: 42px;
+  margin-block: 2px;
+  border-radius: var(--mantine-radius-md);
+  color: var(--mantine-color-ink-2);
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.navLink:hover {
+  background: var(--mantine-color-ink-8);
+  color: var(--mantine-color-white);
+}
+
+.navLink[data-active] {
+  background: var(--mantine-color-accent-3);
+  color: var(--mantine-color-ink-9);
+}
+
+.navLink[data-active]:hover {
+  background: var(--mantine-color-accent-3);
+}
+
+.navLabel {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.navFooter {
+  margin-top: auto;
+  padding: var(--mantine-spacing-lg) 12px 4px;
+  color: var(--mantine-color-ink-4);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.main {
+  min-width: 0;
+}
+
+.content {
+  width: min(100%, 1640px);
+  margin-inline: auto;
+  padding: 28px clamp(18px, 3vw, 48px) 64px;
+}
+
+.routeLoader {
+  display: grid;
+  min-height: 240px;
+  place-items: center;
+}
+
+@media (max-width: 61.99em) {
+  .header {
+    display: block;
+    background: var(--mantine-color-ink-9);
+  }
+
+  .brandCell {
+    justify-content: space-between;
+    padding-inline: var(--mantine-spacing-md);
+  }
+
+  .brandCell .brand {
+    flex: 1;
+  }
+
+  .topbar {
+    display: none;
+  }
+
+  .navbar {
+    border-top: 1px solid var(--mantine-color-ink-8);
+  }
+
+  .content {
+    padding: 20px 16px 48px;
+  }
+}

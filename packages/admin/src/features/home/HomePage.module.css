@@ -1,0 +1,181 @@
+.dateBadge {
+  border-color: var(--mantine-color-ink-2);
+  background: var(--mantine-color-white);
+  color: var(--mantine-color-ink-6);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.55fr);
+  gap: var(--mantine-spacing-xl);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-md);
+}
+
+.sectionTitle {
+  color: var(--mantine-color-ink-9);
+  font-size: 18px;
+  letter-spacing: -0.025em;
+}
+
+.sectionMeta {
+  color: var(--mantine-color-ink-5);
+  font-size: 12px;
+}
+
+.todoGrid {
+  display: grid;
+  gap: var(--mantine-spacing-sm);
+}
+
+.todoButton {
+  width: 100%;
+  border-radius: var(--mantine-radius-lg);
+  text-align: left;
+}
+
+.todoCard {
+  position: relative;
+  overflow: hidden;
+  border-color: var(--mantine-color-ink-1);
+  transition:
+    transform 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.todoCard::after {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--mantine-color-accent-3);
+  content: "";
+}
+
+.todoButton:hover .todoCard,
+.todoButton:focus-visible .todoCard {
+  border-color: var(--mantine-color-ink-3);
+  box-shadow: var(--mantine-shadow-sm);
+  transform: translateY(-1px);
+}
+
+.todoIcon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 13px;
+  background: var(--mantine-color-ink-0);
+  color: var(--mantine-color-ink-7);
+}
+
+.todoNumber {
+  min-width: 42px;
+  color: var(--mantine-color-ink-9);
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 30px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  text-align: right;
+}
+
+.emptyQueue {
+  border-color: var(--mantine-color-ink-1);
+  background: var(--mantine-color-white);
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--mantine-spacing-sm);
+}
+
+.metricCard {
+  border-color: var(--mantine-color-ink-1);
+  background: var(--mantine-color-white);
+}
+
+.metricLabel {
+  color: var(--mantine-color-ink-5);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.metricValue {
+  color: var(--mantine-color-ink-9);
+  font-family: var(--mantine-font-family-monospace);
+  font-size: clamp(28px, 4vw, 42px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+}
+
+.logPanel {
+  border-color: var(--mantine-color-ink-1);
+  background: var(--mantine-color-white);
+}
+
+.logList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.logItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  padding-block: var(--mantine-spacing-sm);
+  border-top: 1px solid var(--mantine-color-ink-1);
+}
+
+.logTime {
+  color: var(--mantine-color-ink-5);
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.viewAll {
+  color: var(--mantine-color-ink-7);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.viewAll:hover {
+  color: var(--mantine-color-ink-9);
+  text-decoration: underline;
+}
+
+@media (max-width: 74.99em) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 39.99em) {
+  .metricGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .logItem {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .logTime {
+    grid-column: 2;
+  }
+}

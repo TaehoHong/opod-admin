@@ -40,6 +40,9 @@ describe("admin application shell", () => {
       "data-active",
       "true",
     );
+    expect(
+      screen.getByRole("navigation", { name: "주요 메뉴" }),
+    ).toHaveTextContent("콘텐츠");
     expect(screen.getByRole("link", { name: "본문 바로가기" })).toHaveAttribute(
       "href",
       "#main-content",

@@ -13,6 +13,9 @@ describe("DataPage status feedback", () => {
       </AppProviders>,
     );
 
+    expect(
+      screen.getByRole("heading", { level: 1, name: "게시글" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("게시글 불러오는 중…");
   });
 

@@ -1,69 +1,92 @@
 import { createTheme, type MantineColorsTuple } from "@mantine/core";
 
-// 승인된 톤앤매너를 Theme token으로 옮긴다 (docs/04-design-rules.md
-// "Visual Direction"). 삭제한 legacy stylesheet에서 승인된 색상값만
-// Theme token으로 옮겼다. Mantine 색상은 10단계 tuple을 요구하므로 기존
-// 사다리를 그대로 채운다.
+// 운영 화면 전체가 같은 상태 언어를 사용하도록 색상과 형태를 theme가 소유한다.
+// chartreuse accent는 선택과 실행, attention은 확인이 필요한 상태에만 쓴다.
 
 const accent: MantineColorsTuple = [
-  "#e5f1ff",
-  "#cce4ff",
-  "#99c9ff",
-  "#4da2ff",
-  "#007aff",
-  "#007aff",
-  "#0056b3",
-  "#004085",
-  "#003366",
-  "#00224d",
+  "#f7ffdc",
+  "#efffb5",
+  "#e6ff89",
+  "#d9ff57",
+  "#c9f53f",
+  "#afd827",
+  "#8daf18",
+  "#69840f",
+  "#465909",
+  "#2c3905",
 ];
 
 // pending/attention 표시용 경고색.
 const attention: MantineColorsTuple = [
-  "#fff3e0",
-  "#ffe3bd",
-  "#ffd08f",
-  "#ffb84d",
-  "#ff9f0a",
-  "#ff9f0a",
-  "#cc7f08",
-  "#995f06",
-  "#7a4c05",
-  "#5c3904",
+  "#fff6e5",
+  "#ffe9bd",
+  "#ffd88f",
+  "#ffc45c",
+  "#f5a623",
+  "#d9890e",
+  "#ad6907",
+  "#824d08",
+  "#623a09",
+  "#432606",
 ];
 
-// ink → cream 중립 사다리.
+// 밝은 작업 캔버스부터 짙은 navigation shell까지 이어지는 중립 사다리.
 const ink: MantineColorsTuple = [
-  "#f8f7f7",
-  "#f1eeee",
-  "#dcdada",
-  "#bcbaba",
-  "#9a9898",
-  "#6e6e73",
-  "#646262",
-  "#424245",
-  "#302c2c",
-  "#201d1d",
+  "#f5f6f1",
+  "#e9ebe3",
+  "#d5d8ce",
+  "#b6baae",
+  "#91978a",
+  "#70766a",
+  "#555b50",
+  "#3b4038",
+  "#272b25",
+  "#171a16",
 ];
 
-export const CANVAS_CREAM = "#fdfcfc";
+export const CANVAS_CREAM = "#f5f6f1";
 
 export const theme = createTheme({
   colors: { accent, attention, ink },
   primaryColor: "accent",
-  primaryShade: 4,
-  white: CANVAS_CREAM,
-  black: "#201d1d",
+  primaryShade: 3,
+  autoContrast: true,
+  luminanceThreshold: 0.4,
+  white: "#ffffff",
+  black: "#171a16",
   fontFamily:
-    '"JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-  headings: { fontFamily: "inherit", fontWeight: "600" },
-  // 작은 radius와 얇은 경계선, 그림자 없음.
-  defaultRadius: "sm",
-  radius: { xs: "4px", sm: "4px", md: "4px", lg: "4px", xl: "4px" },
-  shadows: { xs: "none", sm: "none", md: "none", lg: "none", xl: "none" },
+    'Pretendard, "Pretendard Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  fontFamilyMonospace:
+    '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
+  headings: {
+    fontFamily:
+      'Pretendard, "Pretendard Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    fontWeight: "700",
+  },
+  defaultRadius: "md",
+  radius: { xs: "6px", sm: "8px", md: "12px", lg: "16px", xl: "24px" },
+  shadows: {
+    xs: "0 1px 2px rgba(23, 26, 22, 0.05)",
+    sm: "0 8px 24px rgba(23, 26, 22, 0.07)",
+    md: "0 16px 40px rgba(23, 26, 22, 0.1)",
+    lg: "0 24px 64px rgba(23, 26, 22, 0.14)",
+    xl: "0 32px 80px rgba(23, 26, 22, 0.18)",
+  },
   components: {
-    Card: { defaultProps: { withBorder: true, shadow: "none" } },
-    Paper: { defaultProps: { withBorder: true, shadow: "none" } },
-    Table: { defaultProps: { highlightOnHover: true, verticalSpacing: "xs" } },
+    Button: { defaultProps: { radius: "md", fw: 650 } },
+    Card: { defaultProps: { withBorder: true, shadow: "xs", radius: "lg" } },
+    Paper: { defaultProps: { withBorder: true, shadow: "xs", radius: "lg" } },
+    Table: {
+      defaultProps: {
+        highlightOnHover: true,
+        verticalSpacing: "sm",
+        horizontalSpacing: "md",
+      },
+    },
+    Modal: { defaultProps: { radius: "lg", centered: true } },
+    TextInput: { defaultProps: { radius: "md" } },
+    PasswordInput: { defaultProps: { radius: "md" } },
+    Textarea: { defaultProps: { radius: "md" } },
+    Select: { defaultProps: { radius: "md" } },
   },
 });

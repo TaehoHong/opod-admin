@@ -1,8 +1,92 @@
-/* 승인된 canvas cream 배경. 나머지 색상은 Mantine Theme token이 소유한다
-   (docs/04-design-rules.md "Visual Direction"). */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--mantine-color-ink-0);
+}
+
 body {
-  background-color: var(--mantine-color-white);
+  min-height: 100dvh;
+  margin: 0;
+  background: var(--mantine-color-ink-0);
   color: var(--mantine-color-black);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--mantine-color-accent-2);
+  color: var(--mantine-color-ink-9);
+}
+
+a,
+button {
+  touch-action: manipulation;
+}
+
+a:focus-visible,
+button:focus-visible,
+[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--mantine-color-accent-5);
+  outline-offset: 2px;
+}
+
+.mantine-Table-scrollContainer {
+  border: 1px solid var(--mantine-color-ink-1);
+  border-radius: var(--mantine-radius-lg);
+  background: var(--mantine-color-white);
+}
+
+.mantine-Table-thead {
+  background: var(--mantine-color-ink-0);
+}
+
+.mantine-Table-th {
+  color: var(--mantine-color-ink-6);
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.mantine-Table-tr {
+  transition: background-color 140ms ease;
+}
+
+.mantine-Input-input {
+  background: var(--mantine-color-white);
+  border-color: var(--mantine-color-ink-2);
+}
+
+.mantine-Input-input:focus,
+.mantine-Input-input:focus-within {
+  border-color: var(--mantine-color-ink-7);
+}
+
+.mantine-Modal-content {
+  border: 1px solid var(--mantine-color-ink-2);
+  box-shadow: var(--mantine-shadow-lg);
+}
+
+.mantine-Tabs-list {
+  gap: var(--mantine-spacing-xs);
+  border-bottom-color: var(--mantine-color-ink-2);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.mantine-Tabs-tab {
+  min-height: 42px;
+  border-radius: var(--mantine-radius-md) var(--mantine-radius-md) 0 0;
+  white-space: nowrap;
+}
+
+.mantine-SegmentedControl-root {
+  max-width: 100%;
+  border: 1px solid var(--mantine-color-ink-1);
+  background: var(--mantine-color-ink-0);
 }
 
 .skip-link {
@@ -12,12 +96,34 @@ body {
   z-index: 1000;
   padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
   border: 1px solid var(--mantine-color-accent-6);
-  border-radius: var(--mantine-radius-sm);
+  border-radius: var(--mantine-radius-md);
   background: var(--mantine-color-white);
-  color: var(--mantine-color-accent-7);
+  color: var(--mantine-color-ink-9);
   transform: translateY(calc(-100% - var(--mantine-spacing-md)));
+  transition: transform 140ms ease;
 }
 
 .skip-link:focus {
   transform: translateY(0);
+}
+
+@media (max-width: 47.99em) {
+  .mantine-SegmentedControl-root {
+    overflow-x: auto;
+  }
+
+  .mantine-SegmentedControl-innerLabel {
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

@@ -88,21 +88,43 @@ const SettingsPage = lazy(() =>
 // 두고 대화하므로 링크로 주고받을 수 있어야 하고, 새로고침과 뒤로가기가 보던
 // 자리를 지켜야 한다. detail 값은 상세 경로 뒤에 붙는 path parameter 이름이다.
 export const NAV_ITEMS = [
-  { id: "home", label: "홈", Page: HomePage },
-  { id: "characters", label: "캐릭터", Page: CharactersPage },
-  { id: "locations", label: "장소", Page: LocationsPage },
-  { id: "posts", label: "게시물", Page: PostsPage },
-  { id: "media", label: "미디어", Page: MediaPage },
-  { id: "generation", label: "이미지 생성", Page: GenerationPage },
-  { id: "llm-logs", label: "LLM 로그", Page: LlmLogsPage },
-  { id: "logs", label: "로그", Page: LogsPage },
-  { id: "users", label: "사용자", Page: UsersPage },
-  { id: "credits", label: "크레딧", Page: CreditsPage },
-  { id: "payments", label: "결제", Page: PaymentsPage },
-  { id: "moderation", label: "신고", Page: ModerationPage },
-  { id: "events", label: "이벤트", Page: EventsPage },
-  { id: "analytics", label: "분석", Page: AnalyticsPage },
-  { id: "settings", label: "설정", Page: SettingsPage },
+  { id: "home", label: "홈", group: "overview", Page: HomePage },
+  {
+    id: "characters",
+    label: "캐릭터",
+    group: "content",
+    Page: CharactersPage,
+  },
+  { id: "locations", label: "장소", group: "content", Page: LocationsPage },
+  { id: "posts", label: "게시물", group: "content", Page: PostsPage },
+  { id: "media", label: "미디어", group: "content", Page: MediaPage },
+  {
+    id: "generation",
+    label: "이미지 생성",
+    group: "content",
+    Page: GenerationPage,
+  },
+  { id: "users", label: "사용자", group: "operations", Page: UsersPage },
+  { id: "credits", label: "크레딧", group: "operations", Page: CreditsPage },
+  { id: "payments", label: "결제", group: "operations", Page: PaymentsPage },
+  {
+    id: "moderation",
+    label: "신고",
+    group: "operations",
+    Page: ModerationPage,
+  },
+  { id: "llm-logs", label: "LLM 로그", group: "system", Page: LlmLogsPage },
+  { id: "logs", label: "액션 로그", group: "system", Page: LogsPage },
+  { id: "events", label: "이벤트", group: "system", Page: EventsPage },
+  { id: "analytics", label: "분석", group: "system", Page: AnalyticsPage },
+  { id: "settings", label: "설정", group: "system", Page: SettingsPage },
+] as const;
+
+export const NAV_GROUPS = [
+  { id: "overview", label: "개요" },
+  { id: "content", label: "콘텐츠" },
+  { id: "operations", label: "운영" },
+  { id: "system", label: "시스템" },
 ] as const;
 
 // 캐릭터와 장소는 상세가 별도 페이지 컴포넌트라 아래에서 따로 건다.
