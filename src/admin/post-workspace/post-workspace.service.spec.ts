@@ -8,6 +8,7 @@ const draft = {
   contentType: "feed",
   caption: "서린의 새 게시물",
   status: "generating",
+  attemptCount: 2,
   scheduledAt: null,
   publishedPostId: null,
   conceptJson: { source: "manual", mode: "manual", plan: { shots: [{}] } },
@@ -20,6 +21,7 @@ const draft = {
       sortOrder: 0,
       status: "draft",
       prompt: "portrait prompt",
+      attemptCount: 3,
       updatedAt: new Date("2026-08-10T03:00:00.000Z"),
       outputs: [],
     },
@@ -41,10 +43,35 @@ describe("PostWorkspaceService", () => {
     findStandalonePosts: jest.fn(),
     findDraft: jest.fn(),
     findStandalonePost: jest.fn(),
+    countPostInteractions: jest.fn(),
   } as unknown as jest.Mocked<PostWorkspaceRepository>;
   const service = new PostWorkspaceService(repository);
 
   beforeEach(() => jest.clearAllMocks());
+
+  it("returns production and engagement metrics for a draft-backed post", async () => {
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      publishedPostId: "post-1",
+      publishedPost: post,
+    } as never);
+    repository.countPostInteractions.mockResolvedValue({
+      commentCount: 4,
+      reactionCount: 9,
+    });
+
+    await expect(service.getMetrics("draft-1")).resolves.toEqual({
+      productionStartedAt: "2026-08-10T01:00:00.000Z",
+      lastChangedAt: "2026-08-10T03:00:00.000Z",
+      publishedAt: "2026-08-10T02:00:00.000Z",
+      draftAttemptCount: 2,
+      generationJobCount: 1,
+      failedGenerationJobCount: 0,
+      generationAttemptCount: 3,
+      commentCount: 4,
+      reactionCount: 9,
+    });
+  });
 
   it("merges lifecycle work by recent change and derives the current manual stage", async () => {
     repository.findDrafts.mockResolvedValue([draft] as never);

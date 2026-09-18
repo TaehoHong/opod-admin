@@ -55,6 +55,7 @@ import {
   type V3MemoryCandidate,
   type V3PlanningInput,
 } from "./api";
+import { PostOverviewPanel } from "./PostOverviewPanel";
 import styles from "./PostWorkPage.module.css";
 
 const POLL_INTERVAL_MS = 3000;
@@ -138,15 +139,7 @@ export function PostWorkPage({
       />
     );
   }
-  if (!stage) {
-    return (
-      <Navigate
-        to={`/posts/${encodeURIComponent(workId)}/${work.data.currentStage}`}
-        replace
-      />
-    );
-  }
-  if (!isStage(stage)) {
+  if (stage && !isStage(stage)) {
     return (
       <Navigate
         to={`/posts/${encodeURIComponent(workId)}/${work.data.currentStage}`}
@@ -172,6 +165,7 @@ export function PostWorkPage({
       />
     );
   }
+  const activeStage = stage as PostWorkStage | undefined;
 
   return (
     <DataPage
@@ -184,15 +178,25 @@ export function PostWorkPage({
       }
     >
       <PostWorkHeader item={work.data} draft={draft.data} />
-      <StageRail item={work.data} activeStage={stage} />
-      <StageBody
-        stage={stage}
-        item={work.data}
-        draft={draft.data}
-        post={post.data}
-        postError={post.error}
-        retryPost={() => void post.refetch()}
-      />
+      <StageRail item={work.data} activeStage={activeStage} />
+      {activeStage ? (
+        <StageBody
+          stage={activeStage}
+          item={work.data}
+          draft={draft.data}
+          post={post.data}
+          postError={post.error}
+          retryPost={() => void post.refetch()}
+        />
+      ) : (
+        <PostOverviewPanel
+          item={work.data}
+          draft={draft.data}
+          post={post.data}
+          postError={post.error}
+          retryPost={() => void post.refetch()}
+        />
+      )}
     </DataPage>
   );
 }
@@ -295,11 +299,25 @@ function StageRail({
   activeStage,
 }: {
   item: PostWorkItem;
-  activeStage: PostWorkStage;
+  activeStage?: PostWorkStage;
 }) {
   const stages = item.pipelineV3 ? pipelineStages(item) : LEGACY_STAGES;
   return (
     <nav className={styles.rail} aria-label="게시물 생성 단계">
+      <Link
+        className={`${styles.overviewLink} ${!activeStage ? styles.active : ""}`}
+        to={`/posts/${encodeURIComponent(item.id)}`}
+        aria-current={!activeStage ? "page" : undefined}
+      >
+        <Stack gap={0}>
+          <Text size="sm" fw={700}>
+            운영 개요
+          </Text>
+          <Text size="xs" c="dimmed">
+            통합 현황
+          </Text>
+        </Stack>
+      </Link>
       {stages.map((stage, index) => {
         const active = stage.id === activeStage;
         const done = index + 1 < item.stageIndex;

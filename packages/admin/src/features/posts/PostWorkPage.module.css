@@ -37,6 +37,30 @@
     color 140ms ease;
 }
 
+.overviewLink {
+  flex: 0 0 auto;
+  min-width: 112px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--mantine-radius-md);
+  color: var(--mantine-color-ink-2);
+  text-decoration: none;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.overviewLink:hover {
+  background: var(--mantine-color-ink-8);
+  color: var(--mantine-color-white);
+}
+
+.overviewLink:focus-visible {
+  outline: 2px solid var(--mantine-color-accent-4);
+  outline-offset: 2px;
+}
+
 .stageLink::before {
   position: absolute;
   top: 15px;
@@ -66,6 +90,12 @@
 }
 
 .active:hover {
+  background: var(--mantine-color-accent-3);
+  color: var(--mantine-color-ink-9);
+}
+
+.overviewLink.active {
+  border-color: var(--mantine-color-accent-3);
   background: var(--mantine-color-accent-3);
   color: var(--mantine-color-ink-9);
 }

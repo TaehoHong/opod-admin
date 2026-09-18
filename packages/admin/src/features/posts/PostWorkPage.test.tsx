@@ -104,6 +104,51 @@ function renderStage(
 }
 
 describe("post work stage screens", () => {
+  it("opens on the read-focused operations overview with integrated metrics", async () => {
+    registerHandlers(
+      {
+        pipelineVersion: "post-pipeline-v3",
+        source: "manual",
+        mode: "manual",
+      },
+      v3Item,
+      { status: "planned" },
+    );
+    server.use(
+      http.get("/api/admin/v1/post-work-items/:id/metrics", () =>
+        HttpResponse.json({
+          productionStartedAt: "2026-08-13T00:00:00.000Z",
+          lastChangedAt: "2026-08-13T01:15:00.000Z",
+          publishedAt: null,
+          draftAttemptCount: 2,
+          generationJobCount: 3,
+          failedGenerationJobCount: 1,
+          generationAttemptCount: 4,
+          commentCount: 0,
+          reactionCount: 0,
+        }),
+      ),
+    );
+
+    renderPage(<PostWorkPage workId="draft-1" />, {
+      path: "/posts/draft-1",
+      routes: ["posts/:workId"],
+    });
+
+    expect(
+      await screen.findByRole("link", { name: /운영 개요/ }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("2/8")).toBeInTheDocument();
+    expect(await screen.findByText("1건 실패")).toBeInTheDocument();
+    expect(screen.getByText("3개 작업 · 4회 시도")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "현재 단계 열기" }),
+    ).toHaveAttribute("href", "/posts/draft-1/post_plan");
+    expect(
+      screen.queryByRole("button", { name: "요청 저장" }),
+    ).not.toBeInTheDocument();
+  });
+
   // V3는 운영자 요청을 operatorRequest에 저장한다. V2 필드만 읽으면 운영자가
   // 입력한 요청이 화면에서 사라지고, 이후 단계에서 대조할 기준이 없어진다.
   it("shows the V3 operator request on the brief stage", async () => {

@@ -22,4 +22,9 @@ export class PostWorkspaceController {
   get(@Param("id") id: string) {
     return this.workspace.get(id);
   }
+
+  @Get(":id/metrics")
+  getMetrics(@Param("id") id: string) {
+    return this.workspace.getMetrics(id);
+  }
 }

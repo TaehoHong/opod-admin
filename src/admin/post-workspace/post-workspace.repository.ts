@@ -1,12 +1,14 @@
 import { Injectable } from "@nestjs/common";
-import { and, asc, desc, eq, inArray, isNull, lte } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { DatabaseService } from "../../domain/database/database.service";
 import {
   generationJobOutputs,
   generationJobs,
   media,
+  postComments,
   postDrafts,
   postMedia,
+  postReactions,
   posts,
 } from "../../domain/database/schema";
 
@@ -16,7 +18,13 @@ type JobOutput = Pick<
 > & { media: { url: string } };
 type DraftJob = Pick<
   typeof generationJobs.$inferSelect,
-  "id" | "sortOrder" | "status" | "prompt" | "updatedAt" | "createdAt"
+  | "id"
+  | "sortOrder"
+  | "status"
+  | "prompt"
+  | "attemptCount"
+  | "updatedAt"
+  | "createdAt"
 > & { outputs: JobOutput[] };
 type PublishedPost = typeof posts.$inferSelect & {
   postMedia: Array<typeof postMedia.$inferSelect & { media: { url: string } }>;
@@ -115,6 +123,7 @@ export class PostWorkspaceRepository {
               sortOrder: generationJobs.sortOrder,
               status: generationJobs.status,
               prompt: generationJobs.prompt,
+              attemptCount: generationJobs.attemptCount,
               updatedAt: generationJobs.updatedAt,
               createdAt: generationJobs.createdAt,
             })
@@ -178,5 +187,19 @@ export class PostWorkspaceRepository {
       .innerJoin(media, eq(media.id, postMedia.mediaId))
       .where(eq(postMedia.postId, postId))
       .orderBy(asc(postMedia.sortOrder));
+  }
+
+  async countPostInteractions(
+    postId: string,
+  ): Promise<{ commentCount: number; reactionCount: number }> {
+    const result = await this.database.client.execute<{
+      commentCount: number;
+      reactionCount: number;
+    }>(sql`
+      select
+        (select count(*)::int from ${postComments} where ${postComments.postId} = ${postId}) as "commentCount",
+        (select count(*)::int from ${postReactions} where ${postReactions.postId} = ${postId}) as "reactionCount"
+    `);
+    return result.rows[0] ?? { commentCount: 0, reactionCount: 0 };
   }
 }

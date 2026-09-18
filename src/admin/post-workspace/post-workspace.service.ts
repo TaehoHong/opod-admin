@@ -206,6 +206,18 @@ export type PostWorkItem = {
   pipelineV3?: PostPipelineV3ReadModel;
 };
 
+export type PostWorkMetrics = {
+  productionStartedAt: string;
+  lastChangedAt: string;
+  publishedAt: string | null;
+  draftAttemptCount: number;
+  generationJobCount: number;
+  failedGenerationJobCount: number;
+  generationAttemptCount: number;
+  commentCount: number;
+  reactionCount: number;
+};
+
 type WorkCursor = Pick<PostWorkItem, "id" | "kind" | "updatedAt">;
 
 const STAGES: PostWorkStage[] = [
@@ -293,6 +305,45 @@ export class PostWorkspaceService {
     if (draft) return toDraftWorkItem(draft);
     const post = await this.repository.findStandalonePost(id);
     if (post) return toStandalonePostWorkItem(post);
+    throw new NotFoundException("Post work item not found");
+  }
+
+  async getMetrics(id: string): Promise<PostWorkMetrics> {
+    const draft = await this.repository.findDraft(id);
+    if (draft) {
+      const publishedAt = draft.publishedPost?.createdAt ?? null;
+      const interactions = draft.publishedPostId
+        ? await this.repository.countPostInteractions(draft.publishedPostId)
+        : { commentCount: 0, reactionCount: 0 };
+      return {
+        productionStartedAt: draft.createdAt.toISOString(),
+        lastChangedAt: draft.updatedAt.toISOString(),
+        publishedAt: publishedAt?.toISOString() ?? null,
+        draftAttemptCount: draft.attemptCount,
+        generationJobCount: draft.jobs.length,
+        failedGenerationJobCount: draft.jobs.filter(
+          (job) => job.status === "failed",
+        ).length,
+        generationAttemptCount: draft.jobs.reduce(
+          (sum, job) => sum + job.attemptCount,
+          0,
+        ),
+        ...interactions,
+      };
+    }
+    const post = await this.repository.findStandalonePost(id);
+    if (post) {
+      return {
+        productionStartedAt: post.createdAt.toISOString(),
+        lastChangedAt: post.createdAt.toISOString(),
+        publishedAt: post.createdAt.toISOString(),
+        draftAttemptCount: 0,
+        generationJobCount: 0,
+        failedGenerationJobCount: 0,
+        generationAttemptCount: 0,
+        ...(await this.repository.countPostInteractions(post.id)),
+      };
+    }
     throw new NotFoundException("Post work item not found");
   }
 }

@@ -207,7 +207,7 @@ function validFilter(value: string | null): PostWorkFilter {
 }
 
 function workPath(item: PostWorkItem) {
-  return `/posts/${encodeURIComponent(item.id)}/${item.currentStage}`;
+  return `/posts/${encodeURIComponent(item.id)}`;
 }
 
 function onRowClick(

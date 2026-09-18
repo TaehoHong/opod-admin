@@ -86,6 +86,19 @@ function registerListHandlers(onRequest?: (filter: string | null) => void) {
     http.get("/api/admin/v1/post-work-items/:id", () =>
       HttpResponse.json(item),
     ),
+    http.get("/api/admin/v1/post-work-items/:id/metrics", () =>
+      HttpResponse.json({
+        productionStartedAt: item.createdAt,
+        lastChangedAt: item.updatedAt,
+        publishedAt: null,
+        draftAttemptCount: 1,
+        generationJobCount: 1,
+        failedGenerationJobCount: 0,
+        generationAttemptCount: 1,
+        commentCount: 0,
+        reactionCount: 0,
+      }),
+    ),
     http.get("/api/admin/v1/drafts/:id", () => HttpResponse.json(draft)),
     http.get("/api/admin/v1/drafts/:id/evaluations", () =>
       HttpResponse.json({ items: [] }),
@@ -105,7 +118,7 @@ function registerListHandlers(onRequest?: (filter: string | null) => void) {
 }
 
 describe("post operations workspace", () => {
-  it("starts with the all queue, shows the six approved columns, and opens a row at its current stage", async () => {
+  it("starts with the all queue, shows the six approved columns, and opens a row at its overview", async () => {
     let requestedFilter: string | null = null;
     registerListHandlers((filter) => {
       requestedFilter = filter;
@@ -118,7 +131,7 @@ describe("post operations workspace", () => {
       </>,
       {
         path: "/posts",
-        routes: ["posts", "posts/:workId/:stage"],
+        routes: ["posts", "posts/:workId", "posts/:workId/:stage"],
       },
     );
 
@@ -150,15 +163,13 @@ describe("post operations workspace", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent(
-        "/posts/draft-1/prompt",
+        "/posts/draft-1",
       ),
     );
     expect(
-      await screen.findByRole("heading", { name: "③ 프롬프트" }),
+      await screen.findByRole("heading", { name: "콘텐츠" }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "② 기획" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("3/7")).toBeInTheDocument();
   });
 
   it("opens the focused row with Enter", async () => {
@@ -168,7 +179,10 @@ describe("post operations workspace", () => {
         <PostsPage />
         <LocationProbe />
       </>,
-      { path: "/posts", routes: ["posts", "posts/:workId/:stage"] },
+      {
+        path: "/posts",
+        routes: ["posts", "posts/:workId", "posts/:workId/:stage"],
+      },
     );
 
     const row = await screen.findByRole("row", { name: /서린의 비 오는 날/ });
@@ -177,7 +191,7 @@ describe("post operations workspace", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent(
-        "/posts/draft-1/prompt",
+        "/posts/draft-1",
       ),
     );
   });

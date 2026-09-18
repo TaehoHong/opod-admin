@@ -115,6 +115,18 @@ export type PostWorkItem = {
   };
 };
 
+export type PostWorkMetrics = {
+  productionStartedAt: string;
+  lastChangedAt: string;
+  publishedAt: string | null;
+  draftAttemptCount: number;
+  generationJobCount: number;
+  failedGenerationJobCount: number;
+  generationAttemptCount: number;
+  commentCount: number;
+  reactionCount: number;
+};
+
 export type PipelineFailure = {
   code: string;
   stage: string;
@@ -270,6 +282,10 @@ export function fetchPostWorkItems(params: {
 
 export function fetchPostWorkItem(id: string): Promise<PostWorkItem> {
   return apiRequest(`/post-work-items/${encodeURIComponent(id)}`);
+}
+
+export function fetchPostWorkMetrics(id: string): Promise<PostWorkMetrics> {
+  return apiRequest(`/post-work-items/${encodeURIComponent(id)}/metrics`);
 }
 
 export function fetchPost(postId: string): Promise<PostListItem> {
