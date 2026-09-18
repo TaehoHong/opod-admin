@@ -1,10 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import { desc, eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { DatabaseService } from "../domain/database/database.service";
 import {
   characterActionLogs,
   characterPostingPolicies,
-  characterSocialActivityJobs,
   characters,
 } from "../domain/database/schema";
 
@@ -25,14 +24,13 @@ export type PostingPolicyValues = Omit<
   "characterId" | "updatedAt"
 >;
 
-export type PostingRunRow = Pick<
-  typeof characterSocialActivityJobs.$inferSelect,
-  | "processingStatus"
-  | "scheduledAt"
-  | "finishedAt"
-  | "attemptCount"
-  | "lastErrorMessage"
->;
+export type PostingRunRow = {
+  processingStatus: string;
+  scheduledAt: Date;
+  finishedAt: Date | null;
+  attemptCount: number;
+  lastErrorMessage: string | null;
+};
 
 @Injectable()
 export class PostingPolicyRepository {
@@ -54,23 +52,27 @@ export class PostingPolicyRepository {
       .then(([row]) => row ?? null);
   }
 
-  findLatestRun(characterId: string): Promise<PostingRunRow | null> {
-    return this.database.client
-      .select({
-        processingStatus: characterSocialActivityJobs.processingStatus,
-        scheduledAt: characterSocialActivityJobs.scheduledAt,
-        finishedAt: characterSocialActivityJobs.finishedAt,
-        attemptCount: characterSocialActivityJobs.attemptCount,
-        lastErrorMessage: characterSocialActivityJobs.lastErrorMessage,
-      })
-      .from(characterSocialActivityJobs)
-      .where(eq(characterSocialActivityJobs.characterId, characterId))
-      .orderBy(
-        desc(characterSocialActivityJobs.scheduledAt),
-        desc(characterSocialActivityJobs.id),
-      )
-      .limit(1)
-      .then(([row]) => row ?? null);
+  async findLatestRun(characterId: string): Promise<PostingRunRow | null> {
+    const table = await this.database.client.execute<{
+      tableName: string | null;
+    }>(
+      sql`select to_regclass('opod.character_social_activity_jobs')::text as "tableName"`,
+    );
+    if (!table.rows[0]?.tableName) return null;
+
+    const result = await this.database.client.execute<PostingRunRow>(sql`
+      select
+        processing_status as "processingStatus",
+        scheduled_at as "scheduledAt",
+        finished_at as "finishedAt",
+        attempt_count::int as "attemptCount",
+        last_error_message as "lastErrorMessage"
+      from opod.character_social_activity_jobs
+      where character_id = ${characterId}
+      order by scheduled_at desc, id desc
+      limit 1
+    `);
+    return result.rows[0] ?? null;
   }
 
   async upsert(
