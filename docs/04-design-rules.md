@@ -14,13 +14,15 @@
 
 ## Visual Direction
 
-현재 UI의 톤앤매너를 React 전환 후에도 유지한다.
+Admin은 일반 사용자 제품이 아니라 운영 판단을 위한 콘솔이다. 어두운 shell과
+밝은 작업 canvas를 분리해 전역 이동과 현재 작업의 경계를 분명히 한다.
 
-- cream canvas `#fdfcfc`
-- ink text `#201d1d`
-- blue primary accent `#007aff`
-- 작은 radius와 얇은 경계선
-- 운영 상태와 데이터 밀도를 우선하는 절제된 화면
+- dark ink navigation shell
+- warm cream operational canvas
+- chartreuse primary accent는 선택, 실행과 현재 단계에만 사용
+- 흰 surface, 중간 radius와 얇은 경계선으로 정보 덩어리를 구분
+- 본문은 system sans, ID·시각·수치처럼 정렬이 필요한 값만 monospace
+- 성공·주의·실패는 teal·amber·red와 상태 문구를 함께 사용
 
 색상과 spacing 값은 Mantine Theme token으로 정의한다. 새로운 화면이
 현재 CSS 값을 그대로 복사하기보다 승인된 token을 재사용하게 한다.
@@ -54,9 +56,17 @@
 
 - Desktop-first로 설계한다.
 - mobile-first 또는 desktop과 완전히 동일한 배치를 요구하지 않는다.
+- 전역 navigation은 개요·콘텐츠·운영·시스템으로 묶고 현재 위치를 하나만
+  강조한다.
+- 모든 화면은 `DataPage`의 page title과 action 영역을 기본 위계로 사용한다.
+- 복합 detail은 요약 header 뒤에 tab 또는 단계 rail을 두어 작업 맥락을
+  유지한다.
+- 긴 설정 form은 공급자나 책임 단위로 접어 필요한 부분만 열 수 있게 한다.
 - 작은 화면에서도 로그인, 핵심 상태 조회와 긴급 자동화 중단이 가능해야
   한다.
 - 고밀도 table은 정보를 숨기기보다 horizontal scroll을 허용할 수 있다.
+- filter와 segmented control은 작은 화면에서 잘리지 않고 가로로 탐색할 수
+  있어야 한다.
 - primary action과 위험 상태는 viewport가 작아도 찾을 수 있어야 한다.
 
 breakpoint, table column 축약과 chart 단위 같은 화면별 결정은 구현할 때
