@@ -1,0 +1,58 @@
+.identity {
+  overflow: hidden;
+  border-color: var(--mantine-color-ink-1);
+  background:
+    radial-gradient(
+      circle at 100% 0%,
+      rgba(217, 255, 87, 0.24),
+      transparent 34%
+    ),
+    var(--mantine-color-white);
+}
+
+.identityMark {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 16px;
+  background: var(--mantine-color-ink-9);
+  color: var(--mantine-color-accent-3);
+}
+
+.identityStats {
+  display: flex;
+  gap: var(--mantine-spacing-lg);
+  margin-left: auto;
+}
+
+.stat {
+  min-width: 72px;
+}
+
+.workspace {
+  overflow: hidden;
+  background: var(--mantine-color-white);
+}
+
+.tabsList {
+  padding-inline: var(--mantine-spacing-md);
+  background: var(--mantine-color-ink-0);
+}
+
+.panel {
+  min-height: 360px;
+  padding: var(--mantine-spacing-lg);
+}
+
+@media (max-width: 47.99em) {
+  .identityStats {
+    width: 100%;
+    margin-left: 68px;
+  }
+
+  .panel {
+    padding: var(--mantine-spacing-md);
+  }
+}

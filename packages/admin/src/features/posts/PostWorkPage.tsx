@@ -205,7 +205,7 @@ function PostWorkHeader({
   draft?: Draft;
 }) {
   return (
-    <Paper p="md" component="section">
+    <Paper className={styles.workHeader} p="lg" component="section">
       <Group justify="space-between" align="flex-start" wrap="wrap">
         <Stack gap={4}>
           <Group gap="xs" wrap="wrap">
@@ -311,6 +311,7 @@ function StageRail({
             className={`${styles.stageLink} ${active ? styles.active : ""} ${state === "done" && !skipped ? styles.done : ""}`}
             to={`/posts/${encodeURIComponent(item.id)}/${stage.id}`}
             aria-current={active ? "step" : undefined}
+            data-state={skipped ? "skipped" : state}
           >
             <Stack gap={0}>
               <Text size="sm" fw={600}>
@@ -961,6 +962,7 @@ function StagePaper({
 }) {
   return (
     <Paper
+      className={styles.stagePaper}
       p="lg"
       component="section"
       aria-labelledby="stage-title"

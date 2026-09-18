@@ -1,4 +1,4 @@
-import { SimpleGrid } from "@mantine/core";
+import { SimpleGrid, Stack } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { DataPage } from "../../shared/ui/DataPage";
 import { GenerationSettingsForm } from "./GenerationSettingsForm";
@@ -33,7 +33,7 @@ export function SettingsPage() {
       error={settings.error}
     >
       {settings.data ? (
-        <>
+        <Stack gap="lg">
           <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
             <GenerationSettingsForm settings={settings.data} />
             <WorkerCard
@@ -42,7 +42,7 @@ export function SettingsPage() {
             />
           </SimpleGrid>
           <SettingsChangesTable changes={changes.data?.items ?? []} />
-        </>
+        </Stack>
       ) : null}
     </DataPage>
   );

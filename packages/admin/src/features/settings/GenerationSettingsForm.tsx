@@ -1,8 +1,8 @@
 import {
+  Accordion,
   Alert,
   Badge,
   Button,
-  Divider,
   Group,
   Paper,
   PasswordInput,
@@ -31,6 +31,7 @@ import {
   toSettingsUpdate,
   type SettingsFormValues,
 } from "./payload";
+import styles from "./GenerationSettingsForm.module.css";
 
 function httpUrlOrEmpty(value: string): string | null {
   const trimmed = value.trim();
@@ -137,296 +138,359 @@ export function GenerationSettingsForm({
   );
 
   return (
-    <Paper p="md" component="section">
+    <Paper className={styles.formCard} p={0} component="section">
+      <Stack gap={2} className={styles.formIntro}>
+        <Title order={4}>생성 및 AI 연결</Title>
+        <Text size="sm" c="dimmed">
+          공급자별 연결값을 확인하고 필요한 항목만 펼쳐 수정합니다.
+        </Text>
+      </Stack>
       <form
         onSubmit={form.onSubmit((values) =>
           save.mutate(toSettingsUpdate(values)),
         )}
       >
-        <Stack gap="sm">
-          {sectionHeader("이미지 생성", "image")}
-          <Select
-            label="실행 provider"
-            data={[
-              { value: "opod-flux", label: "opod-flux v1" },
-              { value: "fal", label: "fal.ai" },
-            ]}
-            allowDeselect={false}
-            value={imageProvider}
-            onChange={(value) => {
-              const next = value === "opod-flux" ? "opod-flux" : "fal";
-              form.setFieldValue("imageProvider", next);
-              setImageProvider(next);
-            }}
-          />
-          {imageProvider === "opod-flux" ? (
-            <>
-              <TextInput
-                label="opod-flux API Base URL"
-                placeholder="https://taeho.taildac41e.ts.net:8850/v1"
-                description={sourceNote(
-                  settings.resolved.sources.opodFluxApiBaseUrl,
-                )}
-                key={form.key("opodFluxApiBaseUrl")}
-                {...form.getInputProps("opodFluxApiBaseUrl")}
-              />
-              <Group gap="xs" align="flex-end" wrap="nowrap">
-                <PasswordInput
-                  label="opod-flux API 키"
-                  placeholder={
-                    settings.opodFluxApiKey.set
-                      ? "변경할 때만 입력"
-                      : "Bearer API 키 (인증 사용 시)"
-                  }
-                  autoComplete="off"
-                  flex={1}
-                  key={form.key("opodFluxApiKey")}
-                  {...form.getInputProps("opodFluxApiKey")}
-                />
-                <SecretStatusBadge
-                  status={settings.opodFluxApiKey}
-                  envSource={settings.resolved.sources.opodFluxApiKey}
-                  missingLabel="키 없음 — 인증 비활성 배포만 가능"
-                />
-                {settings.opodFluxApiKey.set ? (
-                  <ClearKeyButton
-                    label="opod-flux API 키 삭제"
-                    description="저장된 opod-flux 키를 지우고 env 값으로 되돌립니다."
-                    loading={save.isPending}
-                    onConfirm={() => clearKey("opodFluxApiKey")}
+        <Stack gap={0}>
+          <Accordion
+            className={styles.accordion}
+            multiple
+            defaultValue={["image"]}
+            variant="separated"
+          >
+            <Accordion.Item value="image">
+              <Accordion.Control>이미지 생성</Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="sm">
+                  {sectionHeader("이미지 생성", "image")}
+                  <Select
+                    label="실행 provider"
+                    data={[
+                      { value: "opod-flux", label: "opod-flux v1" },
+                      { value: "fal", label: "fal.ai" },
+                    ]}
+                    allowDeselect={false}
+                    value={imageProvider}
+                    onChange={(value) => {
+                      const next = value === "opod-flux" ? "opod-flux" : "fal";
+                      form.setFieldValue("imageProvider", next);
+                      setImageProvider(next);
+                    }}
                   />
-                ) : null}
-              </Group>
-            </>
-          ) : (
-            <Group gap="xs" align="flex-end" wrap="nowrap">
-              <PasswordInput
-                label="fal.ai API 키"
-                placeholder={
-                  settings.falApiKey.set
-                    ? "변경할 때만 입력"
-                    : "fal.ai 대시보드에서 발급한 키"
-                }
-                autoComplete="off"
-                flex={1}
-                key={form.key("falApiKey")}
-                {...form.getInputProps("falApiKey")}
-              />
-              <SecretStatusBadge
-                status={settings.falApiKey}
-                envSource={settings.resolved.sources.apiKey}
-                missingLabel="키 없음 — 이미지 생성 불가"
-              />
-              {settings.falApiKey.set ? (
-                <ClearKeyButton
-                  label="fal.ai API 키 삭제"
-                  description="저장된 fal.ai 키를 지우고 env 값으로 되돌립니다. env에도 키가 없으면 이미지 생성이 중단됩니다."
-                  loading={save.isPending}
-                  onConfirm={() => clearKey("falApiKey")}
-                />
-              ) : null}
+                  {imageProvider === "opod-flux" ? (
+                    <>
+                      <TextInput
+                        label="opod-flux API Base URL"
+                        placeholder="https://taeho.taildac41e.ts.net:8850/v1"
+                        description={sourceNote(
+                          settings.resolved.sources.opodFluxApiBaseUrl,
+                        )}
+                        key={form.key("opodFluxApiBaseUrl")}
+                        {...form.getInputProps("opodFluxApiBaseUrl")}
+                      />
+                      <Group
+                        gap="xs"
+                        wrap="nowrap"
+                        className={styles.secretRow}
+                      >
+                        <PasswordInput
+                          label="opod-flux API 키"
+                          placeholder={
+                            settings.opodFluxApiKey.set
+                              ? "변경할 때만 입력"
+                              : "Bearer API 키 (인증 사용 시)"
+                          }
+                          autoComplete="off"
+                          flex={1}
+                          key={form.key("opodFluxApiKey")}
+                          {...form.getInputProps("opodFluxApiKey")}
+                        />
+                        <SecretStatusBadge
+                          status={settings.opodFluxApiKey}
+                          envSource={settings.resolved.sources.opodFluxApiKey}
+                          missingLabel="키 없음 — 인증 비활성 배포만 가능"
+                        />
+                        {settings.opodFluxApiKey.set ? (
+                          <ClearKeyButton
+                            label="opod-flux API 키 삭제"
+                            description="저장된 opod-flux 키를 지우고 env 값으로 되돌립니다."
+                            loading={save.isPending}
+                            onConfirm={() => clearKey("opodFluxApiKey")}
+                          />
+                        ) : null}
+                      </Group>
+                    </>
+                  ) : (
+                    <Group gap="xs" wrap="nowrap" className={styles.secretRow}>
+                      <PasswordInput
+                        label="fal.ai API 키"
+                        placeholder={
+                          settings.falApiKey.set
+                            ? "변경할 때만 입력"
+                            : "fal.ai 대시보드에서 발급한 키"
+                        }
+                        autoComplete="off"
+                        flex={1}
+                        key={form.key("falApiKey")}
+                        {...form.getInputProps("falApiKey")}
+                      />
+                      <SecretStatusBadge
+                        status={settings.falApiKey}
+                        envSource={settings.resolved.sources.apiKey}
+                        missingLabel="키 없음 — 이미지 생성 불가"
+                      />
+                      {settings.falApiKey.set ? (
+                        <ClearKeyButton
+                          label="fal.ai API 키 삭제"
+                          description="저장된 fal.ai 키를 지우고 env 값으로 되돌립니다. env에도 키가 없으면 이미지 생성이 중단됩니다."
+                          loading={save.isPending}
+                          onConfirm={() => clearKey("falApiKey")}
+                        />
+                      ) : null}
+                    </Group>
+                  )}
+                  <TextInput
+                    label="edit 프롬프트 정책 모델 ID"
+                    placeholder="black-forest-labs/FLUX.1-Kontext-dev"
+                    description={sourceNote(
+                      settings.resolved.sources.editModel,
+                    )}
+                    key={form.key("falImageModel")}
+                    {...form.getInputProps("falImageModel")}
+                  />
+                  <TextInput
+                    label="t2i 프롬프트 정책 모델 ID"
+                    placeholder="black-forest-labs/FLUX.1-Kontext-dev"
+                    description={sourceNote(settings.resolved.sources.t2iModel)}
+                    key={form.key("falImageT2iModel")}
+                    {...form.getInputProps("falImageT2iModel")}
+                  />
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+
+            <Accordion.Item value="format">
+              <Accordion.Control>게시 포맷별 종횡비</Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="sm">
+                  <TextInput
+                    label="피드 게시물"
+                    placeholder={DEFAULT_ASPECT_RATIO_HINT.feed}
+                    description={ratioNote(
+                      settings.aspectRatios.effective.feed,
+                    )}
+                    key={form.key("aspectRatioFeed")}
+                    {...form.getInputProps("aspectRatioFeed")}
+                  />
+                  <TextInput
+                    label="스토리"
+                    placeholder={DEFAULT_ASPECT_RATIO_HINT.story}
+                    description={ratioNote(
+                      settings.aspectRatios.effective.story,
+                    )}
+                    key={form.key("aspectRatioStory")}
+                    {...form.getInputProps("aspectRatioStory")}
+                  />
+                  <TextInput
+                    label="릴"
+                    placeholder={DEFAULT_ASPECT_RATIO_HINT.reel}
+                    description={ratioNote(
+                      settings.aspectRatios.effective.reel,
+                    )}
+                    key={form.key("aspectRatioReel")}
+                    {...form.getInputProps("aspectRatioReel")}
+                  />
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+
+            <Accordion.Item value="planner">
+              <Accordion.Control>기획 LLM</Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="sm">
+                  {sectionHeader("기획 LLM (OpenAI-compatible)", "planner")}
+                  <Group gap="xs" wrap="nowrap" className={styles.secretRow}>
+                    <PasswordInput
+                      label="LLM API 키"
+                      placeholder={
+                        settings.llmApiKey.set ? "변경할 때만 입력" : "sk-..."
+                      }
+                      autoComplete="off"
+                      flex={1}
+                      key={form.key("llmApiKey")}
+                      {...form.getInputProps("llmApiKey")}
+                    />
+                    <SecretStatusBadge
+                      status={settings.llmApiKey}
+                      envSource={settings.resolved.plannerSources.apiKey}
+                      missingLabel="키 없음 — 로컬 플래너"
+                    />
+                    {settings.llmApiKey.set ? (
+                      <ClearKeyButton
+                        label="기획 LLM 키 삭제"
+                        description="저장된 기획 LLM 키를 지우고 env 값으로 되돌립니다."
+                        loading={save.isPending}
+                        onConfirm={() => clearKey("llmApiKey")}
+                      />
+                    ) : null}
+                  </Group>
+                  <TextInput
+                    label="API URL"
+                    placeholder="https://api.openai.com/v1/chat/completions"
+                    description={sourceNote(
+                      settings.resolved.plannerSources.apiUrl,
+                    )}
+                    key={form.key("llmApiUrl")}
+                    {...form.getInputProps("llmApiUrl")}
+                  />
+                  <TextInput
+                    label="모델"
+                    placeholder="gpt-5-mini"
+                    description={sourceNote(
+                      settings.resolved.plannerSources.model,
+                    )}
+                    key={form.key("llmModel")}
+                    {...form.getInputProps("llmModel")}
+                  />
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+
+            <Accordion.Item value="chat">
+              <Accordion.Control>캐릭터 채팅 LLM</Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="sm">
+                  {sectionHeader("캐릭터 채팅 LLM (opod-agent)", "chat")}
+                  <Group gap="xs" wrap="nowrap" className={styles.secretRow}>
+                    <PasswordInput
+                      label="API 키"
+                      placeholder="채팅 전용 키로 바꿀 때만 입력"
+                      autoComplete="off"
+                      flex={1}
+                      key={form.key("agentLlmApiKey")}
+                      {...form.getInputProps("agentLlmApiKey")}
+                    />
+                    <InheritedKeyBadge
+                      override={settings.chat.overrides.apiKey}
+                      effectiveLast4={settings.chat.effective.apiKeyLast4}
+                    />
+                    {settings.chat.overrides.apiKey.set ? (
+                      <ClearKeyButton
+                        label="채팅 LLM 키 삭제"
+                        description="채팅 전용 키를 지우고 기획 LLM 키를 다시 사용합니다."
+                        loading={save.isPending}
+                        onConfirm={() => clearKey("agentLlmApiKey")}
+                      />
+                    ) : null}
+                  </Group>
+                  <TextInput
+                    label="API URL"
+                    placeholder={
+                      settings.chat.effective.apiUrl ??
+                      "https://api.openai.com/v1/chat/completions"
+                    }
+                    description="비우면 기획 LLM 값을 상속합니다"
+                    key={form.key("agentLlmApiUrl")}
+                    {...form.getInputProps("agentLlmApiUrl")}
+                  />
+                  <TextInput
+                    label="모델"
+                    placeholder={settings.chat.effective.model ?? "모델명"}
+                    description="비우면 기획 LLM 값을 상속합니다"
+                    key={form.key("agentLlmModel")}
+                    {...form.getInputProps("agentLlmModel")}
+                  />
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+
+            <Accordion.Item value="embedding">
+              <Accordion.Control>기억 검색 임베딩</Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="sm">
+                  {sectionHeader("기억 검색 임베딩", "embedding")}
+                  <Group gap="xs" wrap="nowrap" className={styles.secretRow}>
+                    <PasswordInput
+                      label="임베딩 API 키"
+                      placeholder="임베딩 전용 키로 바꿀 때만 입력"
+                      autoComplete="off"
+                      flex={1}
+                      key={form.key("agentEmbeddingApiKey")}
+                      {...form.getInputProps("agentEmbeddingApiKey")}
+                    />
+                    <StandaloneKeyBadge
+                      status={settings.chat.overrides.embeddingApiKey}
+                      effectiveLast4={
+                        settings.chat.effective.embeddingApiKeyLast4
+                      }
+                      missingLabel="키 없음 — 기억 검색 불가"
+                    />
+                    {settings.chat.overrides.embeddingApiKey.set ? (
+                      <ClearKeyButton
+                        label="임베딩 API 키 삭제"
+                        description="저장된 임베딩 키를 삭제합니다. 별도 키가 없으면 기억 검색 임베딩이 중단됩니다."
+                        loading={save.isPending}
+                        onConfirm={() => clearKey("agentEmbeddingApiKey")}
+                      />
+                    ) : null}
+                  </Group>
+                  <TextInput
+                    label="임베딩 API URL"
+                    placeholder="https://openrouter.ai/api/v1/embeddings"
+                    description="채팅 URL을 상속하지 않습니다"
+                    key={form.key("agentEmbeddingApiUrl")}
+                    {...form.getInputProps("agentEmbeddingApiUrl")}
+                  />
+                  <TextInput
+                    label="임베딩 모델"
+                    placeholder={
+                      settings.chat.effective.embeddingModel ??
+                      "openai/text-embedding-3-small"
+                    }
+                    description="채팅 모델을 상속하지 않습니다"
+                    key={form.key("agentEmbeddingModel")}
+                    {...form.getInputProps("agentEmbeddingModel")}
+                  />
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
+
+          <Stack gap="sm" className={styles.formFooter}>
+            <Text size="xs" c="dimmed">
+              이미지·기획 설정은 DB 값이 env보다 우선하고, 채팅 LLM은 DB
+              전용이라 비운 필드는 기획 LLM을 상속합니다. 임베딩 URL·키·모델은
+              별도 설정이며 세 값이 모두 필요합니다. 저장하면 다음
+              잡·기획·대화부터 적용됩니다. 모델과 URL은 비우고 저장하면 상위
+              값으로 복귀하지만, API 키는 비워도 유지되고 삭제는 키 삭제
+              버튼으로만 합니다.
+            </Text>
+
+            {testResult ? (
+              <Alert
+                color={testResult.ok ? "teal" : "red"}
+                role="status"
+                title={testResult.ok ? "연결 성공" : "연결 실패"}
+              >
+                {testResult.message}
+              </Alert>
+            ) : null}
+            {save.isError ? (
+              <Alert color="red" role="alert" title="저장하지 못했습니다">
+                {save.error.message}
+              </Alert>
+            ) : null}
+            {save.isSuccess ? (
+              <Alert color="teal" role="status">
+                설정을 저장했습니다.
+              </Alert>
+            ) : null}
+
+            <Group justify="flex-end">
+              <Button type="submit" loading={save.isPending}>
+                변경사항 저장
+              </Button>
             </Group>
-          )}
-          <TextInput
-            label="edit 프롬프트 정책 모델 ID"
-            placeholder="black-forest-labs/FLUX.1-Kontext-dev"
-            description={sourceNote(settings.resolved.sources.editModel)}
-            key={form.key("falImageModel")}
-            {...form.getInputProps("falImageModel")}
-          />
-          <TextInput
-            label="t2i 프롬프트 정책 모델 ID"
-            placeholder="black-forest-labs/FLUX.1-Kontext-dev"
-            description={sourceNote(settings.resolved.sources.t2iModel)}
-            key={form.key("falImageT2iModel")}
-            {...form.getInputProps("falImageT2iModel")}
-          />
-
-          <Divider />
-          {/* 연결 테스트 대상이 아니라 sectionHeader를 쓰지 않는다. */}
-          <Title order={6}>게시 포맷별 종횡비</Title>
-          <TextInput
-            label="피드 게시물"
-            placeholder={DEFAULT_ASPECT_RATIO_HINT.feed}
-            description={ratioNote(settings.aspectRatios.effective.feed)}
-            key={form.key("aspectRatioFeed")}
-            {...form.getInputProps("aspectRatioFeed")}
-          />
-          <TextInput
-            label="스토리"
-            placeholder={DEFAULT_ASPECT_RATIO_HINT.story}
-            description={ratioNote(settings.aspectRatios.effective.story)}
-            key={form.key("aspectRatioStory")}
-            {...form.getInputProps("aspectRatioStory")}
-          />
-          <TextInput
-            label="릴"
-            placeholder={DEFAULT_ASPECT_RATIO_HINT.reel}
-            description={ratioNote(settings.aspectRatios.effective.reel)}
-            key={form.key("aspectRatioReel")}
-            {...form.getInputProps("aspectRatioReel")}
-          />
-
-          <Divider />
-          {sectionHeader("기획 LLM (OpenAI-compatible)", "planner")}
-          <Group gap="xs" align="flex-end" wrap="nowrap">
-            <PasswordInput
-              label="LLM API 키"
-              placeholder={
-                settings.llmApiKey.set ? "변경할 때만 입력" : "sk-..."
-              }
-              autoComplete="off"
-              flex={1}
-              key={form.key("llmApiKey")}
-              {...form.getInputProps("llmApiKey")}
-            />
-            <SecretStatusBadge
-              status={settings.llmApiKey}
-              envSource={settings.resolved.plannerSources.apiKey}
-              missingLabel="키 없음 — 로컬 플래너"
-            />
-            {settings.llmApiKey.set ? (
-              <ClearKeyButton
-                label="기획 LLM 키 삭제"
-                description="저장된 기획 LLM 키를 지우고 env 값으로 되돌립니다."
-                loading={save.isPending}
-                onConfirm={() => clearKey("llmApiKey")}
-              />
-            ) : null}
-          </Group>
-          <TextInput
-            label="API URL"
-            placeholder="https://api.openai.com/v1/chat/completions"
-            description={sourceNote(settings.resolved.plannerSources.apiUrl)}
-            key={form.key("llmApiUrl")}
-            {...form.getInputProps("llmApiUrl")}
-          />
-          <TextInput
-            label="모델"
-            placeholder="gpt-5-mini"
-            description={sourceNote(settings.resolved.plannerSources.model)}
-            key={form.key("llmModel")}
-            {...form.getInputProps("llmModel")}
-          />
-
-          <Divider />
-          {sectionHeader("캐릭터 채팅 LLM (opod-agent)", "chat")}
-          <Group gap="xs" align="flex-end" wrap="nowrap">
-            <PasswordInput
-              label="API 키"
-              placeholder="채팅 전용 키로 바꿀 때만 입력"
-              autoComplete="off"
-              flex={1}
-              key={form.key("agentLlmApiKey")}
-              {...form.getInputProps("agentLlmApiKey")}
-            />
-            <InheritedKeyBadge
-              override={settings.chat.overrides.apiKey}
-              effectiveLast4={settings.chat.effective.apiKeyLast4}
-            />
-            {settings.chat.overrides.apiKey.set ? (
-              <ClearKeyButton
-                label="채팅 LLM 키 삭제"
-                description="채팅 전용 키를 지우고 기획 LLM 키를 다시 사용합니다."
-                loading={save.isPending}
-                onConfirm={() => clearKey("agentLlmApiKey")}
-              />
-            ) : null}
-          </Group>
-          <TextInput
-            label="API URL"
-            placeholder={
-              settings.chat.effective.apiUrl ??
-              "https://api.openai.com/v1/chat/completions"
-            }
-            description="비우면 기획 LLM 값을 상속합니다"
-            key={form.key("agentLlmApiUrl")}
-            {...form.getInputProps("agentLlmApiUrl")}
-          />
-          <TextInput
-            label="모델"
-            placeholder={settings.chat.effective.model ?? "모델명"}
-            description="비우면 기획 LLM 값을 상속합니다"
-            key={form.key("agentLlmModel")}
-            {...form.getInputProps("agentLlmModel")}
-          />
-
-          <Divider label="임베딩" labelPosition="center" />
-          {sectionHeader("기억 검색 임베딩", "embedding")}
-          <Group gap="xs" align="flex-end" wrap="nowrap">
-            <PasswordInput
-              label="임베딩 API 키"
-              placeholder="임베딩 전용 키로 바꿀 때만 입력"
-              autoComplete="off"
-              flex={1}
-              key={form.key("agentEmbeddingApiKey")}
-              {...form.getInputProps("agentEmbeddingApiKey")}
-            />
-            <StandaloneKeyBadge
-              status={settings.chat.overrides.embeddingApiKey}
-              effectiveLast4={settings.chat.effective.embeddingApiKeyLast4}
-              missingLabel="키 없음 — 기억 검색 불가"
-            />
-            {settings.chat.overrides.embeddingApiKey.set ? (
-              <ClearKeyButton
-                label="임베딩 API 키 삭제"
-                description="저장된 임베딩 키를 삭제합니다. 별도 키가 없으면 기억 검색 임베딩이 중단됩니다."
-                loading={save.isPending}
-                onConfirm={() => clearKey("agentEmbeddingApiKey")}
-              />
-            ) : null}
-          </Group>
-          <TextInput
-            label="임베딩 API URL"
-            placeholder="https://openrouter.ai/api/v1/embeddings"
-            description="채팅 URL을 상속하지 않습니다"
-            key={form.key("agentEmbeddingApiUrl")}
-            {...form.getInputProps("agentEmbeddingApiUrl")}
-          />
-          <TextInput
-            label="임베딩 모델"
-            placeholder={
-              settings.chat.effective.embeddingModel ??
-              "openai/text-embedding-3-small"
-            }
-            description="채팅 모델을 상속하지 않습니다"
-            key={form.key("agentEmbeddingModel")}
-            {...form.getInputProps("agentEmbeddingModel")}
-          />
-
-          <Text size="xs" c="dimmed">
-            이미지·기획 설정은 DB 값이 env보다 우선하고, 채팅 LLM은 DB 전용이라
-            비운 필드는 기획 LLM을 상속합니다. 임베딩 URL·키·모델은 별도
-            설정이며 세 값이 모두 필요합니다. 저장하면 다음 잡·기획·대화부터
-            적용됩니다. 모델과 URL은 비우고 저장하면 상위 값으로 복귀하지만, API
-            키는 비워도 유지되고 삭제는 키 삭제 버튼으로만 합니다.
-          </Text>
-
-          {testResult ? (
-            <Alert
-              color={testResult.ok ? "teal" : "red"}
-              role="status"
-              title={testResult.ok ? "연결 성공" : "연결 실패"}
-            >
-              {testResult.message}
-            </Alert>
-          ) : null}
-          {save.isError ? (
-            <Alert color="red" role="alert" title="저장하지 못했습니다">
-              {save.error.message}
-            </Alert>
-          ) : null}
-          {save.isSuccess ? (
-            <Alert color="teal" role="status">
-              설정을 저장했습니다.
-            </Alert>
-          ) : null}
-
-          <Group>
-            <Button type="submit" loading={save.isPending}>
-              저장
-            </Button>
-          </Group>
+          </Stack>
         </Stack>
       </form>
     </Paper>

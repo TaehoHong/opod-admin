@@ -1,0 +1,35 @@
+.formCard {
+  align-self: start;
+  overflow: hidden;
+}
+
+.formIntro {
+  padding: var(--mantine-spacing-md) var(--mantine-spacing-lg);
+  border-bottom: 1px solid var(--mantine-color-ink-1);
+  background: var(--mantine-color-ink-0);
+}
+
+.accordion {
+  padding: var(--mantine-spacing-md);
+}
+
+.secretRow {
+  align-items: flex-end;
+}
+
+.formFooter {
+  padding: var(--mantine-spacing-md) var(--mantine-spacing-lg)
+    var(--mantine-spacing-lg);
+  border-top: 1px solid var(--mantine-color-ink-1);
+}
+
+@media (max-width: 47.99em) {
+  .secretRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .secretRow > * {
+    width: 100%;
+  }
+}
