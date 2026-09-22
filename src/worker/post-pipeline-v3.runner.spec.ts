@@ -160,6 +160,254 @@ function readyPostPlan() {
 }
 
 describe("PostPipelineV3Runner", () => {
+  it("plans from v2 roles without legacy titles and excludes private source text", async () => {
+    const current = draft({
+      pipelineVersion: "post-pipeline-v4",
+      operatorRequest: "강릉에서 보낸 하루",
+      pipeline: { stage: "post_plan", state: "running" },
+    });
+    const { runner, repository, fetchMock } = setup(
+      {
+        ...current,
+        character: {
+          ...current.character,
+          personas: [
+            {
+              id: "source-v2",
+              schemaVersion: 2,
+              title: "인물 설정",
+              content: "꽃집에서 일한다.짧게 말한다.제작자 비밀.처음 인사.",
+              fragments: [
+                {
+                  id: "identity",
+                  kind: "identity",
+                  injection: "always",
+                  content: "꽃집에서 일한다.",
+                  recallKeys: [],
+                  canonIds: [],
+                },
+                {
+                  id: "voice",
+                  kind: "voice",
+                  injection: "always",
+                  content: "짧게 말한다.",
+                  recallKeys: [],
+                  canonIds: [],
+                },
+                {
+                  id: "private",
+                  kind: "creator_note",
+                  injection: "never_prompt",
+                  content: "제작자 비밀.",
+                  recallKeys: ["강릉"],
+                  canonIds: [],
+                },
+                {
+                  id: "greeting",
+                  kind: "greeting",
+                  injection: "start_only",
+                  content: "처음 인사.",
+                  recallKeys: [],
+                  canonIds: [],
+                },
+              ],
+            },
+          ],
+        },
+      },
+      readyPostPlan(),
+    );
+
+    await runner.runCurrentStage("draft-1");
+
+    expect(repository.persistV3Artifact).toHaveBeenCalledWith(
+      expect.objectContaining({ actionType: "DRAFT_V3_POST_PLAN_READY" }),
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const input = JSON.parse(body.messages[1].content);
+    expect(input.persona.characterContext).toContainEqual(
+      expect.objectContaining({
+        sourceId: "source-v2",
+        fragmentId: "identity",
+        schemaVersion: 2,
+        kind: "identity",
+        content: "꽃집에서 일한다.",
+      }),
+    );
+    expect(input.persona.writingProfile.voice).toContainEqual(
+      expect.objectContaining({ kind: "voice", content: "짧게 말한다." }),
+    );
+    expect(body.messages[1].content).not.toContain("제작자 비밀");
+    expect(body.messages[1].content).not.toContain("처음 인사");
+  });
+
+  it.each(["image_plan", "caption"])(
+    "keeps v2 routing and boundaries when passing the plan to %s",
+    async (stage) => {
+      const current = captionStageDraft();
+      const fragments = [
+        { kind: "identity", injection: "always", content: "꽃집에서 일한다." },
+        { kind: "voice", injection: "always", content: "짧게 말한다." },
+        {
+          kind: "boundary",
+          injection: "always",
+          content: "직장 주소는 숨긴다.",
+        },
+        { kind: "example", injection: "always", content: "예시 속 허구 사건." },
+        {
+          kind: "creator_note",
+          injection: "never_prompt",
+          content: "제작자 비밀.",
+        },
+        {
+          kind: "greeting",
+          injection: "start_only",
+          content: "대화 시작 인사.",
+        },
+        {
+          kind: "judgment",
+          injection: "retrieved",
+          content: "운동은 천천히 배운다.",
+        },
+      ].map((entry, i) => ({
+        ...entry,
+        id: `fragment-${i}`,
+        recallKeys: ["필라테스"],
+        canonIds: [],
+      }));
+      const { runner, fetchMock, repository } = setup(
+        {
+          ...current,
+          conceptJson: {
+            ...current.conceptJson,
+            pipeline: {
+              stage,
+              state: "running",
+              imageCount: 1,
+              reasonCodes: [],
+            },
+          },
+          character: {
+            ...current.character,
+            personas: [
+              {
+                id: "source",
+                schemaVersion: 2,
+                title: "인물",
+                content: fragments.map((item) => item.content).join(""),
+                fragments,
+              },
+            ],
+          },
+        },
+        stage === "caption"
+          ? {
+              status: "ready",
+              caption: "운동 끝.",
+              captionLanguages: ["ko"],
+              hashtags: [],
+            }
+          : {
+              status: "blocked",
+              reasons: [
+                {
+                  code: "insufficient_distinct_shots",
+                  detail: "촬영 근거 부족",
+                },
+              ],
+            },
+        {
+          captionShots: [
+            {
+              sortOrder: 0,
+              jobId: "job",
+              mediaId: "media",
+              media: {
+                url: "https://cdn.local/image.png",
+                storageKey: null,
+                contentType: "image/png",
+              },
+            },
+          ],
+        },
+      );
+
+      await runner.runCurrentStage("draft-1");
+
+      expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      const serialized =
+        stage === "caption"
+          ? body.messages[1].content[0].text
+          : body.messages[1].content;
+      const input = JSON.parse(serialized);
+      expect(serialized).not.toContain("제작자 비밀");
+      expect(serialized).not.toContain("대화 시작 인사");
+      expect(serialized).not.toContain("예시 속 허구 사건");
+      const context =
+        stage === "caption"
+          ? input.persona.characterContext
+          : input.characterVisualContext.personaContext;
+      expect(context).toContainEqual(
+        expect.objectContaining({
+          kind: "judgment",
+          sourceId: "source",
+          content: "운동은 천천히 배운다.",
+        }),
+      );
+      if (stage === "caption") {
+        expect(input.persona.boundaries).toContainEqual(
+          expect.objectContaining({
+            kind: "boundary",
+            content: "직장 주소는 숨긴다.",
+          }),
+        );
+        expect(input.persona.writingProfile.voice).toContainEqual(
+          expect.objectContaining({ kind: "voice" }),
+        );
+      } else {
+        expect(input.characterVisualContext.boundaries).toEqual([
+          "직장 주소는 숨긴다.",
+        ]);
+      }
+    },
+  );
+
+  it("pauses a v2 source without fragments instead of leaking its raw body", async () => {
+    const current = draft({
+      pipelineVersion: "post-pipeline-v4",
+      pipeline: { stage: "post_plan", state: "running" },
+    });
+    const { runner, repository, fetchMock } = setup({
+      ...current,
+      character: {
+        ...current.character,
+        personas: [
+          {
+            id: "v2",
+            schemaVersion: 2,
+            title: "content_style",
+            content: "private unsplit source",
+            fragments: [],
+          },
+          ...current.character.personas,
+        ],
+      },
+    });
+    await runner.runCurrentStage("draft-1");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(repository.persistV3Paused).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conceptJson: expect.objectContaining({
+          pipeline: expect.objectContaining({
+            state: "needs_input",
+            reasonCodes: ["invalid_persona_structure"],
+          }),
+        }),
+      }),
+    );
+  });
+
   it.each([
     ["post-pipeline-v3", "content_guidance"],
     ["post-pipeline-v4", "content_guidance"],

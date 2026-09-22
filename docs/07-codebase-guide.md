@@ -224,9 +224,37 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   `npm run test -- src/characters/characters.service.spec.ts --runInBand`다.
 - `PostPipelineV3Runner`가 V3/V4의 `content_style`/`content_guidance` alias를 LLM 호출 전에 하나의
   `content_style` owner로 정규화한다. trim 후 내용이 같으면 하나로 합치고 다르면 `conflict`와
-  `persona_content_policy_conflict`로 pause한다. 둘 다 없을 때의 `missing_content_style` pause는 유지한다.
+  `persona_content_policy_conflict`로 pause한다. v1은 둘 다 없을 때의 `missing_content_style` pause를 유지한다.
   정규화된 persona 집합은 post planning, image planning, caption에 공통으로 전달한다. 좁은 회귀 명령은
   `npm run test -- src/worker/post-pipeline-v3.runner.spec.ts --runInBand`다.
+
+## Post planning persona input — 2026-09-17 verified
+
+- `DraftWorkerRepository.hydratePlannedCharacter`가 V3/V4용 활성 persona source와 조각,
+  같은 캐릭터의 활성 Canon 및 연결을 읽는다. Canon은 최근 20개로 먼저 자르지 않는다.
+  `src/worker/post-persona-context.ts`는 DB 접근 없이 prompt에 보낼 조각과 기억을 선별한다.
+  `PostPipelineV3Runner`가 alias 해석·LLM 로그·artifact 저장 전에 이를 적용한다.
+- v2는 제목 대신 kind로 역할을 해석하고 sourceId/fragmentId/schemaVersion/injection/recallKeys를
+  유지한다. `creator_note`, `greeting`, `never_prompt`, `start_only`는 게시 입력에 넣지 않는다.
+  v2 조각 누락 또는 원문과 조각의 불일치는 `invalid_persona_structure`로 중단하며 원문으로
+  대체하지 않는다. 구조 없는 v1은 제목/본문을 유지한다.
+- `retrieved`는 정규화한 recall key의 문자열 일치로 선별한다. 기획은 운영자 요청, 후속 단계는
+  요청+채택한 premise를 사용한다. 요청이 없는 기획은 bio/관심사/상시 캐릭터 문맥을 사용하고
+  예시·retrieved 본문·최근 게시물은 검색 단서로 사용하지 않는다. 의미 기반 검색은 아직 없다.
+  Canon 연결 자체는 검색을 강제하지 않으며, 선택한 기억에 본문 없는 personaSources와 사건 시점을
+  보존한다. legacy 기억과 관련 retrieved 기억은 각각 최신 20개, always 기억은 모두 전달한다.
+- v2는 bio 또는 캐릭터 역할 문맥이 있으면 옛 content_style/voice 제목 없이 기획할 수 있다.
+  boundary 역할은 이미지 기획·캡션의 제약으로 연결한다. example은 비사실 해석 규칙이 있는
+  게시 기획에만 전달한다. `post-planner-v3`는 입력 의미만 갱신하며 출력은 `post-plan-v2`를 유지한다.
+- 회귀 위치: `src/worker/post-persona-context.spec.ts`,
+  `src/worker/post-pipeline-v3.runner.spec.ts`, `test/post-planning-context.e2e-spec.ts`.
+  DB E2E는 최근 21개에 가려진 관련 Canon, 삭제·다른 캐릭터 연결 제외, 비공개 원문 제외를 검증한다.
+  실제 모델의 자연스러움이나 자동 채택·재기획 품질을 검증한 결과는 아니다.
+- 검증: `npm run lint`, `npm run build`, 변경 TS 파일의 Prettier check 통과.
+  `npm run test -- --runInBand --silent` 48 suites/459 tests,
+  `npm run test:e2e` 7 suites/22 tests 통과. HTTP/DB 테스트는 로컬 포트와 Docker 접근이 가능한
+  환경에서 실행했다. 전체 단위 테스트 첫 실행의 관리자 UUID 필터 테스트 400→404 실패는
+  해당 묶음 35개와 전체 재실행에서 수정 없이 통과했으며 원인은 미확정이다.
 
 ## Authored character context — 2026-09-08 verified boundary
 

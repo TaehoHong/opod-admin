@@ -8,6 +8,7 @@ import {
 } from "../domain/llm-logs/llm-log.service";
 import { StrictJsonAgentClient } from "./strict-json-agent";
 import { isRecord } from "./value-utils";
+import type { PostMemoryEntry, PostPersonaEntry } from "./post-persona-context";
 
 const SOURCES = new Set([
   "operatorRequest",
@@ -26,7 +27,7 @@ const MEMORY_TYPES = new Set([
   "goal",
 ]);
 
-export type PersonaEntry = { title: string; content: string };
+export type PersonaEntry = PostPersonaEntry;
 export type PostPlannerInput = {
   character: {
     name: string;
@@ -40,7 +41,7 @@ export type PostPlannerInput = {
     boundaries: PersonaEntry[];
     additionalContext: PersonaEntry[];
   };
-  memories: { type: string; content: string }[];
+  memories: PostMemoryEntry[];
   recentPosts: {
     premise: string | null;
     caption: string;

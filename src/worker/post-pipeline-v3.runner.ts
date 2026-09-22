@@ -51,6 +51,10 @@ import {
 import { StrictJsonAgentClient } from "./strict-json-agent";
 import { isRecord } from "./value-utils";
 import { pipelineFailure } from "./pipeline-error";
+import {
+  postPersonaRole,
+  projectPostPersonaContext,
+} from "./post-persona-context";
 
 type V3Concept = Record<string, unknown> & {
   pipelineVersion: "post-pipeline-v3" | "post-pipeline-v4";
@@ -87,10 +91,39 @@ export class PostPipelineV3Runner {
     const concept = draft.conceptJson as V3Concept;
     const stage = concept.pipeline.stage;
     try {
-      const personaPolicy =
-        stage === "post_plan" || stage === "image_plan" || stage === "caption"
-          ? resolvePersonaPolicyAliases(draft.character.personas)
-          : { status: "ready" as const, personas: draft.character.personas };
+      const needsContext = ["post_plan", "image_plan", "caption"].includes(
+        String(stage),
+      );
+      const context = needsContext
+        ? projectPostPersonaContext({
+            personas: draft.character.personas,
+            memories: draft.character.memories,
+            bio: draft.character.bio,
+            interests: draft.character.interests,
+            query: [
+              operatorRequest(concept),
+              ...(stage === "post_plan"
+                ? []
+                : [postPlanReady(concept)?.intent.premise]),
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          })
+        : {
+            status: "ready" as const,
+            hasV2: false,
+            personas: draft.character.personas,
+            memories: draft.character.memories,
+          };
+      if (context.status === "invalid") {
+        await this.pause(draft, concept, "needs_input", [
+          "invalid_persona_structure",
+        ]);
+        return;
+      }
+      const personaPolicy = needsContext
+        ? resolvePersonaPolicyAliases(context.personas)
+        : { status: "ready" as const, personas: context.personas };
       if (personaPolicy.status === "conflict") {
         await this.pause(draft, concept, "conflict", [
           "persona_content_policy_conflict",
@@ -102,6 +135,7 @@ export class PostPipelineV3Runner {
         character: {
           ...draft.character,
           personas: personaPolicy.personas,
+          memories: context.memories,
         },
       };
       const planner = await this.settings.resolvePlannerSettings();
@@ -121,7 +155,12 @@ export class PostPipelineV3Runner {
         this.llmLogs,
       );
       if (stage === "post_plan") {
-        await this.runPostPlanning(normalizedDraft, concept, client);
+        await this.runPostPlanning(
+          normalizedDraft,
+          concept,
+          client,
+          context.hasV2,
+        );
       } else if (stage === "image_plan") {
         await this.runImagePlanning(normalizedDraft, concept, client);
       } else if (stage === "image_prompt") {
@@ -172,14 +211,19 @@ export class PostPipelineV3Runner {
     draft: PlannedDraft,
     concept: V3Concept,
     client: StrictJsonAgentClient,
+    hasV2: boolean,
   ): Promise<void> {
     const input = postPlannerInput(draft, concept);
-    const missing = [
-      ...(input.persona.writingProfile.contentStyle.length
+    const missing = hasV2
+      ? input.character.bio.trim() || input.persona.characterContext.length
         ? []
-        : ["content_style"]),
-      ...(input.persona.writingProfile.voice.length ? [] : ["voice"]),
-    ];
+        : ["character_context"]
+      : [
+          ...(input.persona.writingProfile.contentStyle.length
+            ? []
+            : ["content_style"]),
+          ...(input.persona.writingProfile.voice.length ? [] : ["voice"]),
+        ];
     if (missing.length) {
       await this.pause(
         draft,
@@ -304,16 +348,14 @@ export class PostPipelineV3Runner {
                 "boundaries",
                 "greeting",
                 "examples",
-              ].includes(normalizeTitle(entry.title)),
+              ].includes(postPersonaRole(entry)) &&
+              entry.kind !== "example",
           )
-          .map((entry) => ({ title: entry.title, content: entry.content })),
+          .map((entry) => ({ ...entry })),
       },
-      memories: draft.character.memories
-        .map((memory) => ({
-          type: memory.type,
-          content: memory.content,
-        }))
-        .filter((memory) => memory.content.trim()),
+      memories: draft.character.memories.filter((memory) =>
+        memory.content.trim(),
+      ),
       recentVisualHistory: recentVisualHistory(recentDrafts),
       ...(operatorRequest(concept)
         ? { operatorRequest: operatorRequest(concept) }
@@ -746,34 +788,44 @@ function postPlannerInput(
   concept: V3Concept,
 ): PostPlannerInput {
   return {
-    ...personaInput(draft),
+    ...personaInput(draft, true),
     ...(operatorRequest(concept)
       ? { operatorRequest: operatorRequest(concept) }
       : {}),
   };
 }
 
-// ② 게시글 기획과 ⑥ 캡션이 같은 캐릭터 컨텍스트를 본다 — 두 Agent가 다른
-// 페르소나 조각을 보면 글의 소유자가 갈린다.
+// ② 기획과 ⑥ 캡션은 같은 역할 분류를 사용한다. example은 사실로 오인하지
+// 않도록 해석 규칙을 가진 ② 기획에만 전달한다.
 function personaInput(
   draft: PlannedDraft,
+  includeExamples = false,
 ): Omit<PostPlannerInput, "operatorRequest"> {
-  const personas = draft.character.personas.filter((entry) =>
-    entry.content.trim(),
+  const personas = draft.character.personas.filter(
+    (entry) =>
+      entry.content.trim() && (includeExamples || entry.kind !== "example"),
   );
   const take = (title: string) =>
-    personas.filter((entry) => normalizeTitle(entry.title) === title);
-  const reserved = new Set([
+    personas.filter((entry) => postPersonaRole(entry) === title);
+  const characterRoles = [
     "identity",
     "personality",
     "background",
     "lifestyle",
+    "motivation",
+    "judgment",
+    "tension",
+    "relationship",
+  ];
+  const reserved = new Set([
+    ...characterRoles,
     "voice",
     "content_style",
     "capture_style",
     "boundaries",
     "greeting",
     "examples",
+    ...(includeExamples ? [] : ["example"]),
   ]);
   return {
     character: {
@@ -784,9 +836,7 @@ function personaInput(
     },
     persona: {
       characterContext: personas.filter((entry) =>
-        ["identity", "personality", "background", "lifestyle"].includes(
-          normalizeTitle(entry.title),
-        ),
+        characterRoles.includes(postPersonaRole(entry)),
       ),
       writingProfile: {
         contentStyle: take("content_style"),
@@ -794,13 +844,10 @@ function personaInput(
       },
       boundaries: take("boundaries"),
       additionalContext: personas.filter(
-        (entry) => !reserved.has(normalizeTitle(entry.title)),
+        (entry) => !reserved.has(postPersonaRole(entry)),
       ),
     },
-    memories: draft.character.memories.map((memory) => ({
-      type: memory.type,
-      content: memory.content,
-    })),
+    memories: draft.character.memories,
     recentPosts: draft.character.posts.map((post) => ({
       premise: recentPremise(post.sourceDrafts[0]?.conceptJson),
       caption: post.content,
@@ -959,7 +1006,7 @@ function resolvePersonaPolicyAliases(
   personas: PersonaEntry[],
 ): { status: "ready"; personas: PersonaEntry[] } | { status: "conflict" } {
   const aliases = personas.filter((entry) =>
-    ["content_style", "content_guidance"].includes(normalizeTitle(entry.title)),
+    ["content_style", "content_guidance"].includes(postPersonaRole(entry)),
   );
   const hasContentStyle = aliases.some(
     (entry) => normalizeTitle(entry.title) === "content_style",
@@ -988,13 +1035,12 @@ function resolvePersonaPolicyAliases(
   const normalized: PersonaEntry[] = [];
   for (const entry of personas) {
     if (
-      ["content_style", "content_guidance"].includes(
-        normalizeTitle(entry.title),
-      )
+      ["content_style", "content_guidance"].includes(postPersonaRole(entry))
     ) {
       if (!inserted) {
         normalized.push(
           ...policies.map((content) => ({
+            ...aliases.find((entry) => entry.content.trim() === content),
             title: "content_style",
             content,
           })),
@@ -1010,9 +1056,7 @@ function resolvePersonaPolicyAliases(
 
 function personaContents(draft: PlannedDraft, title: string): string[] {
   return draft.character.personas
-    .filter(
-      (entry) => normalizeTitle(entry.title) === title && entry.content.trim(),
-    )
+    .filter((entry) => postPersonaRole(entry) === title && entry.content.trim())
     .map((entry) => entry.content.trim());
 }
 function recentPremise(value: unknown): string | null {

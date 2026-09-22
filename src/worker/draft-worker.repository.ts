@@ -19,6 +19,8 @@ import {
   characterLocationReferences,
   characterLocations,
   characterMemories,
+  characterPersonaFragments,
+  characterPersonaCanonLinks,
   characterPersonas,
   characterPostingPolicies,
   characterVisualProfileReferences,
@@ -39,7 +41,12 @@ import {
   POST_PIPELINE_V3,
   POST_PIPELINE_V4,
   PostPipelineV3ArtifactKey,
+  isPostPipelineV3,
 } from "./post-pipeline-v3";
+import type {
+  PostMemoryEntry,
+  StoredPostPersona,
+} from "./post-persona-context";
 
 type DraftStatus = (typeof postDrafts.$inferSelect)["status"];
 export type AggregateDraft = Pick<
@@ -57,12 +64,8 @@ type PlannedCharacter = Pick<
   "displayName" | "bio" | "contentLanguage"
 > & {
   interests: string[];
-  personas: Array<
-    Pick<typeof characterPersonas.$inferSelect, "title" | "content">
-  >;
-  memories: Array<
-    Pick<typeof characterMemories.$inferSelect, "type" | "content">
-  >;
+  personas: StoredPostPersona[];
+  memories: PostMemoryEntry[];
   posts: PlannedPost[];
   visualProfile:
     | (Pick<
@@ -763,7 +766,10 @@ export class DraftWorkerRepository {
     if (!draft) return null;
     return {
       ...draft,
-      character: await this.hydratePlannedCharacter(draft.characterId),
+      character: await this.hydratePlannedCharacter(
+        draft.characterId,
+        isPostPipelineV3(draft.conceptJson),
+      ),
     };
   }
 
@@ -1286,6 +1292,7 @@ export class DraftWorkerRepository {
 
   private async hydratePlannedCharacter(
     characterId: string,
+    structured = false,
   ): Promise<PlannedCharacter> {
     const [character] = await this.database.client
       .select({
@@ -1299,9 +1306,31 @@ export class DraftWorkerRepository {
       .from(characters)
       .where(eq(characters.id, characterId))
       .limit(1);
+    const memoryQuery = this.database.client
+      .select({
+        sourceId: characterMemories.id,
+        type: characterMemories.type,
+        content: characterMemories.content,
+        kind: characterMemories.kind,
+        injection: characterMemories.injection,
+        recallKeys: characterMemories.recallKeys,
+        occurredAt: characterMemories.occurredAt,
+        occurredLabel: characterMemories.occurredLabel,
+        occurredPrecision: characterMemories.occurredPrecision,
+      })
+      .from(characterMemories)
+      .where(
+        and(
+          eq(characterMemories.characterId, characterId),
+          isNull(characterMemories.deletedAt),
+        ),
+      )
+      .orderBy(desc(characterMemories.createdAt));
     const [personas, memories, recentPosts, profile] = await Promise.all([
       this.database.client
         .select({
+          id: characterPersonas.id,
+          schemaVersion: characterPersonas.schemaVersion,
           title: characterPersonas.title,
           content: characterPersonas.content,
         })
@@ -1313,20 +1342,7 @@ export class DraftWorkerRepository {
           ),
         )
         .orderBy(asc(characterPersonas.sortOrder)),
-      this.database.client
-        .select({
-          type: characterMemories.type,
-          content: characterMemories.content,
-        })
-        .from(characterMemories)
-        .where(
-          and(
-            eq(characterMemories.characterId, characterId),
-            isNull(characterMemories.deletedAt),
-          ),
-        )
-        .orderBy(desc(characterMemories.createdAt))
-        .limit(20),
+      structured ? memoryQuery : memoryQuery.limit(20),
       this.database.client
         .select({ id: posts.id, content: posts.content })
         .from(posts)
@@ -1345,6 +1361,48 @@ export class DraftWorkerRepository {
         .limit(1)
         .then(([row]) => row ?? null),
     ]);
+    const fragments =
+      structured && personas.length
+        ? await this.database.client
+            .select({
+              id: characterPersonaFragments.id,
+              personaId: characterPersonaFragments.personaId,
+              content: characterPersonaFragments.content,
+              kind: characterPersonaFragments.kind,
+              injection: characterPersonaFragments.injection,
+              recallKeys: characterPersonaFragments.recallKeys,
+            })
+            .from(characterPersonaFragments)
+            .where(
+              inArray(
+                characterPersonaFragments.personaId,
+                personas.map((source) => source.id),
+              ),
+            )
+            .orderBy(asc(characterPersonaFragments.ordinal))
+        : [];
+    const links = fragments.length
+      ? await this.database.client
+          .select({
+            fragmentId: characterPersonaCanonLinks.fragmentId,
+            memoryId: characterPersonaCanonLinks.memoryId,
+          })
+          .from(characterPersonaCanonLinks)
+          .innerJoin(
+            characterMemories,
+            eq(characterMemories.id, characterPersonaCanonLinks.memoryId),
+          )
+          .where(
+            and(
+              inArray(
+                characterPersonaCanonLinks.fragmentId,
+                fragments.map((fragment) => fragment.id),
+              ),
+              eq(characterMemories.characterId, characterId),
+              isNull(characterMemories.deletedAt),
+            ),
+          )
+      : [];
     const hydratedPosts = await Promise.all(
       recentPosts.map(async (post) => ({
         content: post.content,
@@ -1383,8 +1441,33 @@ export class DraftWorkerRepository {
       : [];
     return {
       ...character,
-      personas,
-      memories,
+      personas: personas.map((source) => ({
+        ...source,
+        ...(structured
+          ? {
+              fragments: fragments
+                .filter((fragment) => fragment.personaId === source.id)
+                .map((fragment) => ({
+                  ...fragment,
+                  canonIds: links
+                    .filter((link) => link.fragmentId === fragment.id)
+                    .map((link) => link.memoryId),
+                })),
+            }
+          : {}),
+      })),
+      memories: memories.map((memory) => ({
+        ...memory,
+        occurredAt: memory.occurredAt?.toISOString() ?? null,
+        personaSources: links
+          .filter((link) => link.memoryId === memory.sourceId)
+          .map((link) => ({
+            sourceId: fragments.find(
+              (fragment) => fragment.id === link.fragmentId,
+            )!.personaId,
+            fragmentId: link.fragmentId,
+          })),
+      })),
       posts: hydratedPosts,
       visualProfile: profile ? { ...profile, referenceMedia } : null,
     };
