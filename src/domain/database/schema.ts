@@ -7,6 +7,7 @@ import {
   integer,
   smallint,
   timestamp,
+  time,
   boolean,
   doublePrecision,
   jsonb,
@@ -849,6 +850,8 @@ export const characters = opod.table(
       onUpdate: "cascade",
     }),
     contentLanguage: text("content_language").default("ko").notNull(),
+    // IANA living timezone shared by every character capability.
+    timezone: text(),
   },
   (table) => [
     index("characters_profile_image_id_idx").using(
@@ -858,6 +861,240 @@ export const characters = opod.table(
     uniqueIndex("characters_public_id_key").using(
       "btree",
       table.publicId.asc().nullsLast(),
+    ),
+    check(
+      "characters_timezone_check",
+      sql`${table.timezone} IS NULL OR (${table.timezone} <> '' AND ${table.timezone} = BTRIM(${table.timezone}))`,
+    ),
+  ],
+);
+
+export const characterSocialActivityPolicies = opod.table(
+  "character_social_activity_policies",
+  {
+    characterId: uuid("character_id")
+      .primaryKey()
+      .references(() => characters.id, {
+        name: "character_social_activity_policies_character_id_fkey",
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    enabled: boolean().default(false).notNull(),
+    activeStartLocalTime: time("active_start_local_time", {
+      precision: 0,
+    }).notNull(),
+    activeEndLocalTime: time("active_end_local_time", {
+      precision: 0,
+    }).notNull(),
+    activityIntervalMinutes: integer("activity_interval_minutes").notNull(),
+    maxDailyPostViews: integer("max_daily_post_views").notNull(),
+    maxDailyPostLikes: integer("max_daily_post_likes").notNull(),
+    maxDailyFollows: integer("max_daily_follows").notNull(),
+    postLikeProbability: numeric("post_like_probability", {
+      precision: 4,
+      scale: 3,
+    }).notNull(),
+    nextActivityAt: timestamp("next_activity_at", {
+      precision: 6,
+      withTimezone: true,
+    }),
+    createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp("updated_at", { precision: 6, withTimezone: true })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull()
+      .$onUpdateFn(() => new Date()),
+  },
+  (table) => [
+    check(
+      "character_social_activity_policies_active_time_check",
+      sql`${table.activeStartLocalTime} < TIME '24:00' AND ${table.activeEndLocalTime} < TIME '24:00' AND ${table.activeStartLocalTime} <> ${table.activeEndLocalTime}`,
+    ),
+    check(
+      "character_social_activity_policies_interval_check",
+      sql`${table.activityIntervalMinutes} > 0`,
+    ),
+    check(
+      "character_social_activity_policies_daily_limits_check",
+      sql`${table.maxDailyPostViews} >= 0 AND ${table.maxDailyPostLikes} >= 0 AND ${table.maxDailyFollows} >= 0`,
+    ),
+    check(
+      "character_social_activity_policies_like_probability_check",
+      sql`${table.postLikeProbability} >= 0 AND ${table.postLikeProbability} <= 1`,
+    ),
+    check(
+      "character_social_activity_policies_enabled_schedule_check",
+      sql`NOT ${table.enabled} OR ${table.nextActivityAt} IS NOT NULL`,
+    ),
+    index("character_social_activity_policies_due_idx")
+      .using(
+        "btree",
+        table.nextActivityAt.asc().nullsLast(),
+        table.characterId.asc().nullsLast(),
+      )
+      .where(sql`${table.enabled}`),
+  ],
+);
+
+export const characterPostViews = opod.table(
+  "character_post_views",
+  {
+    viewerCharacterId: uuid("viewer_character_id")
+      .notNull()
+      .references(() => characters.id, {
+        name: "character_post_views_viewer_character_id_fkey",
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, {
+        name: "character_post_views_post_id_fkey",
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    firstViewedAt: timestamp("first_viewed_at", {
+      precision: 6,
+      withTimezone: true,
+    })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.viewerCharacterId, table.postId],
+      name: "character_post_views_pkey",
+    }),
+    index("character_post_views_post_id_idx").using(
+      "btree",
+      table.postId.asc().nullsLast(),
+    ),
+    index("character_post_views_viewer_first_viewed_idx").using(
+      "btree",
+      table.viewerCharacterId.asc().nullsLast(),
+      table.firstViewedAt.asc().nullsLast(),
+    ),
+  ],
+);
+
+export const characterFollows = opod.table(
+  "character_follows",
+  {
+    followerCharacterId: uuid("follower_character_id")
+      .notNull()
+      .references(() => characters.id, {
+        name: "character_follows_follower_character_id_fkey",
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    followedCharacterId: uuid("followed_character_id")
+      .notNull()
+      .references(() => characters.id, {
+        name: "character_follows_followed_character_id_fkey",
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    followedAt: timestamp("followed_at", { precision: 6, withTimezone: true })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.followerCharacterId, table.followedCharacterId],
+      name: "character_follows_pkey",
+    }),
+    check(
+      "character_follows_no_self_check",
+      sql`${table.followerCharacterId} <> ${table.followedCharacterId}`,
+    ),
+    index("character_follows_followed_followed_at_idx").using(
+      "btree",
+      table.followedCharacterId.asc().nullsLast(),
+      table.followedAt.asc().nullsLast(),
+    ),
+    index("character_follows_follower_followed_at_idx").using(
+      "btree",
+      table.followerCharacterId.asc().nullsLast(),
+      table.followedAt.asc().nullsLast(),
+    ),
+  ],
+);
+
+export const characterSocialActivityJobs = opod.table(
+  "character_social_activity_jobs",
+  {
+    id: bigint({ mode: "bigint" }).generatedAlwaysAsIdentity().primaryKey(),
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, {
+        name: "character_social_activity_jobs_character_id_fkey",
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    scheduledAt: timestamp("scheduled_at", {
+      precision: 6,
+      withTimezone: true,
+    }).notNull(),
+    nextAttemptAt: timestamp("next_attempt_at", {
+      precision: 6,
+      withTimezone: true,
+    }).notNull(),
+    processingStatus: text("processing_status").default("queued").notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    processingLeaseToken: uuid("processing_lease_token"),
+    processingLeaseExpiresAt: timestamp("processing_lease_expires_at", {
+      precision: 6,
+      withTimezone: true,
+    }),
+    lastErrorMessage: text("last_error_message"),
+    finishedAt: timestamp("finished_at", { precision: 6, withTimezone: true }),
+    createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp("updated_at", { precision: 6, withTimezone: true })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull()
+      .$onUpdateFn(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("character_social_activity_jobs_character_scheduled_key").using(
+      "btree",
+      table.characterId.asc().nullsLast(),
+      table.scheduledAt.asc().nullsLast(),
+    ),
+    uniqueIndex("character_social_activity_jobs_active_character_key")
+      .using("btree", table.characterId.asc().nullsLast())
+      .where(sql`${table.processingStatus} IN ('queued', 'running')`),
+    index("character_social_activity_jobs_queued_due_idx")
+      .using(
+        "btree",
+        table.nextAttemptAt.asc().nullsLast(),
+        table.id.asc().nullsLast(),
+      )
+      .where(sql`${table.processingStatus} = 'queued'`),
+    index("character_social_activity_jobs_running_lease_idx")
+      .using(
+        "btree",
+        table.processingLeaseExpiresAt.asc().nullsLast(),
+        table.id.asc().nullsLast(),
+      )
+      .where(sql`${table.processingStatus} = 'running'`),
+    check(
+      "character_social_activity_jobs_status_check",
+      sql`${table.processingStatus} IN ('queued', 'running', 'completed', 'failed', 'cancelled')`,
+    ),
+    check(
+      "character_social_activity_jobs_attempt_count_check",
+      sql`${table.attemptCount} >= 0`,
+    ),
+    check(
+      "character_social_activity_jobs_lease_check",
+      sql`(${table.processingStatus} = 'running' AND ${table.processingLeaseToken} IS NOT NULL AND ${table.processingLeaseExpiresAt} IS NOT NULL) OR (${table.processingStatus} <> 'running' AND ${table.processingLeaseToken} IS NULL AND ${table.processingLeaseExpiresAt} IS NULL)`,
+    ),
+    check(
+      "character_social_activity_jobs_finished_at_check",
+      sql`(${table.processingStatus} IN ('completed', 'failed', 'cancelled')) = (${table.finishedAt} IS NOT NULL)`,
     ),
   ],
 );
@@ -2311,6 +2548,18 @@ export const postReactions = opod.table(
       table.postId.asc().nullsLast(),
       table.userId.asc().nullsLast(),
       table.reactionType.asc().nullsLast(),
+    ),
+    uniqueIndex("post_reactions_post_id_character_id_reaction_type_key")
+      .using(
+        "btree",
+        table.postId.asc().nullsLast(),
+        table.characterId.asc().nullsLast(),
+        table.reactionType.asc().nullsLast(),
+      )
+      .where(sql`${table.characterId} IS NOT NULL`),
+    check(
+      "post_reactions_single_actor_check",
+      sql`${table.userId} IS NULL OR ${table.characterId} IS NULL`,
     ),
     index("post_reactions_user_id_created_at_idx").using(
       "btree",
