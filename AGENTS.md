@@ -76,6 +76,18 @@
 - Drizzle schema mirror changes require `npm run schema:check` and
   `npm run db:generate`.
 
+## Mandatory Repository Dependency Rule
+
+- 이 규칙은 `opod-service-backend`와 `opod-admin`의 절대 규칙이다.
+- Repository는 테이블당 하나이며, A Repository에 의존할 수 있는 것은 A Domain Service뿐이다.
+- B Domain Service는 A Repository에 접근할 때 반드시 A Domain Service를 거친다.
+- Application / Facade / UseCase Service는 Domain Service만 조합하며 Repository를 직접 의존하지 않는다.
+- Controller, Worker, Scheduler 및 다른 Repository의 직접 Repository 접근도 금지한다.
+- Repository/DB client 노출, 직접 SQL, 동적 DI 조회로 이 경계를 우회하지 않는다.
+- 트랜잭션을 공유할 때도 소유 Domain Service 경유 원칙을 지킨다.
+- 기존 미준수 코드는 예외나 정본 예시가 아니다. 요청 범위 밖 코드는 자동 수정하지 않는다.
+- 상세 정본: [개발 규칙](docs/02-development-rules.md)의 “Repository 의존 절대 규칙”.
+
 ## Boundaries
 
 - Do not add public service controllers here.
