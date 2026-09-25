@@ -13,7 +13,7 @@ import {
 } from "@nestjs/common";
 import { AdminJwtGuard } from "../admin/auth/admin-jwt.guard";
 import { parsePageQuery } from "../domain/database/page";
-import { CharactersService } from "./characters.service";
+import { CharacterService } from "./character.service";
 import { PutPersonaStructureDto } from "./dto/put-persona-structure.dto";
 import { PutMemoryRoutingDto } from "./dto/put-memory-routing.dto";
 import { CreateCharacterMemoriesDto } from "./dto/create-character-memories.dto";
@@ -31,17 +31,20 @@ import { UpdateCharacterStatusDto } from "./dto/update-character-status.dto";
 import { UpdateCharacterDto } from "./dto/update-character.dto";
 import { UpsertCharacterProfileImageDto } from "./dto/upsert-character-profile-image.dto";
 import { UpsertPostingPolicyDto } from "./dto/upsert-posting-policy.dto";
+import { UpsertSocialActivityPolicyDto } from "./dto/upsert-social-activity-policy.dto";
 import { UpsertVisualProfileDto } from "./dto/upsert-visual-profile.dto";
 import { CharacterProfileImageService } from "./character-profile-image.service";
 import { PostingPolicyService } from "./posting-policy.service";
+import { CharacterSocialActivityApplicationService } from "./character-social-activity-application.service";
 import { VisualProfileService } from "./visual-profile.service";
 
 @Controller("api/admin/v1/characters")
 @UseGuards(AdminJwtGuard)
 export class CharactersController {
   constructor(
-    private readonly charactersService: CharactersService,
+    private readonly charactersService: CharacterService,
     private readonly postingPolicyService: PostingPolicyService,
+    private readonly socialActivityPolicyService: CharacterSocialActivityApplicationService,
     private readonly visualProfileService: VisualProfileService,
     private readonly profileImageService: CharacterProfileImageService,
   ) {}
@@ -68,7 +71,7 @@ export class CharactersController {
     @Param("id") characterId: string,
     @Body() body: UpdateCharacterStatusDto,
   ) {
-    return this.charactersService.updateCharacterStatus({
+    return this.socialActivityPolicyService.updateCharacterStatus({
       id: characterId,
       ...body,
     });
@@ -79,7 +82,10 @@ export class CharactersController {
     @Param("id") characterId: string,
     @Body() body: UpdateCharacterDto,
   ) {
-    return this.charactersService.updateCharacter({ id: characterId, ...body });
+    return this.socialActivityPolicyService.updateCharacter({
+      id: characterId,
+      ...body,
+    });
   }
 
   @Get(":id")
@@ -97,7 +103,11 @@ export class CharactersController {
     @Param("id") characterId: string,
     @Body() body: DeleteCharacterDto,
   ) {
-    return this.charactersService.deleteCharacter({ id: characterId, ...body });
+    return this.socialActivityPolicyService.updateCharacterStatus({
+      id: characterId,
+      status: "inactive",
+      reason: body.reason,
+    });
   }
 
   @Get(":id/profile-image")
@@ -311,5 +321,20 @@ export class CharactersController {
     @Body() body: UpsertPostingPolicyDto,
   ) {
     return this.postingPolicyService.upsertPolicy({ characterId, ...body });
+  }
+
+  @Get(":id/social-activity-policy")
+  getSocialActivityPolicy(
+    @Param("id", new ParseUUIDPipe()) characterId: string,
+  ) {
+    return this.socialActivityPolicyService.get(characterId);
+  }
+
+  @Put(":id/social-activity-policy")
+  putSocialActivityPolicy(
+    @Param("id", new ParseUUIDPipe()) characterId: string,
+    @Body() body: UpsertSocialActivityPolicyDto,
+  ) {
+    return this.socialActivityPolicyService.put(characterId, body);
   }
 }

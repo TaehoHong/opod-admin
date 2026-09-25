@@ -8,7 +8,7 @@ describe("admin character source boundary", () => {
     expect(existsSync(join(charactersSource, "characters.controller.ts"))).toBe(
       true,
     );
-    expect(existsSync(join(charactersSource, "characters.service.ts"))).toBe(
+    expect(existsSync(join(charactersSource, "character.service.ts"))).toBe(
       true,
     );
 

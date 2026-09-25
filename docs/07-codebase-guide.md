@@ -1,7 +1,8 @@
 # 07. Codebase Guide
 
 > 현재 repository 증거에 기반한 탐색 인덱스다. 승인된 목표 구조와 현재
-> 코드가 다르면 현재 코드를 사실로 보고 별도 변경으로 계획한다.
+> 코드가 다르면 현재 동작은 코드로 확인하고 별도 변경으로 계획한다.
+> 사용자 확정 컨벤션과 충돌하는 코드는 미준수 대상이며, 기존 코드를 이유로 규칙을 약화하지 않는다.
 
 ## How to Use
 
@@ -67,27 +68,24 @@
 | Observable behavior tests           | draft/generation worker specs | 상태 전이와 결과를 보호                                                                           | `src/admin/drafts/drafts.service.spec.ts`, `src/worker/*.spec.ts`   |
 | Cross-module DB contract            | auth/generation E2E           | 실제 PostgreSQL과 API 경계 검증                                                                   | `test/admin-auth.e2e-spec.ts`, `test/generation.e2e-spec.ts`        |
 | Pure prompt logic                   | prompt builders               | network/persistence 없이 deterministic 구성                                                       | `prompts/`, 관련 specs                                              |
-| Repository/application-service 구조 | health, characters, admin     | controller → application service → repository 방향이고 `DatabaseService`가 repository 안에만 있음 | `src/health/`, `src/characters/`, `src/admin/admin-*.repository.ts` |
+| 기존 DB 접근 분리 사례 | health, characters, admin | DB 접근 분리의 현황 참고용. Application Service → Repository 직접 의존은 새 절대 규칙의 미준수 대상 | `src/health/`, `src/characters/`, `src/admin/admin-*.repository.ts` |
 
-health feature가 승인된 repository/application-service 구조의 첫 canonical
-example이고 character profile image가 entity mutation 적용 예다. 새 DB 접근은
-이 형태를 따른다. 기존 service의 직접 Drizzle 접근은 새 규칙의 example로
-간주하지 않는다.
-
-규모가 있는 적용 예로는 `src/characters/character.repository.ts`(엔티티 셋을
-한 애그리게이트로 묶은 경우)와 `src/worker/generation-job.repository.ts`
-(조건부 갱신·트랜잭션·raw SQL claim을 담은 경우)를 본다. 두 spec
-(`characters.service.spec.ts`, `generation-worker.service.spec.ts`)이
-repository fake로 서비스 판단만 검증하는 형태의 예다.
+health·character profile image 등은 기존 DB 접근 분리의 현황을 확인하는 사례다.
+기존의 Application Service → Repository 직접 의존이나 여러 테이블을 묶은 Repository는
+2026-09-22 확정 규칙의 정본 예시가 아니다. 테이블별 Repository와 소유 Domain Service를
+거치는 경계를 적용해야 한다. 단순히 기존 클래스 이름을 Domain Service라고 바꿔 해석하지 않는다.
+관련 spec은 현재 동작의 증거이며 의존 규칙 준수를 입증하는 것은 아니다.
 
 ## Target Dependency Rules
 
 - 새 DB 접근은 entity repository에 둔다.
 - `DatabaseService`를 controller, application service 또는 domain service에
   새로 주입하지 않는다.
-- controller → application service → repository/external capability 방향을
-  따른다.
-- application service는 concrete repository를 주입한다.
+- 필수 정본: [개발 규칙](02-development-rules.md)의 “Repository 의존 절대 규칙”.
+- Repository는 테이블당 하나이며 소유 Domain Service만 의존한다.
+- controller/worker → application service → Domain Service → 소유 Repository 방향을 따른다.
+- B Domain Service가 A Repository의 기능을 사용하려면 A Domain Service를 호출한다.
+- Application / Facade / UseCase Service의 Repository 직접 의존과 Repository 간 의존은 금지한다.
 - worker가 admin module을 역참조하지 않는다.
 - public/user-facing controller는 `opod-service-backend`에 둔다.
 - canonical schema 변경은 backend에서 먼저 수행한다.
@@ -211,17 +209,53 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   canonical schema 변경이 선행돼야 한다.
 - generation/draft worker의 raw SQL claim과 lock은 각각 repository가
   소유한다.
-- 실제 provider refund, 사용자 제재와 자동 상호작용 중단 기능이
-  완성되지 않았다.
+- 실제 provider refund와 사용자 제재 연동은 완성되지 않았다. 캐릭터별 소셜
+  정책 중지·캐릭터 비활성화에 따른 미완료 소셜 작업 취소는 아래 API가 소유한다.
 - `GET /api/health`가 DB 도달성을 확인한다. automated smoke와 rollback
   절차는 아직 없다.
 
+## Character social activity configuration — 2026-09-23
+
+- `CharacterService`/`CharacterRepository`와 기존 생성·수정 DTO가 공통
+  `characters.timezone`을 읽고 쓴다. nullable IANA 시간대이며 위치나 언어로 추정하지 않는다.
+  이름 정규화는 `src/characters/character-timezone.ts`를 사용한다.
+- `src/characters/character-social-activity-application.service.ts`의
+  `CharacterSocialActivityApplicationService`가 `GET/PUT
+  /api/admin/v1/characters/:id/social-activity-policy`를 조율한다.
+  캐릭터 상태·시간대 변경과 정책·작업의 협력도 이 클래스가 조율한다.
+  CharacterService, CharacterSocialActivityPolicyService, CharacterSocialActivityJobService는
+  각자 소유 Repository만 사용한다.
+- 기존 관리자 세션·CSRF 경계를 유지한다. 정책이 없으면 null을 반환한다.
+  PUT은 활성 여부, 현지 활동 시작·종료 시각, 활동 간격, 세 일일 한도와 좋아요 확률을 받는다.
+  활성화에는 활성 캐릭터와 유효한 시간대가 필요하다. 중지·캐릭터 비활성화는
+  정책 변경과 미완료 작업 취소를 하나의 트랜잭션에서 처리한다.
+- `CharacterService.withActivityTransaction` → `CharacterRepository`가
+  `character_social:<UUID>` advisory lock과 트랜잭션을 시작한다.
+  `src/domain/database/database-transaction-context.ts`는 같은 비동기 흐름의
+  Repository에 트랜잭션을 전달한다. DB client는 Service로 전달하지 않는다.
+- 수동 반응은 `src/admin/post-reaction.service.ts`의 `PostReactionService`가
+  `PostReactionRepository`를 소유한다. 같은 캐릭터 잠금 안에서 멱등 반응을 저장하고,
+  새 반응일 때만 `src/characters/character-action-log.service.ts`의
+  `CharacterActionLogService`를 통해 로그를 기록한다. 로그 Repository는 이 Service만 사용한다.
+- 현지 날짜·자동 실행은 backend 소유다. 시간대 수정은 다음 실행부터 반영한다.
+  `PostingPolicyRepository.findLatestRun`은 게시 작업의 별도 실행 이력이 연결될 때까지
+  null이며 소셜 활동 작업을 반환하지 않는다.
+- 실행 결과는 latestJob으로 조회하고 BIGINT ID는 문자열로 반환한다. 관리자 UI는 아직 없다.
+- 정적 의존 경계 검사는 `src/characters/social-activity-boundary.spec.ts`가 담당한다.
+  행동 회귀 검증은 `test/character-social-activity.e2e-spec.ts`의 인증·CSRF·정책·중지·비활성화·
+  수동 반응 및 트랜잭션 테스트다. 일회용 DB는 backend migration을 읽는다.
+- 남은 미준수 범위: CharacterRepository의 페르소나·메모리와 두 원자 수정 메서드 내부의 로그,
+  AdminContentRepository의 다른 콘텐츠 처리 등 기존 여러 테이블 접근.
+  PostingPolicyRepository·GenerationRepository·VisualProfileRepository·DraftsRepository의
+  기존 직접 로그 쓰기도 후속 정리 대상이다. 이번 소셜 경로의 책임 이관이
+  프로젝트 전체의 규칙 준수를 뜻하지 않는다.
+
 ## Persona response and post policy normalization — 2026-09-16 verified
 
-- `CharactersService.toCharacterPersona`가 persona 목록·상세·생성·수정 응답의 공통 mapper다. repository가
-  선택한 `schemaVersion`을 응답에 그대로 포함하며 `src/characters/characters.service.spec.ts`가 이 API
+- `CharacterService.toCharacterPersona`가 persona 목록·상세·생성·수정 응답의 공통 mapper다. repository가
+  선택한 `schemaVersion`을 응답에 그대로 포함하며 `src/characters/character.service.spec.ts`가 이 API
   field 계약을 보호한다. 좁은 명령은
-  `npm run test -- src/characters/characters.service.spec.ts --runInBand`다.
+  `npm run test -- src/characters/character.service.spec.ts --runInBand`다.
 - `PostPipelineV3Runner`가 V3/V4의 `content_style`/`content_guidance` alias를 LLM 호출 전에 하나의
   `content_style` owner로 정규화한다. trim 후 내용이 같으면 하나로 합치고 다르면 `conflict`와
   `persona_content_policy_conflict`로 pause한다. v1은 둘 다 없을 때의 `missing_content_style` pause를 유지한다.
@@ -291,7 +325,7 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
 - schema 정본은 backend의 `20260908093302_persist_character_context` migration이며 admin은
   동일한 `schema.ts`를 미러링한다. 테스트용 SQL 사본은 `test/fixtures/legacy-migrations/`에 있다.
   새 schema 없이 변경된 reader/admin을 먼저 배포하지 않는다.
-- 기존 CharactersController → CharactersService → CharacterRepository에 구조 API를 추가했다.
+- 기존 CharactersController → CharacterService → CharacterRepository에 구조 API를 추가했다.
   `GET/PUT /api/admin/v1/characters/:id/personas/:personaId/structure`는 원문+조각을 읽고 저장한다.
   PUT의 `sourceSha256`은 원문 버전 검증, 선택 `content`는 새 원문, `fragments`는 순서대로
   저장하는 content/kind/injection/recallKeys다. 원문과 조각 연결이 정확히 같아야 한다.

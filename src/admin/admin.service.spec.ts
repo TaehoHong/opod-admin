@@ -7,6 +7,8 @@ type ServiceDependencies = {
   moderation?: object;
   analytics?: object;
   generation?: object;
+  postReactions?: object;
+  actionLogs?: object;
 };
 
 const createService = ({
@@ -16,10 +18,24 @@ const createService = ({
   moderation = {},
   analytics = {},
   generation = {},
+  postReactions = {},
+  actionLogs,
 }: ServiceDependencies = {}) =>
   new (
     AdminService as unknown as new (...dependencies: object[]) => AdminService
-  )(user, content, credit, moderation, analytics, generation);
+  )(
+    user,
+    content,
+    credit,
+    moderation,
+    analytics,
+    generation,
+    postReactions,
+    actionLogs ?? {
+      record: (content as { recordCharacterAction?: unknown })
+        .recordCharacterAction,
+    },
+  );
 
 // 구매는 결제 수단·금액을 payments 행에서 가져온다 (schema.Drizzle CreditPurchase).
 const purchase = (

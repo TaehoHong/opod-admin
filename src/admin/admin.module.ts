@@ -38,6 +38,8 @@ import { LocationsService } from "./locations/locations.service";
 import { PostWorkspaceController } from "./post-workspace/post-workspace.controller";
 import { PostWorkspaceRepository } from "./post-workspace/post-workspace.repository";
 import { PostWorkspaceService } from "./post-workspace/post-workspace.service";
+import { PostReactionRepository } from "./post-reaction.repository";
+import { PostReactionService } from "./post-reaction.service";
 
 function storageEnv(config: S3Config | undefined) {
   return config
@@ -74,6 +76,8 @@ function storageEnv(config: S3Config | undefined) {
     AdminService,
     AdminUserRepository,
     AdminContentRepository,
+    PostReactionRepository,
+    PostReactionService,
     AdminCreditPaymentRepository,
     AdminModerationRepository,
     AdminAnalyticsRepository,

@@ -12,7 +12,6 @@ import {
 } from "drizzle-orm";
 import { DatabaseService } from "../domain/database/database.service";
 import {
-  characterActionLogs,
   characters,
   hashtags,
   media,
@@ -422,113 +421,6 @@ export class AdminContentRepository {
     )[0];
   }
 
-  hasReactionCursor(
-    cursorId: string,
-    filters: { postId: string; characterId?: string; reactionType?: string },
-  ): Promise<boolean> {
-    return this.database.client
-      .select({ id: postReactions.id })
-      .from(postReactions)
-      .where(
-        and(eq(postReactions.id, cursorId), this.reactionCondition(filters)),
-      )
-      .limit(1)
-      .then((rows) => rows.length > 0);
-  }
-
-  async listReactions(input: {
-    filters: { postId: string; characterId?: string; reactionType?: string };
-    cursorId?: string;
-    limit: number;
-  }): Promise<AdminPostReactionRecord[]> {
-    const [cursor] = input.cursorId
-      ? await this.database.client
-          .select({ id: postReactions.id, createdAt: postReactions.createdAt })
-          .from(postReactions)
-          .where(eq(postReactions.id, input.cursorId))
-          .limit(1)
-      : [];
-    return this.database.client
-      .select()
-      .from(postReactions)
-      .where(
-        and(
-          this.reactionCondition(input.filters),
-          cursor
-            ? or(
-                lt(postReactions.createdAt, cursor.createdAt),
-                and(
-                  eq(postReactions.createdAt, cursor.createdAt),
-                  lt(postReactions.id, cursor.id),
-                ),
-              )
-            : undefined,
-        ),
-      )
-      .orderBy(desc(postReactions.createdAt), desc(postReactions.id))
-      .limit(input.limit + 1);
-  }
-
-  async createReaction(input: {
-    postId: string;
-    characterId: string;
-    reactionType: string;
-  }): Promise<AdminPostReactionRecord> {
-    return (
-      await this.database.client.insert(postReactions).values(input).returning()
-    )[0];
-  }
-
-  recordCharacterAction(input: typeof characterActionLogs.$inferInsert) {
-    return this.database.client
-      .insert(characterActionLogs)
-      .values(input)
-      .returning()
-      .then(([row]) => row);
-  }
-
-  async listCharacterActions(input: {
-    characterId?: string;
-    cursor?: bigint;
-    limit: number;
-  }) {
-    const [cursor] =
-      input.cursor !== undefined
-        ? await this.database.client
-            .select({
-              id: characterActionLogs.id,
-              createdAt: characterActionLogs.createdAt,
-            })
-            .from(characterActionLogs)
-            .where(eq(characterActionLogs.id, input.cursor))
-            .limit(1)
-        : [];
-    return this.database.client
-      .select()
-      .from(characterActionLogs)
-      .where(
-        and(
-          input.characterId
-            ? eq(characterActionLogs.characterId, input.characterId)
-            : undefined,
-          cursor
-            ? or(
-                lt(characterActionLogs.createdAt, cursor.createdAt),
-                and(
-                  eq(characterActionLogs.createdAt, cursor.createdAt),
-                  lt(characterActionLogs.id, cursor.id),
-                ),
-              )
-            : undefined,
-        ),
-      )
-      .orderBy(
-        desc(characterActionLogs.createdAt),
-        desc(characterActionLogs.id),
-      )
-      .limit(input.limit + 1);
-  }
-
   private async hydratePosts(
     rows: Array<typeof posts.$inferSelect>,
   ): Promise<AdminPostRecord[]> {
@@ -601,21 +493,6 @@ export class AdminContentRepository {
       eq(postComments.postId, filters.postId),
       filters.characterId
         ? eq(postComments.characterId, filters.characterId)
-        : undefined,
-    );
-  }
-  private reactionCondition(filters: {
-    postId: string;
-    characterId?: string;
-    reactionType?: string;
-  }) {
-    return and(
-      eq(postReactions.postId, filters.postId),
-      filters.characterId
-        ? eq(postReactions.characterId, filters.characterId)
-        : undefined,
-      filters.reactionType
-        ? eq(postReactions.reactionType, filters.reactionType)
         : undefined,
     );
   }

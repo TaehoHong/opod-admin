@@ -17,4 +17,8 @@ export class CreateCharacterDto {
   @IsArray()
   @IsString({ each: true })
   interests?: string[];
+
+  @IsOptional()
+  @IsString()
+  timezone?: string | null;
 }

@@ -10,11 +10,18 @@ import {
 } from "../worker/reference-captioner";
 import { CharactersController } from "./characters.controller";
 import { CharacterRepository } from "./character.repository";
-import { CharactersService } from "./characters.service";
+import { CharacterService } from "./character.service";
+import { CharacterActionLogRepository } from "./character-action-log.repository";
+import { CharacterActionLogService } from "./character-action-log.service";
 import { CharacterProfileImageRepository } from "./character-profile-image.repository";
 import { CharacterProfileImageService } from "./character-profile-image.service";
 import { PostingPolicyRepository } from "./posting-policy.repository";
 import { PostingPolicyService } from "./posting-policy.service";
+import { CharacterSocialActivityApplicationService } from "./character-social-activity-application.service";
+import { CharacterSocialActivityJobRepository } from "./character-social-activity-job.repository";
+import { CharacterSocialActivityJobService } from "./character-social-activity-job.service";
+import { CharacterSocialActivityPolicyRepository } from "./character-social-activity-policy.repository";
+import { CharacterSocialActivityPolicyService } from "./character-social-activity-policy.service";
 import { VisualProfileRepository } from "./visual-profile.repository";
 import { VisualProfileService } from "./visual-profile.service";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
@@ -24,11 +31,18 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
   controllers: [CharactersController],
   providers: [
     CharacterRepository,
-    CharactersService,
+    CharacterService,
+    CharacterActionLogRepository,
+    CharacterActionLogService,
     CharacterProfileImageRepository,
     CharacterProfileImageService,
     PostingPolicyService,
     PostingPolicyRepository,
+    CharacterSocialActivityApplicationService,
+    CharacterSocialActivityPolicyService,
+    CharacterSocialActivityPolicyRepository,
+    CharacterSocialActivityJobService,
+    CharacterSocialActivityJobRepository,
     VisualProfileRepository,
     {
       provide: VisualProfileService,
@@ -65,5 +79,6 @@ import { LlmLogService } from "../domain/llm-logs/llm-log.service";
       ],
     },
   ],
+  exports: [CharacterService, CharacterActionLogService],
 })
 export class CharactersModule {}

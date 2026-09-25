@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { DatabaseService } from "../domain/database/database.service";
 import {
   characterActionLogs,
@@ -53,26 +53,10 @@ export class PostingPolicyRepository {
   }
 
   async findLatestRun(characterId: string): Promise<PostingRunRow | null> {
-    const table = await this.database.client.execute<{
-      tableName: string | null;
-    }>(
-      sql`select to_regclass('opod.character_social_activity_jobs')::text as "tableName"`,
-    );
-    if (!table.rows[0]?.tableName) return null;
-
-    const result = await this.database.client.execute<PostingRunRow>(sql`
-      select
-        processing_status as "processingStatus",
-        scheduled_at as "scheduledAt",
-        finished_at as "finishedAt",
-        attempt_count::int as "attemptCount",
-        last_error_message as "lastErrorMessage"
-      from opod.character_social_activity_jobs
-      where character_id = ${characterId}
-      order by scheduled_at desc, id desc
-      limit 1
-    `);
-    return result.rows[0] ?? null;
+    void characterId;
+    // Social browsing jobs are not automatic posting runs. Keep this empty
+    // until posting automation has its own canonical run ledger.
+    return null;
   }
 
   async upsert(

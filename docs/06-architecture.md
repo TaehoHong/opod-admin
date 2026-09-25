@@ -30,6 +30,7 @@ src/<entity>/
   <entity>.module.ts
   <entity>.controller.ts
   <use-case>.application-service.ts
+  <entity>.service.ts
   <entity>.repository.ts
   dto/
   *.spec.ts
@@ -40,22 +41,25 @@ src/<entity>/
 ### Dependency Direction
 
 ```text
-Controller
+Controller / Worker
   -> Application Service
-      -> Entity Repository
-      -> Optional Domain Service
+      -> A Domain Service -> A Repository -> DatabaseService
+      -> B Domain Service -> B Repository -> DatabaseService
       -> External Capability Port
-Entity Repository
-  -> DatabaseService
+B Domain Service
+  -> A Domain Service -> A Repository
 External Adapter
   -> Provider SDK or HTTP
 ```
 
 - controller는 HTTP boundary만 담당한다.
-- application service가 use-case flow와 business rule을 처리한다.
-- domain service는 재사용되거나 독립적으로 복잡한 rule에만 사용한다.
-- repository는 entity 중심이며 모든 DB 접근을 소유한다.
-- application service는 repository concrete class를 직접 주입한다.
+- application service는 use-case flow와 Domain Service 간 협력을 조율한다.
+- Domain Service는 자기 도메인의 business rule과 소유 Repository 접근을 담당한다.
+- Repository는 테이블당 하나다. A Repository의 업무 의존자는 A Domain Service뿐이다.
+- B Domain Service는 A Domain Service를 통해서만 A Repository의 기능을 사용한다.
+- Application / Facade / UseCase Service와 Controller·Worker의 Repository 직접 의존은 금지한다.
+- 정본은 [개발 규칙](02-development-rules.md)의 “Repository 의존 절대 규칙”이다.
+  기존 직접 의존 코드는 예외가 아닌 리팩터링 대상이며 이 문서가 구현 완료를 뜻하지 않는다.
 - external integration만 interface와 Nest token으로 분리한다.
 - module 외부 호출은 export된 Nest provider를 통한다.
 
@@ -184,7 +188,7 @@ runtime log는 위 business/audit log와 분리한다.
 | Entity 중심 module과 repository                   | decided  |
 | Application service 중심 business flow            | decided  |
 | Drizzle/CLS transaction                           | decided  |
-| Concrete repository injection                     | decided  |
+| 소유 Domain Service만 자기 Repository 주입 (2026-09-22 확정) | decided |
 | External capability interface/token               | decided  |
 | React/Vite/Mantine frontend                       | decided  |
 | REST `/api/admin/v1/*`, no Swagger                | decided  |
@@ -201,3 +205,17 @@ runtime log는 위 business/audit log와 분리한다.
 - 토큰 사용량 집계 API와 React dashboard가 있다.
 - approved 4-table log 구조는 canonical schema 변경이 선행돼야 한다.
 - 현재 Raw SQL은 queue claim, row/advisory lock에 사용된다.
+
+## Character social activity service boundaries — 2026-09-22
+
+- `CharacterSocialActivityApplicationService`가 정책 조회·수정 및 캐릭터 시간대·상태
+  변경의 여러 도메인 협력을 조율한다. Repository에 직접 의존하지 않는다.
+- `CharacterService`, `CharacterSocialActivityPolicyService`, `CharacterSocialActivityJobService`,
+  `PostReactionService`, `CharacterActionLogService`는 각자 소유 Repository만 사용한다. 클래스명에 `Domain`을 붙이지 않는다.
+- `CharacterService.withActivityTransaction`을 통해 캐릭터별 advisory lock과 DB 트랜잭션을
+  시작한다. `DatabaseModule`의 공유 `DatabaseTransactionContext`를 각 Repository가 주입받아
+  동일한 트랜잭션을 사용하므로
+  정책 중지와 작업 취소, 캐릭터 비활성화와 정책 중지가 함께 커밋/롤백된다.
+- `CharacterRepository`의 기존 페르소나·메모리 및 두 원자 수정 내부 로그 처리와 `AdminContentRepository`의
+  다른 콘텐츠 처리는 여전히 여러 테이블을 다루는 레거시다. 이번 기능에서 책임을 옮긴
+  경로와 구분하며, 프로젝트 전체가 테이블당 Repository 규칙을 충족한 것으로 보지 않는다.

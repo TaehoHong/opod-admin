@@ -21,6 +21,8 @@ import {
   posts,
   userCharacterFollows,
 } from "../domain/database/schema";
+import { lockCharacterSocial } from "../domain/database/character-social-lock";
+import { DatabaseTransactionContext } from "../domain/database/database-transaction-context";
 
 const characterFields = {
   id: characters.id,
@@ -28,6 +30,7 @@ const characterFields = {
   displayName: characters.displayName,
   bio: characters.bio,
   interests: sql<string[]>`coalesce(${characters.interests}, ARRAY[]::text[])`,
+  timezone: characters.timezone,
 } as const;
 const characterListFields = {
   ...characterFields,
@@ -89,7 +92,7 @@ type DatabaseTransaction = Parameters<
 
 export type CharacterRow = Pick<
   typeof characters.$inferSelect,
-  "id" | "publicId" | "displayName" | "bio"
+  "id" | "publicId" | "displayName" | "bio" | "timezone"
 > & { interests: string[] };
 export type CharacterListRow = CharacterRow & {
   status: "active" | "inactive";
@@ -203,10 +206,55 @@ const memoryHash = (
 
 @Injectable()
 export class CharacterRepository {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly transactions: DatabaseTransactionContext,
+  ) {}
+
+  async withActivityTransaction<T>(
+    characterId: string,
+    callback: () => Promise<T>,
+  ): Promise<T> {
+    const current = this.transactions.current();
+    if (current) {
+      if (current.characterId !== characterId) {
+        throw new Error("nested character activity transaction actor mismatch");
+      }
+      return callback();
+    }
+    return this.database.client.transaction(async (transaction) => {
+      await lockCharacterSocial(transaction, characterId);
+      return this.transactions.run(transaction, characterId, callback);
+    });
+  }
+
+  findActivityCharacter(characterId: string) {
+    return this.transactions
+      .currentOr(this.database.client)
+      .select({
+        id: characters.id,
+        status: characters.status,
+        timezone: characters.timezone,
+      })
+      .from(characters)
+      .where(eq(characters.id, characterId))
+      .limit(1)
+      .then(([row]) => row ?? null);
+  }
+
+  async isTimezoneAvailable(timezone: string) {
+    const result = await this.transactions.currentOr(this.database.client)
+      .execute<{ available: boolean }>(sql`
+        select exists (
+          select 1 from pg_timezone_names where name = ${timezone}
+        ) as available
+      `);
+    return result.rows[0]?.available === true;
+  }
 
   async exists(characterId: string): Promise<boolean> {
-    const rows = await this.database.client
+    const rows = await this.transactions
+      .currentOr(this.database.client)
       .select({ id: characters.id })
       .from(characters)
       .where(eq(characters.id, characterId))
@@ -257,6 +305,7 @@ export class CharacterRepository {
     displayName: string;
     bio: string;
     interests: string[];
+    timezone?: string | null;
   }): Promise<CharacterRow> {
     const [row] = await this.database.client
       .insert(characters)
@@ -267,9 +316,15 @@ export class CharacterRepository {
 
   async update(
     characterId: string,
-    data: { displayName?: string; bio?: string; interests?: string[] },
+    data: {
+      displayName?: string;
+      bio?: string;
+      interests?: string[];
+      timezone?: string | null;
+    },
   ): Promise<CharacterRow> {
-    const [row] = await this.database.client
+    const [row] = await this.transactions
+      .currentOr(this.database.client)
       .update(characters)
       .set(data)
       .where(eq(characters.id, characterId))
@@ -281,7 +336,8 @@ export class CharacterRepository {
     characterId: string,
     status: CharacterStatus,
   ): Promise<CharacterStatusRow> {
-    const [row] = await this.database.client
+    const [row] = await this.transactions
+      .currentOr(this.database.client)
       .update(characters)
       .set({ status })
       .where(eq(characters.id, characterId))
@@ -1010,15 +1066,5 @@ export class CharacterRepository {
         .returning(memoryFields);
       return row;
     });
-  }
-
-  async recordActionLog(input: {
-    characterId: string;
-    actionType: string;
-    targetTable: string;
-    targetId: string;
-    reason: string;
-  }): Promise<void> {
-    await this.database.client.insert(characterActionLogs).values(input);
   }
 }

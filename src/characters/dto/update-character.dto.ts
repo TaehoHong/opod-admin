@@ -13,4 +13,8 @@ export class UpdateCharacterDto {
   @IsArray()
   @IsString({ each: true })
   interests?: string[];
+
+  @IsOptional()
+  @IsString()
+  timezone?: string | null;
 }

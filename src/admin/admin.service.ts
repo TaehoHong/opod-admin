@@ -39,6 +39,8 @@ import {
 } from "./admin-user.repository";
 import { GenerationService } from "./generation/generation.service";
 import { Media } from "./media/media.service";
+import { CharacterActionLogService } from "../characters/character-action-log.service";
+import { PostReactionService } from "./post-reaction.service";
 
 const freeCreditTtlDays = 30;
 
@@ -276,6 +278,8 @@ export class AdminService {
     private readonly moderationRepository: AdminModerationRepository,
     private readonly analyticsRepository: AdminAnalyticsRepository,
     private readonly generationService: GenerationService,
+    private readonly postReactions: PostReactionService,
+    private readonly actionLogs: CharacterActionLogService,
   ) {}
 
   async listUsers(input: { q?: string } & PageInput): Promise<Page<AdminUser>> {
@@ -641,14 +645,11 @@ export class AdminService {
       ...(reactionType ? { reactionType } : {}),
     };
     const cursorId = decodeCursor(input.cursor);
-    if (
-      cursorId &&
-      !(await this.contentRepository.hasReactionCursor(cursorId, where))
-    ) {
+    if (cursorId && !(await this.postReactions.hasCursor(cursorId, where))) {
       throw new BadRequestException("Invalid cursor");
     }
 
-    const reactions = await this.contentRepository.listReactions({
+    const reactions = await this.postReactions.list({
       filters: where,
       cursorId,
       limit: input.limit,
@@ -677,19 +678,13 @@ export class AdminService {
     }
 
     const reaction = this.toPostReaction(
-      await this.contentRepository.createReaction({
+      await this.postReactions.create({
         postId: input.postId,
         characterId: input.characterId,
         reactionType,
+        reason: input.reason?.trim() || "post reaction created",
       }),
     );
-    await this.recordCharacterActionLog({
-      characterId: input.characterId,
-      actionType: "POST_REACTION_CREATED",
-      targetTable: "post_reactions",
-      targetId: reaction.id,
-      reason: input.reason?.trim() || "post reaction created",
-    });
     return reaction;
   }
 
@@ -850,7 +845,7 @@ export class AdminService {
       }
     }
 
-    const logs = await this.contentRepository.listCharacterActions({
+    const logs = await this.actionLogs.list({
       characterId,
       cursor,
       limit,
@@ -1241,7 +1236,7 @@ export class AdminService {
     targetId: string;
     reason: string;
   }) {
-    await this.contentRepository.recordCharacterAction(input);
+    await this.actionLogs.record(input);
   }
 
   private async appendCreditEntry(

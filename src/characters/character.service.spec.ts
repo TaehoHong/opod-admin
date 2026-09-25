@@ -1,5 +1,6 @@
 import { CharacterRepository } from "./character.repository";
-import { CharactersService } from "./characters.service";
+import { CharacterService } from "./character.service";
+import { CharacterActionLogService } from "./character-action-log.service";
 
 // Drizzle를 흉내내지 않고 repository를 대신 세운다
 // (docs/02-development-rules.md "Module and Repository Rules").
@@ -32,13 +33,21 @@ function repositoryFake(overrides: Partial<CharacterRepository> = {}) {
     createMemory: jest.fn(),
     updateMemory: jest.fn(),
     softDeleteMemory: jest.fn(),
-    recordActionLog: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   } as unknown as RepositoryFake;
 }
 
+const actionLogs = {
+  record: jest.fn().mockResolvedValue(undefined),
+  list: jest.fn(),
+};
+
 function makeService(repository: RepositoryFake) {
-  return new CharactersService(repository);
+  actionLogs.record.mockClear();
+  return new CharacterService(
+    repository,
+    actionLogs as unknown as CharacterActionLogService,
+  );
 }
 
 const createdAt = new Date("2026-07-02T00:00:00.000Z");
@@ -73,7 +82,7 @@ function memoryRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("CharactersService", () => {
+describe("CharacterService", () => {
   it("returns character publishing and engagement metrics", async () => {
     const repository = repositoryFake({
       findMetrics: jest.fn().mockResolvedValue({
@@ -124,7 +133,7 @@ describe("CharactersService", () => {
       type: "preference",
       reason: "operator note",
     });
-    expect(repository.recordActionLog).toHaveBeenCalledWith(
+    expect(actionLogs.record).toHaveBeenCalledWith(
       expect.objectContaining({
         characterId: "character-1",
         actionType: "MEMORY_CREATED",
@@ -313,7 +322,7 @@ describe("CharactersService", () => {
       expect.any(Date),
     );
     expect(
-      repository.recordActionLog.mock.calls.map(([input]) => input.actionType),
+      actionLogs.record.mock.calls.map(([input]) => input.actionType),
     ).toEqual(["PERSONA_CREATED", "PERSONA_UPDATED", "PERSONA_DELETED"]);
   });
 
@@ -381,8 +390,8 @@ describe("CharactersService", () => {
       title: "02. Voice",
       sortOrder: 60,
     });
-    expect(repository.recordActionLog).toHaveBeenCalledTimes(2);
-    expect(repository.recordActionLog).toHaveBeenLastCalledWith(
+    expect(actionLogs.record).toHaveBeenCalledTimes(2);
+    expect(actionLogs.record).toHaveBeenLastCalledWith(
       expect.objectContaining({
         actionType: "PERSONA_CREATED",
         targetId: "persona-2",
@@ -416,7 +425,7 @@ describe("CharactersService", () => {
       ["b", 10],
       ["a", 20],
     ]);
-    expect(repository.recordActionLog).toHaveBeenCalledWith(
+    expect(actionLogs.record).toHaveBeenCalledWith(
       expect.objectContaining({ actionType: "PERSONA_REORDERED" }),
     );
 

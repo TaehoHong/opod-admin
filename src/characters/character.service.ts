@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { PutPersonaStructureDto } from "./dto/put-persona-structure.dto";
 import { PutMemoryRoutingDto } from "./dto/put-memory-routing.dto";
 import {
@@ -13,6 +17,8 @@ import {
   type MemoryRow,
   type PersonaRow,
 } from "./character.repository";
+import { normalizeCharacterTimezone } from "./character-timezone";
+import { CharacterActionLogService } from "./character-action-log.service";
 
 type CharacterStatus = "active" | "inactive";
 
@@ -22,6 +28,7 @@ type AdminCharacter = {
   displayName: string;
   bio: string;
   interests: string[];
+  timezone: string | null;
 };
 
 type AdminCharacterListItem = AdminCharacter & {
@@ -106,20 +113,60 @@ const BULK_CREATE_MAX_ITEMS = 50;
 const PERSONA_SORT_STEP = 10;
 
 @Injectable()
-export class CharactersService {
-  constructor(private readonly characters: CharacterRepository) {}
+export class CharacterService {
+  constructor(
+    private readonly characters: CharacterRepository,
+    private readonly actionLogs: CharacterActionLogService,
+  ) {}
+
+  withActivityTransaction<T>(characterId: string, callback: () => Promise<T>) {
+    return this.characters.withActivityTransaction(characterId, callback);
+  }
+
+  async requireActivityCharacter(characterId: string) {
+    const character = await this.characters.findActivityCharacter(characterId);
+    if (!character) throw new NotFoundException("Character not found");
+    return character;
+  }
+
+  async assertActivityTimezoneAvailable(timezone: string) {
+    normalizeCharacterTimezone(timezone);
+    if (!(await this.characters.isTimezoneAvailable(timezone))) {
+      throw new BadRequestException(
+        "character timezone is unavailable to the database",
+      );
+    }
+  }
+
+  async assertCanEnableSocialActivity(characterId: string) {
+    const character = await this.requireActivityCharacter(characterId);
+    if (character.status !== "active") {
+      throw new BadRequestException(
+        "social activity requires an active character",
+      );
+    }
+    if (!character.timezone) {
+      throw new BadRequestException(
+        "enabled social activity requires a character timezone",
+      );
+    }
+    await this.assertActivityTimezoneAvailable(character.timezone);
+    return character;
+  }
 
   async createCharacter(input: {
     publicId: string;
     displayName: string;
     bio: string;
     interests?: string[];
+    timezone?: string | null;
   }) {
     const character = await this.characters.create({
       publicId: input.publicId,
       displayName: input.displayName,
       bio: input.bio,
       interests: input.interests ?? [],
+      timezone: normalizeCharacterTimezone(input.timezone),
     });
     await this.recordCharacterActionLog({
       characterId: character.id,
@@ -136,11 +183,13 @@ export class CharactersService {
     displayName?: string;
     bio?: string;
     interests?: string[];
+    timezone?: string | null;
   }): Promise<AdminCharacter> {
     const data: {
       displayName?: string;
       bio?: string;
       interests?: string[];
+      timezone?: string | null;
     } = {};
     if (input.displayName !== undefined) {
       const displayName = input.displayName.trim();
@@ -158,6 +207,9 @@ export class CharactersService {
     }
     if (input.interests !== undefined) {
       data.interests = input.interests;
+    }
+    if (input.timezone !== undefined) {
+      data.timezone = normalizeCharacterTimezone(input.timezone) ?? null;
     }
     if (Object.keys(data).length === 0) {
       throw new BadRequestException("character update is empty");
@@ -691,14 +743,14 @@ export class CharactersService {
     };
   }
 
-  private async recordCharacterActionLog(input: {
+  async recordCharacterActionLog(input: {
     characterId: string;
     actionType: string;
     targetTable: string;
     targetId: string;
     reason: string;
   }) {
-    await this.characters.recordActionLog(input);
+    await this.actionLogs.record(input);
   }
 
   private async hasCharacter(characterId: string): Promise<boolean> {
@@ -728,6 +780,7 @@ export class CharactersService {
       displayName: character.displayName,
       bio: character.bio,
       interests: character.interests,
+      timezone: character.timezone,
       status: character.status,
       postCount: character._count.posts,
       followerCount: character._count.userFollowers,
