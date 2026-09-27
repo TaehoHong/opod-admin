@@ -3,6 +3,16 @@ import {
   WorkerConfig,
 } from "./generation-worker.service";
 import { createHash } from "node:crypto";
+import sharp from "sharp";
+
+let imageBytes: Buffer;
+beforeAll(async () => {
+  imageBytes = await sharp({
+    create: { width: 40, height: 50, channels: 3, background: "white" },
+  })
+    .png()
+    .toBuffer();
+});
 import {
   GenerationPollResult,
   ImageGenerationProvider,
@@ -143,7 +153,7 @@ function makeService(
     url: "https://cdn.local/stored.png",
     storageKey: "generated/image/a.png",
   }),
-  downloadBytes = jest.fn().mockResolvedValue(Buffer.from("png-bytes")),
+  downloadBytes = jest.fn().mockResolvedValue(imageBytes),
   signReferenceUrl: ((storageKey: string) => Promise<string>) | null = null,
   aspectRatios: Record<"feed" | "story" | "reel", string> = {
     feed: "4:5",
@@ -172,13 +182,121 @@ function makeService(
 }
 
 describe("GenerationWorkerService", () => {
+  it("stores the actual image type and dimensions without changing the bytes", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(claimedJob());
+    const provider = providerMock([
+      {
+        status: "completed",
+        images: [
+          {
+            url: "https://p.local/a",
+            contentType: "image/jpeg",
+            width: 999,
+            height: 999,
+          },
+        ],
+      },
+    ]);
+    const { service, store } = makeService(repository, provider);
+    await service.tick();
+    expect(store).toHaveBeenCalledWith(
+      expect.objectContaining({ bytes: imageBytes, contentType: "image/png" }),
+    );
+    expect(repository.persistSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        files: [
+          expect.objectContaining({
+            image: expect.objectContaining({ width: 40, height: 50 }),
+            contentType: "image/png",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it.each(["empty", "corrupt", "wrong_ratio", "mixed"])(
+    "does not complete or upload a provider success with %s output",
+    async (kind) => {
+      const repository = repositoryFake();
+      repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+      repository.findForProcessing.mockResolvedValue(claimedJob());
+      const invalid =
+        kind === "wrong_ratio"
+          ? await sharp({
+              create: {
+                width: 50,
+                height: 50,
+                channels: 3,
+                background: "white",
+              },
+            })
+              .png()
+              .toBuffer()
+          : Buffer.from("not an image");
+      const images =
+        kind === "empty"
+          ? []
+          : kind === "mixed"
+            ? [
+                {
+                  url: "https://p.local/good",
+                  dataBase64: imageBytes.toString("base64"),
+                },
+                {
+                  url: "https://p.local/bad",
+                  dataBase64: invalid.toString("base64"),
+                },
+              ]
+            : [
+                {
+                  url: "https://p.local/bad",
+                  dataBase64: invalid.toString("base64"),
+                },
+              ];
+      const { service, store } = makeService(
+        repository,
+        providerMock([{ status: "completed", images }]),
+      );
+      await service.tick();
+      expect(store).not.toHaveBeenCalled();
+      expect(repository.persistSuccess).not.toHaveBeenCalled();
+      expect(repository.markFailed).toHaveBeenCalledWith(
+        "job-1",
+        expect.stringContaining("generated_image_invalid:"),
+      );
+      expect(repository.requeueForRetry).not.toHaveBeenCalled();
+    },
+  );
+
+  it("validates resumed output against the submitted ratio instead of changed settings", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        provider: "test-provider",
+        providerRequestId: "req-old",
+        paramsJson: {
+          aspect_ratio: "1:1",
+          _shot: { execution: { outputAspectRatio: 0.8 } },
+        },
+      }),
+    );
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(repository, provider);
+    await service.tick();
+    expect(provider.submit).not.toHaveBeenCalled();
+    expect(repository.persistSuccess).toHaveBeenCalled();
+  });
+
   it("processes a claimed job end to end", async () => {
     const repository = repositoryFake();
     repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
     repository.findForProcessing.mockResolvedValue(claimedJob());
-    const outputDigest = createHash("sha256")
-      .update(Buffer.from("png-bytes"))
-      .digest("hex");
+    const outputDigest = createHash("sha256").update(imageBytes).digest("hex");
     const provider = providerMock([
       {
         status: "completed",
@@ -215,6 +333,7 @@ describe("GenerationWorkerService", () => {
           execution: {
             route: "edit",
             referenceMediaIds: ["reference-1"],
+            outputAspectRatio: 0.8,
           },
         },
       },
@@ -336,7 +455,7 @@ describe("GenerationWorkerService", () => {
     const repository = repositoryFake();
     repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
     repository.findForProcessing.mockResolvedValue(claimedJob());
-    const bytes = Buffer.from("streamed-image");
+    const bytes = imageBytes;
     const provider = providerMock([
       {
         status: "completed",
@@ -614,7 +733,10 @@ describe("GenerationWorkerService", () => {
           progress: 0,
         },
       })
-      .mockResolvedValueOnce({ status: "completed", images: [] });
+      .mockResolvedValueOnce({
+        status: "completed",
+        images: [{ url: "https://p.local/a.png" }],
+      });
     const { service } = makeService(repository, provider, {
       providerTimeoutMs: 0,
     });
@@ -719,7 +841,10 @@ describe("GenerationWorkerService", () => {
 
     await service.tick();
 
-    expect(t2i.submit).toHaveBeenCalled();
+    expect(t2i.submit).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "film photo of a beach" }),
+    );
+    expect(repository.persistSuccess).toHaveBeenCalled();
     expect(edit.submit).not.toHaveBeenCalled();
     expect(repository.markFailed).not.toHaveBeenCalled();
     expect(repository.recordProviderSubmission).toHaveBeenCalledWith({
@@ -735,6 +860,7 @@ describe("GenerationWorkerService", () => {
           execution: {
             route: "t2i",
             referenceMediaIds: [],
+            outputAspectRatio: 0.8,
           },
         },
       },
@@ -839,9 +965,27 @@ describe("GenerationWorkerService", () => {
       const provider = providerMock([
         { status: "completed", images: [{ url: "https://p.local/a.png" }] },
       ]);
-      const { service } = makeService(repository, provider);
+      const { service } = makeService(
+        repository,
+        provider,
+        {},
+        undefined,
+        jest.fn().mockResolvedValue(
+          await sharp({
+            create: {
+              width: Number(expected.split(":")[0]) * 10,
+              height: Number(expected.split(":")[1]) * 10,
+              channels: 3,
+              background: "white",
+            },
+          })
+            .png()
+            .toBuffer(),
+        ),
+      );
 
       await service.tick();
+      expect(repository.persistSuccess).toHaveBeenCalled();
 
       expect(provider.submit).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -864,9 +1008,22 @@ describe("GenerationWorkerService", () => {
     const provider = providerMock([
       { status: "completed", images: [{ url: "https://p.local/a.png" }] },
     ]);
-    const { service } = makeService(repository, provider);
+    const { service } = makeService(
+      repository,
+      provider,
+      {},
+      undefined,
+      jest.fn().mockResolvedValue(
+        await sharp({
+          create: { width: 90, height: 160, channels: 3, background: "white" },
+        })
+          .png()
+          .toBuffer(),
+      ),
+    );
 
     await service.tick();
+    expect(repository.persistSuccess).toHaveBeenCalled();
 
     expect(provider.submit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -889,9 +1046,22 @@ describe("GenerationWorkerService", () => {
     const provider = providerMock([
       { status: "completed", images: [{ url: "https://p.local/a.png" }] },
     ]);
-    const { service } = makeService(repository, provider);
+    const { service } = makeService(
+      repository,
+      provider,
+      {},
+      undefined,
+      jest.fn().mockResolvedValue(
+        await sharp({
+          create: { width: 50, height: 50, channels: 3, background: "white" },
+        })
+          .png()
+          .toBuffer(),
+      ),
+    );
 
     await service.tick();
+    expect(repository.persistSuccess).toHaveBeenCalled();
 
     expect(provider.submit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1120,6 +1290,7 @@ describe("GenerationWorkerService", () => {
           _shot: {
             characterVisible: false,
             referenceMediaIds: ["reference-1"],
+            outputAspectRatio: 0.8,
           },
           _v3: {
             referenceBindings: [
@@ -1155,6 +1326,7 @@ describe("GenerationWorkerService", () => {
           _shot: {
             characterVisible: false,
             referenceMediaIds: ["reference-1"],
+            outputAspectRatio: 0.8,
           },
           _v3: {
             referenceBindings: [

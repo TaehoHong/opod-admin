@@ -2,6 +2,7 @@ import { INestApplication } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
+import sharp from "sharp";
 import { AppModule } from "../src/app.module";
 import type { GeneratedMediaStore } from "../src/worker/generated-media-store";
 import { GenerationJobRepository } from "../src/worker/generation-job.repository";
@@ -331,6 +332,7 @@ describe("generation", () => {
       delete process.env.FAL_IMAGE_T2I_MODEL;
 
       const providerRequests: ImageGenerationRequest[] = [];
+      let invalidOutput = false;
       const provider: ImageGenerationProvider = {
         name: "e2e-fake-provider",
         async submit(input) {
@@ -338,6 +340,7 @@ describe("generation", () => {
           return { requestId: "e2e-request-1", sentPrompt: input.prompt };
         },
         async poll() {
+          if (invalidOutput) return { status: "completed", images: [] };
           return {
             status: "completed",
             images: Array.from({ length: 3 }, (_, index) => ({
@@ -376,7 +379,17 @@ describe("generation", () => {
                 providerTimeoutMs: 1_000,
               },
               async () => {},
-              async (url) => Buffer.from(`downloaded:${url}`),
+              async () =>
+                sharp({
+                  create: {
+                    width: 40,
+                    height: 50,
+                    channels: 3,
+                    background: "white",
+                  },
+                })
+                  .png()
+                  .toBuffer(),
             ),
         })
         .compile();
@@ -602,6 +615,37 @@ describe("generation", () => {
         status: "draft",
         originJobId: created.body.id,
       });
+      invalidOutput = true;
+      const storedBefore = storedFile;
+      await request(app.getHttpServer())
+        .post(`/api/admin/v1/generation/jobs/${regenerated.body.id}/confirm`)
+        .set(headers)
+        .expect(201);
+      await request(app.getHttpServer())
+        .post("/api/admin/v1/generation/worker/run")
+        .set(headers)
+        .send({ jobId: regenerated.body.id })
+        .expect(201);
+      const failureDeadline = Date.now() + 5_000;
+      let failed;
+      while (Date.now() < failureDeadline) {
+        const response = await request(app.getHttpServer())
+          .get(`/api/admin/v1/generation/jobs/${regenerated.body.id}`)
+          .set(headers)
+          .expect(200);
+        if (response.body.status === "failed") {
+          failed = response.body;
+          break;
+        }
+        await wait(20);
+      }
+      expect(failed).toMatchObject({
+        status: "failed",
+        errorMessage: expect.stringContaining("generated_image_invalid:"),
+      });
+      expect(failed.outputs ?? []).toHaveLength(0);
+      expect(failed.outputMediaId).toBeUndefined();
+      expect(storedFile).toBe(storedBefore);
     } finally {
       try {
         if (app) {

@@ -13,6 +13,19 @@
 
 ## Current Module Map
 
+이미지 생성 실행에서는 기획 모델과 현재 provider가 달라도 입력 프롬프트를
+재작성하거나 막지 않는다(2026-09-27 사용자 결정). 기존 provider API 입력 규격과
+레퍼런스 계약 검사는 유지한다. `GenerationWorkerService`는 provider 성공 뒤
+`generated-image-validation.ts`로 원본 파일을 완전히 디코딩하고 실제 MIME·표시
+해상도를 확인한 뒤에만 저장·완료 처리한다. 원본을 리사이즈하거나 크롭하지 않는다.
+요청 당시 비율은 `_shot.execution.outputAspectRatio`로 보존한다. 명시적
+`image_size` 숫자 크기는 기본 `aspect_ratio`보다 우선하고, provider 전용 크기 이름·
+auto·이전 제출의 snapshot 누락은 비율을 추측하지 않는다. 비율 오차는 1%까지 허용한다.
+빈 출력·손상·비율 불일치는 `generated_image_invalid` 사유로 failed 처리하며,
+자동 재생성·캡션 진행을 하지 않는다. 네트워크 재시도와 별개이며 사진의 미학 검수는 아니다.
+기존 저장 경로를 확장했고, 파일 검사에는 별도 기존 owner가 없어 순수 validator를 추가했다.
+회귀 owner는 generation-worker/generated-image-validation spec과 generation E2E다.
+
 이미지 프롬프트의 간결한 작성과 제외 조건 전달 계약은
 [이미지 프롬프트 작성 원칙](image-prompt-writing.md)에 있다. 공통 작성 owner는
 `prompts/image-prompt-generator.ts`, 실행 시 중복 제외 조건 방지는
