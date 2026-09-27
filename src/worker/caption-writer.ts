@@ -83,7 +83,7 @@ export class CaptionWriterAgent {
   ): Promise<{ output: CaptionSet; producerLogId: string | null }> {
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.captionWriteV4,
-      schemaName: "opod_caption_set_v1",
+      schemaName: "opod_caption_set_v2",
       schema: CAPTION_SET_JSON_SCHEMA as unknown as Record<string, unknown>,
       systemPrompt: CAPTION_WRITER_SYSTEM_PROMPT,
       input,
@@ -135,7 +135,7 @@ export function parseCaptionSet(value: unknown): CaptionSet {
   );
   const captionLanguages = stringArray(
     value.captionLanguages,
-    1,
+    0,
     10,
     35,
     "captionLanguages",

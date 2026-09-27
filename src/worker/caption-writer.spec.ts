@@ -17,6 +17,16 @@ describe("Caption Agent contract", () => {
     });
   });
 
+  it("accepts an emoji-only caption without inventing a language or hashtags", () => {
+    const output = {
+      status: "ready",
+      caption: "📸",
+      captionLanguages: [],
+      hashtags: [],
+    };
+    expect(parseCaptionSet(output)).toEqual(output);
+  });
+
   // post-planner-v1에서 이관한 검사 — 옮기면서 약해지면 게시 본문 계약이 깨진다.
   it("rejects non-canonical language tags, duplicate tags, extra fields and blank captions", () => {
     expect(() =>
