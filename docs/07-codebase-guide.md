@@ -13,6 +13,19 @@
 
 ## Current Module Map
 
+이미지 프롬프트의 간결한 작성과 제외 조건 전달 계약은
+[이미지 프롬프트 작성 원칙](image-prompt-writing.md)에 있다. 공통 작성 owner는
+`prompts/image-prompt-generator.ts`, 실행 시 중복 제외 조건 방지는
+`PostPipelineV3Runner`의 `locationExclusions` / `exclusionsResolved`와
+`GenerationWorkerService`가 담당한다. 관련 runner/worker spec이 신규·이전
+초안의 전달 계약을 검증한다.
+
+`src/worker/image-model-policy.ts`의 `buildPromptGenerationInput`은 원본
+package를 보존하면서 LLM 입력의 중복 바인딩·정책·내부 식별자를 제외한다.
+공통 프롬프트 v6은 최소 재작성과 의미 보존 확인을 지시한다. 입력 축약의
+정보 보존·인물 비노출·구버전 호환은 image-model-policy/image-prompt-generator
+spec이 검증하며, 실제 이미지의 자연스러움은 별도 모델 평가 대상이다.
+
 | 영역           | 현재 경로                                                                                                                          | 현재 책임                                                                       | 주요 진입점                                                                                  | 테스트·증거                                                 |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | Bootstrap/HTTP | `src/main.ts`, `src/app.module.ts`, `src/common/`                                                                                  | Nest 시작, static UI, validation, exception, HTTP log                           | `bootstrap`, `AppModule`                                                                     | `src/main.ts`, `src/app.module.ts`, `src/common/`           |

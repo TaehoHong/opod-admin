@@ -1,5 +1,6 @@
 import {
   buildPromptPackage,
+  buildPromptGenerationInput,
   resolveImageModelPolicy,
   UnsupportedImagePlanError,
 } from "./image-model-policy";
@@ -40,6 +41,72 @@ const imagePlan: ImagePlanReady = {
 };
 
 describe("image model policy", () => {
+  it("keeps mixed-shot visibility, continuity, visible text and motion when compacting input", () => {
+    const mixedPlan: ImagePlanReady = {
+      ...imagePlan,
+      continuity: {
+        lockedElements: [
+          {
+            category: "prop",
+            description: "two white cups",
+            appliesToShots: [0, 1],
+          },
+        ],
+      },
+      shots: [
+        {
+          ...imagePlan.shots[0],
+          scene: 'The person holds two cups beside a sign reading "OPEN".',
+          subjectState: "wet sleeves",
+          motionEvidence: "a moving hand",
+          notInFrame: ["bag"],
+        },
+        {
+          ...imagePlan.shots[0],
+          sortOrder: 1,
+          scene: "Two cups on the table.",
+          characterPresentation: {
+            mode: "none",
+            visibleParts: [],
+            faceVisible: false,
+            identityPreservationRequired: false,
+          },
+          subjectCameraRelation: "not_applicable",
+          referenceBindings: [],
+        },
+      ],
+    };
+    const result = buildPromptGenerationInput(
+      buildPromptPackage({
+        targetModelId: "fal-ai/nano-banana-pro/edit",
+        imagePlan: mixedPlan,
+        appearance: "black bob hair",
+        visualStyle: "film photograph",
+      }),
+    );
+
+    expect(result.subjectContract).toMatchObject({
+      appearance: "black bob hair",
+      visualStyle: "film photograph",
+    });
+    expect(result.imagePlan.continuity).toEqual(mixedPlan.continuity);
+    expect(result.imagePlan.shots[0]).toMatchObject({
+      scene: 'The person holds two cups beside a sign reading "OPEN".',
+      subjectState: "wet sleeves",
+      motionEvidence: "a moving hand",
+      notInFrame: ["bag"],
+      characterPresentation: mixedPlan.shots[0].characterPresentation,
+    });
+    expect(result.imagePlan.shots[1]).toMatchObject({
+      sortOrder: 1,
+      characterPresentation: { mode: "none" },
+      subjectCameraRelation: "not_applicable",
+    });
+    expect(result.referenceSlots.map((slot) => slot.shotSortOrder)).toEqual([
+      0,
+    ]);
+  });
+
   it("maps every binding exactly once to provider-readable positional slots", () => {
     const result = buildPromptPackage({
       targetModelId: "fal-ai/nano-banana-pro/edit",
@@ -53,7 +120,7 @@ describe("image model policy", () => {
         slot: "Image 1",
       }),
     ]);
-    expect(result.modelPolicy.version).toBe("nano-banana-policy-v2");
+    expect(result.modelPolicy.version).toBe("nano-banana-policy-v3");
     expect(result.modelPolicy.instructions).toContain(
       "Never copy its pose, crop, background, camera geometry, or composition",
     );
@@ -127,7 +194,7 @@ describe("image model policy", () => {
       }),
     ]);
     expect(result.modelPolicy).toMatchObject({
-      version: "flux-kontext-policy-v1",
+      version: "flux-kontext-policy-v2",
       usesNegativePrompt: false,
     });
   });
@@ -165,4 +232,11 @@ it("builds a prompt package from a pre-v2 plan that lacks the new fields", () =>
 
   expect(built.imagePlan.shots[0].sortOrder).toBe(0);
   expect(built.referenceSlots).toEqual([]);
+  const sent = JSON.parse(JSON.stringify(buildPromptGenerationInput(built)));
+  expect(sent.imagePlan.shots[0]).toMatchObject({
+    scene: "거울 앞",
+    captureSetup: "후면 카메라",
+  });
+  expect(sent.imagePlan.shots[0]).not.toHaveProperty("subjectCameraRelation");
+  expect(sent.imagePlan.shots[0]).not.toHaveProperty("motionEvidence");
 });

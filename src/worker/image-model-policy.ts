@@ -96,3 +96,39 @@ export function buildPromptPackage(input: {
     },
   };
 }
+
+// 실행·추적용 원본 package는 보존하고 LLM에는 시각적 결정만 전달한다.
+// referenceBindings는 referenceSlots와 중복이고 모델 정책은 system에 있다.
+export function buildPromptGenerationInput(input: PromptBuildPackage) {
+  return {
+    imagePlan: {
+      continuity: input.imagePlan.continuity,
+      shots: input.imagePlan.shots.map((shot) => ({
+        sortOrder: shot.sortOrder,
+        scene: shot.scene,
+        captureSetup: shot.captureSetup,
+        characterPresentation: shot.characterPresentation,
+        subjectState: shot.subjectState,
+        motionEvidence: shot.motionEvidence,
+        notInFrame: shot.notInFrame,
+        subjectCameraRelation: shot.subjectCameraRelation,
+      })),
+    },
+    subjectContract: {
+      ...input.subjectContract,
+      appearance: input.imagePlan.shots.some(
+        (shot) => shot.characterPresentation.mode !== "none",
+      )
+        ? input.subjectContract.appearance
+        : "",
+    },
+    referenceSlots: input.referenceSlots.map((reference) => ({
+      shotSortOrder: reference.shotSortOrder,
+      slot: reference.slot,
+      source: reference.source,
+      semanticPurposes: reference.semanticPurposes,
+      preserve: reference.preserve,
+      avoidCopying: reference.avoidCopying,
+    })),
+  };
+}

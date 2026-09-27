@@ -1,6 +1,7 @@
 import { buildPromptPackage } from "./image-model-policy";
 import {
   assertProviderReferenceOrder,
+  ImagePromptGenerationAgent,
   parsePromptSet,
 } from "./image-prompt-generator";
 import { ImagePlanReady } from "./image-planner";
@@ -69,6 +70,108 @@ const fluxPromptPackage = buildPromptPackage({
 });
 
 describe("Image Prompt Generation Agent contract", () => {
+  it("sends visual decisions and reference roles once without internal bookkeeping", async () => {
+    const run = jest.fn().mockResolvedValue({
+      value: {
+        shots: [
+          {
+            sortOrder: 0,
+            prompt:
+              "Image 1 supplies facial identity. A person sits by the window.",
+            negativePrompt: null,
+          },
+        ],
+      },
+      producerLogId: "log-1",
+    });
+    const original = structuredClone(promptPackage);
+    const agent = new ImagePromptGenerationAgent({ run } as never);
+
+    await agent.generate(promptPackage);
+
+    const sent = run.mock.calls[0][0];
+    expect(sent.input).toEqual({
+      imagePlan: {
+        continuity: imagePlan.continuity,
+        shots: [
+          {
+            sortOrder: 0,
+            scene: imagePlan.shots[0].scene,
+            captureSetup: imagePlan.shots[0].captureSetup,
+            characterPresentation: imagePlan.shots[0].characterPresentation,
+            subjectState: "",
+            motionEvidence: "",
+            notInFrame: [],
+            subjectCameraRelation: "deliberately_posed",
+          },
+        ],
+      },
+      subjectContract: promptPackage.subjectContract,
+      referenceSlots: [
+        {
+          shotSortOrder: 0,
+          slot: "Image 1",
+          source: "identity",
+          semanticPurposes: ["identity"],
+          preserve: ["facial identity"],
+          avoidCopying: ["background"],
+        },
+      ],
+    });
+    expect(sent.systemPrompt).toContain(promptPackage.modelPolicy.instructions);
+    expect(promptPackage).toEqual(original);
+  });
+
+  it("omits character appearance for object-only plans while retaining finish and exclusions", async () => {
+    const objectPlan: ImagePlanReady = {
+      ...imagePlan,
+      shots: [
+        {
+          ...imagePlan.shots[0],
+          scene: "A cup on a table",
+          captureSetup: "Viewed from above",
+          characterPresentation: {
+            mode: "none",
+            visibleParts: [],
+            faceVisible: false,
+            identityPreservationRequired: false,
+          },
+          subjectCameraRelation: "not_applicable",
+          referenceBindings: [],
+        },
+      ],
+    };
+    const input = buildPromptPackage({
+      targetModelId: "fal-ai/nano-banana-pro",
+      imagePlan: objectPlan,
+      appearance: "black bob hair",
+      visualStyle: "film photograph",
+      exclusions: ["logos"],
+    });
+    const run = jest.fn().mockResolvedValue({
+      value: {
+        shots: [
+          {
+            sortOrder: 0,
+            prompt:
+              "A film photograph of an unbranded cup on a table, viewed from above.",
+            negativePrompt: null,
+          },
+        ],
+      },
+      producerLogId: null,
+    });
+
+    await new ImagePromptGenerationAgent({ run } as never).generate(input);
+
+    expect(run.mock.calls[0][0].input.subjectContract).toEqual({
+      appearance: "",
+      visualStyle: "film photograph",
+      exclusions: ["logos"],
+    });
+    expect(input.subjectContract.appearance).toBe("black bob hair");
+  });
+
   it("accepts model policy output without generation parameters", () => {
     expect(
       parsePromptSet(

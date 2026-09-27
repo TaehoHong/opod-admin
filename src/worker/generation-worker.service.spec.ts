@@ -1248,6 +1248,41 @@ describe("GenerationWorkerService", () => {
     expect(sent.negativePrompt).not.toContain("faces");
   });
 
+  it.each([null, "unbranded clothing"])(
+    "sends resolved prompt exclusions without appending live profile or location text (%s)",
+    async (negativePrompt) => {
+      const repository = repositoryFake();
+      repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+      repository.findForProcessing.mockResolvedValue(
+        claimedJob({
+          prompt: "A plain cup on a table, viewed from above.",
+          paramsJson: {
+            _shot: { characterVisible: false, referenceMediaIds: [] },
+            _v3: {
+              referenceBindings: [],
+              exclusionsResolved: true,
+              negativePrompt,
+            },
+          },
+          draft: { location: { negativePrompt: "neon gym", references: [] } },
+        }),
+      );
+      const provider = providerMock([
+        { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+      ]);
+      const { service } = makeService(repository, provider);
+
+      await service.tick();
+
+      expect(provider.submit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: "A plain cup on a table, viewed from above.",
+          negativePrompt: negativePrompt ?? undefined,
+        }),
+      );
+    },
+  );
+
   // 프로바이더가 네거티브를 본문 뒤에 합치는 모델이 있어 "저장본 ≠ 전송본"이었다.
   // 회귀하면 실제로 무엇이 나갔는지 다시 못 보게 되고, 연구 로그의 1차 증거가
   // 또 틀려진다(관측 4 부수 발견).
