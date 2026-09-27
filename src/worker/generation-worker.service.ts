@@ -5,6 +5,11 @@ import {
   OnModuleInit,
 } from "@nestjs/common";
 import { createHash } from "node:crypto";
+import {
+  GeneratedImageValidationError,
+  requestedImageAspectRatio,
+  validateGeneratedImage,
+} from "./generated-image-validation";
 import { AppConfig } from "../domain/config/app-config";
 import { GenerationJobRepository } from "./generation-job.repository";
 import {
@@ -49,16 +54,6 @@ function shotReferenceMediaIds(paramsJson: unknown): string[] | undefined {
     : undefined;
 }
 
-function shotTargetModelId(paramsJson: unknown): string | undefined {
-  if (!isRecord(paramsJson) || !isRecord(paramsJson._shot)) {
-    return undefined;
-  }
-  const targetModelId = paramsJson._shot.targetModelId;
-  return typeof targetModelId === "string" && targetModelId.trim()
-    ? targetModelId.trim()
-    : undefined;
-}
-
 // V3 잡의 인물 레퍼런스 필요 여부. 값이 없는 옛 V3 잡(이 필드 도입 전)은
 // 기획 파서가 이미 "필요하면 바인딩 필수"를 통과시킨 잡이므로 false로 본다 —
 // 그 잡들이 실제로 인물 바인딩을 갖고 있으면 어차피 통과하고, 없으면 기획이
@@ -89,6 +84,7 @@ function v3Metadata(paramsJson: unknown): Record<string, unknown> | null {
 type ShotExecution = {
   route: "t2i" | "edit";
   referenceMediaIds: string[];
+  outputAspectRatio: number | null;
 };
 
 function withShotExecution(
@@ -380,16 +376,6 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       const providers = await this.resolveProviders();
       const provider =
         request.references.length > 0 ? providers.edit : providers.t2i;
-      const targetModelId = shotTargetModelId(job.paramsJson);
-      if (
-        targetModelId &&
-        provider.name.startsWith("fal:") &&
-        provider.name !== `fal:${targetModelId}`
-      ) {
-        this.logger.warn(
-          `Job ${job.id}: planned target model ${targetModelId} does not match resolved provider ${provider.name}`,
-        );
-      }
       const result = await this.generate(job, provider, request);
       await this.persistSuccess(job, result, provider.name);
       this.consecutiveFailures = 0;
@@ -422,6 +408,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       const paramsJson = withShotExecution(job.paramsJson, {
         route: referenceMediaIds.length > 0 ? "edit" : "t2i",
         referenceMediaIds,
+        outputAspectRatio: requestedImageAspectRatio(request.extraParams),
       });
       job.paramsJson = paramsJson;
       // 제출 직후 기록해야 크래시 후 재수용 시 이중 제출을 막는다.
@@ -668,13 +655,34 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     return request;
   }
 
-  // 출력 다운로드 → 우리 스토리지 업로드 → Media(uploadedAt 확정, isAiGenerated)
+  // 출력 다운로드·전체 파일 검증 → 우리 스토리지 업로드 → Media(uploadedAt 확정, isAiGenerated)
   // → 후보 기록 → completed 전이. 영속화는 한 트랜잭션으로 묶는다.
   private async persistSuccess(
     job: ClaimedJob,
     result: CompletedGeneration,
     providerName: string,
   ): Promise<void> {
+    if (result.images.length === 0) {
+      throw new GeneratedImageValidationError("provider returned no images");
+    }
+    const shot =
+      isRecord(job.paramsJson) && isRecord(job.paramsJson._shot)
+        ? job.paramsJson._shot
+        : null;
+    const ratio =
+      shot && isRecord(shot.execution)
+        ? shot.execution.outputAspectRatio
+        : null;
+    // 예전 제출에는 snapshot이 없다. 바뀔 수 있는 현재 설정으로 검사하지 않는다.
+    const expectedRatio =
+      typeof ratio === "number" && Number.isFinite(ratio) && ratio > 0
+        ? ratio
+        : null;
+    const validated: {
+      image: GeneratedImage;
+      bytes: Buffer;
+      contentType: string;
+    }[] = [];
     const stored: {
       image: GeneratedImage;
       url: string;
@@ -683,9 +691,10 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       byteSize: number;
     }[] = [];
     for (const image of result.images) {
-      const bytes = image.dataBase64
-        ? decodeBase64Image(image.dataBase64)
-        : await this.downloadBytes(image.url, image.downloadHeaders);
+      const bytes =
+        image.dataBase64 !== undefined
+          ? decodeBase64Image(image.dataBase64)
+          : await this.downloadBytes(image.url, image.downloadHeaders);
       if (
         image.sha256 &&
         createHash("sha256").update(bytes).digest("hex") !==
@@ -693,7 +702,18 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       ) {
         throw new Error("generated media SHA-256 verification failed");
       }
-      const contentType = image.contentType ?? "image/png";
+      const { width, height, contentType } = await validateGeneratedImage(
+        bytes,
+        expectedRatio,
+      );
+      validated.push({
+        image: { ...image, width, height, contentType },
+        bytes,
+        contentType,
+      });
+    }
+    // 모든 결과가 유효할 때만 업로드한다. 일부 정상 파일만 후보로 남기지 않는다.
+    for (const { image, bytes, contentType } of validated) {
       const file = await this.store({
         bytes,
         contentType,
@@ -724,9 +744,10 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       `Job ${job.id} attempt ${job.attemptCount} failed: ${message}`,
     );
 
-    // 입력 검증 실패(permanent)는 프로바이더 장애가 아니다 — 재시도해도 항상
-    // 같은 결과이므로 즉시 실패 처리하고, 서킷브레이커에도 집계하지 않는다.
+    // 입력/출력 검증 실패는 즉시 실패로 구분한다. 같은 결과를 반복 조회하거나
+    // 자동으로 유료 재생성하지 않고, 네트워크 장애 서킷에도 집계하지 않는다.
     const permanent =
+      error instanceof GeneratedImageValidationError ||
       (error instanceof ProviderJobFailedError && error.permanent) ||
       (error instanceof ImageGenerationRequestError && error.permanent);
     if (!permanent) {
@@ -837,7 +858,7 @@ function decodeBase64Image(value: string): Buffer {
       normalized,
     )
   ) {
-    throw new Error("generated media contains invalid base64 data");
+    throw new GeneratedImageValidationError("invalid base64 data");
   }
   return Buffer.from(normalized, "base64");
 }
