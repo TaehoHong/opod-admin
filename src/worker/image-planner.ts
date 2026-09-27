@@ -1,3 +1,4 @@
+import type { CharacterContentProfile } from "../domain/character-content-profiles/character-content-profile";
 import {
   IMAGE_PLAN_JSON_SCHEMA,
   IMAGE_PLANNER_SYSTEM_PROMPT,
@@ -10,6 +11,10 @@ import { StrictJsonAgentClient } from "./strict-json-agent";
 import { isRecord } from "./value-utils";
 
 export type ImagePlannerInput = {
+  contentProfile?: Pick<
+    CharacterContentProfile,
+    "accountConcept" | "imageStyle" | "constraints"
+  >;
   postPlan: {
     intent: {
       premise: string;

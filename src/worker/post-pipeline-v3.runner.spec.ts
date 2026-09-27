@@ -1,3 +1,4 @@
+import { EMPTY_CONTENT_PROFILE } from "../domain/character-content-profiles/character-content-profile";
 import { UNION_ENVELOPE_KEY } from "../../prompts/strict-schema";
 import { PostPipelineV3Runner } from "./post-pipeline-v3.runner";
 
@@ -36,7 +37,11 @@ function draft(
 function setup(
   currentDraft: Record<string, unknown>,
   fetchResult?: unknown,
-  options: { captionShots?: unknown[]; readMedia?: boolean } = {},
+  options: {
+    captionShots?: unknown[];
+    readMedia?: boolean;
+    profile?: typeof EMPTY_CONTENT_PROFILE;
+  } = {},
 ) {
   const repository = {
     findPlannedDraft: jest.fn().mockResolvedValue(currentDraft),
@@ -87,6 +92,11 @@ function setup(
     settings as never,
     llmLogs as never,
     { draftWorker: { maxShots: 3, maxAttempts: 3 } } as never,
+    {
+      get: jest
+        .fn()
+        .mockResolvedValue(options.profile ?? EMPTY_CONTENT_PROFILE),
+    } as never,
     () => 0.5,
     fetchMock as never,
     options.readMedia === false ? null : readMedia,
@@ -161,86 +171,62 @@ function readyPostPlan() {
 }
 
 describe("PostPipelineV3Runner", () => {
-  it.each([
-    [1, "content_style"],
-    [2, "content_style"],
-    [1, "content_guidance"],
-    [2, "content_guidance"],
-  ])(
-    "preserves v%s %s as account direction without promoting examples or private text",
-    async (schemaVersion, title) => {
+  it("does not fall back to legacy editorial personas when no content profile is configured", async () => {
+    const current = draft({
+      pipelineVersion: "post-pipeline-v4",
+      pipeline: { stage: "post_plan", state: "running" },
+    });
+    const { runner, fetchMock } = setup(current, readyPostPlan());
+    await runner.runCurrentStage("draft-1");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const input = JSON.parse(body.messages[1].content);
+    expect(input.contentProfile).toEqual({
+      accountConcept: "",
+      constraints: "",
+    });
+    expect(body.messages[1].content).not.toContain(
+      "사소한 일상을 구체적으로 쓴다",
+    );
+    expect(input.persona.writingProfile.voice).toEqual([
+      { title: "voice", content: "짧은 반말 한 문장" },
+    ]);
+  });
+
+  it.each([undefined, "카페에서 쉬는 순간"])(
+    "always supplies authored account concept with request=%s",
+    async (operatorRequest) => {
       const current = draft({
         pipelineVersion: "post-pipeline-v4",
+        operatorRequest,
         pipeline: { stage: "post_plan", state: "running" },
       });
-      const direction = "러닝 기록과 훈련 전후 일상을 중심으로 게시한다.";
-      const fragments = [
-        {
-          id: "direction",
-          kind: "identity",
-          injection: "always",
-          content: direction,
-        },
-        {
-          id: "example",
-          kind: "example",
-          injection: "always",
-          content: "매일 카페에 가는 예시.",
-        },
-        {
-          id: "private",
-          kind: "creator_note",
-          injection: "never_prompt",
-          content: "비공개 운영 메모.",
-        },
-        {
-          id: "unrelated",
-          kind: "judgment",
-          injection: "retrieved",
-          content: "등산 소재 지침.",
-        },
-      ].map((fragment) => ({
-        ...fragment,
-        recallKeys: ["등산"],
-        canonIds: [],
-      }));
-      current.character.personas = [
-        {
-          id: "direction-source",
-          schemaVersion,
-          title,
-          content: fragments.map((fragment) => fragment.content).join(""),
-          fragments,
-        },
-        { title: "voice", content: "짧은 반말" },
-      ] as typeof current.character.personas;
-      const output = {
-        ...readyPostPlan(),
-        accountFit:
-          "최근 러닝 기록 사이의 가벼운 카페 일상으로 계정의 중심을 바꾸지 않는다.",
+      const profile = {
+        accountConcept: "러닝 기록과 훈련 전후 일상",
+        imageStyle: "사진 전용 지침",
+        captionStyle: "캡션 전용 지침",
+        constraints: "협찬 금지",
       };
-      const { runner, repository, fetchMock } = setup(current, output);
+      const { runner, repository, fetchMock } = setup(
+        current,
+        readyPostPlan(),
+        { profile },
+      );
       await runner.runCurrentStage("draft-1");
       const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
       const input = JSON.parse(body.messages[1].content);
-      expect(input.contentDirection).toEqual([
-        expect.objectContaining({
-          content: direction,
-          sourceId: "direction-source",
-          fragmentId: "direction",
-          sourceTitle: title,
-          kind: "identity",
-        }),
-      ]);
-      expect(body.messages[1].content).not.toContain("비공개 운영 메모");
-      expect(body.messages[1].content).not.toContain("등산 소재 지침");
-      expect(repository.persistV3Artifact).toHaveBeenCalledWith(
-        expect.objectContaining({
-          conceptJson: expect.objectContaining({
-            postPlanning: expect.objectContaining({ output }),
-          }),
-        }),
+      expect(input.contentProfile).toEqual({
+        accountConcept: profile.accountConcept,
+        constraints: profile.constraints,
+      });
+      expect(body.messages[1].content).not.toContain(profile.imageStyle);
+      expect(body.messages[1].content).not.toContain(profile.captionStyle);
+      expect(body.messages[1].content).not.toContain(
+        "사소한 일상을 구체적으로 쓴다",
       );
+      expect(
+        repository.persistV3Artifact.mock.calls[0][0].conceptJson.postPlanning
+          .input.contentProfile,
+      ).toEqual(input.contentProfile);
     },
   );
 
@@ -401,6 +387,12 @@ describe("PostPipelineV3Runner", () => {
               ],
             },
         {
+          profile: {
+            accountConcept: "운동 중심 일상",
+            imageStyle: "사진만의 구도",
+            captionStyle: "캡션만의 어투",
+            constraints: "협찬 금지",
+          },
           captionShots: [
             {
               sortOrder: 0,
@@ -425,6 +417,16 @@ describe("PostPipelineV3Runner", () => {
           ? body.messages[1].content[0].text
           : body.messages[1].content;
       const input = JSON.parse(serialized);
+      expect(input.contentProfile).toEqual({
+        accountConcept: "운동 중심 일상",
+        constraints: "협찬 금지",
+        ...(stage === "caption"
+          ? { captionStyle: "캡션만의 어투" }
+          : { imageStyle: "사진만의 구도" }),
+      });
+      expect(serialized).not.toContain(
+        stage === "caption" ? "사진만의 구도" : "캡션만의 어투",
+      );
       expect(serialized).not.toContain("제작자 비밀");
       expect(serialized).not.toContain("대화 시작 인사");
       expect(serialized).not.toContain("예시 속 허구 사건");
@@ -470,7 +472,7 @@ describe("PostPipelineV3Runner", () => {
           {
             id: "v2",
             schemaVersion: 2,
-            title: "content_style",
+            title: "identity",
             content: "private unsplit source",
             fragments: [],
           },
@@ -492,191 +494,23 @@ describe("PostPipelineV3Runner", () => {
     );
   });
 
-  it.each([
-    ["post-pipeline-v3", "content_guidance"],
-    ["post-pipeline-v4", "content_guidance"],
-    ["post-pipeline-v4", "content_style"],
-  ])(
-    "accepts %s drafts with the %s editorial policy title",
-    async (pipelineVersion, policyTitle) => {
-      const current = draft(
-        {
-          pipelineVersion,
-          pipeline: {
-            stage: "post_plan",
-            state: "running",
-            imageCount: null,
-            reasonCodes: [],
-          },
-        },
-        {
-          character: {
-            ...draft({}).character,
-            personas: [
-              { title: policyTitle, content: "사소한 일상을 구체적으로 쓴다" },
-              { title: "voice", content: "짧은 반말" },
-            ],
-          },
-        },
-      );
-      const { runner, repository, fetchMock } = setup(current, readyPostPlan());
-
-      await runner.runCurrentStage("draft-1");
-
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(repository.persistV3Artifact).toHaveBeenCalledWith(
-        expect.objectContaining({
-          conceptJson: expect.objectContaining({
-            postPlanning: expect.objectContaining({
-              input: expect.objectContaining({
-                persona: expect.objectContaining({
-                  writingProfile: expect.objectContaining({
-                    contentStyle: [
-                      {
-                        title: "content_style",
-                        content: "사소한 일상을 구체적으로 쓴다",
-                      },
-                    ],
-                  }),
-                  additionalContext: [],
-                }),
-              }),
-            }),
-          }),
-        }),
-      );
-    },
-  );
-
-  it("deduplicates identical editorial policy aliases", async () => {
-    const current = draft(
-      {
-        pipelineVersion: "post-pipeline-v4",
-        pipeline: {
-          stage: "post_plan",
-          state: "running",
-          imageCount: null,
-          reasonCodes: [],
-        },
-      },
-      {
-        character: {
-          ...draft({}).character,
-          personas: [
-            {
-              title: "content_style",
-              content: "  사소한 일상을 구체적으로 쓴다  ",
-            },
-            {
-              title: "content_guidance",
-              content: "사소한 일상을 구체적으로 쓴다",
-            },
-            { title: "voice", content: "짧은 반말" },
-          ],
-        },
-      },
-    );
-    const { runner, repository, fetchMock } = setup(current, readyPostPlan());
-
+  it("pauses when common character context is absent even if a content profile exists", async () => {
+    const current = draft({
+      pipelineVersion: "post-pipeline-v4",
+      pipeline: { stage: "post_plan", state: "running" },
+    });
+    current.character.bio = "";
+    current.character.personas = [{ title: "voice", content: "짧은 반말" }];
+    const { runner, repository, fetchMock } = setup(current, readyPostPlan(), {
+      profile: { ...EMPTY_CONTENT_PROFILE, accountConcept: "러닝" },
+    });
     await runner.runCurrentStage("draft-1");
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const stored = repository.persistV3Artifact.mock.calls[0][0] as {
-      conceptJson: {
-        postPlanning: {
-          input: {
-            persona: {
-              writingProfile: { contentStyle: unknown[] };
-              additionalContext: unknown[];
-            };
-          };
-        };
-      };
-    };
-    expect(
-      stored.conceptJson.postPlanning.input.persona.writingProfile.contentStyle,
-    ).toEqual([
-      {
-        title: "content_style",
-        content: "사소한 일상을 구체적으로 쓴다",
-      },
-    ]);
-    expect(
-      stored.conceptJson.postPlanning.input.persona.additionalContext,
-    ).toEqual([]);
-  });
-
-  it("pauses conflicting editorial policy aliases before an LLM call", async () => {
-    const current = draft(
-      {
-        pipelineVersion: "post-pipeline-v4",
-        pipeline: {
-          stage: "post_plan",
-          state: "running",
-          imageCount: null,
-          reasonCodes: [],
-        },
-      },
-      {
-        character: {
-          ...draft({}).character,
-          personas: [
-            { title: "content_style", content: "짧게 쓴다" },
-            { title: "content_guidance", content: "길게 설명한다" },
-            { title: "voice", content: "짧은 반말" },
-          ],
-        },
-      },
-    );
-    const { runner, repository, fetchMock } = setup(current, readyPostPlan());
-
-    await runner.runCurrentStage("draft-1");
-
     expect(fetchMock).not.toHaveBeenCalled();
     expect(repository.persistV3Paused).toHaveBeenCalledWith(
       expect.objectContaining({
-        expectedStage: "post_plan",
         conceptJson: expect.objectContaining({
           pipeline: expect.objectContaining({
-            state: "conflict",
-            reasonCodes: ["persona_content_policy_conflict"],
-          }),
-        }),
-      }),
-    );
-    expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
-  });
-
-  it("pauses before an LLM call when the writing profile is incomplete", async () => {
-    const current = draft(
-      {
-        pipelineVersion: "post-pipeline-v3",
-        pipeline: {
-          stage: "post_plan",
-          state: "running",
-          imageCount: null,
-          reasonCodes: [],
-        },
-      },
-      {
-        character: {
-          ...draft({}).character,
-          personas: [{ title: "voice", content: "짧은 반말" }],
-        },
-      },
-    );
-    const { runner, repository, fetchMock } = setup(current);
-
-    await runner.runCurrentStage("draft-1");
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(repository.persistV3Paused).toHaveBeenCalledWith(
-      expect.objectContaining({
-        expectedStage: "post_plan",
-        conceptJson: expect.objectContaining({
-          pipeline: expect.objectContaining({
-            state: "needs_input",
-            reasonCodes: ["missing_content_style"],
+            reasonCodes: ["missing_character_context"],
           }),
         }),
       }),
@@ -891,10 +725,9 @@ describe("PostPipelineV3Runner", () => {
     };
     const context =
       paused.conceptJson.imagePlanning.input.characterVisualContext;
-    expect(context.capturePreferences).toEqual(["혼자면 고정면 셀프타이머"]);
+    expect(context.capturePreferences).toEqual([]);
     expect(context.personaContext).toEqual(
       expect.arrayContaining([
-        { title: "content_style", content: "사소한 일상을 구체적으로 쓴다" },
         { title: "world", content: "연남동 원룸에 산다" },
       ]),
     );
@@ -985,7 +818,7 @@ describe("PostPipelineV3Runner", () => {
         conceptJson: expect.objectContaining({
           captionBuild: expect.objectContaining({
             revision: 1,
-            promptVersion: "caption-writer-v1",
+            promptVersion: "caption-writer-v2",
             contractVersion: "caption-set-v1",
             source: expect.objectContaining({
               postPlanningHash: "sha256:post",

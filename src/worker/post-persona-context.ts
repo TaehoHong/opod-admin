@@ -54,6 +54,13 @@ export function projectPostPersonaContext(input: {
     } {
   const entries: PostPersonaEntry[] = [];
   for (const source of input.personas) {
+    // Editorial instructions now belong to the separate content profile.
+    if (
+      ["content_style", "content_guidance", "capture_style"].includes(
+        normalize(source.title).replace(/[ -]+/g, "_"),
+      )
+    )
+      continue;
     const version = source.schemaVersion ?? 1;
     const fragments = source.fragments ?? [];
     if (

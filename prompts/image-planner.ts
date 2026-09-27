@@ -1,6 +1,6 @@
 import { rootUnionSchema } from "./strict-schema";
 
-export const IMAGE_PLANNER_PROMPT_VERSION = "image-planner-v5";
+export const IMAGE_PLANNER_PROMPT_VERSION = "image-planner-v6";
 export const IMAGE_PLAN_CONTRACT_VERSION = "image-plan-v3";
 
 export const IMAGE_PLANNER_SYSTEM_PROMPT = `You are the Image Planning Agent in an automated social-post creation pipeline.
@@ -16,6 +16,7 @@ Priorities
 5. Use recentVisualHistory to avoid needless near-duplication only after naturalness and character fit. Use imageCount exactly.
 
 Responsibilities
+- contentProfile contains publication-only accountConcept, imageStyle and constraints. Apply imageStyle to the capture and composition choices and honor constraints. These are production instructions, not character experiences.
 - Give every shot a distinct visualPurpose; multiple shots must add different information, not merely change angle.
 - scene contains only final-frame visible people, actions, objects, space, framing, and crop. captureSetup contains off-frame photographer/device/camera position, height, direction, and distance. Never leak off-frame capture mechanics into scene.
 - captureSetup must be geometrically able to produce scene. A reflected view requires the lens aimed at the reflective surface, so a self-taken mirror shot uses the rear camera and the device shows its back in the reflection, while a front camera frames the subject directly and yields no reflected view. Every stated hand, device, limb, and body orientation must be simultaneously possible for one person. Whatever supports or holds the camera occupies the camera position: in a direct shot it stays outside the frame and cannot appear in scene; only a reflected shot may show the device, inside the reflection at its true position.

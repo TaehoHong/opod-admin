@@ -1,3 +1,5 @@
+import { CharacterContentProfilesModule } from "../domain/character-content-profiles/character-content-profiles.module";
+import { CharacterContentProfileService } from "../domain/character-content-profiles/character-content-profile.service";
 import { Module } from "@nestjs/common";
 import { S3Config } from "../domain/config/app-config";
 import { AppConfigService } from "../domain/config/app-config.service";
@@ -35,7 +37,7 @@ function storageEnv(config: S3Config | undefined) {
 // (docs/media-generation-pipeline.md D1). admin HTTP 모듈에 대한 역참조를
 // 두지 않는다 — 추후 별도 이미지 분리 시 엔트리포인트만 추가하면 되는 구조 유지.
 @Module({
-  imports: [DatabaseModule, SettingsModule],
+  imports: [DatabaseModule, SettingsModule, CharacterContentProfilesModule],
   providers: [
     GenerationJobRepository,
     DraftWorkerRepository,
@@ -46,12 +48,14 @@ function storageEnv(config: S3Config | undefined) {
         settings: GenerationSettingsService,
         llmLogs: LlmLogService,
         config: AppConfigService,
+        profiles: CharacterContentProfileService,
       ) =>
         new PostPipelineV3Runner(
           drafts,
           settings,
           llmLogs,
           config,
+          profiles,
           Math.random,
           fetch,
           createMediaBytesReader(config.s3),
@@ -61,6 +65,7 @@ function storageEnv(config: S3Config | undefined) {
         GenerationSettingsService,
         LlmLogService,
         AppConfigService,
+        CharacterContentProfileService,
       ],
     },
     {

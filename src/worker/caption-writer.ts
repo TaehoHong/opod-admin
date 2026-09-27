@@ -1,3 +1,4 @@
+import type { CharacterContentProfile } from "../domain/character-content-profiles/character-content-profile";
 import {
   CAPTION_SET_JSON_SCHEMA,
   CAPTION_WRITER_SYSTEM_PROMPT,
@@ -15,6 +16,10 @@ import { isRecord } from "./value-utils";
 // V4 ⑥ 캡션 Agent — 생성 이미지를 보고 캡션·해시태그를 쓴다.
 // 설계 정본 docs/post-creation-agent-architecture-v3.md §20.5.
 export type CaptionWriterInput = {
+  contentProfile?: Pick<
+    CharacterContentProfile,
+    "accountConcept" | "captionStyle" | "constraints"
+  >;
   character: {
     name: string;
     bio: string;

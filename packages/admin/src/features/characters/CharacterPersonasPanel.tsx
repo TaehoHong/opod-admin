@@ -37,8 +37,6 @@ const PERSONA_TITLES = [
   { value: "emotions", label: "감정·대인" },
   { value: "voice", label: "말투" },
   { value: "world", label: "배경" },
-  { value: "content_style", label: "콘텐츠 스타일" },
-  { value: "capture_style", label: "촬영 방식" },
   { value: "relationships", label: "관계" },
   { value: "preferences", label: "취향" },
   { value: "goals", label: "목표" },
@@ -140,7 +138,8 @@ export function CharacterPersonasPanel({
         <Stack gap={2}>
           <Title order={4}>페르소나</Title>
           <Text size="sm" c="dimmed">
-            캐릭터 판단과 표현에 사용하는 {personas.length}개 블록
+            캐릭터 판단과 표현에 사용하는 {personas.length}개 블록. 계정 컨셉과
+            사진·캡션 스타일은 ‘게시물 제작’ 탭에서 설정합니다.
           </Text>
         </Stack>
         <Button onClick={() => setCreating(true)}>페르소나 추가</Button>

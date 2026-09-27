@@ -1,3 +1,4 @@
+import { CharacterContentProfilePanel } from "./CharacterContentProfilePanel";
 import { Badge, Button, Group, Paper, Stack, Tabs, Text } from "@mantine/core";
 import { UserCircle } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
@@ -92,6 +93,7 @@ export function CharacterManagerPage() {
                 <Tabs.Tab value="overview">운영 개요</Tabs.Tab>
                 <Tabs.Tab value="profile">프로필</Tabs.Tab>
                 <Tabs.Tab value="personas">페르소나</Tabs.Tab>
+                <Tabs.Tab value="content">게시물 제작</Tabs.Tab>
                 <Tabs.Tab value="memory">메모리</Tabs.Tab>
                 <Tabs.Tab value="posts">게시물</Tabs.Tab>
                 <Tabs.Tab value="activity">활동</Tabs.Tab>
@@ -111,6 +113,12 @@ export function CharacterManagerPage() {
                 <CharacterPersonasPanel
                   characterId={character.data.id}
                   personas={character.data.personas}
+                />
+              </Tabs.Panel>
+              <Tabs.Panel value="content" className={styles.panel}>
+                <CharacterContentProfilePanel
+                  key={character.data.id}
+                  characterId={character.data.id}
                 />
               </Tabs.Panel>
               <Tabs.Panel value="memory" className={styles.panel}>
@@ -143,6 +151,7 @@ const SECTIONS = new Set([
   "overview",
   "profile",
   "personas",
+  "content",
   "memory",
   "posts",
   "activity",

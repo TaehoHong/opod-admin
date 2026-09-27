@@ -377,3 +377,26 @@ export function updatePostingPolicy(
 function characterPath(characterId: string): string {
   return `/characters/${encodeURIComponent(characterId)}`;
 }
+
+export type CharacterContentProfile = {
+  accountConcept: string;
+  imageStyle: string;
+  captionStyle: string;
+  constraints: string;
+};
+
+export function fetchContentProfile(
+  characterId: string,
+): Promise<CharacterContentProfile> {
+  return apiRequest(`${characterPath(characterId)}/content-profile`);
+}
+
+export function updateContentProfile(
+  characterId: string,
+  profile: CharacterContentProfile,
+): Promise<CharacterContentProfile> {
+  return apiRequest(`${characterPath(characterId)}/content-profile`, {
+    method: "PUT",
+    body: profile,
+  });
+}

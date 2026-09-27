@@ -22,6 +22,40 @@ const source = (
 const base = { query: "", bio: "", interests: [], memories: [] };
 
 describe("post persona context", () => {
+  it.each([1, 2])(
+    "excludes legacy publication sources in schema v%s without leaking their fragments",
+    (schemaVersion) => {
+      const result = projectPostPersonaContext({
+        ...base,
+        query: "게시물 기획 촬영 캡션",
+        personas: [
+          ...["content_style", "content_guidance", "capture_style"].map(
+            (title) => ({
+              id: title,
+              title,
+              schemaVersion,
+              content: "제작 전용 원문.",
+              ...(schemaVersion === 2
+                ? {
+                    fragments: [
+                      fragment(title, "제작 전용 원문.", "identity", "always"),
+                    ],
+                  }
+                : {}),
+            }),
+          ),
+          source([
+            fragment("identity", "꽃집에서 일한다.", "identity", "always"),
+          ]),
+        ],
+      });
+      if (result.status !== "ready") throw new Error("invalid fixture");
+      expect(result.personas.map((entry) => entry.content)).toEqual([
+        "꽃집에서 일한다.",
+      ]);
+    },
+  );
+
   it("uses explicit recall cues and preserves Canon provenance without injecting its excluded source", () => {
     const result = projectPostPersonaContext({
       ...base,

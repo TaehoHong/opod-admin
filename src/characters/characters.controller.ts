@@ -1,3 +1,6 @@
+import { CharacterContentProfileService } from "../domain/character-content-profiles/character-content-profile.service";
+import { CharacterActionLogService } from "./character-action-log.service";
+import { PutCharacterContentProfileDto } from "./dto/put-character-content-profile.dto";
 import {
   Body,
   Controller,
@@ -47,6 +50,8 @@ export class CharactersController {
     private readonly socialActivityPolicyService: CharacterSocialActivityApplicationService,
     private readonly visualProfileService: VisualProfileService,
     private readonly profileImageService: CharacterProfileImageService,
+    private readonly contentProfiles: CharacterContentProfileService,
+    private readonly actionLogs: CharacterActionLogService,
   ) {}
 
   @Get()
@@ -308,6 +313,34 @@ export class CharactersController {
       characterId,
       ...body,
     });
+  }
+
+  @Get(":id/content-profile")
+  async getContentProfile(@Param("id", ParseUUIDPipe) characterId: string) {
+    await this.charactersService.requireActivityCharacter(characterId);
+    return this.contentProfiles.get(characterId);
+  }
+
+  @Put(":id/content-profile")
+  async putContentProfile(
+    @Param("id", ParseUUIDPipe) characterId: string,
+    @Body() body: PutCharacterContentProfileDto,
+  ) {
+    return this.charactersService.withActivityTransaction(
+      characterId,
+      async () => {
+        await this.charactersService.requireActivityCharacter(characterId);
+        await this.contentProfiles.put(characterId, body);
+        await this.actionLogs.record({
+          characterId,
+          actionType: "CONTENT_PROFILE_UPDATED",
+          targetTable: "character_content_profiles",
+          targetId: characterId,
+          reason: "게시물 제작 설정 변경",
+        });
+        return this.contentProfiles.get(characterId);
+      },
+    );
   }
 
   @Get(":id/posting-policy")

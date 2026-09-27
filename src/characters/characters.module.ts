@@ -1,3 +1,4 @@
+import { CharacterContentProfilesModule } from "../domain/character-content-profiles/character-content-profiles.module";
 import { Module } from "@nestjs/common";
 import { AdminAuthModule } from "../admin/auth/admin-auth.module";
 import { AppConfigService } from "../domain/config/app-config.service";
@@ -27,7 +28,12 @@ import { VisualProfileService } from "./visual-profile.service";
 import { LlmLogService } from "../domain/llm-logs/llm-log.service";
 
 @Module({
-  imports: [DatabaseModule, AdminAuthModule, SettingsModule],
+  imports: [
+    DatabaseModule,
+    AdminAuthModule,
+    SettingsModule,
+    CharacterContentProfilesModule,
+  ],
   controllers: [CharactersController],
   providers: [
     CharacterRepository,

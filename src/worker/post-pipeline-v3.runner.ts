@@ -1,3 +1,5 @@
+import { CharacterContentProfile } from "../domain/character-content-profiles/character-content-profile";
+import { CharacterContentProfileService } from "../domain/character-content-profiles/character-content-profile.service";
 import { Injectable, Logger } from "@nestjs/common";
 import type { JsonValue } from "../domain/database/json";
 import {
@@ -70,6 +72,7 @@ export class PostPipelineV3Runner {
     private readonly settings: GenerationSettingsService,
     private readonly llmLogs: LlmLogService,
     private readonly config: AppConfigService,
+    private readonly contentProfiles: CharacterContentProfileService,
     private readonly random: () => number = Math.random,
     private readonly fetchFn: typeof fetch = fetch,
     // V4 ⑥ 캡션 단계가 생성 이미지를 읽는 데 쓴다. 없으면 캡션 단계는
@@ -121,20 +124,14 @@ export class PostPipelineV3Runner {
         ]);
         return;
       }
-      const personaPolicy = needsContext
-        ? resolvePersonaPolicyAliases(context.personas)
-        : { status: "ready" as const, personas: context.personas };
-      if (personaPolicy.status === "conflict") {
-        await this.pause(draft, concept, "conflict", [
-          "persona_content_policy_conflict",
-        ]);
-        return;
-      }
+      const profile = needsContext
+        ? await this.contentProfiles.get(draft.characterId)
+        : null;
       const normalizedDraft: PlannedDraft = {
         ...draft,
         character: {
           ...draft.character,
-          personas: personaPolicy.personas,
+          personas: context.personas,
           memories: context.memories,
         },
       };
@@ -155,14 +152,9 @@ export class PostPipelineV3Runner {
         this.llmLogs,
       );
       if (stage === "post_plan") {
-        await this.runPostPlanning(
-          normalizedDraft,
-          concept,
-          client,
-          context.hasV2,
-        );
+        await this.runPostPlanning(normalizedDraft, concept, client, profile!);
       } else if (stage === "image_plan") {
-        await this.runImagePlanning(normalizedDraft, concept, client);
+        await this.runImagePlanning(normalizedDraft, concept, client, profile!);
       } else if (stage === "image_prompt") {
         await this.runPromptGeneration(normalizedDraft, concept, client);
       } else if (stage === "caption") {
@@ -170,6 +162,7 @@ export class PostPipelineV3Runner {
           normalizedDraft,
           concept,
           client,
+          profile!,
           options?.operatorNote,
         );
       } else {
@@ -211,19 +204,13 @@ export class PostPipelineV3Runner {
     draft: PlannedDraft,
     concept: V3Concept,
     client: StrictJsonAgentClient,
-    hasV2: boolean,
+    profile: CharacterContentProfile,
   ): Promise<void> {
-    const input = postPlannerInput(draft, concept);
-    const missing = hasV2
-      ? input.character.bio.trim() || input.persona.characterContext.length
+    const input = postPlannerInput(draft, concept, profile);
+    const missing =
+      input.character.bio.trim() || input.persona.characterContext.length
         ? []
-        : ["character_context"]
-      : [
-          ...(input.persona.writingProfile.contentStyle.length
-            ? []
-            : ["content_style"]),
-          ...(input.persona.writingProfile.voice.length ? [] : ["voice"]),
-        ];
+        : ["character_context"];
     if (missing.length) {
       await this.pause(
         draft,
@@ -314,6 +301,7 @@ export class PostPipelineV3Runner {
     draft: PlannedDraft,
     concept: V3Concept,
     client: StrictJsonAgentClient,
+    profile: CharacterContentProfile,
   ): Promise<void> {
     const postPlan = postPlanReady(concept);
     const imageCount = existingImageCount(concept);
@@ -330,6 +318,11 @@ export class PostPipelineV3Runner {
       ),
     ]);
     const input: ImagePlannerInput = {
+      contentProfile: {
+        accountConcept: profile.accountConcept,
+        imageStyle: profile.imageStyle,
+        constraints: profile.constraints,
+      },
       postPlan: { intent: postPlan.intent },
       imageCount,
       characterVisualContext: {
@@ -631,6 +624,7 @@ export class PostPipelineV3Runner {
     draft: PlannedDraft,
     concept: V3Concept,
     client: StrictJsonAgentClient,
+    profile: CharacterContentProfile,
     operatorNote?: string,
   ): Promise<void> {
     const postPlan = postPlanReady(concept);
@@ -663,6 +657,11 @@ export class PostPipelineV3Runner {
       })),
     );
     const input: CaptionWriterInput = {
+      contentProfile: {
+        accountConcept: profile.accountConcept,
+        captionStyle: profile.captionStyle,
+        constraints: profile.constraints,
+      },
       ...personaInput(draft),
       postPlan: { intent: postPlan.intent },
       shots: imagePlan.shots.map((shot) => ({
@@ -786,19 +785,14 @@ export class PostPipelineV3Runner {
 function postPlannerInput(
   draft: PlannedDraft,
   concept: V3Concept,
+  profile: CharacterContentProfile,
 ): PostPlannerInput {
   return {
     ...personaInput(draft, true),
-    // Source purpose and fragment kind are independent: a v2 identity/voice
-    // fragment can still belong to the account's authored content direction.
-    contentDirection: draft.character.personas.filter(
-      (entry) =>
-        entry.content.trim() &&
-        entry.kind !== "example" &&
-        ["content_style", "content_guidance"].includes(
-          normalizeTitle(entry.sourceTitle ?? entry.title),
-        ),
-    ),
+    contentProfile: {
+      accountConcept: profile.accountConcept,
+      constraints: profile.constraints,
+    },
     ...(operatorRequest(concept)
       ? { operatorRequest: operatorRequest(concept) }
       : {}),
@@ -810,7 +804,7 @@ function postPlannerInput(
 function personaInput(
   draft: PlannedDraft,
   includeExamples = false,
-): Omit<PostPlannerInput, "operatorRequest" | "contentDirection"> {
+): Omit<PostPlannerInput, "operatorRequest" | "contentProfile"> {
   const personas = draft.character.personas.filter(
     (entry) =>
       entry.content.trim() && (includeExamples || entry.kind !== "example"),
@@ -1006,64 +1000,6 @@ function operatorRequest(concept: V3Concept): string | undefined {
     ? concept.operatorRequest.trim()
     : undefined;
 }
-function normalizeTitle(value: string): string {
-  return value.trim().toLowerCase().replace(/[ -]+/g, "_");
-}
-
-type PersonaEntry = PlannedDraft["character"]["personas"][number];
-
-function resolvePersonaPolicyAliases(
-  personas: PersonaEntry[],
-): { status: "ready"; personas: PersonaEntry[] } | { status: "conflict" } {
-  const aliases = personas.filter((entry) =>
-    ["content_style", "content_guidance"].includes(postPersonaRole(entry)),
-  );
-  const hasContentStyle = aliases.some(
-    (entry) => normalizeTitle(entry.title) === "content_style",
-  );
-  const hasContentGuidance = aliases.some(
-    (entry) => normalizeTitle(entry.title) === "content_guidance",
-  );
-  const normalizedContents = [
-    ...new Set(
-      aliases.map((entry) => entry.content.trim()).filter((content) => content),
-    ),
-  ];
-
-  if (hasContentStyle && hasContentGuidance && normalizedContents.length > 1) {
-    return { status: "conflict" };
-  }
-  if (!aliases.length) return { status: "ready", personas };
-
-  const policies =
-    hasContentStyle && hasContentGuidance
-      ? normalizedContents.slice(0, 1)
-      : aliases
-          .map((entry) => entry.content.trim())
-          .filter((content) => content);
-  let inserted = false;
-  const normalized: PersonaEntry[] = [];
-  for (const entry of personas) {
-    if (
-      ["content_style", "content_guidance"].includes(postPersonaRole(entry))
-    ) {
-      if (!inserted) {
-        normalized.push(
-          ...policies.map((content) => ({
-            ...aliases.find((entry) => entry.content.trim() === content),
-            title: "content_style",
-            content,
-          })),
-        );
-        inserted = true;
-      }
-      continue;
-    }
-    normalized.push(entry);
-  }
-  return { status: "ready", personas: normalized };
-}
-
 function personaContents(draft: PlannedDraft, title: string): string[] {
   return draft.character.personas
     .filter((entry) => postPersonaRole(entry) === title && entry.content.trim())

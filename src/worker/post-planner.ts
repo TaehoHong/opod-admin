@@ -1,3 +1,4 @@
+import type { CharacterContentProfile } from "../domain/character-content-profiles/character-content-profile";
 import {
   POST_PLAN_JSON_SCHEMA,
   POST_PLANNER_SYSTEM_PROMPT,
@@ -12,7 +13,9 @@ import type { PostMemoryEntry, PostPersonaEntry } from "./post-persona-context";
 
 const SOURCES = new Set([
   "operatorRequest",
-  "contentDirection",
+  "contentDirection", // Old artifact conflict sources remain readable.
+  "contentProfile.accountConcept",
+  "contentProfile.constraints",
   "persona.boundaries",
   "persona.characterContext",
   "memories",
@@ -30,7 +33,10 @@ const MEMORY_TYPES = new Set([
 
 export type PersonaEntry = PostPersonaEntry;
 export type PostPlannerInput = {
-  contentDirection: PersonaEntry[];
+  contentProfile: Pick<
+    CharacterContentProfile,
+    "accountConcept" | "constraints"
+  >;
   character: {
     name: string;
     bio: string;

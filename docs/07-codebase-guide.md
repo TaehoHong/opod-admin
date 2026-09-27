@@ -256,11 +256,8 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   선택한 `schemaVersion`을 응답에 그대로 포함하며 `src/characters/character.service.spec.ts`가 이 API
   field 계약을 보호한다. 좁은 명령은
   `npm run test -- src/characters/character.service.spec.ts --runInBand`다.
-- `PostPipelineV3Runner`가 V3/V4의 `content_style`/`content_guidance` alias를 LLM 호출 전에 하나의
-  `content_style` owner로 정규화한다. trim 후 내용이 같으면 하나로 합치고 다르면 `conflict`와
-  `persona_content_policy_conflict`로 pause한다. v1은 둘 다 없을 때의 `missing_content_style` pause를 유지한다.
-  정규화된 persona 집합은 post planning, image planning, caption에 공통으로 전달한다. 좁은 회귀 명령은
-  `npm run test -- src/worker/post-pipeline-v3.runner.spec.ts --runInBand`다.
+- 게시물 제작 지침의 현재 소유자는 아래 Character content profiles 항목이다.
+  이전 content_style/content_guidance alias 정규화와 필수 제목 검사 경로는 제거했다.
 
 ## Post planning persona input — 2026-09-17 verified
 
@@ -277,7 +274,7 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   예시·retrieved 본문·최근 게시물은 검색 단서로 사용하지 않는다. 의미 기반 검색은 아직 없다.
   Canon 연결 자체는 검색을 강제하지 않으며, 선택한 기억에 본문 없는 personaSources와 사건 시점을
   보존한다. legacy 기억과 관련 retrieved 기억은 각각 최신 20개, always 기억은 모두 전달한다.
-- v2는 bio 또는 캐릭터 역할 문맥이 있으면 옛 content_style/voice 제목 없이 기획할 수 있다.
+- v1/v2 모두 bio 또는 캐릭터 역할 문맥이 있으면 옛 content_style/voice 제목 없이 기획할 수 있다.
   boundary 역할은 이미지 기획·캡션의 제약으로 연결한다. example은 비사실 해석 규칙이 있는
   게시 기획에만 전달한다. `post-planner-v3`는 입력 의미만 갱신하며 출력은 `post-plan-v2`를 유지한다.
 - 회귀 위치: `src/worker/post-persona-context.spec.ts`,
@@ -297,10 +294,8 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   최근 게시물 흐름과 함께 판단하되 고정 비율·주제 순환을 강제하지 않는다.
 - `projectPostPersonaContext`가 구조화 조각의 `sourceTitle`을 보존한다. v2의 역할은
   계속 kind로 판별하며, 원문 복구나 주입 정책 우회는 하지 않는다.
-- 기존 입력 조립 owner인 `PostPipelineV3Runner.postPlannerInput`이 선별된
-  `content_style`/`content_guidance` 출처를 `contentDirection`으로 전달한다.
-  example은 제외하고, 비공개·시작 전용·조회 조건 불일치 조각은 기존 projection이 제외한다.
-  별도 DB 필드나 조회, 계정 컨셉 추론, 추가 LLM 호출은 없다.
+- 계정 방향은 별도 contentProfile.accountConcept으로 전달한다. 이전 persona 제목 기반
+  contentDirection 추출은 아래 Character content profiles 구현으로 대체했다.
 - `post-planner-v4`/`post-plan-v3`가 이번 순간과 최근 계정 흐름의 관계를 설명하는
   `accountFit`을 새 출력에 요구한다. 설명은 artifact에 저장되며 캡션이나 Canon으로 전달하지 않는다.
   내용의 적합성 판단은 모델 지시이고 parser는 설명의 형식·길이만 검증한다.
@@ -364,3 +359,31 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   인증/캐릭터 격리/DB event 제약을 검증한다. 좁은 명령은
   `npm run test:e2e -- --runTestsByPath test/character-context.e2e-spec.ts`.
   전체 단위445/E2E16/build/lint/schema check를 확인했다. 개발 DB에는 적용하지 않았다.
+
+## Character content profiles — 2026-09-27
+
+- 사용자 확정: 공통 페르소나와 게시물 제작 설정을 분리한다. 설정은 계정 컨셉·사진 스타일·
+  캡션 스타일·제작 제한이며 채팅에서는 사용하지 않는다. 소재 허용 목록이나 고정 비율은 만들지 않는다.
+- backend 정본 `character_content_profiles`는 character_id PK/FK인 추가형 테이블이다.
+  migration은 `20260927073129_character_content_profiles`이고 admin schema는 정본 미러다.
+- `src/domain/character-content-profiles/`의 CharacterContentProfileService가 Repository의
+  유일한 호출자다. CharactersController는 CharacterService의 캐릭터 확인/트랜잭션과
+  CharacterActionLogService를 조합해 GET/PUT `/api/admin/v1/characters/:id/content-profile`을 제공한다.
+  worker는 HTTP 모듈 대신 CharacterContentProfilesModule을 통해 이 Service를 사용한다.
+- `PostPipelineV3Runner`는 기획에 accountConcept/constraints, 이미지 기획에 추가 imageStyle,
+  캡션에 추가 captionStyle을 전달한다. 각 단계 실행 시 조회한 값은 해당 artifact 입력에 저장된다.
+  키워드 검색이나 기존 페르소나에서의 fallback은 없다. 빈 설정은 빈 지침이며 페르소나 보충이 아니다.
+- `projectPostPersonaContext`는 기존 content_style/content_guidance/capture_style 원문을
+  게시 입력에서 제외한다. 작업 키워드 추가 방식과 alias 충돌 검사도 제거했다.
+  채팅 reader는 새 테이블을 조회하지 않는다. **기존 DB 페르소나를 자동으로 옮기거나 비활성화하지
+  않으므로 실제 전환 시 제작 전용 문장의 이전 및 기존 주입 정책 정리가 별도로 필요하다.**
+- 관리 UI는 `CharacterContentProfilePanel.tsx`, 기존 CharacterManagerPage의 게시물 제작 탭이다.
+  일반 페르소나 작성 프리셋에서 content_style/capture_style을 제거하고 새 탭을 안내한다.
+  사용자 지정 제목 편집과 기존 데이터는 보존한다.
+- 프롬프트는 post-planner-v5 / image-planner-v6 / caption-writer-v2.
+  출력 구조와 이전 artifact 읽기 호환성을 유지하고 새 기획 conflict 출처를 parser에 추가했다.
+- 검증 위치: `test/character-content-profile.e2e-spec.ts`(인증·저장·격리·초기화·FK·기존 persona 보존),
+  `src/worker/post-pipeline-v3.runner.spec.ts`(단계별 실제 LLM 입력),
+  `CharacterContentProfilePanel.test.tsx`(저장 실패 후 입력 보존), agent의
+  `postgres-persona-store.test.ts`(실제 DB→채팅 입력 분리, TEST_DATABASE_URL 필요).
+- 실제 캐릭터 이전 검토 및 배포 전 주의사항은 `docs/post-production-settings-design-2026-09-27.md`.

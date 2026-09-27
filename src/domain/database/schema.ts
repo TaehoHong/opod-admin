@@ -717,6 +717,30 @@ export const characterPersonaCanonLinks = opod.table(
   ],
 );
 
+export const characterContentProfiles = opod.table(
+  "character_content_profiles",
+  {
+    characterId: uuid("character_id")
+      .primaryKey()
+      .references(() => characters.id, {
+        name: "character_content_profiles_character_id_fkey",
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    accountConcept: text("account_concept").default("").notNull(),
+    imageStyle: text("image_style").default("").notNull(),
+    captionStyle: text("caption_style").default("").notNull(),
+    constraints: text("constraints").default("").notNull(),
+    createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp("updated_at", { precision: 6, withTimezone: true })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull()
+      .$onUpdateFn(() => new Date()),
+  },
+);
+
 export const characterPostingPolicies = opod.table(
   "character_posting_policies",
   {
