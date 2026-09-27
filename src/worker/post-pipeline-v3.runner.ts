@@ -441,16 +441,24 @@ export class PostPipelineV3Runner {
     }
     const revision = artifactRevision(concept.imagePlanning) + 1;
     const hash = canonicalJsonHash(result.output);
+    const selectedLocationId = result.output.locationId;
+    const locationExclusions = availableLocations
+      .filter((location) => location.id === selectedLocationId)
+      .map((location) => location.negativePrompt.trim())
+      .filter(Boolean);
     const nextConcept = {
       ...concept,
-      imagePlanning: imageArtifact(
-        revision,
-        hash,
-        result.producerLogId,
-        concept,
-        input,
-        result.output,
-      ),
+      imagePlanning: {
+        ...imageArtifact(
+          revision,
+          hash,
+          result.producerLogId,
+          concept,
+          input,
+          result.output,
+        ),
+        locationExclusions,
+      },
       pipeline: {
         ...concept.pipeline,
         stage: "image_prompt",
@@ -497,13 +505,28 @@ export class PostPipelineV3Runner {
       return;
     }
     let promptPackage;
+    // 신규 기획은 선택 장소의 제외 조건을 보존한다. 이 정보가 없는 옛
+    // 기획은 실행 단계의 기존 제외 조건 처리를 유지한다.
+    const storedLocationExclusions = isRecord(concept.imagePlanning)
+      ? concept.imagePlanning.locationExclusions
+      : undefined;
+    const locationExclusions =
+      imagePlan.locationId === null
+        ? []
+        : Array.isArray(storedLocationExclusions) &&
+            storedLocationExclusions.every((value) => typeof value === "string")
+          ? (storedLocationExclusions as string[])
+          : undefined;
     try {
       promptPackage = buildPromptPackage({
         targetModelId,
         imagePlan,
         appearance: draft.character.visualProfile?.appearancePrompt ?? "",
         visualStyle: draft.character.visualProfile?.stylePrompt,
-        exclusions: [draft.character.visualProfile?.negativePrompt ?? ""],
+        exclusions: [
+          draft.character.visualProfile?.negativePrompt ?? "",
+          ...(locationExclusions ?? []),
+        ],
       });
     } catch (error) {
       if (error instanceof UnsupportedImagePlanError) {
@@ -609,6 +632,7 @@ export class PostPipelineV3Runner {
                 slot: slot.slot,
               })),
               negativePrompt: shot.negativePrompt,
+              exclusionsResolved: locationExclusions !== undefined,
             },
           } as JsonValue,
         };

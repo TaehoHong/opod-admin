@@ -171,6 +171,149 @@ function readyPostPlan() {
 }
 
 describe("PostPipelineV3Runner", () => {
+  it("carries the selected location exclusions into prompt generation before resolving them", async () => {
+    const current = captionStageDraft();
+    const plan = {
+      status: "ready",
+      locationId: "cafe-1",
+      continuity: { lockedElements: [] },
+      shots: [
+        {
+          sortOrder: 0,
+          visualPurpose: "커피 기록",
+          scene: "탁자 위의 컵",
+          captureSetup: "위에서 내려다본다",
+          characterPresentation: {
+            mode: "none",
+            visibleParts: [],
+            faceVisible: false,
+            identityPreservationRequired: false,
+          },
+          subjectState: "",
+          motionEvidence: "",
+          notInFrame: [],
+          subjectCameraRelation: "not_applicable",
+          referenceBindings: [],
+        },
+      ],
+    };
+    const planning = setup(
+      {
+        ...current,
+        conceptJson: {
+          ...current.conceptJson,
+          pipeline: { stage: "image_plan", state: "running", imageCount: 1 },
+        },
+      },
+      plan,
+    );
+    planning.repository.findAvailableLocations.mockResolvedValue([
+      {
+        id: "cafe-1",
+        displayName: "카페",
+        description: "카페",
+        negativePrompt: "neon signs",
+        references: [],
+      },
+      {
+        id: "other",
+        displayName: "다른 장소",
+        description: "다른 장소",
+        negativePrompt: "flowers",
+        references: [],
+      },
+    ]);
+    await planning.runner.runCurrentStage("draft-1");
+    expect(planning.repository.requeueOrFailV3).not.toHaveBeenCalled();
+    const concept =
+      planning.repository.persistV3Artifact.mock.calls[0][0].conceptJson;
+    expect(concept.imagePlanning.locationExclusions).toEqual(["neon signs"]);
+
+    const prompting = setup({
+      ...current,
+      conceptJson: {
+        ...concept,
+        pipeline: { ...concept.pipeline, state: "running" },
+      },
+    });
+    prompting.fetchMock.mockResolvedValue(
+      Response.json({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                shots: [
+                  {
+                    sortOrder: 0,
+                    prompt:
+                      "An unbranded cup on a table, viewed from above. No neon signs.",
+                    negativePrompt: null,
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    );
+    await prompting.runner.runCurrentStage("draft-1");
+    expect(prompting.repository.requeueOrFailV3).not.toHaveBeenCalled();
+    const body = JSON.parse(
+      prompting.fetchMock.mock.calls[0][1].body as string,
+    );
+    expect(
+      JSON.parse(body.messages[1].content).subjectContract.exclusions,
+    ).toEqual(["logos", "neon signs"]);
+    const saved = prompting.repository.persistV3PromptJobs.mock.calls[0][0];
+    expect(saved.jobs[0].paramsJson._v3).toMatchObject({
+      exclusionsResolved: true,
+      negativePrompt: null,
+    });
+  });
+
+  it.each([null, "legacy-location"])(
+    "preserves exclusion handling for older image plans at %s",
+    async (locationId) => {
+      const current = captionStageDraft();
+      const concept = current.conceptJson as {
+        pipeline: Record<string, unknown>;
+        imagePlanning: { output: { locationId: string | null } };
+      };
+      concept.pipeline = {
+        stage: "image_prompt",
+        state: "running",
+        imageCount: 1,
+      };
+      concept.imagePlanning.output.locationId = locationId;
+      const { runner, repository, fetchMock } = setup(current);
+      fetchMock.mockResolvedValue(
+        Response.json({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  shots: [
+                    {
+                      sortOrder: 0,
+                      prompt: "A person reflected in a mirror.",
+                      negativePrompt: null,
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+      );
+      await runner.runCurrentStage("draft-1");
+      expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+      expect(
+        repository.persistV3PromptJobs.mock.calls[0][0].jobs[0].paramsJson._v3
+          .exclusionsResolved,
+      ).toBe(locationId === null);
+    },
+  );
+
   it("does not fall back to legacy editorial personas when no content profile is configured", async () => {
     const current = draft({
       pipelineVersion: "post-pipeline-v4",

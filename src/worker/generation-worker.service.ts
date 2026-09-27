@@ -617,8 +617,11 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       prompt: job.prompt,
       negativePrompt:
         [
-          profile?.negativePrompt,
-          job.draft?.location?.negativePrompt,
+          // 새 프롬프트는 캐릭터·장소의 제외 조건을 이미 정리했다.
+          // 원문을 다시 붙이면 중복되거나 기획한 장면과 충돌할 수 있다.
+          ...(v3?.exclusionsResolved === true
+            ? []
+            : [profile?.negativePrompt, job.draft?.location?.negativePrompt]),
           v3 && typeof v3.negativePrompt === "string"
             ? v3.negativePrompt
             : undefined,

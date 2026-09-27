@@ -6,7 +6,10 @@ import {
   LLM_LOG_TYPE,
   LlmLogContext,
 } from "../domain/llm-logs/llm-log.service";
-import { PromptBuildPackage } from "./image-model-policy";
+import {
+  buildPromptGenerationInput,
+  PromptBuildPackage,
+} from "./image-model-policy";
 import { StrictJsonAgentClient } from "./strict-json-agent";
 import { isRecord } from "./value-utils";
 
@@ -25,7 +28,7 @@ export class ImagePromptGenerationAgent {
       schemaName: "opod_prompt_set_v1",
       schema: PROMPT_SET_JSON_SCHEMA as unknown as Record<string, unknown>,
       systemPrompt: `${IMAGE_PROMPT_GENERATOR_SYSTEM_PROMPT}\n\nActive model policy\n${input.modelPolicy.instructions}`,
-      input,
+      input: buildPromptGenerationInput(input),
       context,
     });
     return {
