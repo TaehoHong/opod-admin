@@ -150,6 +150,7 @@ function captionStageDraft() {
 function readyPostPlan() {
   return {
     status: "ready",
+    accountFit: "사소한 일상을 구체적으로 공유하는 계정 방향을 유지한다.",
     intent: {
       premise: "카페에 먼저 도착했다.",
       primaryPurpose: "일찍 온 민망함을 기록한다.",
@@ -160,6 +161,89 @@ function readyPostPlan() {
 }
 
 describe("PostPipelineV3Runner", () => {
+  it.each([
+    [1, "content_style"],
+    [2, "content_style"],
+    [1, "content_guidance"],
+    [2, "content_guidance"],
+  ])(
+    "preserves v%s %s as account direction without promoting examples or private text",
+    async (schemaVersion, title) => {
+      const current = draft({
+        pipelineVersion: "post-pipeline-v4",
+        pipeline: { stage: "post_plan", state: "running" },
+      });
+      const direction = "러닝 기록과 훈련 전후 일상을 중심으로 게시한다.";
+      const fragments = [
+        {
+          id: "direction",
+          kind: "identity",
+          injection: "always",
+          content: direction,
+        },
+        {
+          id: "example",
+          kind: "example",
+          injection: "always",
+          content: "매일 카페에 가는 예시.",
+        },
+        {
+          id: "private",
+          kind: "creator_note",
+          injection: "never_prompt",
+          content: "비공개 운영 메모.",
+        },
+        {
+          id: "unrelated",
+          kind: "judgment",
+          injection: "retrieved",
+          content: "등산 소재 지침.",
+        },
+      ].map((fragment) => ({
+        ...fragment,
+        recallKeys: ["등산"],
+        canonIds: [],
+      }));
+      current.character.personas = [
+        {
+          id: "direction-source",
+          schemaVersion,
+          title,
+          content: fragments.map((fragment) => fragment.content).join(""),
+          fragments,
+        },
+        { title: "voice", content: "짧은 반말" },
+      ] as typeof current.character.personas;
+      const output = {
+        ...readyPostPlan(),
+        accountFit:
+          "최근 러닝 기록 사이의 가벼운 카페 일상으로 계정의 중심을 바꾸지 않는다.",
+      };
+      const { runner, repository, fetchMock } = setup(current, output);
+      await runner.runCurrentStage("draft-1");
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      const input = JSON.parse(body.messages[1].content);
+      expect(input.contentDirection).toEqual([
+        expect.objectContaining({
+          content: direction,
+          sourceId: "direction-source",
+          fragmentId: "direction",
+          sourceTitle: title,
+          kind: "identity",
+        }),
+      ]);
+      expect(body.messages[1].content).not.toContain("비공개 운영 메모");
+      expect(body.messages[1].content).not.toContain("등산 소재 지침");
+      expect(repository.persistV3Artifact).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conceptJson: expect.objectContaining({
+            postPlanning: expect.objectContaining({ output }),
+          }),
+        }),
+      );
+    },
+  );
+
   it("plans from v2 roles without legacy titles and excludes private source text", async () => {
     const current = draft({
       pipelineVersion: "post-pipeline-v4",
@@ -613,15 +697,7 @@ describe("PostPipelineV3Runner", () => {
       },
     });
     // post-planner-v2: 캡션 없음 — 캡션은 ⑥ 캡션 단계 소유.
-    const { runner, repository } = setup(current, {
-      status: "ready",
-      intent: {
-        premise: "카페에 먼저 도착했다.",
-        primaryPurpose: "일찍 온 민망함을 기록한다.",
-        secondaryPurpose: null,
-      },
-      newMemoryCandidates: [],
-    });
+    const { runner, repository } = setup(current, readyPostPlan());
 
     await runner.runCurrentStage("draft-1");
 

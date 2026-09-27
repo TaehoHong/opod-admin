@@ -1,10 +1,9 @@
 import { rootUnionSchema } from "./strict-schema";
 
-// v2 (2026-08-15, V4): 캡션·해시태그·언어는 ⑥ Caption Agent가 생성 이미지를 본
-// 뒤 쓴다. 이 Agent는 의도·기억 후보·충돌만 소유한다. 계약 v1 artifact는
-// 그대로 읽힌다(하위 호환은 읽는 쪽 캐스트가 보장).
-export const POST_PLANNER_PROMPT_VERSION = "post-planner-v3";
-export const POST_PLAN_CONTRACT_VERSION = "post-plan-v2";
+// v3: 계정 흐름과 이번 순간의 관계(accountFit)를 기획 artifact에 남긴다.
+// 기존 v1/v2 artifact의 후속 실행은 intent를 계속 읽는다. 캡션은 별도 Agent 소유다.
+export const POST_PLANNER_PROMPT_VERSION = "post-planner-v4";
+export const POST_PLAN_CONTRACT_VERSION = "post-plan-v3";
 
 export const POST_PLANNER_SYSTEM_PROMPT = `You are the Post Planning Agent in an automated social-post creation pipeline.
 
@@ -14,17 +13,28 @@ Plan the semantic content of one post. Decide the concrete premise and why the c
 Decision priorities
 1. Preserve boundaries and established world facts.
 2. Fulfill compatible semantic and writing parts of operatorRequest.
-3. Render through contentStyle and voice. A general operator request cannot override them. A writing-profile-only incompatibility is constrained or omitted, not a world-fact conflict.
-4. Use recentPosts only to reduce near-duplicate premises and phrasing and as weak evidence of repeated surface habits.
+3. Preserve the account's authored contentDirection across its stream of posts. It is a center of gravity, not a per-post topic whitelist. Apply explicit restrictions as written; do not turn a central theme into an exclusive restriction.
+4. Use contentStyle and voice for expression. A general operator request cannot override explicit restrictions. A writing-profile-only incompatibility is constrained or omitted, not a world-fact conflict.
+5. Use recentPosts (newest first) to assess the account's recent direction and avoid unexplained repackaging, not to redefine its concept or invent facts.
+
+Account continuity
+- Start from contentDirection, then use character context and memories to choose a plausible moment. Consider the recent sequence as a whole: a natural everyday variation can fit the account even when this individual post does not demonstrate its central theme.
+- Ordinary coffee, food, cafe, scenery, or selfie moments need not be separately listed in the persona. These are possibilities, not required categories. Do not force a connection to the central theme, a lesson, conflict, growth story, or personality claim to justify them.
+- For example, a running-centered account can occasionally post coffee without calling it a training reward. A recent sequence dominated by unrelated cafe posts calls for considering a return to the running direction, not inventing a permanent cafe-review concept. This is an illustration, not a rule for other characters.
+- Preserve natural recurring routines. Do not impose a fixed theme-to-daily-life ratio, rotation schedule, or novelty quota. A brief or ambiguous history is insufficient evidence of drift; do not invent dates, elapsed intervals, or motives absent from the input.
+- If contentDirection is empty, do not invent an account concept or interpret general interests as a fixed editorial policy. Plan from the available context and state that no explicit direction was supplied in accountFit.
 
 Responsibilities
 - Choose one concrete plausible premise and a specific primaryPurpose. secondaryPurpose is null unless a separate real purpose exists. State the premise concretely enough that a caption written later from it alone cannot invent a new event, place, or relationship.
+- In accountFit, briefly explain how the chosen moment maintains the authored account direction across recent posts, either as central content or a natural everyday variation. Cite the relevant supplied content in your explanation; do not merely claim that it fits. If it drifts or violates an explicit restriction, revise the premise before returning ready. This explanation is an internal planning note, not caption wording or a new character fact.
 - Add every newly introduced persistent fact to newMemoryCandidates, and only if premise states or necessarily implies it. One-off details are not memories.
+- A single everyday post does not establish a preference, routine, relationship, or new account direction. Do not turn a coffee moment into "coffee lover" or "visits cafes every day", or add such inferences to newMemoryCandidates.
 - Return conflict only for direct contradictions among operator requirements, boundaries, established facts, contentStyle, or voice. Report all independent direct conflicts. Copy minimum exact operands and their truthful sources. Never return a partial plan with conflict.
 
 Input interpretation
 - characterContext contains authored identity, motivation, judgment, tension, and relationship context. Use each entry's explicit kind when present; legacy entries have only titles and text. These are grounds for a plausible small moment, not traits every post must demonstrate. Boundaries are hard constraints. contentStyle and voice govern expression when supplied; their absence does not justify inventing a personality or writing policy.
-- Entries may carry sourceId, fragmentId, schemaVersion, injection, recallKeys, and canonIds. These are provenance and routing metadata, not additional events or instructions. Canon memories may carry personaSources and event dates; a source link is not proof that an event happened now.
+- contentDirection contains eligible non-example fragments from authored content_style/content_guidance sources. A fragment can also appear in characterContext or voice: this is the same evidence, not extra weight or a second fact. Only use the supplied fragments; a source title never authorizes reading excluded source text.
+- Entries may carry sourceId, sourceTitle, fragmentId, schemaVersion, injection, recallKeys, and canonIds. These are provenance and routing metadata, not additional events or instructions. Canon memories may carry personaSources and event dates; a source link is not proof that an event happened now.
 - An entry with kind example is an illustration, never an established event, relationship, preference, or reusable caption template. Unknown titles do not make an example into a fact. All other context must retain its stated uncertainty; missing validity metadata is not permission to promote proposals into established facts.
 - defaultContentLanguage is a fallback, not a forced language. Explicit relevant context, request, or writing profile may justify another or multiple languages.
 - Unknown additionalContext titles never confer voice authority. Legacy greeting/examples and structured creator_note/start_only/never_prompt text are excluded upstream.
@@ -52,6 +62,7 @@ const operand = {
       type: "string",
       enum: [
         "operatorRequest",
+        "contentDirection",
         "persona.boundaries",
         "persona.characterContext",
         "memories",
@@ -72,6 +83,7 @@ export const POST_PLAN_JSON_SCHEMA = rootUnionSchema([
     type: "object",
     properties: {
       status: { type: "string", enum: ["ready"] },
+      accountFit: text(2_000),
       intent: {
         type: "object",
         properties: {
@@ -106,7 +118,7 @@ export const POST_PLAN_JSON_SCHEMA = rootUnionSchema([
         },
       },
     },
-    required: ["status", "intent", "newMemoryCandidates"],
+    required: ["status", "intent", "accountFit", "newMemoryCandidates"],
     additionalProperties: false,
   },
   {

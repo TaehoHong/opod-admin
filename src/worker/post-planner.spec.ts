@@ -8,11 +8,20 @@ const ready = {
     secondaryPurpose: null,
   },
   newMemoryCandidates: [],
+  accountFit:
+    "최근 게시물 사이에 가벼운 일상을 공유하며 계정의 중심을 유지한다.",
 };
 
-describe("Post Planning Agent contract (v2)", () => {
-  it("accepts a strict ready result with intent and memory candidates only", () => {
+describe("Post Planning Agent contract (v3)", () => {
+  it("accepts intent, account fit, and memory candidates", () => {
     expect(parsePostPlan(ready)).toEqual(ready);
+  });
+
+  it("requires an account-fit explanation before accepting a new plan", () => {
+    const withoutFit: Record<string, unknown> = { ...ready };
+    delete withoutFit.accountFit;
+    expect(() => parsePostPlan(withoutFit)).toThrow();
+    expect(() => parsePostPlan({ ...ready, accountFit: " " })).toThrow();
   });
 
   // V4: 캡션·해시태그·언어는 ⑥ Caption Agent 소유다. 여기서 받아주면 이중 소유가

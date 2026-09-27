@@ -789,6 +789,16 @@ function postPlannerInput(
 ): PostPlannerInput {
   return {
     ...personaInput(draft, true),
+    // Source purpose and fragment kind are independent: a v2 identity/voice
+    // fragment can still belong to the account's authored content direction.
+    contentDirection: draft.character.personas.filter(
+      (entry) =>
+        entry.content.trim() &&
+        entry.kind !== "example" &&
+        ["content_style", "content_guidance"].includes(
+          normalizeTitle(entry.sourceTitle ?? entry.title),
+        ),
+    ),
     ...(operatorRequest(concept)
       ? { operatorRequest: operatorRequest(concept) }
       : {}),
@@ -800,7 +810,7 @@ function postPlannerInput(
 function personaInput(
   draft: PlannedDraft,
   includeExamples = false,
-): Omit<PostPlannerInput, "operatorRequest"> {
+): Omit<PostPlannerInput, "operatorRequest" | "contentDirection"> {
   const personas = draft.character.personas.filter(
     (entry) =>
       entry.content.trim() && (includeExamples || entry.kind !== "example"),

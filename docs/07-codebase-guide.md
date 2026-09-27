@@ -290,6 +290,30 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   환경에서 실행했다. 전체 단위 테스트 첫 실행의 관리자 UUID 필터 테스트 400→404 실패는
   해당 묶음 35개와 전체 재실행에서 수정 없이 통과했으며 원인은 미확정이다.
 
+## Post account direction — 2026-09-27
+
+- 사용자 확정 원칙: 게시물 컨셉은 계정 전체의 중심 방향이며 소재 허용 목록이 아니다.
+  개별 일상 게시물을 페르소나에 일일이 등록하거나 중심 주제에 억지로 연결하지 않는다.
+  최근 게시물 흐름과 함께 판단하되 고정 비율·주제 순환을 강제하지 않는다.
+- `projectPostPersonaContext`가 구조화 조각의 `sourceTitle`을 보존한다. v2의 역할은
+  계속 kind로 판별하며, 원문 복구나 주입 정책 우회는 하지 않는다.
+- 기존 입력 조립 owner인 `PostPipelineV3Runner.postPlannerInput`이 선별된
+  `content_style`/`content_guidance` 출처를 `contentDirection`으로 전달한다.
+  example은 제외하고, 비공개·시작 전용·조회 조건 불일치 조각은 기존 projection이 제외한다.
+  별도 DB 필드나 조회, 계정 컨셉 추론, 추가 LLM 호출은 없다.
+- `post-planner-v4`/`post-plan-v3`가 이번 순간과 최근 계정 흐름의 관계를 설명하는
+  `accountFit`을 새 출력에 요구한다. 설명은 artifact에 저장되며 캡션이나 Canon으로 전달하지 않는다.
+  내용의 적합성 판단은 모델 지시이고 parser는 설명의 형식·길이만 검증한다.
+  기존 v1/v2 artifact의 후속 이미지·캡션 실행은 기존 intent를 계속 읽는다.
+- v1 입력 필수조건과 v2 최소 문맥 조건은 유지한다. v2에 명시적 컨셉이 없으면
+  임의의 컨셉을 만들지 않고 그 부재를 accountFit에 기록하도록 지시한다.
+- 회귀 owner: `src/worker/post-pipeline-v3.runner.spec.ts`의 v1/v2·두 제목별 전달과
+  제외 조각·artifact 저장 테스트, `src/worker/post-planner.spec.ts`의 새 설명 필수 계약.
+  실제 모델의 일상 허용·컨셉 유지 품질은 별도 평가가 필요하다.
+- 검증: 관련 3 suites/30 tests, 전체 50 suites/469 tests, lint와 build 통과.
+  전체 테스트는 샌드박스의 HTTP listen 제한으로 한 번 실패한 뒤 포트 사용이 가능한
+  환경에서 동일 명령으로 통과했다. DB 접근·스키마·외부 API 변경은 없다.
+
 ## Authored character context — 2026-09-08 verified boundary
 
 ### 2026-09-16 persona schema v2 검증

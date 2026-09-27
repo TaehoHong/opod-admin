@@ -2,6 +2,7 @@ export type PostPersonaEntry = {
   title: string;
   content: string;
   sourceId?: string;
+  sourceTitle?: string;
   fragmentId?: string;
   schemaVersion?: number;
   kind?: string;
@@ -83,6 +84,7 @@ export function projectPostPersonaContext(input: {
         title: version === 2 ? fragment.kind : source.title,
         content: fragment.content,
         sourceId: source.id,
+        sourceTitle: source.title,
         fragmentId: fragment.id,
         schemaVersion: version,
         kind: fragment.kind,

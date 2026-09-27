@@ -12,6 +12,7 @@ import type { PostMemoryEntry, PostPersonaEntry } from "./post-persona-context";
 
 const SOURCES = new Set([
   "operatorRequest",
+  "contentDirection",
   "persona.boundaries",
   "persona.characterContext",
   "memories",
@@ -29,6 +30,7 @@ const MEMORY_TYPES = new Set([
 
 export type PersonaEntry = PostPersonaEntry;
 export type PostPlannerInput = {
+  contentDirection: PersonaEntry[];
   character: {
     name: string;
     bio: string;
@@ -52,6 +54,7 @@ export type PostPlannerInput = {
 
 export type PostPlanReady = {
   status: "ready";
+  accountFit: string;
   intent: {
     premise: string;
     primaryPurpose: string;
@@ -78,7 +81,7 @@ export class PostPlanningAgent {
   ): Promise<{ output: PostPlan; producerLogId: string | null }> {
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.postPlanV3,
-      schemaName: "opod_post_plan_v2",
+      schemaName: "opod_post_plan_v3",
       schema: POST_PLAN_JSON_SCHEMA as unknown as Record<string, unknown>,
       systemPrompt: POST_PLANNER_SYSTEM_PROMPT,
       input,
@@ -127,7 +130,7 @@ export function parsePostPlan(value: unknown): PostPlan {
   }
   exactKeys(
     value,
-    ["status", "intent", "newMemoryCandidates"],
+    ["status", "intent", "accountFit", "newMemoryCandidates"],
     "post plan ready",
   );
   if (!isRecord(value.intent)) throw new Error("post plan intent is invalid");
@@ -169,6 +172,7 @@ export function parsePostPlan(value: unknown): PostPlan {
   );
   return {
     status: "ready",
+    accountFit: requiredText(value.accountFit, 2_000, "accountFit"),
     intent: {
       premise: requiredText(value.intent.premise, 2_000, "premise"),
       primaryPurpose: requiredText(
