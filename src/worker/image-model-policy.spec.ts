@@ -120,7 +120,7 @@ describe("image model policy", () => {
         slot: "Image 1",
       }),
     ]);
-    expect(result.modelPolicy.version).toBe("nano-banana-policy-v4");
+    expect(result.modelPolicy.version).toBe("nano-banana-policy-v5");
   });
 
   it("rejects unknown exact model IDs before an Agent call", () => {
@@ -188,7 +188,7 @@ describe("image model policy", () => {
       }),
     ]);
     expect(result.modelPolicy).toMatchObject({
-      version: "flux-kontext-policy-v3",
+      version: "flux-kontext-policy-v4",
       usesNegativePrompt: false,
     });
   });
