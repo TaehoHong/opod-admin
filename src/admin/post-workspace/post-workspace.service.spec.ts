@@ -256,6 +256,99 @@ describe("PostWorkspaceService", () => {
     });
   });
 
+  it("exposes each stage's saved input and guidance without borrowing from another stage", async () => {
+    const postInput = {
+      contentProfile: { accountConcept: "기획 당시 컨셉", constraints: "" },
+      persona: { characterContext: [{ title: "identity", content: "사진가" }] },
+      memories: [],
+      recentPosts: [],
+    };
+    const imageInput = {
+      contentProfile: {
+        accountConcept: "이미지 당시 컨셉",
+        imageStyle: "필름",
+        constraints: "로고 금지",
+      },
+      characterVisualContext: { appearance: "검은 머리" },
+    };
+    const promptInput = { subjectContract: { visualStyle: "필름" } };
+    const captionInput = {
+      contentProfile: { accountConcept: "", captionStyle: "", constraints: "" },
+      persona: {
+        writingProfile: { voice: [{ title: "voice", content: "반말" }] },
+      },
+      memories: [],
+      recentPosts: [],
+    };
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v4",
+        pipeline: { stage: "publish", state: "pending" },
+        postPlanning: { revision: 1, input: postInput, output: {} },
+        imagePlanning: { revision: 1, input: imageInput, output: {} },
+        promptBuild: { revision: 1, input: promptInput, output: {} },
+        captionBuild: { revision: 1, input: captionInput, output: {} },
+      },
+    } as never);
+
+    const artifacts = (await service.get("draft-1")).pipelineV3!.artifacts;
+    for (const [artifact, input] of [
+      [artifacts.postPlan, postInput],
+      [artifacts.imagePlan, imageInput],
+      [artifacts.promptBuild, promptInput],
+      [artifacts.captionBuild, captionInput],
+    ] as const) {
+      expect(artifact?.agentInput?.snapshot).toEqual(input);
+    }
+    expect(artifacts.imagePlan?.agentInput?.contentProfile).toEqual(
+      imageInput.contentProfile,
+    );
+    expect(artifacts.captionBuild?.agentInput?.contentProfile).toEqual(
+      captionInput.contentProfile,
+    );
+    expect(artifacts.captionBuild?.agentInput?.context?.persona).toEqual([
+      { group: "voice", title: "voice", content: "반말" },
+    ]);
+    expect(artifacts.promptBuild?.agentInput?.contentProfile).toBeUndefined();
+  });
+
+  it("does not invent an input snapshot for an older artifact without a saved input", async () => {
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v4",
+        pipeline: { stage: "image_plan", state: "pending" },
+        postPlanning: { revision: 1, output: {} },
+      },
+    } as never);
+    expect(
+      (await service.get("draft-1")).pipelineV3?.artifacts.postPlan?.agentInput,
+    ).toBeUndefined();
+  });
+
+  it("keeps full stage inputs out of the operations list", async () => {
+    repository.findDrafts.mockResolvedValue([
+      {
+        ...draft,
+        conceptJson: {
+          pipelineVersion: "post-pipeline-v4",
+          pipeline: { stage: "image_plan", state: "pending" },
+          postPlanning: {
+            revision: 1,
+            input: { contentProfile: { accountConcept: "계정 컨셉" } },
+            output: {},
+          },
+        },
+      },
+    ] as never);
+    repository.findStandalonePosts.mockResolvedValue([]);
+    const result = await service.list({ limit: 20 });
+    expect(
+      result.items[0].pipelineV3?.artifacts.postPlan?.agentInput,
+    ).toBeUndefined();
+  });
+
   // 어느 프롬프트 버전이 산출물을 만들었는지는 프롬프트 실험 관측의 1차
   // 증거다. PromptSet은 같은 정보를 다른 키(commonPromptVersion)로 기록하므로
   // 그 키를 놓치면 ④에서만 조용히 사라진다.
@@ -376,6 +469,7 @@ describe("PostWorkspaceService", () => {
       hashtags: ["필라테스"],
       captionLanguages: ["ko"],
       operatorNote: "이모지 빼고",
+      agentInput: { snapshot: { operatorNote: "이모지 빼고" } },
       stale: true,
       matchesColumn: false,
     });

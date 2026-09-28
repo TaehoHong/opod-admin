@@ -516,7 +516,7 @@ describe("post work stage screens", () => {
 
   it("shows the planning input snapshot the agent actually received", async () => {
     renderStage(
-      "brief",
+      "post_plan",
       { pipelineVersion: "post-pipeline-v3", source: "manual", mode: "manual" },
       {
         item: {
@@ -526,6 +526,13 @@ describe("post work stage screens", () => {
             artifacts: {
               postPlan: {
                 ...v3Item.pipelineV3.artifacts.postPlan,
+                agentInput: {
+                  contentProfile: {
+                    accountConcept: "실행 당시 계정 컨셉",
+                    constraints: "협찬 표현 금지",
+                  },
+                  snapshot: { operatorRequest: "이번 게시글 요청" },
+                },
                 planningInput: {
                   persona: [
                     {
@@ -555,6 +562,141 @@ describe("post work stage screens", () => {
     expect(
       screen.getByText("짧게 끊어 쓰고 이모지를 쓰지 않는다"),
     ).toBeInTheDocument();
+    expect(screen.getByText("실행 당시 계정 컨셉")).toBeInTheDocument();
+    expect(screen.getByText("협찬 표현 금지")).toBeInTheDocument();
+    expect(screen.getByText("제작 지침 전달됨")).toBeInTheDocument();
+  });
+
+  it("keeps the post planning agent input out of the brief", async () => {
+    renderStage(
+      "brief",
+      { pipelineVersion: "post-pipeline-v4" },
+      {
+        item: {
+          ...v3Item,
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            artifacts: {
+              postPlan: {
+                ...v3Item.pipelineV3.artifacts.postPlan,
+                planningInput: { persona: [], memories: [], recentPosts: [] },
+              },
+            },
+          },
+        },
+      },
+    );
+    await screen.findByRole("heading", { name: "① 브리프" });
+    expect(screen.queryByText("Agent가 본 입력")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["image_plan", "imagePlan", "imageStyle", "실행 당시 사진 스타일"],
+    ["caption", "captionBuild", "captionStyle", "실행 당시 캡션 스타일"],
+  ])(
+    "shows %s's own saved production guidance",
+    async (stage, key, field, value) => {
+      renderStage(
+        stage,
+        { pipelineVersion: "post-pipeline-v4" },
+        {
+          item: {
+            ...v3Item,
+            pipelineV3: {
+              ...v3Item.pipelineV3,
+              version: "post-pipeline-v4",
+              artifacts: {
+                postPlan: {
+                  ...v3Item.pipelineV3.artifacts.postPlan,
+                  agentInput: {
+                    contentProfile: { accountConcept: "이전 단계의 컨셉" },
+                    snapshot: {},
+                  },
+                },
+                [key]: {
+                  revision: 1,
+                  status: "ready",
+                  caption: "생성 캡션",
+                  hashtags: [],
+                  captionLanguages: [],
+                  agentInput: {
+                    contentProfile: {
+                      accountConcept: "이 단계의 컨셉",
+                      [field]: value,
+                      constraints: "",
+                    },
+                    snapshot: { operatorRequest: "이 단계의 요청" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      );
+      expect(await screen.findByText(value)).toBeInTheDocument();
+      expect(screen.getByText("이 단계의 컨셉")).toBeInTheDocument();
+      expect(screen.getByText("지정 없음")).toBeInTheDocument();
+      expect(screen.queryByText("이전 단계의 컨셉")).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    [{ accountConcept: "", constraints: "" }, "제작 지침 없이 실행"],
+    [undefined, "제작 지침 기록 없음"],
+  ])(
+    "distinguishes empty guidance from missing history",
+    async (contentProfile, label) => {
+      renderStage(
+        "post_plan",
+        { pipelineVersion: "post-pipeline-v4" },
+        {
+          item: {
+            ...v3Item,
+            pipelineV3: {
+              ...v3Item.pipelineV3,
+              artifacts: {
+                postPlan: {
+                  ...v3Item.pipelineV3.artifacts.postPlan,
+                  agentInput: { contentProfile, snapshot: {} },
+                },
+              },
+            },
+          },
+        },
+      );
+      expect(await screen.findByText(label)).toBeInTheDocument();
+    },
+  );
+
+  it("shows the prompt generation package on the prompt stage", async () => {
+    renderStage(
+      "prompt",
+      { pipelineVersion: "post-pipeline-v4" },
+      {
+        item: {
+          ...v3Item,
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            artifacts: {
+              promptBuild: {
+                revision: 1,
+                shotCount: 1,
+                agentInput: {
+                  snapshot: {
+                    subjectContract: { visualStyle: "저장된 사진 스타일" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+    await screen.findByText("프롬프트 생성 입력 패키지");
+    await userEvent.click(
+      screen.getByRole("button", { name: "저장된 전체 입력" }),
+    );
+    expect(screen.getByText(/저장된 사진 스타일/)).toBeInTheDocument();
   });
 
   it("shows how the planned subject relates to the camera", async () => {

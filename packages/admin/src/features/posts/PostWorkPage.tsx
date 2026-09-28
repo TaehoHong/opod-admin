@@ -1,4 +1,5 @@
 import {
+  Accordion,
   Alert,
   Badge,
   Button,
@@ -56,6 +57,7 @@ import {
   type PostWorkStage,
   type V3MemoryCandidate,
   type V3PlanningInput,
+  type V3AgentInput,
 } from "./api";
 import { PostOverviewPanel } from "./PostOverviewPanel";
 import styles from "./PostWorkPage.module.css";
@@ -447,7 +449,15 @@ function V3PostPlanStage({ item }: { item: PostWorkItem }) {
       lineage={artifact}
       status={artifact?.status}
     >
-      {artifact ? <PostPlanArtifact artifact={artifact} /> : null}
+      <AgentInputSnapshot
+        input={artifact?.agentInput}
+        contextFallback={artifact?.planningInput}
+      />
+      {artifact ? (
+        <PostPlanArtifact artifact={artifact} />
+      ) : (
+        <Alert color="gray">아직 이 단계의 산출물이 없습니다.</Alert>
+      )}
     </V3Stage>
   );
 }
@@ -465,12 +475,15 @@ function V3ImagePlanStage({ item }: { item: PostWorkItem }) {
       lineage={artifact}
       status={artifact?.status}
     >
+      <AgentInputSnapshot input={artifact?.agentInput} />
       {artifact ? (
         <ImagePlanArtifact
           artifact={artifact}
           imageCount={item.pipelineV3?.imageCount ?? null}
         />
-      ) : null}
+      ) : (
+        <Alert color="gray">아직 이 단계의 산출물이 없습니다.</Alert>
+      )}
     </V3Stage>
   );
 }
@@ -890,7 +903,12 @@ function V3PromptStage({ item }: { item: PostWorkItem }) {
       runLabel="이미지 프롬프트"
       lineage={artifact}
     >
-      {artifact ? <PromptSetArtifact artifact={artifact} /> : null}
+      <AgentInputSnapshot input={artifact?.agentInput} packageInput />
+      {artifact ? (
+        <PromptSetArtifact artifact={artifact} />
+      ) : (
+        <Alert color="gray">아직 이 단계의 산출물이 없습니다.</Alert>
+      )}
     </V3Stage>
   );
 }
@@ -1009,7 +1027,6 @@ function StagePaper({
 function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
   const concept = draft.conceptJson ?? {};
   const v3 = item.pipelineV3;
-  const planningInput = v3?.artifacts.postPlan?.planningInput;
   const nextStage = v3 ? "post_plan" : "plan";
   return (
     <StagePaper
@@ -1039,13 +1056,6 @@ function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
           ? "단계별 수동 진행"
           : "개입 전까지 자동 진행"}
       </Meta>
-      {planningInput ? <PlanningInputSnapshot input={planningInput} /> : null}
-      {v3 && !planningInput ? (
-        <Alert color="gray">
-          게시글 기획을 아직 실행하지 않아 Agent에게 넘긴 입력 스냅숏이
-          없습니다.
-        </Alert>
-      ) : null}
       <Group>
         <Button component={Link} to={`/posts/${item.id}/${nextStage}`}>
           {v3 ? "게시글 기획으로" : "기획으로"}
@@ -1119,79 +1129,160 @@ const PERSONA_GROUP_LABEL: Record<string, string> = {
   additionalContext: "추가 맥락",
 };
 
-// Agent가 실제로 본 입력. 기획 결과가 이상할 때 프롬프트를 의심하기 전에
-// 입력을 확인할 수 있어야 한다 — 이게 유일한 추적 경로다.
-function PlanningInputSnapshot({ input }: { input: V3PlanningInput }) {
+const CONTENT_PROFILE_LABEL = {
+  accountConcept: "계정 컨셉",
+  imageStyle: "사진 스타일",
+  captionStyle: "캡션 스타일",
+  constraints: "제작 제한",
+} as const;
+
+// 각 단계의 저장된 입력을 표시한다. 현재 설정이나 이전 단계로 대체하지 않는다.
+function AgentInputSnapshot({
+  input: agentInput,
+  contextFallback,
+  packageInput = false,
+}: {
+  input?: V3AgentInput;
+  contextFallback?: V3PlanningInput;
+  packageInput?: boolean;
+}) {
+  const input = agentInput?.context ?? contextFallback;
+  const profile = agentInput?.contentProfile;
+  const hasGuidance = Object.values(profile ?? {}).some((value) =>
+    value?.trim(),
+  );
   return (
     <Paper p="md" component="section">
       <Stack gap="xs">
         <Text fw={600} size="sm">
-          Agent가 본 입력
+          {packageInput ? "프롬프트 생성 입력 패키지" : "Agent가 본 입력"}
         </Text>
         <Text size="xs" c="dimmed">
-          페르소나 블록 {input.persona.length}개 · 메모리{" "}
-          {input.memories.length}건 · 최근 게시물 {input.recentPosts.length}건
+          실행 당시 저장된 입력입니다.
+          {packageInput
+            ? " 원본 패키지이며, LLM에는 필요한 시각 정보만 추려 전달합니다."
+            : " 제작 지침의 전달 여부와 내용을 확인할 수 있습니다."}
         </Text>
-        <Spoiler maxHeight={0} showLabel="입력 펼치기" hideLabel="접기">
-          <Stack gap="sm" mt="xs">
-            {input.persona.map((block, index) => (
-              <Stack key={`${block.group}:${block.title}:${index}`} gap={2}>
-                <Group gap={6} align="baseline">
-                  <Badge size="xs" variant="light">
-                    {PERSONA_GROUP_LABEL[block.group] ?? block.group}
-                  </Badge>
-                  <Text size="xs" fw={600}>
-                    {block.title}
-                  </Text>
-                </Group>
-                <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
-                  {block.content}
-                </Text>
-              </Stack>
-            ))}
-            {input.memories.length ? (
-              <Stack gap={2}>
-                <Text size="xs" fw={600}>
-                  메모리
-                </Text>
-                {input.memories.map((memory, index) => (
-                  <Group key={`${memory.type}:${index}`} gap={6} wrap="nowrap">
-                    <Badge size="xs" variant="light">
-                      {memory.type}
-                    </Badge>
-                    <Text size="xs" c="dimmed">
-                      {memory.content}
+        {!agentInput && !input ? (
+          <Alert color="gray">이 단계의 저장된 입력 기록이 없습니다.</Alert>
+        ) : null}
+        {!packageInput && (agentInput || input) ? (
+          <Stack gap="xs">
+            <Badge variant="light" color={hasGuidance ? "teal" : "gray"}>
+              {!profile
+                ? "제작 지침 기록 없음"
+                : hasGuidance
+                  ? "제작 지침 전달됨"
+                  : "제작 지침 없이 실행"}
+            </Badge>
+            {!profile ? (
+              <Text size="xs" c="dimmed">
+                저장된 제작 지침이 없어 전달 여부를 확인할 수 없습니다.
+              </Text>
+            ) : (
+              Object.entries(CONTENT_PROFILE_LABEL).map(([key, label]) => {
+                const value =
+                  profile[key as keyof typeof CONTENT_PROFILE_LABEL];
+                return value !== undefined ? (
+                  <Meta key={key} label={label}>
+                    <Text size="sm" className={styles.publishCaption}>
+                      {value.trim() ? value : "지정 없음"}
                     </Text>
-                  </Group>
-                ))}
-              </Stack>
-            ) : null}
-            {input.recentPosts.length ? (
-              <Stack gap={4}>
-                <Text size="xs" fw={600}>
-                  최근 게시물
-                </Text>
-                {input.recentPosts.map((post, index) => (
-                  <Stack key={index} gap={0}>
-                    {post.premise ? (
-                      <Text size="xs" c="dimmed">
-                        전제 · {post.premise}
+                  </Meta>
+                ) : null;
+              })
+            )}
+          </Stack>
+        ) : null}
+        {input ? (
+          <>
+            <Text size="xs" c="dimmed">
+              페르소나 블록 {input.persona.length}개 · 메모리{" "}
+              {input.memories.length}건 · 최근 게시물 {input.recentPosts.length}
+              건
+            </Text>
+            <Spoiler maxHeight={0} showLabel="입력 펼치기" hideLabel="접기">
+              <Stack gap="sm" mt="xs">
+                {input.persona.map((block, index) => (
+                  <Stack key={`${block.group}:${block.title}:${index}`} gap={2}>
+                    <Group gap={6} align="baseline">
+                      <Badge size="xs" variant="light">
+                        {PERSONA_GROUP_LABEL[block.group] ?? block.group}
+                      </Badge>
+                      <Text size="xs" fw={600}>
+                        {block.title}
                       </Text>
-                    ) : null}
-                    <Text size="xs" c="dimmed">
-                      {post.caption}
+                    </Group>
+                    <Text
+                      size="xs"
+                      c="dimmed"
+                      style={{ whiteSpace: "pre-wrap" }}
+                    >
+                      {block.content}
                     </Text>
-                    {post.hashtags.length ? (
-                      <Text size="xs" c="dimmed">
-                        {post.hashtags.map((tag) => `#${tag}`).join(" ")}
-                      </Text>
-                    ) : null}
                   </Stack>
                 ))}
+                {input.memories.length ? (
+                  <Stack gap={2}>
+                    <Text size="xs" fw={600}>
+                      메모리
+                    </Text>
+                    {input.memories.map((memory, index) => (
+                      <Group
+                        key={`${memory.type}:${index}`}
+                        gap={6}
+                        wrap="nowrap"
+                      >
+                        <Badge size="xs" variant="light">
+                          {memory.type}
+                        </Badge>
+                        <Text size="xs" c="dimmed">
+                          {memory.content}
+                        </Text>
+                      </Group>
+                    ))}
+                  </Stack>
+                ) : null}
+                {input.recentPosts.length ? (
+                  <Stack gap={4}>
+                    <Text size="xs" fw={600}>
+                      최근 게시물
+                    </Text>
+                    {input.recentPosts.map((post, index) => (
+                      <Stack key={index} gap={0}>
+                        {post.premise ? (
+                          <Text size="xs" c="dimmed">
+                            전제 · {post.premise}
+                          </Text>
+                        ) : null}
+                        <Text size="xs" c="dimmed">
+                          {post.caption}
+                        </Text>
+                        {post.hashtags.length ? (
+                          <Text size="xs" c="dimmed">
+                            {post.hashtags.map((tag) => `#${tag}`).join(" ")}
+                          </Text>
+                        ) : null}
+                      </Stack>
+                    ))}
+                  </Stack>
+                ) : null}
               </Stack>
-            ) : null}
-          </Stack>
-        </Spoiler>
+            </Spoiler>
+          </>
+        ) : null}
+        {agentInput ? (
+          <Accordion variant="contained">
+            <Accordion.Item value="snapshot">
+              <Accordion.Control>저장된 전체 입력</Accordion.Control>
+              <Accordion.Panel>
+                <Code block>
+                  {JSON.stringify(agentInput.snapshot, null, 2)}
+                </Code>
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
+        ) : null}
       </Stack>
     </Paper>
   );
@@ -2036,6 +2127,7 @@ function V3CaptionStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
       description="캡션 Agent가 생성된 이미지를 보고 캡션과 해시태그를 씁니다. 게시되는 것은 아래 게시 캡션입니다."
       status={<StageStateBadge state={stageState} />}
     >
+      <AgentInputSnapshot input={artifact?.agentInput} />
       {stageState === "running" ? (
         <Group gap="xs" role="status">
           <Loader size="sm" />

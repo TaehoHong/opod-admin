@@ -72,10 +72,12 @@ export type PostWorkItem = {
         memoryCandidates?: { type: string; content: string }[];
         conflicts?: { left: string; right: string; reason: string }[];
         planningInput?: V3PlanningInput;
+        agentInput?: V3AgentInput;
       };
       imagePlan?: V3Lineage & {
         status: string;
         shotCount?: number;
+        agentInput?: V3AgentInput;
         locationId?: string;
         shots?: V3ImagePlanShot[];
         lockedElements?: {
@@ -88,6 +90,7 @@ export type PostWorkItem = {
       promptBuild?: V3Lineage & {
         shotCount: number;
         targetModelId?: string;
+        agentInput?: V3AgentInput;
         policyVersion?: string;
         usesNegativePrompt?: boolean;
         shots?: {
@@ -108,6 +111,7 @@ export type PostWorkItem = {
         hashtags: string[];
         captionLanguages: string[];
         operatorNote?: string;
+        agentInput?: V3AgentInput;
         stale: boolean;
         matchesColumn: boolean;
       };
@@ -160,6 +164,17 @@ export type V3PlanningInput = {
   persona: { group: string; title: string; content: string }[];
   memories: { type: string; content: string }[];
   recentPosts: { premise?: string; caption: string; hashtags: string[] }[];
+};
+
+export type V3AgentInput = {
+  contentProfile?: Partial<
+    Record<
+      "accountConcept" | "imageStyle" | "captionStyle" | "constraints",
+      string
+    >
+  >;
+  context?: V3PlanningInput;
+  snapshot: Record<string, unknown>;
 };
 
 export type V3ImagePlanShot = {

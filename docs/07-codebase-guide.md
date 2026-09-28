@@ -447,6 +447,13 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
 - `PostPipelineV3Runner`는 기획에 accountConcept/constraints, 이미지 기획에 추가 imageStyle,
   캡션에 추가 captionStyle을 전달한다. 각 단계 실행 시 조회한 값은 해당 artifact 입력에 저장된다.
   키워드 검색이나 기존 페르소나에서의 fallback은 없다. 빈 설정은 빈 지침이며 페르소나 보충이 아니다.
+- `PostWorkspaceService.v3AgentInput`은 상세 조회에서 각 artifact의 저장된 입력을
+  `agentInput`으로 노출한다. 목록에는 전체 입력을 추가하지 않는다.
+  `PostWorkPage.tsx`의 `AgentInputSnapshot`은 게시글 기획·이미지 기획·캡션 화면에
+  해당 단계의 제작 지침·페르소나 문맥·전체 입력을 표시하며 게시글 기획 입력을 브리프에 두지 않는다.
+  현재 설정이나 이전 단계로 보충하지 않고 빈 지침과 기록 부재를 구분한다.
+  프롬프트 화면은 저장된 원본 입력 패키지를 표시하며 LLM용 축약 입력과 구별한다.
+  회귀 검증은 `post-workspace.service.spec.ts`와 `PostWorkPage.test.tsx`가 담당한다.
 - `projectPostPersonaContext`는 기존 content_style/content_guidance/capture_style 원문을
   게시 입력에서 제외한다. 작업 키워드 추가 방식과 alias 충돌 검사도 제거했다.
   채팅 reader는 새 테이블을 조회하지 않는다. **기존 DB 페르소나를 자동으로 옮기거나 비활성화하지

@@ -8,6 +8,7 @@ import {
   isPostPipelineV3,
   isPostPipelineV4,
 } from "../../worker/post-pipeline-v3";
+import { isRecord } from "../../worker/value-utils";
 import {
   PostWorkspaceRepository,
   PostWorkDraft,
@@ -84,6 +85,7 @@ export type PostPipelineV3ReadModel = {
       memoryCandidates?: { type: string; content: string }[];
       conflicts?: { left: string; right: string; reason: string }[];
       planningInput?: V3PlanningInput;
+      agentInput?: V3AgentInput;
     };
     imagePlan?: {
       revision: number;
@@ -92,6 +94,7 @@ export type PostPipelineV3ReadModel = {
       promptVersion?: string;
       hash?: string;
       shotCount?: number;
+      agentInput?: V3AgentInput;
       locationId?: string;
       shots?: V3ImagePlanShot[];
       lockedElements?: {
@@ -108,6 +111,7 @@ export type PostPipelineV3ReadModel = {
       promptVersion?: string;
       hash?: string;
       targetModelId?: string;
+      agentInput?: V3AgentInput;
       policyVersion?: string;
       usesNegativePrompt?: boolean;
       shots?: {
@@ -133,6 +137,7 @@ export type PostPipelineV3ReadModel = {
       hashtags: string[];
       captionLanguages: string[];
       operatorNote?: string;
+      agentInput?: V3AgentInput;
       // 컷 재생성으로 게시 이미지 집합이 바뀌었는가(작성 기준 ≠ 현재).
       stale: boolean;
       // 게시 컬럼이 Agent 원본과 같은가(false = 운영자 수정본).
@@ -157,6 +162,17 @@ export type V3PlanningInput = {
   persona: { group: string; title: string; content: string }[];
   memories: { type: string; content: string }[];
   recentPosts: { premise?: string; caption: string; hashtags: string[] }[];
+};
+
+export type V3AgentInput = {
+  contentProfile?: Partial<
+    Record<
+      "accountConcept" | "imageStyle" | "captionStyle" | "constraints",
+      string
+    >
+  >;
+  context?: V3PlanningInput;
+  snapshot: Record<string, unknown>;
 };
 
 export type V3ImagePlanShot = {
@@ -283,7 +299,7 @@ export class PostWorkspaceService {
     ]);
 
     const merged = [
-      ...drafts.map(toDraftWorkItem),
+      ...drafts.map((draft) => toDraftWorkItem(draft)),
       ...posts.map(toStandalonePostWorkItem),
     ]
       .filter((item) => matchesFilter(item, filter))
@@ -302,7 +318,7 @@ export class PostWorkspaceService {
 
   async get(id: string): Promise<PostWorkItem> {
     const draft = await this.repository.findDraft(id);
-    if (draft) return toDraftWorkItem(draft);
+    if (draft) return toDraftWorkItem(draft, true);
     const post = await this.repository.findStandalonePost(id);
     if (post) return toStandalonePostWorkItem(post);
     throw new NotFoundException("Post work item not found");
@@ -388,14 +404,17 @@ function matchesFilter(item: PostWorkItem, filter: PostWorkFilter): boolean {
   return item.operationalStatus === "failed";
 }
 
-function toDraftWorkItem(draft: PostWorkDraft): PostWorkItem {
+function toDraftWorkItem(
+  draft: PostWorkDraft,
+  includeAgentInput = false,
+): PostWorkItem {
   const concept = record(draft.conceptJson);
   const mode = concept.mode === "manual" ? "manual" : "auto";
   const source = sourceOf(concept.source);
   const latestJobs = latestJobsPerShot(draft);
   const currentStage = stageForDraft(draft, latestJobs);
   const operational = statusForDraft(draft, latestJobs, currentStage, mode);
-  const pipelineV3 = v3ReadModel(concept, draft, latestJobs);
+  const pipelineV3 = v3ReadModel(concept, draft, latestJobs, includeAgentInput);
   const publishedThumbnail =
     draft.publishedPost?.postMedia[0]?.media.url ?? undefined;
   const generatedThumbnail = latestJobs
@@ -579,6 +598,7 @@ function v3ReadModel(
   concept: Record<string, unknown>,
   draft: Pick<PostWorkDraft, "caption" | "errorMessage" | "updatedAt">,
   latestJobs: PostWorkDraft["jobs"],
+  includeAgentInput: boolean,
 ): PostPipelineV3ReadModel | undefined {
   if (!isPostPipelineV3(concept)) return undefined;
   const version = isPostPipelineV4(concept)
@@ -648,6 +668,9 @@ function v3ReadModel(
                   ? postOutput.status
                   : "unknown",
               ...lineage(postPlanning),
+              ...(includeAgentInput
+                ? { agentInput: v3AgentInput(postPlanning.input) }
+                : {}),
               ...(typeof postIntent.premise === "string"
                 ? { premise: postIntent.premise }
                 : {}),
@@ -713,6 +736,9 @@ function v3ReadModel(
                   ? imageOutput.status
                   : "unknown",
               ...lineage(imagePlanning),
+              ...(includeAgentInput
+                ? { agentInput: v3AgentInput(imagePlanning.input) }
+                : {}),
               ...(Array.isArray(imageOutput.shots)
                 ? {
                     shotCount: imageOutput.shots.length,
@@ -763,6 +789,9 @@ function v3ReadModel(
                 ? promptOutput.shots.length
                 : 0,
               ...lineage(promptBuild),
+              ...(includeAgentInput
+                ? { agentInput: v3AgentInput(promptBuild.input) }
+                : {}),
               ...(typeof modelPolicy.modelId === "string"
                 ? { targetModelId: modelPolicy.modelId }
                 : {}),
@@ -798,6 +827,9 @@ function v3ReadModel(
             captionBuild: {
               revision: captionBuild.revision as number,
               ...lineage(captionBuild),
+              ...(includeAgentInput
+                ? { agentInput: v3AgentInput(captionBuild.input) }
+                : {}),
               caption: text(captionOutput.caption),
               hashtags: Array.isArray(captionOutput.hashtags)
                 ? strings(captionOutput.hashtags)
@@ -912,6 +944,26 @@ function v3MemoryCandidates(
       },
     ];
   });
+}
+
+function v3AgentInput(input: unknown): V3AgentInput | undefined {
+  if (!isRecord(input)) return undefined;
+  const profile = record(input.contentProfile);
+  return {
+    ...(isRecord(input.contentProfile)
+      ? {
+          contentProfile: Object.fromEntries(
+            ["accountConcept", "imageStyle", "captionStyle", "constraints"]
+              .filter((key) => typeof profile[key] === "string")
+              .map((key) => [key, profile[key]]),
+          ),
+        }
+      : {}),
+    ...(input.persona || input.memories || input.recentPosts
+      ? { context: v3PlanningInput(input) }
+      : {}),
+    snapshot: input,
+  };
 }
 
 function v3PlanningInput(input: Record<string, unknown>): V3PlanningInput {
