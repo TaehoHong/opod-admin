@@ -1,7 +1,9 @@
 import type { ConnectionTestTarget, GenerationSettingsUpdate } from "./api";
 
 export type SettingsFormValues = {
-  imageProvider: "fal" | "opod-flux";
+  imageProvider: "fal" | "opod-flux" | "openai";
+  openaiApiKey?: string;
+  openaiImageModel?: string;
   falApiKey: string;
   falImageModel: string;
   falImageT2iModel: string;
@@ -31,6 +33,10 @@ export function toSettingsUpdate(
     value.trim() ? { [field]: value.trim() } : {};
   return {
     imageProvider: values.imageProvider,
+    ...secret("openaiApiKey", values.openaiApiKey ?? ""),
+    ...(values.openaiImageModel !== undefined
+      ? { openaiImageModel: values.openaiImageModel.trim() || null }
+      : {}),
     ...secret("falApiKey", values.falApiKey),
     falImageModel: values.falImageModel.trim() || null,
     falImageT2iModel: values.falImageT2iModel.trim() || null,
@@ -58,7 +64,9 @@ export function toConnectionTestBody(
   values: SettingsFormValues,
 ): {
   target: ConnectionTestTarget;
-  imageProvider?: "fal" | "opod-flux";
+  imageProvider?: "fal" | "opod-flux" | "openai";
+  openaiApiKey?: string;
+  openaiImageModel?: string;
   falApiKey?: string;
   opodFluxApiBaseUrl?: string;
   opodFluxApiKey?: string;
@@ -67,6 +75,18 @@ export function toConnectionTestBody(
   llmModel?: string;
 } {
   if (target === "image") {
+    if (values.imageProvider === "openai") {
+      return {
+        target,
+        imageProvider: "openai",
+        ...(values.openaiApiKey?.trim()
+          ? { openaiApiKey: values.openaiApiKey.trim() }
+          : {}),
+        ...(values.openaiImageModel?.trim()
+          ? { openaiImageModel: values.openaiImageModel.trim() }
+          : {}),
+      };
+    }
     if (values.imageProvider === "opod-flux") {
       const opodFluxApiBaseUrl = values.opodFluxApiBaseUrl.trim();
       const opodFluxApiKey = values.opodFluxApiKey.trim();

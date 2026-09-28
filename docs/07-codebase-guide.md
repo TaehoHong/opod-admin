@@ -13,6 +13,20 @@
 
 ## Current Module Map
 
+OpenAI Sunburst 이미지 생성은 `src/worker/openai-image.provider.ts`가 소유하며,
+`image-generation.provider.ts`의 `provider="openai"` 분기에서 연결한다. 로컬 접수
+ID를 반환한 뒤 `poll`에서 Images API의 `generations` 또는 `edits`를 호출하고,
+재시작으로 접수 상태가 유실되면 자동 재생성 없이 실패한다. `GenerationSettingsService`는
+`generation.openaiApiKey` / `generation.openaiImageModel`을 DB 우선으로 해석하고
+`OPENAI_IMAGE_API_KEY` / `OPENAI_IMAGE_MODEL`을 fallback으로 사용한다. 이미지 키는
+기획 LLM 키와 독립이다. `packages/admin/src/features/settings/`의
+`GenerationSettingsForm.tsx`, `payload.ts`, `api.ts`는 기존 Mantine 설정 화면에
+OpenAI 공급자·Sunburst 모델 선택을 연결한다. 키는 설정 여부·끝 4자리만 표시하며,
+빈 입력 저장은 기존 키 유지, 명시적 삭제는 DB 키 삭제 후 env 복귀이고,
+`resolved.sources.apiKey`로 현재 공급자의 키 출처를 표시한다. 회귀 owner는
+`openai-image.provider.spec.ts`, `generation-settings.service.spec.ts`,
+`SettingsPage.test.tsx`, `payload.test.ts`다.
+
 수동 게시 최종 확인은 `packages/admin/src/features/posts/PostWorkPage.tsx`의
 `PublishStage` / `PublishPreview`가 소유한다. `지금 게시`는 확인 팝업을 열고,
 캐릭터·형식·사진 수, 미리보기 앞 경고, 순서대로 번호를 붙인 확대 가능한 사진,

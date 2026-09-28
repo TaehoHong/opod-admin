@@ -138,3 +138,27 @@ describe("toConnectionTestBody", () => {
     });
   });
 });
+
+it("saves and tests OpenAI image settings without sending fal credentials to the connection test", () => {
+  const values = {
+    ...empty,
+    imageProvider: "openai" as const,
+    openaiApiKey: " image-key ",
+    openaiImageModel: "gpt-image-2.5-sunburst",
+    falApiKey: "fal-key",
+  };
+  expect(toConnectionTestBody("image", values)).toEqual({
+    target: "image",
+    imageProvider: "openai",
+    openaiApiKey: "image-key",
+    openaiImageModel: "gpt-image-2.5-sunburst",
+  });
+  expect(toSettingsUpdate(values)).toMatchObject({
+    imageProvider: "openai",
+    openaiApiKey: "image-key",
+    openaiImageModel: "gpt-image-2.5-sunburst",
+  });
+  expect(toSettingsUpdate({ ...values, openaiApiKey: "" })).not.toHaveProperty(
+    "openaiApiKey",
+  );
+});

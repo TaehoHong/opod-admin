@@ -672,3 +672,73 @@ describe("GenerationSettingsService", () => {
     ]);
   });
 });
+
+describe("OpenAI image settings", () => {
+  it("uses the dedicated image key and model, independently from fal and planner settings", async () => {
+    const service = makeService(
+      repositoryMock([
+        { key: "generation.imageProvider", value: "openai" },
+        { key: "generation.openaiApiKey", value: "image-key" },
+        { key: "generation.openaiImageModel", value: "gpt-image-2.5-sunburst" },
+        { key: "generation.falImageModel", value: "legacy-model" },
+        { key: "planner.llmApiKey", value: "planner-key" },
+      ]),
+    );
+    expect(await service.resolveProviderSettings({})).toMatchObject({
+      provider: "openai",
+      openaiApiKey: "image-key",
+      editModel: "gpt-image-2.5-sunburst",
+      t2iModel: "gpt-image-2.5-sunburst",
+    });
+    expect(await service.resolveProviderNames({})).toMatchObject({
+      t2i: "openai:gpt-image-2.5-sunburst",
+      edit: "openai:gpt-image-2.5-sunburst",
+    });
+  });
+  it("masks the dedicated key in change history", () => {
+    expect(
+      JSON.stringify(
+        settingsChangeEntries(
+          {},
+          { openaiApiKey: "private-key-1234" },
+          { openaiApiKey: "private-key-1234" },
+        ),
+      ),
+    ).not.toContain("private-key");
+  });
+  it("tests the unsaved OpenAI key only against the official model endpoint", async () => {
+    const service = makeService(repositoryMock());
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+    expect(
+      await service.testConnection(
+        {
+          target: "image",
+          imageProvider: "openai",
+          openaiApiKey: "key",
+          openaiImageModel: "gpt-image-2.5-sunburst",
+        },
+        {},
+        fetchFn,
+      ),
+    ).toMatchObject({ ok: true });
+    expect(fetchFn).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/models/gpt-image-2.5-sunburst",
+      expect.objectContaining({ headers: { authorization: "Bearer key" } }),
+    );
+  });
+});
+
+it("keeps settings readable when the selected OpenAI image key is missing", async () => {
+  const service = makeService(
+    repositoryMock([
+      { key: "generation.imageProvider", value: "openai" },
+      { key: "generation.openaiImageModel", value: "gpt-image-2.5-sunburst" },
+    ]),
+  );
+  expect(await service.resolveProviderNames({})).toMatchObject({
+    t2i: null,
+    edit: null,
+  });
+});

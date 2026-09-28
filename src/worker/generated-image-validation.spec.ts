@@ -63,3 +63,12 @@ describe("generated image validation", () => {
     );
   });
 });
+
+it("uses OpenAI size instead of the format ratio for output validation", () => {
+  expect(
+    requestedImageAspectRatio({ size: "1536x1024", aspect_ratio: "4:5" }),
+  ).toBe(1.5);
+  expect(
+    requestedImageAspectRatio({ size: "auto", aspect_ratio: "4:5" }),
+  ).toBeNull();
+});

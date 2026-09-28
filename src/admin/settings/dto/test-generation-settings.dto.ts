@@ -7,8 +7,17 @@ export class TestGenerationSettingsDto {
   target!: "image" | "planner" | "chat" | "embedding";
 
   @IsOptional()
-  @IsIn(["fal", "opod-flux"])
-  imageProvider?: "fal" | "opod-flux";
+  @IsIn(["fal", "opod-flux", "openai"])
+  imageProvider?: "fal" | "opod-flux" | "openai";
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  openaiApiKey?: string;
+
+  @IsOptional()
+  @IsIn(["gpt-image-2.5-sunburst"])
+  openaiImageModel?: string;
 
   @IsOptional()
   @IsString()

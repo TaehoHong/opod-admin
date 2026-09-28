@@ -1,3 +1,4 @@
+import { createOpenAiImageProvider } from "./openai-image.provider";
 import {
   LLM_LOG_TYPE,
   LlmLogContext,
@@ -134,7 +135,9 @@ type ProviderEnv = Record<string, string | undefined>;
 // 프로바이더 구성 값 — 출처는 env 또는 admin_settings(DB)이며 이 계층은
 // 출처를 모른다. 병합/우선순위는 GenerationSettingsService가 담당한다.
 export type GenerationProviderSettings = {
-  provider?: "fal" | "opod-flux";
+  provider?: "fal" | "opod-flux" | "openai";
+  openaiApiKey?: string;
+  openaiImageModel?: string;
   apiKey?: string;
   editModel?: string;
   t2iModel?: string;
@@ -153,6 +156,17 @@ export function resolveImageGenerationProviders(
   fetchFn: typeof fetch = fetch,
   llmLogs?: LlmLogService,
 ): ImageGenerationProviders {
+  if (settings.provider === "openai") {
+    const provider = createOpenAiImageProvider(
+      {
+        apiKey: settings.openaiApiKey ?? "",
+        model: settings.openaiImageModel ?? "",
+      },
+      fetchFn,
+      llmLogs,
+    );
+    return { t2i: provider, edit: provider };
+  }
   if (settings.provider === "opod-flux") {
     const provider = createOpodFluxImageGenerationProvider(
       {
@@ -200,7 +214,13 @@ export function createImageGenerationProviders(
   return resolveImageGenerationProviders(
     {
       provider:
-        env.IMAGE_GENERATION_PROVIDER === "opod-flux" ? "opod-flux" : "fal",
+        env.IMAGE_GENERATION_PROVIDER === "openai"
+          ? "openai"
+          : env.IMAGE_GENERATION_PROVIDER === "opod-flux"
+            ? "opod-flux"
+            : "fal",
+      openaiApiKey: env.OPENAI_IMAGE_API_KEY,
+      openaiImageModel: env.OPENAI_IMAGE_MODEL,
       apiKey: env.FAL_API_KEY,
       editModel: env.FAL_IMAGE_MODEL,
       t2iModel: env.FAL_IMAGE_T2I_MODEL,

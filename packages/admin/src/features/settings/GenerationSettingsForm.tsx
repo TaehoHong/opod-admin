@@ -72,6 +72,8 @@ export function GenerationSettingsForm({
     mode: "uncontrolled",
     initialValues: {
       imageProvider: settings.imageProvider,
+      openaiApiKey: "",
+      openaiImageModel: settings.openaiImageModel ?? "gpt-image-2.5-sunburst",
       falApiKey: "",
       falImageModel: settings.falImageModel ?? "",
       falImageT2iModel: settings.falImageT2iModel ?? "",
@@ -167,11 +169,17 @@ export function GenerationSettingsForm({
                     data={[
                       { value: "opod-flux", label: "opod-flux v1" },
                       { value: "fal", label: "fal.ai" },
+                      { value: "openai", label: "OpenAI" },
                     ]}
                     allowDeselect={false}
                     value={imageProvider}
                     onChange={(value) => {
-                      const next = value === "opod-flux" ? "opod-flux" : "fal";
+                      const next =
+                        value === "openai"
+                          ? "openai"
+                          : value === "opod-flux"
+                            ? "opod-flux"
+                            : "fal";
                       form.setFieldValue("imageProvider", next);
                       setImageProvider(next);
                     }}
@@ -219,6 +227,34 @@ export function GenerationSettingsForm({
                         ) : null}
                       </Group>
                     </>
+                  ) : imageProvider === "openai" ? (
+                    <Group gap="xs" wrap="nowrap" className={styles.secretRow}>
+                      <PasswordInput
+                        label="OpenAI API 키"
+                        placeholder={
+                          settings.openaiApiKey?.set
+                            ? "변경할 때만 입력"
+                            : "OpenAI 대시보드에서 발급한 키"
+                        }
+                        autoComplete="off"
+                        flex={1}
+                        key={form.key("openaiApiKey")}
+                        {...form.getInputProps("openaiApiKey")}
+                      />
+                      <SecretStatusBadge
+                        status={settings.openaiApiKey ?? { set: false }}
+                        envSource={settings.resolved.sources.apiKey}
+                        missingLabel="키 없음 — 이미지 생성 불가"
+                      />
+                      {settings.openaiApiKey?.set ? (
+                        <ClearKeyButton
+                          label="OpenAI API 키 삭제"
+                          description="저장된 OpenAI 키를 지우고 env 값으로 되돌립니다. env에도 키가 없으면 이미지 생성이 중단됩니다."
+                          loading={save.isPending}
+                          onConfirm={() => clearKey("openaiApiKey")}
+                        />
+                      ) : null}
+                    </Group>
                   ) : (
                     <Group gap="xs" wrap="nowrap" className={styles.secretRow}>
                       <PasswordInput
@@ -248,22 +284,41 @@ export function GenerationSettingsForm({
                       ) : null}
                     </Group>
                   )}
-                  <TextInput
-                    label="edit 프롬프트 정책 모델 ID"
-                    placeholder="black-forest-labs/FLUX.1-Kontext-dev"
-                    description={sourceNote(
-                      settings.resolved.sources.editModel,
-                    )}
-                    key={form.key("falImageModel")}
-                    {...form.getInputProps("falImageModel")}
-                  />
-                  <TextInput
-                    label="t2i 프롬프트 정책 모델 ID"
-                    placeholder="black-forest-labs/FLUX.1-Kontext-dev"
-                    description={sourceNote(settings.resolved.sources.t2iModel)}
-                    key={form.key("falImageT2iModel")}
-                    {...form.getInputProps("falImageT2iModel")}
-                  />
+                  {imageProvider === "openai" ? (
+                    <Select
+                      label="이미지 모델"
+                      data={[
+                        {
+                          value: "gpt-image-2.5-sunburst",
+                          label: "GPT Image 2.5 Sunburst",
+                        },
+                      ]}
+                      allowDeselect={false}
+                      key={form.key("openaiImageModel")}
+                      {...form.getInputProps("openaiImageModel")}
+                    />
+                  ) : (
+                    <>
+                      <TextInput
+                        label="edit 프롬프트 정책 모델 ID"
+                        placeholder="black-forest-labs/FLUX.1-Kontext-dev"
+                        description={sourceNote(
+                          settings.resolved.sources.editModel,
+                        )}
+                        key={form.key("falImageModel")}
+                        {...form.getInputProps("falImageModel")}
+                      />
+                      <TextInput
+                        label="t2i 프롬프트 정책 모델 ID"
+                        placeholder="black-forest-labs/FLUX.1-Kontext-dev"
+                        description={sourceNote(
+                          settings.resolved.sources.t2iModel,
+                        )}
+                        key={form.key("falImageT2iModel")}
+                        {...form.getInputProps("falImageT2iModel")}
+                      />
+                    </>
+                  )}
                 </Stack>
               </Accordion.Panel>
             </Accordion.Item>
