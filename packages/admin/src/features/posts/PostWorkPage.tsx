@@ -6,7 +6,9 @@ import {
   Code,
   Group,
   Loader,
+  Modal,
   Paper,
+  ScrollArea,
   Spoiler,
   Stack,
   Text,
@@ -1673,6 +1675,23 @@ function PublishStage({
     runDraftStage(draft!.id, "publish"),
   );
   const [interaction, setInteraction] = useState<PostInteraction | null>(null);
+  const [confirmOpened, setConfirmOpened] = useState(false);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const canPublish = Boolean(
+    draft && (draft.status === "approved" || v4PausedAt(draft, ["publish"])),
+  );
+  const selected = draft ? selectedPublishImages(draft) : [];
+  const expectedCount =
+    item.pipelineV3?.imageCount ?? draft?.shots?.length ?? 0;
+  const missingImages =
+    !selected.length ||
+    selected.length !== expectedCount ||
+    draft?.shots?.some(
+      (shot) =>
+        shot.status !== "completed" ||
+        shot.outputs.filter((output) => output.selected).length !== 1,
+    );
+  const captionStale = item.pipelineV3?.artifacts.captionBuild?.stale;
   return (
     <StagePaper
       title="⑦ 게시"
@@ -1710,8 +1729,7 @@ function PublishStage({
           다시 실행하세요.
         </Alert>
       ) : null}
-      {draft?.status === "approved" ||
-      (draft && v4PausedAt(draft, ["publish"])) ? (
+      {draft && canPublish ? (
         <>
           <Alert color="blue">
             {draft.status === "approved"
@@ -1725,12 +1743,96 @@ function PublishStage({
             <Button
               loading={publish.isPending}
               disabled={!draft.caption.trim()}
-              onClick={() => publish.mutate(undefined)}
+              onClick={() => {
+                publish.reset();
+                setConfirmOpened(true);
+              }}
             >
               지금 게시
             </Button>
           </Group>
         </>
+      ) : null}
+      {draft ? (
+        <Modal
+          opened={confirmOpened && !post}
+          onClose={() => {
+            if (!publish.isPending) setConfirmOpened(false);
+          }}
+          title="게시 전 최종 확인"
+          size="xl"
+          scrollAreaComponent={ScrollArea.Autosize}
+          closeOnClickOutside={!publish.isPending && !previewExpanded}
+          closeOnEscape={!publish.isPending && !previewExpanded}
+          trapFocus={!previewExpanded}
+          withCloseButton={!publish.isPending}
+          classNames={{ body: styles.publishConfirmBody }}
+        >
+          <Stack gap="md">
+            <Group justify="space-between" align="flex-start">
+              <Stack gap="xs">
+                <CharacterName id={draft.characterId} fw={700} size="lg" />
+                <Text size="sm" c="dimmed">
+                  OPOD {draft.contentType === "reel" ? "릴" : "피드"}
+                  {" · "}사진 {selected.length}장
+                </Text>
+              </Stack>
+              <Text size="sm" c="dimmed">
+                {draft.scheduledAt
+                  ? "예약 시각과 관계없이 지금 게시합니다."
+                  : "확인한 내용으로 지금 게시합니다."}
+              </Text>
+            </Group>
+            {captionStale ? (
+              <Alert
+                color="attention"
+                title="사진 변경 후 캡션을 확인해 주세요"
+              >
+                이전 사진을 보고 작성한 캡션입니다. 현재 사진과 맞는지
+                확인하거나 돌아가서 캡션을 수정하세요.
+              </Alert>
+            ) : null}
+            {missingImages ? (
+              <Alert
+                color="attention"
+                title="게시할 사진이 준비되지 않았습니다"
+              >
+                기획한 사진 {expectedCount}장 중 게시할 사진과 생성 상태를
+                이미지 생성 단계에서 확인해 주세요.
+              </Alert>
+            ) : null}
+            {!canPublish ? (
+              <Alert color="attention">
+                게시 상태가 변경되었습니다. 돌아가서 현재 상태를 확인해 주세요.
+              </Alert>
+            ) : null}
+            <PublishPreview draft={draft} onZoomChange={setPreviewExpanded} />
+            {publish.isError ? <MutationError error={publish.error} /> : null}
+            <Group justify="flex-end" className={styles.publishConfirmActions}>
+              <Button
+                variant="default"
+                data-autofocus
+                disabled={publish.isPending}
+                onClick={() => setConfirmOpened(false)}
+              >
+                돌아가기
+              </Button>
+              <Button
+                loading={publish.isPending}
+                disabled={!canPublish || !draft.caption.trim() || missingImages}
+                onClick={() => {
+                  if (!publish.isPending) {
+                    publish.mutate(undefined, {
+                      onSuccess: () => setConfirmOpened(false),
+                    });
+                  }
+                }}
+              >
+                확인하고 게시
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
       ) : null}
       {post ? (
         <>
@@ -1788,7 +1890,7 @@ function PublishStage({
             onClose={() => setInteraction(null)}
           />
         </>
-      ) : draft?.status !== "approved" ? (
+      ) : !canPublish ? (
         <Alert color="gray">승인 후 게시할 수 있습니다.</Alert>
       ) : null}
       {item.postId && !post ? (
@@ -1802,12 +1904,24 @@ function PublishStage({
 
 // 게시 전 미리보기. 검수에서 고른 컷과 편집한 캡션이 실제로 어떤 조합으로
 // 나가는지는 여기서만 한 번에 보인다.
-function PublishPreview({ draft }: { draft: Draft }) {
-  const selected = (draft.shots ?? []).flatMap((shot) =>
-    shot.outputs
-      .filter((output) => output.selected)
-      .map((output) => ({ ...output, sortOrder: shot.sortOrder })),
-  );
+function selectedPublishImages(draft: Draft) {
+  return [...(draft.shots ?? [])]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .flatMap((shot) =>
+      shot.outputs
+        .filter((output) => output.selected)
+        .map((output) => ({ ...output, sortOrder: shot.sortOrder })),
+    );
+}
+
+function PublishPreview({
+  draft,
+  onZoomChange,
+}: {
+  draft: Draft;
+  onZoomChange?: (opened: boolean) => void;
+}) {
+  const selected = selectedPublishImages(draft);
   return (
     <Paper p="md" component="section">
       <Stack gap="sm">
@@ -1818,21 +1932,29 @@ function PublishPreview({ draft }: { draft: Draft }) {
           <Alert color="gray">아직 선택된 게시 이미지가 없습니다.</Alert>
         ) : (
           <div className={styles.mediaGrid}>
-            {selected.map((output) => (
-              <ZoomableImage
-                key={output.mediaId}
-                src={output.url}
-                alt={`게시 예정 이미지 ${output.sortOrder + 1}`}
-                className={styles.media}
-                fit="contain"
-              />
+            {selected.map((output, index) => (
+              <Stack key={output.mediaId} gap="xs">
+                <Text size="xs" c="dimmed">
+                  {index + 1} / {selected.length}
+                </Text>
+                <ZoomableImage
+                  src={output.url}
+                  alt={`게시 예정 이미지 ${output.sortOrder + 1}`}
+                  className={styles.media}
+                  fit="contain"
+                  onZoomChange={onZoomChange}
+                />
+              </Stack>
             ))}
           </div>
         )}
+        <Text fw={600} size="sm">
+          캡션
+        </Text>
         {/* 미리보기는 실제로 나갈 모습이다 — 캡션이 없으면 가제로 채우지 않고
             없다고 말한다(제목 폴백은 목록·헤더에만). */}
         {draft.caption ? (
-          <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+          <Text size="sm" className={styles.publishCaption}>
             {draft.caption}
           </Text>
         ) : (
@@ -1851,7 +1973,11 @@ function PublishPreview({ draft }: { draft: Draft }) {
               </Badge>
             ))}
           </Group>
-        ) : null}
+        ) : (
+          <Text size="sm" c="dimmed">
+            해시태그 없음
+          </Text>
+        )}
       </Stack>
     </Paper>
   );

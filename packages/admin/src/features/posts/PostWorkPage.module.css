@@ -163,3 +163,22 @@
   border-radius: var(--mantine-radius-sm);
   object-fit: contain;
 }
+
+.publishCaption {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.publishConfirmActions {
+  position: sticky;
+  bottom: 0;
+  padding-block: var(--mantine-spacing-sm);
+  background: var(--mantine-color-body);
+  border-top: 1px solid var(--mantine-color-ink-1);
+}
+
+@media (max-width: 48em) {
+  .publishConfirmBody .mediaGrid {
+    grid-template-columns: repeat(auto-fit, minmax(5rem, 1fr));
+  }
+}

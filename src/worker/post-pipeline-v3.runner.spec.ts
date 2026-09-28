@@ -1073,80 +1073,105 @@ describe("PostPipelineV3Runner", () => {
 
   // ⑥ 캡션: 산출물 저장과 게시 컬럼 갱신이 한 CAS 트랜잭션이고, 다음 단계는
   // 검수가 아니라 게시 대기다. 이미지가 vision 블록으로 실제 전송돼야 한다.
-  it("runs the caption stage on the generated images and hands off to publish", async () => {
-    const { runner, repository, fetchMock, readMedia } = setup(
-      captionStageDraft(),
-      {
-        status: "ready",
-        caption: "필라테스 끝나고 한 컷,, 오늘도 완룟",
-        captionLanguages: ["ko"],
-        hashtags: ["#필라테스"],
-      },
-      {
-        captionShots: [
-          {
-            sortOrder: 0,
-            jobId: "job-0",
-            mediaId: "media-0",
-            media: {
-              url: "https://cdn.local/0.png",
-              storageKey: null,
-              contentType: "image/png",
-            },
-          },
-        ],
-      },
-    );
-
-    await runner.runCurrentStage("draft-1", { operatorNote: "이모지 빼고" });
-
-    expect(readMedia).toHaveBeenCalledWith(
-      expect.objectContaining({ url: "https://cdn.local/0.png" }),
-    );
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    const userContent = body.messages[1].content as {
-      type: string;
-      text?: string;
-    }[];
-    expect(userContent.some((block) => block.type === "image_url")).toBe(true);
-    expect(userContent[0].text).toContain("존댓말로 짧게");
-    expect(userContent[0].text).toContain("이모지 빼고");
-    expect(userContent[0].text).not.toContain("captureSetup");
-
-    expect(repository.persistV3Artifact).toHaveBeenCalledWith(
-      expect.objectContaining({
-        expected: expect.objectContaining({
-          stage: "caption",
-          artifactKey: "captionBuild",
-          revision: null,
-        }),
-        columns: {
-          caption: "필라테스 끝나고 한 컷,, 오늘도 완룟",
-          hashtags: ["필라테스"],
+  it.each([
+    {
+      kind: "text",
+      caption: "필라테스 끝나고 한 컷,, 오늘도 완룟",
+      captionLanguages: ["ko"],
+      hashtags: ["필라테스"],
+      operatorNote: "이모지 빼고",
+    },
+    {
+      kind: "emoji only",
+      caption: "📸",
+      captionLanguages: [],
+      hashtags: [],
+      operatorNote: "📸만 쓰고 해시태그는 빼줘",
+    },
+  ])(
+    "writes a $kind caption from generated images and hands off to publish",
+    async ({ caption, captionLanguages, hashtags, operatorNote }) => {
+      const { runner, repository, fetchMock, readMedia } = setup(
+        captionStageDraft(),
+        {
+          status: "ready",
+          caption,
+          captionLanguages,
+          hashtags,
         },
-        actionType: "DRAFT_V3_CAPTION_READY",
-        conceptJson: expect.objectContaining({
-          captionBuild: expect.objectContaining({
-            revision: 1,
-            promptVersion: "caption-writer-v1",
-            contractVersion: "caption-set-v1",
-            source: expect.objectContaining({
-              postPlanningHash: "sha256:post",
-              generationSetHash: expect.stringMatching(/^sha256:/),
-            }),
-            input: expect.objectContaining({
-              operatorNote: "이모지 빼고",
-              shots: [expect.objectContaining({ mediaId: "media-0" })],
-            }),
+        {
+          captionShots: [
+            {
+              sortOrder: 0,
+              jobId: "job-0",
+              mediaId: "media-0",
+              media: {
+                url: "https://cdn.local/0.png",
+                storageKey: null,
+                contentType: "image/png",
+              },
+            },
+          ],
+        },
+      );
+
+      await runner.runCurrentStage("draft-1", { operatorNote });
+
+      expect(readMedia).toHaveBeenCalledWith(
+        expect.objectContaining({ url: "https://cdn.local/0.png" }),
+      );
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      expect(
+        body.response_format.json_schema.schema.properties.result.anyOf[0]
+          .properties.captionLanguages.minItems,
+      ).toBe(0);
+      const userContent = body.messages[1].content as {
+        type: string;
+        text?: string;
+      }[];
+      expect(userContent.some((block) => block.type === "image_url")).toBe(
+        true,
+      );
+      expect(userContent[0].text).toContain("존댓말로 짧게");
+      expect(userContent[0].text).toContain(operatorNote);
+      expect(userContent[0].text).not.toContain("captureSetup");
+
+      expect(repository.persistV3Artifact).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expected: expect.objectContaining({
+            stage: "caption",
+            artifactKey: "captionBuild",
+            revision: null,
           }),
-          pipeline: expect.objectContaining({
-            stage: "publish",
-            state: "pending",
+          columns: {
+            caption,
+            hashtags,
+          },
+          actionType: "DRAFT_V3_CAPTION_READY",
+          conceptJson: expect.objectContaining({
+            captionBuild: expect.objectContaining({
+              revision: 1,
+              promptVersion: "caption-writer-v3-dev-legacy",
+              contractVersion: "caption-set-v2",
+              output: { status: "ready", caption, captionLanguages, hashtags },
+              source: expect.objectContaining({
+                postPlanningHash: "sha256:post",
+                generationSetHash: expect.stringMatching(/^sha256:/),
+              }),
+              input: expect.objectContaining({
+                operatorNote,
+                shots: [expect.objectContaining({ mediaId: "media-0" })],
+              }),
+            }),
+            pipeline: expect.objectContaining({
+              stage: "publish",
+              state: "pending",
+            }),
           }),
         }),
-      }),
-    );
-  });
+      );
+    },
+  );
 
   // ⑦ 게시는 러너의 단계가 아니다. claim 게이트가 뚫려 여기 들어오더라도 초안을
   // failed로 만들면 안 된다 — 게시·캡션 편집·컷 재생성 게이트가 전부

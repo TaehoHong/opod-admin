@@ -28,6 +28,7 @@ type ZoomableImageProps = Omit<ImageProps, "src" | "alt"> & {
   /** 확대할 때 보여줄 이미지. 썸네일과 다를 때만 준다(기본은 src). */
   zoomSrc?: string;
   compare?: CompareSource;
+  onZoomChange?: (opened: boolean) => void;
 };
 
 export function ZoomableImage({
@@ -36,9 +37,13 @@ export function ZoomableImage({
   zoomLabel,
   zoomSrc,
   compare,
+  onZoomChange,
   ...imageProps
 }: ZoomableImageProps) {
-  const [opened, { open, close }] = useDisclosure(false);
+  const [opened, { open, close }] = useDisclosure(false, {
+    onOpen: () => onZoomChange?.(true),
+    onClose: () => onZoomChange?.(false),
+  });
 
   return (
     <>

@@ -13,6 +13,25 @@
 
 ## Current Module Map
 
+수동 게시 최종 확인은 `packages/admin/src/features/posts/PostWorkPage.tsx`의
+`PublishStage` / `PublishPreview`가 소유한다. `지금 게시`는 확인 팝업을 열고,
+캐릭터·형식·사진 수, 미리보기 앞 경고, 순서대로 번호를 붙인 확대 가능한 사진,
+실제 캡션·해시태그를 보여준 뒤 `확인하고 게시`에서 요청한다. 같은 디렉터리의
+`PostWorkPage.module.css`는 모바일 축소 격자와 하단 고정 액션을 담당하며,
+`packages/admin/src/shared/ui/ZoomableImage.tsx`의 `onZoomChange`로 확대 중 부모 팝업의 Escape
+닫기를 막아 사진만 닫히게 한다. 기존 디자인 규칙·theme를 따르는 UI 확장이며
+자동 예약 게시 경로는 바꾸지 않는다. `PostWorkPage.test.tsx`가 확인 전 요청 없음,
+사진 순서·누락 차단, 중복 요청 방지, 실패 후 재시도 가능 상태와 확대 사진 Escape 동작을 검증한다.
+
+캡션 작성 owner는 `prompts/caption-writer.ts`와 `src/worker/caption-writer.ts`다.
+스킬 작업 피드백에서 가져온 작성 원칙과 품질 비교 기준은
+[캡션 작성 원칙](caption-writing.md)에 있다. `caption-writer-v3`는 설명·슬로건·
+의무적인 감상/질문과 과거 문장의 틀 재사용을 줄이되 캐릭터별 말투를 유지한다.
+`caption-set-v2`는 이모지 단독 결과에 빈 `captionLanguages`를 허용하며 기존
+언어 태그 결과도 읽는다. 본문 공백은 여전히 거부한다. Caption writer/runner
+spec이 schema·parser·게시 대기 전이의 호환을 검증하고, 문체 품질은 실모델 비교
+대상이다. 별도 평가 Agent·피드백 저장·자동 재시도는 추가하지 않았다.
+
 이미지 생성 실행에서는 기획 모델과 현재 provider가 달라도 입력 프롬프트를
 재작성하거나 막지 않는다(2026-09-27 사용자 결정). 기존 provider API 입력 규격과
 레퍼런스 계약 검사는 유지한다. `GenerationWorkerService`는 provider 성공 뒤

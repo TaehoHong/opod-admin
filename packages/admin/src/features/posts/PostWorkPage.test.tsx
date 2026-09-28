@@ -1,4 +1,5 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { renderPage } from "../../test/renderPage";
@@ -102,6 +103,172 @@ function renderStage(
     routes: ["posts/:workId/:stage"],
   });
 }
+
+const publishConcept = {
+  pipelineVersion: "post-pipeline-v4",
+  mode: "manual",
+  pipeline: { stage: "publish", state: "pending" },
+};
+
+function publishShot(sortOrder: number) {
+  return {
+    sortOrder,
+    jobId: `job-${sortOrder}`,
+    status: "completed",
+    outputs: [
+      {
+        mediaId: `media-${sortOrder}`,
+        url: `https://cdn.test/${sortOrder}.png`,
+        selected: true,
+      },
+    ],
+  };
+}
+
+function renderPublish(draft: Record<string, unknown> = {}) {
+  renderStage("publish", publishConcept, {
+    item: {
+      ...v3Item,
+      currentStage: "publish",
+      pipelineV3: {
+        ...v3Item.pipelineV3,
+        version: "post-pipeline-v4",
+        stage: "publish",
+        imageCount: 2,
+        artifacts: { captionBuild: { stale: true } },
+      },
+    },
+    draft: {
+      status: "planned",
+      caption: "현재 게시할 문장\n줄바꿈 유지",
+      hashtags: ["기록"],
+      shots: [publishShot(1), publishShot(0)],
+      ...draft,
+    },
+  });
+}
+
+describe("publish confirmation", () => {
+  it("previews the actual caption and ordered photos, and only publishes after confirmation", async () => {
+    let calls = 0;
+    let finish!: () => void;
+    server.use(
+      http.post("/api/admin/v1/drafts/:id/publish", async () => {
+        calls++;
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return HttpResponse.json({
+          id: "draft-1",
+          status: "published",
+          caption: "게시됨",
+          hashtags: [],
+        });
+      }),
+    );
+    renderPublish();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "지금 게시" }));
+    let dialog = within(
+      await screen.findByRole("dialog", { name: "게시 전 최종 확인" }),
+    );
+    expect(await dialog.findByText("서린")).toBeInTheDocument();
+    expect(dialog.getByText("OPOD 피드 · 사진 2장")).toBeInTheDocument();
+    expect(dialog.getByText("현재 게시할 문장 줄바꿈 유지")).toHaveTextContent(
+      "현재 게시할 문장",
+    );
+    expect(dialog.getByText("#기록")).toBeInTheDocument();
+    expect(
+      dialog.getAllByRole("img").map((image) => image.getAttribute("src")),
+    ).toEqual(["https://cdn.test/0.png", "https://cdn.test/1.png"]);
+    expect(
+      dialog.getByText("사진 변경 후 캡션을 확인해 주세요"),
+    ).toBeInTheDocument();
+    expect(calls).toBe(0);
+    await user.click(dialog.getByRole("button", { name: "돌아가기" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(calls).toBe(0);
+    await user.click(screen.getByRole("button", { name: "지금 게시" }));
+    dialog = within(await screen.findByRole("dialog"));
+    const confirm = dialog.getByRole("button", { name: "확인하고 게시" });
+    await user.dblClick(confirm);
+    await waitFor(() => expect(calls).toBe(1));
+    expect(confirm).toBeDisabled();
+    expect(dialog.getByRole("button", { name: "돌아가기" })).toBeDisabled();
+    finish();
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("keeps the preview open with a retryable error when publishing fails", async () => {
+    server.use(
+      http.post("/api/admin/v1/drafts/:id/publish", () =>
+        HttpResponse.json({ message: "게시 요청 실패" }, { status: 500 }),
+      ),
+    );
+    renderPublish();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "지금 게시" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    await user.click(dialog.getByRole("button", { name: "확인하고 게시" }));
+    expect(await dialog.findByText("게시 요청 실패")).toBeInTheDocument();
+    expect(dialog.getByRole("button", { name: "확인하고 게시" })).toBeEnabled();
+    expect(dialog.getByRole("button", { name: "돌아가기" })).toBeEnabled();
+  });
+
+  it("closes only the enlarged photo on Escape and keeps confirmation open", async () => {
+    renderPublish();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "지금 게시" }));
+    const confirm = await screen.findByRole("dialog", {
+      name: "게시 전 최종 확인",
+    });
+    await user.click(
+      within(confirm).getByRole("button", {
+        name: "게시 예정 이미지 1 크게 보기",
+      }),
+    );
+    await screen.findByRole("dialog", {
+      name: "게시 예정 이미지 1",
+    });
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", {
+          name: "게시 예정 이미지 1",
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(confirm).toBeVisible();
+    expect(
+      within(confirm).getByRole("button", { name: "확인하고 게시" }),
+    ).toBeEnabled();
+  });
+
+  it.each([
+    { name: "empty", shots: [] },
+    { name: "missing", shots: [publishShot(0)] },
+    {
+      name: "unfinished",
+      shots: [publishShot(0), { ...publishShot(1), status: "running" }],
+    },
+  ])("prevents confirmation when photos are $name", async ({ shots }) => {
+    renderPublish({ shots });
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "지금 게시" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(
+      dialog.getByText("게시할 사진이 준비되지 않았습니다"),
+    ).toBeInTheDocument();
+    expect(
+      dialog.getByRole("button", { name: "확인하고 게시" }),
+    ).toBeDisabled();
+  });
+});
 
 describe("post work stage screens", () => {
   it("opens on the read-focused operations overview with integrated metrics", async () => {
