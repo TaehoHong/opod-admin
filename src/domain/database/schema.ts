@@ -168,6 +168,68 @@ export const messageReplyJobStatus = opod.enum(
   ["queued", "running", "completed", "failed"],
 );
 
+export const aiModelType = opod.enum("ai_model_type", ["llm", "image"]);
+export const postAgentStage = opod.enum("post_agent_stage", [
+  "post_plan",
+  "image_plan",
+  "image_prompt",
+  "generation",
+  "caption",
+]);
+
+export const aiModels = opod.table(
+  "ai_models",
+  {
+    id: bigint({ mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
+    type: aiModelType().notNull(),
+    provider: text().notNull(),
+    model: text().notNull(),
+    createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    check("ai_models_provider_check", sql`btrim(${table.provider}) <> ''`),
+    check("ai_models_model_check", sql`btrim(${table.model}) <> ''`),
+  ],
+);
+
+export const postAgentPrompts = opod.table(
+  "post_agent_prompts",
+  {
+    id: bigint({ mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
+    stage: postAgentStage().notNull(),
+    revision: integer().notNull(),
+    systemPrompt: text("system_prompt"),
+    outputSchema: jsonb("output_schema"),
+    aiModelId: bigint("ai_model_id", { mode: "bigint" })
+      .notNull()
+      .references(() => aiModels.id, { onDelete: "restrict" }),
+    model: text(),
+    createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("post_agent_prompts_stage_revision_unique").on(
+      table.stage,
+      table.revision,
+    ),
+    check("post_agent_prompts_revision_check", sql`${table.revision} > 0`),
+    check(
+      "post_agent_prompts_model_check",
+      sql`${table.model} IS NULL OR btrim(${table.model}) <> ''`,
+    ),
+    check(
+      "post_agent_prompts_stage_content_check",
+      sql`
+    (${table.stage} = 'generation' AND ${table.systemPrompt} IS NULL AND ${table.outputSchema} IS NULL)
+    OR (${table.stage} <> 'generation' AND ${table.systemPrompt} IS NOT NULL AND btrim(${table.systemPrompt}) <> ''
+    AND ${table.outputSchema} IS NOT NULL AND jsonb_typeof(${table.outputSchema}) = 'object')`,
+    ),
+  ],
+);
+
 export const adminSettings = opod.table("admin_settings", {
   key: text().primaryKey(),
   value: text().notNull(),

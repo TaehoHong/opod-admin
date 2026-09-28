@@ -196,7 +196,9 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly jobs: GenerationJobRepository,
     // 잡 처리 시마다 재해석한다 — admin 설정(UI)에서 키/모델을 바꾸면
     // 프로세스 재시작 없이 다음 잡부터 반영된다.
-    private readonly resolveProviders: () => Promise<ImageGenerationProviders>,
+    private readonly resolveProviders: (
+      promptId?: string,
+    ) => Promise<ImageGenerationProviders>,
     private readonly store: GeneratedMediaStore,
     // 자동 루프 on/off도 tick마다 재해석 — 설정 화면 토글이 프로세스 재시작
     // 없이 반영돼야 한다.
@@ -373,7 +375,15 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       // 레퍼런스가 있으면 edit(컨디셔닝) 모델, 없으면 t2i 모델. 단,
       // characterVisible=true인 구조화 잡은 레퍼런스 없이 실행하지 않는다.
       const request = await this.buildRequest(job);
-      const providers = await this.resolveProviders();
+      const postAgent =
+        isRecord(job.paramsJson) && isRecord(job.paramsJson._postAgent)
+          ? job.paramsJson._postAgent
+          : null;
+      const providers = await this.resolveProviders(
+        typeof postAgent?.promptId === "string"
+          ? postAgent.promptId
+          : undefined,
+      );
       const provider =
         request.references.length > 0 ? providers.edit : providers.t2i;
       const result = await this.generate(job, provider, request);
@@ -396,6 +406,9 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       characterId: job.characterId,
       generationJobId: job.id,
       inputMediaIds: this.requestInputMediaIds.get(request) ?? [],
+      ...(isRecord(job.paramsJson) && isRecord(job.paramsJson._postAgent)
+        ? { metadata: { agentConfig: job.paramsJson._postAgent } }
+        : {}),
     });
     // 이전 시도가 다른 프로바이더로 제출했던 잡은 이어받을 수 없으므로 새로 제출한다.
     // (시도 사이에 레퍼런스가 승격되어 라우팅이 바뀐 경우도 여기에 해당한다.)

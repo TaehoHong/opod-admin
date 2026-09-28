@@ -5,6 +5,11 @@ import { AppLayout } from "./AppLayout";
 // 화면은 라우트 단위로 잘라서 받는다. 전부 한 번에 묶으면 초기 번들이 커지고,
 // 운영자는 보통 한두 화면만 쓴다. feature가 named export를 쓰므로 default로
 // 감싸 준다.
+const PostAgentsPage = lazy(() =>
+  import("../features/post-generation-agents/PostAgentsPage").then((m) => ({
+    default: m.PostAgentsPage,
+  })),
+);
 const HomePage = lazy(() =>
   import("../features/home/HomePage").then((m) => ({ default: m.HomePage })),
 );
@@ -117,6 +122,12 @@ export const NAV_ITEMS = [
   { id: "logs", label: "액션 로그", group: "system", Page: LogsPage },
   { id: "events", label: "이벤트", group: "system", Page: EventsPage },
   { id: "analytics", label: "분석", group: "system", Page: AnalyticsPage },
+  {
+    id: "post-generation-agents",
+    label: "게시물 Agent",
+    group: "system",
+    Page: PostAgentsPage,
+  },
   { id: "settings", label: "설정", group: "system", Page: SettingsPage },
 ] as const;
 
@@ -133,6 +144,7 @@ const DETAIL_ROUTES: { id: string; paths: string[] }[] = [
   { id: "media", paths: [":mediaId"] },
   { id: "generation", paths: [":jobId"] },
   { id: "llm-logs", paths: [":logId"] },
+  { id: "post-generation-agents", paths: [":stage"] },
   { id: "users", paths: [":userId"] },
   { id: "payments", paths: [":paymentId"] },
 ];

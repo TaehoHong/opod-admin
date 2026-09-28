@@ -88,8 +88,11 @@ export class PostPlanningAgent {
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.postPlanV3,
       schemaName: "opod_post_plan_v3",
-      schema: POST_PLAN_JSON_SCHEMA as unknown as Record<string, unknown>,
-      systemPrompt: POST_PLANNER_SYSTEM_PROMPT,
+      schema:
+        this.client.agentSettings?.outputSchema ??
+        (POST_PLAN_JSON_SCHEMA as unknown as Record<string, unknown>),
+      systemPrompt:
+        this.client.agentSettings?.systemPrompt ?? POST_PLANNER_SYSTEM_PROMPT,
       input,
       context,
     });

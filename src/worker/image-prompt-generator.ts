@@ -26,8 +26,10 @@ export class ImagePromptGenerationAgent {
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.imagePromptV3,
       schemaName: "opod_prompt_set_v1",
-      schema: PROMPT_SET_JSON_SCHEMA as unknown as Record<string, unknown>,
-      systemPrompt: `${IMAGE_PROMPT_GENERATOR_SYSTEM_PROMPT}\n\nActive model policy\n${input.modelPolicy.instructions}`,
+      schema:
+        this.client.agentSettings?.outputSchema ??
+        (PROMPT_SET_JSON_SCHEMA as unknown as Record<string, unknown>),
+      systemPrompt: `${this.client.agentSettings?.systemPrompt ?? IMAGE_PROMPT_GENERATOR_SYSTEM_PROMPT}\n\nActive model policy\n${input.modelPolicy.instructions}`,
       input: buildPromptGenerationInput(input),
       context,
     });

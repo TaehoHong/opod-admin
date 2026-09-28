@@ -1,3 +1,5 @@
+import { PostAgentPromptsModule } from "../domain/post-agent-prompts/post-agent-prompts.module";
+import { PostAgentPromptService } from "../domain/post-agent-prompts/post-agent-prompt.service";
 import { CharacterContentProfilesModule } from "../domain/character-content-profiles/character-content-profiles.module";
 import { CharacterContentProfileService } from "../domain/character-content-profiles/character-content-profile.service";
 import { Module } from "@nestjs/common";
@@ -37,7 +39,12 @@ function storageEnv(config: S3Config | undefined) {
 // (docs/media-generation-pipeline.md D1). admin HTTP 모듈에 대한 역참조를
 // 두지 않는다 — 추후 별도 이미지 분리 시 엔트리포인트만 추가하면 되는 구조 유지.
 @Module({
-  imports: [DatabaseModule, SettingsModule, CharacterContentProfilesModule],
+  imports: [
+    DatabaseModule,
+    SettingsModule,
+    CharacterContentProfilesModule,
+    PostAgentPromptsModule,
+  ],
   providers: [
     GenerationJobRepository,
     DraftWorkerRepository,
@@ -49,6 +56,7 @@ function storageEnv(config: S3Config | undefined) {
         llmLogs: LlmLogService,
         config: AppConfigService,
         profiles: CharacterContentProfileService,
+        agentPrompts: PostAgentPromptService,
       ) =>
         new PostPipelineV3Runner(
           drafts,
@@ -59,6 +67,7 @@ function storageEnv(config: S3Config | undefined) {
           Math.random,
           fetch,
           createMediaBytesReader(config.s3),
+          agentPrompts,
         ),
       inject: [
         DraftWorkerRepository,
@@ -66,6 +75,7 @@ function storageEnv(config: S3Config | undefined) {
         LlmLogService,
         AppConfigService,
         CharacterContentProfileService,
+        PostAgentPromptService,
       ],
     },
     {
@@ -76,15 +86,25 @@ function storageEnv(config: S3Config | undefined) {
         settings: GenerationSettingsService,
         llmLogs: LlmLogService,
         config: AppConfigService,
+        agentPrompts: PostAgentPromptService,
       ) =>
         new GenerationWorkerService(
           jobs,
-          async () =>
-            resolveImageGenerationProviders(
-              await settings.resolveProviderSettings(),
+          async (promptId) => {
+            const selected = promptId
+              ? await agentPrompts.getVersion("generation", promptId)
+              : null;
+            return resolveImageGenerationProviders(
+              selected
+                ? await settings.resolveImageModelSettings(
+                    selected.provider!,
+                    selected.effectiveModel!,
+                  )
+                : await settings.resolveProviderSettings(),
               fetch,
               llmLogs,
-            ),
+            );
+          },
           createGeneratedMediaStore(storageEnv(config.s3)),
           async () =>
             (await settings.resolveWorkerToggles()).generation.enabled,
@@ -109,6 +129,7 @@ function storageEnv(config: S3Config | undefined) {
         GenerationSettingsService,
         LlmLogService,
         AppConfigService,
+        PostAgentPromptService,
       ],
     },
     {

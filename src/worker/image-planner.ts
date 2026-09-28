@@ -142,8 +142,11 @@ export class ImagePlanningAgent {
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.imagePlanV3,
       schemaName: "opod_image_plan_v3",
-      schema: IMAGE_PLAN_JSON_SCHEMA as unknown as Record<string, unknown>,
-      systemPrompt: IMAGE_PLANNER_SYSTEM_PROMPT,
+      schema:
+        this.client.agentSettings?.outputSchema ??
+        (IMAGE_PLAN_JSON_SCHEMA as unknown as Record<string, unknown>),
+      systemPrompt:
+        this.client.agentSettings?.systemPrompt ?? IMAGE_PLANNER_SYSTEM_PROMPT,
       input,
       context,
     });

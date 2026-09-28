@@ -4,6 +4,8 @@ import {
 } from "./generation-worker.service";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
+import { GenerationSettingsService } from "../domain/settings/generation-settings.service";
+import { resolveImageGenerationProviders } from "./image-generation.provider";
 
 let imageBytes: Buffer;
 beforeAll(async () => {
@@ -182,6 +184,58 @@ function makeService(
 }
 
 describe("GenerationWorkerService", () => {
+  it("pins a post job to its selected generation version and sends its model/key to the image API", async () => {
+    const repository = repositoryFake();
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        candidateCount: 1,
+        paramsJson: { _postAgent: { promptId: "17", revision: 3 } },
+        character: { visualProfile: { referenceMedia: [] } },
+      }),
+    );
+    const settings = new GenerationSettingsService({
+      findByKeys: jest.fn().mockResolvedValue([
+        { key: "generation.imageProvider", value: "fal" },
+        { key: "generation.openaiApiKey", value: "selected-key" },
+      ]),
+    } as never);
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValue(
+        Response.json({ data: [{ b64_json: imageBytes.toString("base64") }] }),
+      );
+    const resolveProviders = jest.fn(async (promptId?: string) => {
+      expect(promptId).toBe("17");
+      return resolveImageGenerationProviders(
+        await settings.resolveImageModelSettings(
+          "openai",
+          "gpt-image-2.5-sunburst",
+        ),
+        fetchFn,
+      );
+    });
+    const store = jest.fn().mockResolvedValue({
+      url: "https://cdn.local/generated.png",
+      storageKey: "generated/test.png",
+    });
+    const service = new GenerationWorkerService(
+      repository as never,
+      resolveProviders,
+      store,
+      async () => true,
+      baseConfig,
+      async () => undefined,
+    );
+    await service.runJobNow("job-1");
+    await service.onModuleDestroy();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("https://api.openai.com/v1/images/generations");
+    expect(init.headers.authorization).toBe("Bearer selected-key");
+    expect(JSON.parse(init.body).model).toBe("gpt-image-2.5-sunburst");
+    expect(repository.persistSuccess).toHaveBeenCalled();
+    expect(repository.markFailed).not.toHaveBeenCalled();
+  });
   it("stores the actual image type and dimensions without changing the bytes", async () => {
     const repository = repositoryFake();
     repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");

@@ -13,6 +13,36 @@
 
 ## Current Module Map
 
+게시물 Agent 설정은 `src/domain/ai-models/`와 `src/domain/post-agent-prompts/`가
+각각 모델 목록과 단계별 지침 이력을 소유한다. 각 Service만 자기 Repository를
+주입하고, `PostGenerationAgentsController` / `WorkerModule`이 두 Service와
+`GenerationSettingsService`를 조합한다. 정본 DDL은 backend의
+`drizzle/20260928080853_post_agent_prompts/migration.sql`, Admin schema는 mirror다.
+`ai_models`의 type ENUM / provider TEXT / model과 `post_agent_prompts`의 필수
+ai_model_id / nullable model override를 사용한다. BIGINT ID는 JSON에서 문자열이다.
+실효 모델은 override 우선이며 공급자는 참조 모델에서 가져온다. 키와 URL은 기존
+settings owner가 담당하고 모델 목록에는 저장하지 않는다. 현재 LLM adapter는
+openai-compatible, 이미지 adapter는 openai/fal/opod-flux다.
+단계별 현재값은 최대 revision이며 저장·복원·기본값 적용은 새 행을 추가한다.
+PostAgentPromptRepository는 단계 advisory transaction lock과 expectedRevision으로
+첫 저장을 포함한 동시 변경을 막는다. 출력 규격은 실제 LLM 요청에 보내는 schema이며,
+현재 parser 계약과 같아야 저장·복원·실행된다. generation 행의 지침/schema는 NULL이다.
+처음 저장하기 전에는 기존 공통 설정/코드 지침을 사용하며 저장은 모델 참조가 필수다.
+`PostPipelineV3Runner`가 네 LLM 단계에서 저장 지침/schema/모델을 읽는다.
+이미지 프롬프트 단계는 generation 모델로 model policy를 정하고 잡의 `_postAgent`에
+해당 버전을 보존한다. 이미지 worker는 최신값 대신 그 버전을 읽어 실행하므로 프롬프트
+작성 뒤 설정을 바꾸어도 이미 만든 잡의 모델은 바뀌지 않는다. 호출 로그와 artifact의
+agentConfig가 적용 설정을 기록한다. 기존 metadata 없는 잡은 기존 경로로 처리한다.
+관리 UI owner는 `packages/admin/src/features/post-generation-agents/`다.
+기존 Mantine theme/DataPage를 사용하고 단계별 URL, 모델 등록·선택, 지침 편집,
+읽기 전용 출력 규격, 이력 조회·복원·기본값 적용, 입력 임시 보관/전환 보호,
+409에서 최신값 확인 후 입력 유지 재편집을 제공한다.
+회귀 owner는 `test/post-generation-agents.e2e-spec.ts`,
+`post-pipeline-v3.runner.spec.ts`, `generation-worker.service.spec.ts`,
+`generation-settings.service.spec.ts`, `PostAgentsPage.test.tsx`이며
+[관리 API 계약](api/admin-post-generation-agents.md)에 저장/실행 경계를 기록한다.
+
+
 이미지 기획 `prompts/image-planner.ts` v9는 의미·제약·물리적 일관성·필요한 연속성에
 영향을 주는 시각적 결정을 우선하고 부수적인 세부사항은 열어 둔다. 운영자의 시각적
 요청은 확정된 의도·사실·제약과 양립할 때 반영한다. 필요한 상태·동작 단서만 작성하고,

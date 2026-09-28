@@ -25,6 +25,32 @@ function makeService(repository: RepositoryMock) {
 }
 
 describe("GenerationSettingsService", () => {
+  it("resolves the selected image provider/model independently of the global provider", async () => {
+    const service = makeService(
+      repositoryMock([
+        { key: "generation.imageProvider", value: "fal" },
+        { key: "generation.falApiKey", value: "fal-key" },
+        { key: "generation.openaiApiKey", value: "openai-key" },
+        { key: "generation.openaiImageModel", value: "old-model" },
+      ]),
+    );
+    await expect(
+      service.resolveImageModelSettings("openai", "gpt-image-2.5-sunburst"),
+    ).resolves.toMatchObject({
+      provider: "openai",
+      openaiApiKey: "openai-key",
+      openaiImageModel: "gpt-image-2.5-sunburst",
+      editModel: "gpt-image-2.5-sunburst",
+      t2iModel: "gpt-image-2.5-sunburst",
+    });
+    await expect(
+      service.resolveImageModelSettings("fal", "fal-ai/nano-banana-pro/edit"),
+    ).resolves.toMatchObject({
+      provider: "fal",
+      apiKey: "fal-key",
+      editModel: "fal-ai/nano-banana-pro/edit",
+    });
+  });
   it("maps stored rows to named fields", async () => {
     const repository = repositoryMock([
       { key: "generation.falApiKey", value: "fal-secret-1234" },

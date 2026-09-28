@@ -17,6 +17,12 @@ export type StrictJsonAgentConfig = {
   model: string;
 };
 
+export type AgentPromptSettings = {
+  systemPrompt: string;
+  outputSchema: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+};
+
 export type StrictJsonAgentRequest = {
   logType: LlmLogType;
   schemaName: string;
@@ -60,6 +66,7 @@ export class StrictJsonAgentClient {
     private readonly config: StrictJsonAgentConfig,
     private readonly fetchFn: typeof fetch = fetch,
     private readonly llmLogs?: LlmLogService,
+    readonly agentSettings?: AgentPromptSettings,
   ) {}
 
   async run(
@@ -104,7 +111,15 @@ export class StrictJsonAgentClient {
         model: this.config.model,
         endpoint: this.config.apiUrl,
         requestJson,
-        context: request.context,
+        context: {
+          ...request.context,
+          metadata: {
+            ...request.context?.metadata,
+            ...(this.agentSettings
+              ? { agentConfig: this.agentSettings.metadata }
+              : {}),
+          },
+        },
         execute: call,
       });
       return { response: logged.response, producerLogId: logged.logId };

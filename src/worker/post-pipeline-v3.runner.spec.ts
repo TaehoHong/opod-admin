@@ -1,3 +1,4 @@
+import { POST_AGENT_DEFAULTS } from "../../prompts/post-agent-defaults";
 import { EMPTY_CONTENT_PROFILE } from "../domain/character-content-profiles/character-content-profile";
 import { UNION_ENVELOPE_KEY } from "../../prompts/strict-schema";
 import { PostPipelineV3Runner } from "./post-pipeline-v3.runner";
@@ -42,6 +43,8 @@ function setup(
     captionShots?: unknown[];
     readMedia?: boolean;
     profile?: typeof EMPTY_CONTENT_PROFILE;
+    savedAgent?: boolean;
+    imageAgent?: boolean;
   } = {},
 ) {
   const repository = {
@@ -59,6 +62,11 @@ function setup(
       apiUrl: "https://llm.test/v1/chat",
       apiKey: "key",
       model: "gpt-5-mini",
+    }),
+    resolveImageModelSettings: jest.fn().mockResolvedValue({
+      provider: "openai",
+      editModel: "gpt-image-2.5-sunburst",
+      t2iModel: "gpt-image-2.5-sunburst",
     }),
     resolveProviderSettings: jest.fn().mockResolvedValue({
       editModel: "fal-ai/nano-banana-pro/edit",
@@ -101,6 +109,34 @@ function setup(
     () => 0.5,
     fetchMock as never,
     options.readMedia === false ? null : readMedia,
+    options.savedAgent || options.imageAgent
+      ? ({
+          execution: jest.fn(
+            async (stage: keyof typeof POST_AGENT_DEFAULTS) => ({
+              ...POST_AGENT_DEFAULTS[stage],
+              ...(stage === "generation" && options.imageAgent
+                ? {
+                    id: "17",
+                    revision: 3,
+                    aiModelId: "2",
+                    model: null,
+                    effectiveModel: "gpt-image-2.5-sunburst",
+                    provider: "openai",
+                    systemPrompt: null,
+                  }
+                : {
+                    id: "7",
+                    revision: 2,
+                    aiModelId: "9",
+                    model: "stage-model",
+                    effectiveModel: "stage-model",
+                    provider: "openai-compatible",
+                    systemPrompt: "Saved system instruction",
+                  }),
+            }),
+          ),
+        } as never)
+      : undefined,
   );
   return { runner, repository, settings, fetchMock, readMedia };
 }
@@ -1278,5 +1314,90 @@ describe("PostPipelineV3Runner", () => {
         }),
       }),
     );
+  });
+});
+
+describe("saved post agent execution", () => {
+  it("uses the generation model policy for prompts and pins the same config to every image job", async () => {
+    const current = captionStageDraft();
+    (current.conceptJson as { pipeline: { stage: string } }).pipeline.stage =
+      "image_prompt";
+    const { runner, repository, fetchMock, settings } = setup(
+      current,
+      undefined,
+      { imageAgent: true },
+    );
+    fetchMock.mockResolvedValue(
+      Response.json({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                shots: [
+                  {
+                    sortOrder: 0,
+                    prompt: "An ordinary scene.",
+                    negativePrompt: null,
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    );
+    await runner.runCurrentStage("draft-1");
+    expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+    expect(settings.resolveImageModelSettings).toHaveBeenCalledWith(
+      "openai",
+      "gpt-image-2.5-sunburst",
+    );
+    const result = repository.persistV3PromptJobs.mock.calls[0][0];
+    expect(result.conceptJson.promptBuild.modelPolicy.id).toBe(
+      "gpt-image-natural-language",
+    );
+    expect(result.jobs[0].paramsJson._postAgent).toEqual({
+      promptId: "17",
+      revision: 3,
+      aiModelId: "2",
+      provider: "openai",
+      model: "gpt-image-2.5-sunburst",
+    });
+  });
+  it("sends the saved instruction/model/schema to the LLM and records the configuration in the artifact", async () => {
+    const current = draft({
+      pipelineVersion: "post-pipeline-v4",
+      pipeline: { stage: "post_plan", state: "running", imageCount: 1 },
+    });
+    const result = {
+      status: "ready",
+      accountFit: "Fits everyday account",
+      intent: {
+        premise: "A quiet afternoon",
+        primaryPurpose: "Daily record",
+        secondaryPurpose: null,
+      },
+      newMemoryCandidates: [],
+    };
+    const { runner, repository, fetchMock } = setup(current, result, {
+      savedAgent: true,
+    });
+    await runner.runCurrentStage("draft-1");
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(request.model).toBe("stage-model");
+    expect(request.messages[0].content).toBe("Saved system instruction");
+    expect(request.response_format.json_schema.schema).toEqual(
+      POST_AGENT_DEFAULTS.post_plan.outputSchema,
+    );
+    expect(
+      repository.persistV3Artifact.mock.calls[0][0].conceptJson.postPlanning
+        .agentConfig,
+    ).toMatchObject({
+      promptId: "7",
+      revision: 2,
+      aiModelId: "9",
+      provider: "openai-compatible",
+      model: "stage-model",
+    });
   });
 });

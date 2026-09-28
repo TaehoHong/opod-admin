@@ -55,6 +55,7 @@ const NAV_ICONS = {
   payments: CreditCard,
   moderation: ShieldCheck,
   "llm-logs": Brain,
+  "post-generation-agents": Brain,
   logs: Scroll,
   events: Heartbeat,
   analytics: ChartLineUp,

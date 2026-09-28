@@ -230,9 +230,14 @@ export class GenerationSettingsService {
   // DB 설정이 env보다 우선한다. env는 로컬 개발/부트스트랩 폴백.
   async resolveProviderSettings(
     env: SettingsEnv = process.env,
+    providerOverride?: GenerationProviderSettings["provider"],
   ): Promise<ResolvedProviderSettings> {
     const db = await this.getSettings();
-    const provider = pick(db, env, "imageProvider");
+    const savedProvider = pick(db, env, "imageProvider");
+    const provider = {
+      ...savedProvider,
+      value: providerOverride ?? savedProvider.value,
+    };
     const openaiApiKey = pick(db, env, "openaiApiKey");
     const openaiImageModel = pick(db, env, "openaiImageModel");
     const apiKey = pick(db, env, "falApiKey");
@@ -275,6 +280,21 @@ export class GenerationSettingsService {
         opodFluxApiBaseUrl: opodFluxApiBaseUrl.source,
         opodFluxApiKey: opodFluxApiKey.source,
       },
+    };
+  }
+
+  async resolveImageModelSettings(
+    provider: string,
+    model: string,
+  ): Promise<GenerationProviderSettings> {
+    if (provider !== "openai" && provider !== "fal" && provider !== "opod-flux")
+      throw new Error("Unsupported image provider");
+    const settings = await this.resolveProviderSettings(undefined, provider);
+    return {
+      ...settings,
+      editModel: model,
+      t2iModel: model,
+      openaiImageModel: model,
     };
   }
 

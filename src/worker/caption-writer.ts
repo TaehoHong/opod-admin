@@ -84,8 +84,11 @@ export class CaptionWriterAgent {
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.captionWriteV4,
       schemaName: "opod_caption_set_v2",
-      schema: CAPTION_SET_JSON_SCHEMA as unknown as Record<string, unknown>,
-      systemPrompt: CAPTION_WRITER_SYSTEM_PROMPT,
+      schema:
+        this.client.agentSettings?.outputSchema ??
+        (CAPTION_SET_JSON_SCHEMA as unknown as Record<string, unknown>),
+      systemPrompt:
+        this.client.agentSettings?.systemPrompt ?? CAPTION_WRITER_SYSTEM_PROMPT,
       input,
       userContent: await captionUserContent(input, images, this.readBytes),
       context,

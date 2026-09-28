@@ -1,3 +1,7 @@
+import {
+  PostAgentPromptService,
+  postAgentStage,
+} from "../domain/post-agent-prompts/post-agent-prompt.service";
 import { CharacterContentProfile } from "../domain/character-content-profiles/character-content-profile";
 import { CharacterContentProfileService } from "../domain/character-content-profiles/character-content-profile.service";
 import { Injectable, Logger } from "@nestjs/common";
@@ -78,6 +82,7 @@ export class PostPipelineV3Runner {
     // V4 ⑥ 캡션 단계가 생성 이미지를 읽는 데 쓴다. 없으면 캡션 단계는
     // needs_configuration으로 정지한다.
     private readonly readMediaBytes: MediaBytesReader | null = null,
+    private readonly agentPrompts?: PostAgentPromptService,
   ) {}
 
   async runCurrentStage(
@@ -135,7 +140,16 @@ export class PostPipelineV3Runner {
           memories: context.memories,
         },
       };
+      const savedAgent =
+        this.agentPrompts &&
+        ["post_plan", "image_plan", "image_prompt", "caption"].includes(
+          String(stage),
+        )
+          ? await this.agentPrompts.execution(postAgentStage(String(stage)))
+          : null;
       const planner = await this.settings.resolvePlannerSettings();
+      if (savedAgent?.id)
+        planner.model = savedAgent.effectiveModel ?? undefined;
       if (!planner.apiUrl || !planner.apiKey || !planner.model) {
         await this.pause(draft, concept, "needs_configuration", [
           "planner_llm_missing",
@@ -150,6 +164,19 @@ export class PostPipelineV3Runner {
         },
         this.fetchFn,
         this.llmLogs,
+        savedAgent?.id
+          ? {
+              systemPrompt: savedAgent.systemPrompt!,
+              outputSchema: savedAgent.outputSchema as Record<string, unknown>,
+              metadata: {
+                promptId: savedAgent.id,
+                revision: savedAgent.revision,
+                aiModelId: savedAgent.aiModelId,
+                provider: savedAgent.provider,
+                model: savedAgent.effectiveModel,
+              },
+            }
+          : undefined,
       );
       if (stage === "post_plan") {
         await this.runPostPlanning(normalizedDraft, concept, client, profile!);
@@ -235,6 +262,7 @@ export class PostPipelineV3Runner {
       revision,
       hash,
       producerLogId: result.producerLogId,
+      agentConfig: client.agentSettings?.metadata ?? null,
       contractVersion: POST_PLAN_CONTRACT_VERSION,
       promptVersion: POST_PLANNER_PROMPT_VERSION,
       input,
@@ -430,6 +458,7 @@ export class PostPipelineV3Runner {
             concept,
             input,
             result.output,
+            client.agentSettings?.metadata,
           ),
           pipeline: {
             ...concept.pipeline,
@@ -458,6 +487,7 @@ export class PostPipelineV3Runner {
           concept,
           input,
           result.output,
+          client.agentSettings?.metadata,
         ),
         locationExclusions,
       },
@@ -493,7 +523,15 @@ export class PostPipelineV3Runner {
     const imagePlan = imagePlanReady(concept);
     if (!postPlan || !imagePlan)
       throw new Error("Prompt Generation requires ready upstream artifacts");
-    const providers = await this.settings.resolveProviderSettings();
+    const imageAgent = this.agentPrompts
+      ? await this.agentPrompts.execution("generation")
+      : null;
+    const providers = imageAgent?.id
+      ? await this.settings.resolveImageModelSettings(
+          imageAgent.provider!,
+          imageAgent.effectiveModel!,
+        )
+      : await this.settings.resolveProviderSettings();
     const usesReferences = imagePlan.shots.some(
       (shot) => shot.referenceBindings.length > 0,
     );
@@ -562,6 +600,7 @@ export class PostPipelineV3Runner {
         imagePlanningHash: artifactHash(concept.imagePlanning),
       },
       producerLogId: result.producerLogId,
+      agentConfig: client.agentSettings?.metadata ?? null,
       contractVersion: PROMPT_SET_CONTRACT_VERSION,
       commonPromptVersion: IMAGE_PROMPT_GENERATOR_VERSION,
       modelPolicy: {
@@ -608,6 +647,17 @@ export class PostPipelineV3Runner {
           prompt: shot.prompt,
           sortOrder: shot.sortOrder,
           paramsJson: {
+            ...(imageAgent?.id
+              ? {
+                  _postAgent: {
+                    promptId: imageAgent.id,
+                    revision: imageAgent.revision,
+                    aiModelId: imageAgent.aiModelId,
+                    provider: imageAgent.provider,
+                    model: imageAgent.effectiveModel,
+                  },
+                }
+              : {}),
             _shot: {
               sortOrder: shot.sortOrder,
               scene: plannedShot.scene,
@@ -738,6 +788,7 @@ export class PostPipelineV3Runner {
         generationSetHash: setHash,
       },
       producerLogId: result.producerLogId,
+      agentConfig: client.agentSettings?.metadata ?? null,
       contractVersion: CAPTION_SET_CONTRACT_VERSION,
       promptVersion: CAPTION_WRITER_PROMPT_VERSION,
       input,
@@ -933,8 +984,10 @@ function imageArtifact(
   concept: V3Concept,
   input: ImagePlannerInput,
   output: unknown,
+  agentConfig?: Record<string, unknown>,
 ) {
   return {
+    agentConfig: agentConfig ?? null,
     revision,
     hash,
     source: {

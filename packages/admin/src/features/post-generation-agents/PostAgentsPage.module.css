@@ -1,0 +1,20 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(0, 3fr);
+  gap: var(--mantine-spacing-lg);
+  align-items: start;
+}
+.stageList,
+.editor {
+  min-width: 0;
+}
+.code {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 62em) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

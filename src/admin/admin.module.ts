@@ -1,3 +1,6 @@
+import { AiModelsModule } from "../domain/ai-models/ai-models.module";
+import { PostAgentPromptsModule } from "../domain/post-agent-prompts/post-agent-prompts.module";
+import { PostGenerationAgentsController } from "./post-generation-agents/post-generation-agents.controller";
 import { Module } from "@nestjs/common";
 import { S3Config } from "../domain/config/app-config";
 import { AppConfigService } from "../domain/config/app-config.service";
@@ -58,6 +61,8 @@ function storageEnv(config: S3Config | undefined) {
   // admin → worker만 허용 (역방향 금지, docs/media-generation-pipeline.md D1).
   imports: [
     DatabaseModule,
+    AiModelsModule,
+    PostAgentPromptsModule,
     AdminAuthModule,
     CharactersModule,
     SettingsModule,
@@ -65,6 +70,7 @@ function storageEnv(config: S3Config | undefined) {
   ],
   controllers: [
     AdminController,
+    PostGenerationAgentsController,
     DraftsController,
     AdminSettingsController,
     FilmFinishController,
