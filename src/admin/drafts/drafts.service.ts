@@ -294,7 +294,8 @@ function generationTrace(
       );
     }
     if (meta.targetModelId && provider) {
-      comparisons.push(provider === `fal:${meta.targetModelId}`);
+      const executedModel = /^(?:fal|openai):(.+)$/.exec(provider)?.[1];
+      comparisons.push(executedModel === meta.targetModelId);
     }
   }
 

@@ -419,6 +419,53 @@ describe("DraftsService", () => {
     });
   });
 
+  it.each([
+    [
+      "openai:gpt-image-2.5-sunburst",
+      "gpt-image-2.5-sunburst",
+      ["ref-a"],
+      true,
+    ],
+    ["fal:vendor/edit-model", "vendor/edit-model", ["ref-a"], true],
+    ["openai:other-model", "gpt-image-2.5-sunburst", ["ref-a"], false],
+    [
+      "openai:gpt-image-2.5-sunburst",
+      "gpt-image-2.5-sunburst",
+      ["ref-b"],
+      false,
+    ],
+    ["openai:gpt-image-2.5-sunburst", "gpt-image-2.5-sunburst", [], false],
+  ])(
+    "compares executed model and references for %s",
+    async (provider, targetModelId, executedReferences, matchesPlan) => {
+      const repository = repositoryFake({
+        findDraft: jest.fn().mockResolvedValue(draftRow),
+        findDraftJobs: jest.fn().mockResolvedValue([
+          {
+            ...selectedJob,
+            provider,
+            paramsJson: {
+              _shot: {
+                referenceMediaIds: ["ref-a"],
+                targetModelId,
+                execution: {
+                  route: executedReferences.length ? "edit" : "t2i",
+                  referenceMediaIds: executedReferences,
+                },
+              },
+            },
+          },
+        ]),
+      });
+
+      await expect(
+        makeService(repository).getDraft("draft-1"),
+      ).resolves.toMatchObject({
+        shots: [{ generationTrace: { matchesPlan } }],
+      });
+    },
+  );
+
   it("creates a manual draft with normalized operator intent", async () => {
     const repository = repositoryFake({
       createDraft: jest.fn().mockResolvedValue({
