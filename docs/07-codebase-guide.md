@@ -34,6 +34,8 @@ PostAgentPromptRepository는 단계 advisory transaction lock과 expectedRevisio
 작성 뒤 설정을 바꾸어도 이미 만든 잡의 모델은 바뀌지 않는다. 호출 로그와 artifact의
 agentConfig가 적용 설정을 기록한다. 기존 metadata 없는 잡은 기존 경로로 처리한다.
 관리 UI owner는 `packages/admin/src/features/post-generation-agents/`다.
+직접 진입/새로고침은 `src/main.ts`의 SPA 허용 경로가 담당한다. 새 관리 화면을
+추가할 때 React route와 서버의 허용 경로를 함께 반영한다.
 기존 Mantine theme/DataPage를 사용하고 단계별 URL, 모델 등록·선택, 지침 편집,
 읽기 전용 출력 규격, 이력 조회·복원·기본값 적용, 입력 임시 보관/전환 보호,
 409에서 최신값 확인 후 입력 유지 재편집을 제공한다.

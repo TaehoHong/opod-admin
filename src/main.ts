@@ -73,7 +73,7 @@ async function bootstrap() {
       next: () => void,
     ) => {
       const adminUiPath =
-        /^\/(?:home|characters|posts|media|drafts|generation|logs|llm-logs|users|credits|payments|moderation|events|analytics|settings)(?:\/[^/]+){0,2}\/?$/;
+        /^\/(?:home|characters|posts|media|drafts|generation|logs|llm-logs|users|credits|payments|moderation|events|analytics|post-generation-agents|settings)(?:\/[^/]+){0,2}\/?$/;
       if (request.method === "GET" && adminUiPath.test(request.path)) {
         response.sendFile(shellEntry);
         return;
