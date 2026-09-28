@@ -126,3 +126,36 @@ describe("settings worker card", () => {
     await waitFor(() => expect(rollout).toBeChecked());
   });
 });
+
+it("shows the configured Sunburst model and keeps the saved image key on save", async () => {
+  const view = {
+    ...settingsView(),
+    imageProvider: "openai" as const,
+    openaiImageModel: "gpt-image-2.5-sunburst",
+    openaiApiKey: { set: true, last4: "1234" },
+  };
+  const saved: unknown[] = [];
+  server.use(
+    ...stubReads(() => view),
+    http.put("/api/admin/v1/settings/generation", async ({ request }) => {
+      saved.push(await request.json());
+      return HttpResponse.json(view);
+    }),
+  );
+  render(
+    <AppProviders>
+      <SettingsPage />
+    </AppProviders>,
+  );
+  expect(
+    await screen.findByRole("combobox", { name: "이미지 모델" }),
+  ).toHaveValue("GPT Image 2.5 Sunburst");
+  expect(screen.queryByLabelText("fal.ai API 키")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "변경사항 저장" }));
+  await waitFor(() => expect(saved).toHaveLength(1));
+  expect(saved[0]).toMatchObject({
+    imageProvider: "openai",
+    openaiImageModel: "gpt-image-2.5-sunburst",
+  });
+  expect(saved[0]).not.toHaveProperty("openaiApiKey");
+});

@@ -240,3 +240,13 @@ it("builds a prompt package from a pre-v2 plan that lacks the new fields", () =>
   expect(sent.imagePlan.shots[0]).not.toHaveProperty("subjectCameraRelation");
   expect(sent.imagePlan.shots[0]).not.toHaveProperty("motionEvidence");
 });
+
+it("accepts Sunburst with ordered identity references in the prompt pipeline", () => {
+  expect(
+    buildPromptPackage({
+      imagePlan,
+      appearance: "same person as the identity reference",
+      targetModelId: "gpt-image-2.5-sunburst",
+    }),
+  ).toMatchObject({ modelPolicy: { usesNegativePrompt: false } });
+});

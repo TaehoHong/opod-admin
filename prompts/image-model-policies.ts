@@ -62,5 +62,20 @@ export const IMAGE_MODEL_POLICIES: Readonly<Record<string, ImageModelPolicy>> =
     "fal-ai/nano-banana/edit": policy("fal-ai/nano-banana/edit", true),
     "fal-ai/nano-banana-pro": policy("fal-ai/nano-banana-pro", false),
     "fal-ai/nano-banana-pro/edit": policy("fal-ai/nano-banana-pro/edit", true),
+    "gpt-image-2.5-sunburst": {
+      id: "gpt-image-natural-language",
+      version: "gpt-image-policy-v1",
+      modelId: "gpt-image-2.5-sunburst",
+      usesNegativePrompt: false,
+      supportsReferences: true,
+      maxReferencesPerShot: 10,
+      referenceSlotPrefix: "Image",
+      instructions: `Active target model: GPT Image 2.5 Sunburst.
+- Use concise natural language describing the intended final image. Preserve supplied facts, counts, framing, visible text, and exclusions; do not add photographic embellishments.
+- Refer to each supplied image by its positional label (Image 1, Image 2). State only its assigned role and what to preserve or avoid copying.
+- Identity references preserve the same person's identity or explicitly requested wardrobe. ImagePlan owns pose, expression, viewpoint, crop, and background; never copy those from an identity reference unless requested.
+- Environment references preserve only their assigned spatial or visual attributes, without importing people or temporary props.
+- Quote exact visible text. Put supplied exclusions concisely in the prompt and return negativePrompt: null.`,
+    },
     [fluxKontextPolicy.modelId]: fluxKontextPolicy,
   };

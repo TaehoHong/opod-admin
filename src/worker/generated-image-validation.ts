@@ -24,6 +24,15 @@ export function requestedImageAspectRatio(
       ? size.width / size.height
       : null;
   }
+  if (params.size !== undefined) {
+    const parts =
+      typeof params.size === "string"
+        ? /^(\d+)x(\d+)$/.exec(params.size)
+        : null;
+    return parts && Number(parts[1]) > 0 && Number(parts[2]) > 0
+      ? Number(parts[1]) / Number(parts[2])
+      : null;
+  }
   if (typeof params.aspect_ratio !== "string") return null;
   const parts = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(params.aspect_ratio);
   if (!parts) return null;

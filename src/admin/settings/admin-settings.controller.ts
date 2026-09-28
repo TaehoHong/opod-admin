@@ -63,6 +63,12 @@ export class AdminSettingsController {
     // 토글은 API에서 boolean, 저장은 문자열이다. 감사 로그도 이 정규화된
     // update를 그대로 봐야 "무엇이 바뀌었는지"가 저장값과 일치한다.
     const update = {
+      ...("openaiApiKey" in body
+        ? { openaiApiKey: body.openaiApiKey ?? null }
+        : {}),
+      ...("openaiImageModel" in body
+        ? { openaiImageModel: body.openaiImageModel ?? null }
+        : {}),
       ...("imageProvider" in body
         ? { imageProvider: body.imageProvider ?? null }
         : {}),
@@ -155,6 +161,11 @@ export class AdminSettingsController {
     const worker = this.config.worker;
     return {
       imageProvider: resolved.provider ?? "fal",
+      openaiApiKey: saved.openaiApiKey
+        ? { set: true, last4: saved.openaiApiKey.slice(-4) }
+        : { set: false },
+      openaiImageModel:
+        resolved.openaiImageModel ?? saved.openaiImageModel ?? null,
       falApiKey: saved.falApiKey
         ? { set: true, last4: saved.falApiKey.slice(-4) }
         : { set: false },

@@ -24,6 +24,8 @@ import {
 // generation.* = 이미지 생성(fal), planner.* = 기획 LLM(OpenAI-compatible).
 export const GENERATION_SETTING_KEYS = {
   imageProvider: "generation.imageProvider",
+  openaiApiKey: "generation.openaiApiKey",
+  openaiImageModel: "generation.openaiImageModel",
   falApiKey: "generation.falApiKey",
   falImageModel: "generation.falImageModel",
   falImageT2iModel: "generation.falImageT2iModel",
@@ -117,7 +119,9 @@ type SettingsEnv = Record<string, string | undefined>;
 // 연결 테스트 — 폼의 미저장 입력을 실효 설정 위에 덮어 검증한다.
 export type ConnectionTestInput = {
   target: "image" | "planner" | "chat" | "embedding";
-  imageProvider?: "fal" | "opod-flux";
+  imageProvider?: "fal" | "opod-flux" | "openai";
+  openaiApiKey?: string;
+  openaiImageModel?: string;
   falApiKey?: string;
   opodFluxApiBaseUrl?: string;
   opodFluxApiKey?: string;
@@ -136,6 +140,8 @@ type TokenLimitParam = "max_tokens" | "max_completion_tokens";
 // env 폴백이 있는 필드만 여기 둔다. 빠진 필드는 DB 전용이다.
 const ENV_KEYS: Partial<Record<GenerationSettingField, string>> = {
   imageProvider: "IMAGE_GENERATION_PROVIDER",
+  openaiApiKey: "OPENAI_IMAGE_API_KEY",
+  openaiImageModel: "OPENAI_IMAGE_MODEL",
   falApiKey: "FAL_API_KEY",
   falImageModel: "FAL_IMAGE_MODEL",
   falImageT2iModel: "FAL_IMAGE_T2I_MODEL",
@@ -227,23 +233,45 @@ export class GenerationSettingsService {
   ): Promise<ResolvedProviderSettings> {
     const db = await this.getSettings();
     const provider = pick(db, env, "imageProvider");
+    const openaiApiKey = pick(db, env, "openaiApiKey");
+    const openaiImageModel = pick(db, env, "openaiImageModel");
     const apiKey = pick(db, env, "falApiKey");
     const editModel = pick(db, env, "falImageModel");
     const t2iModel = pick(db, env, "falImageT2iModel");
     const opodFluxApiBaseUrl = pick(db, env, "opodFluxApiBaseUrl");
     const opodFluxApiKey = pick(db, env, "opodFluxApiKey");
     return {
-      provider: provider.value === "opod-flux" ? "opod-flux" : "fal",
+      provider:
+        provider.value === "openai"
+          ? "openai"
+          : provider.value === "opod-flux"
+            ? "opod-flux"
+            : "fal",
+      ...(provider.value === "openai"
+        ? {
+            openaiApiKey: openaiApiKey.value,
+            openaiImageModel: openaiImageModel.value,
+          }
+        : {}),
       apiKey: apiKey.value,
-      editModel: editModel.value,
-      t2iModel: t2iModel.value,
+      editModel:
+        provider.value === "openai" ? openaiImageModel.value : editModel.value,
+      t2iModel:
+        provider.value === "openai" ? openaiImageModel.value : t2iModel.value,
       opodFluxApiBaseUrl: opodFluxApiBaseUrl.value,
       opodFluxApiKey: opodFluxApiKey.value,
       sources: {
         provider: provider.source,
-        apiKey: apiKey.source,
-        editModel: editModel.source,
-        t2iModel: t2iModel.source,
+        apiKey:
+          provider.value === "openai" ? openaiApiKey.source : apiKey.source,
+        editModel:
+          provider.value === "openai"
+            ? openaiImageModel.source
+            : editModel.source,
+        t2iModel:
+          provider.value === "openai"
+            ? openaiImageModel.source
+            : t2iModel.source,
         opodFluxApiBaseUrl: opodFluxApiBaseUrl.source,
         opodFluxApiKey: opodFluxApiKey.source,
       },
@@ -454,6 +482,33 @@ export class GenerationSettingsService {
       if (input.target === "image") {
         const resolved = await this.resolveProviderSettings(env);
         const provider = input.imageProvider ?? resolved.provider ?? "fal";
+        if (provider === "openai") {
+          const saved = await this.getSettings();
+          const apiKey =
+            input.openaiApiKey?.trim() ||
+            pick(saved, env, "openaiApiKey").value;
+          const model =
+            input.openaiImageModel?.trim() ||
+            pick(saved, env, "openaiImageModel").value;
+          if (!apiKey || model !== "gpt-image-2.5-sunburst")
+            return {
+              ok: false,
+              message: "Sunburst 모델과 OpenAI 이미지 API 키가 필요합니다",
+            };
+          const response = await fetchFn(
+            `https://api.openai.com/v1/models/${model}`,
+            {
+              headers: { authorization: `Bearer ${apiKey}` },
+              signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
+            },
+          );
+          return {
+            ok: response.ok,
+            message: response.ok
+              ? "Sunburst 모델 접근 확인 (이미지 생성 전)"
+              : `OpenAI 모델 접근 실패 (${response.status})`,
+          };
+        }
         if (provider === "opod-flux") {
           const apiBaseUrl =
             input.opodFluxApiBaseUrl?.trim() || resolved.opodFluxApiBaseUrl;
@@ -712,6 +767,7 @@ export function settingsChangeEntries(
   summary: string;
 }[] {
   const SECRET_FIELDS: GenerationSettingField[] = [
+    "openaiApiKey",
     "falApiKey",
     "opodFluxApiKey",
     "llmApiKey",

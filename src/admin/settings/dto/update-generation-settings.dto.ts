@@ -11,8 +11,17 @@ import {
 // @IsOptional은 null도 검증에서 제외하므로 null 삭제 시맨틱과 호환된다.
 export class UpdateGenerationSettingsDto {
   @IsOptional()
-  @IsIn(["fal", "opod-flux"])
-  imageProvider?: "fal" | "opod-flux" | null;
+  @IsIn(["fal", "opod-flux", "openai"])
+  imageProvider?: "fal" | "opod-flux" | "openai" | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  openaiApiKey?: string | null;
+
+  @IsOptional()
+  @IsIn(["gpt-image-2.5-sunburst"])
+  openaiImageModel?: string | null;
 
   @IsOptional()
   @IsString()
