@@ -146,6 +146,38 @@ export class VisualProfileService {
     return this.toVisualProfile(profile);
   }
 
+  async updateReferenceDescription(input: {
+    characterId: string;
+    mediaId: string;
+    description: string;
+  }): Promise<VisualProfile> {
+    await this.assertCharacter(input.characterId);
+    const description = this.parsePrompt(
+      input.description,
+      "Reference description",
+    );
+    if (!description) {
+      throw new BadRequestException("Reference description is required");
+    }
+    const profile = await this.visualProfiles.findProfile(input.characterId);
+    if (
+      !profile?.referenceMedia.some((item) => item.mediaId === input.mediaId)
+    ) {
+      throw new BadRequestException("Character reference not found");
+    }
+    await this.visualProfiles.setReferenceDescription(
+      profile.id,
+      input.mediaId,
+      description,
+    );
+    await this.recordActionLog(
+      input.characterId,
+      "VISUAL_PROFILE_REFERENCE_DESCRIPTION_UPDATED",
+      `reference description updated (${input.mediaId})`,
+    );
+    return this.getProfile(input.characterId);
+  }
+
   // 활성 레퍼런스 세트를 동기화한다. 선택 해제된 관계는 삭제하지 않는다.
   async setReferences(input: {
     characterId: string;

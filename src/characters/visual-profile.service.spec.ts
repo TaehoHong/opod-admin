@@ -52,6 +52,82 @@ const storedProfile = {
 } as unknown as VisualProfileRow;
 
 describe("VisualProfileService", () => {
+  it("updates only the selected character reference description", async () => {
+    const profile = structuredClone(storedProfile);
+    const repository = repositoryFake({
+      findProfile: jest.fn().mockResolvedValue(profile),
+      setReferenceDescription: jest.fn(
+        async (profileId, mediaId, description) => {
+          if (profileId === profile.id) {
+            const reference = profile.referenceMedia.find(
+              (item) => item.mediaId === mediaId,
+            );
+            if (reference) reference.description = description;
+          }
+        },
+      ),
+    });
+    const result = await makeService(repository).updateReferenceDescription({
+      characterId: "ai-1",
+      mediaId: "media-1",
+      description: " face identity reference ",
+    });
+    expect(result.referenceMedia).toEqual([
+      {
+        mediaId: "media-1",
+        url: "https://cdn.local/ref-1.png",
+        sortOrder: 10,
+        isActive: true,
+        description: "face identity reference",
+      },
+      {
+        mediaId: "media-2",
+        url: "https://cdn.local/ref-2.png",
+        sortOrder: 20,
+        isActive: false,
+        description: "side portrait",
+      },
+    ]);
+    expect(result.appearancePrompt).toBe(storedProfile.appearancePrompt);
+    expect(repository.recordActionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        characterId: "ai-1",
+        actionType: "VISUAL_PROFILE_REFERENCE_DESCRIPTION_UPDATED",
+      }),
+    );
+  });
+
+  it("rejects a reference not attached to the character", async () => {
+    const repository = repositoryFake({
+      findProfile: jest.fn().mockResolvedValue(storedProfile),
+    });
+    await expect(
+      makeService(repository).updateReferenceDescription({
+        characterId: "ai-1",
+        mediaId: "another-character-reference",
+        description: "face identity reference",
+      }),
+    ).rejects.toThrow("Character reference not found");
+    expect(repository.setReferenceDescription).not.toHaveBeenCalled();
+  });
+
+  it.each([" ", "a".repeat(4001)])(
+    "rejects an invalid reference description without changing data",
+    async (description) => {
+      const repository = repositoryFake({
+        findProfile: jest.fn().mockResolvedValue(storedProfile),
+      });
+      await expect(
+        makeService(repository).updateReferenceDescription({
+          characterId: "ai-1",
+          mediaId: "media-1",
+          description,
+        }),
+      ).rejects.toThrow();
+      expect(repository.setReferenceDescription).not.toHaveBeenCalled();
+    },
+  );
+
   it("returns an empty default profile before one exists", async () => {
     const service = makeService(repositoryFake());
 
