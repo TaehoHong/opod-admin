@@ -13,6 +13,13 @@
 
 ## Current Module Map
 
+이미지 기획 `prompts/image-planner.ts` v7은 필요한 상태·동작 단서만 작성하고,
+같은 순간의 유사 컷을 허용하며 입력 제약·촬영 구조 밖의 임의 제외를 제한한다.
+공유 요소의 근거 레퍼런스를 관련 컷에 배정하는 것은 기획 Agent의 책임이다.
+출력 계약은 기존 image-plan-v3를 유지하며 실제 생성 품질은 별도 평가 대상이다.
+`DraftsService.generationTrace`는 fal/OpenAI 모델을 접두어와 구분해 비교한다.
+기존 경로·레퍼런스 일치 검사와 함께 `drafts.service.spec.ts`가 회귀를 검증한다.
+
 OpenAI Sunburst 이미지 생성은 `src/worker/openai-image.provider.ts`가 소유하며,
 `image-generation.provider.ts`의 `provider="openai"` 분기에서 연결한다. 로컬 접수
 ID를 반환한 뒤 `poll`에서 Images API의 `generations` 또는 `edits`를 호출하고,
@@ -68,7 +75,7 @@ auto·이전 제출의 snapshot 누락은 비율을 추측하지 않는다. 비�
 
 `src/worker/image-model-policy.ts`의 `buildPromptGenerationInput`은 원본
 package를 보존하면서 LLM 입력의 중복 바인딩·정책·내부 식별자를 제외한다.
-공통 프롬프트 v6은 최소 재작성과 의미 보존 확인을 지시한다. 입력 축약의
+공통 프롬프트 v7은 중복 시각 정보의 통합과 독립 실행 가능한 컷별 묘사를 지시한다. 입력 축약의
 정보 보존·인물 비노출·구버전 호환은 image-model-policy/image-prompt-generator
 spec이 검증하며, 실제 이미지의 자연스러움은 별도 모델 평가 대상이다.
 
