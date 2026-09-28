@@ -13,10 +13,18 @@
 
 ## Current Module Map
 
-이미지 기획 `prompts/image-planner.ts` v7은 필요한 상태·동작 단서만 작성하고,
+이미지 기획 `prompts/image-planner.ts` v8은 필요한 상태·동작 단서만 작성하고,
 같은 순간의 유사 컷을 허용하며 입력 제약·촬영 구조 밖의 임의 제외를 제한한다.
 공유 요소의 근거 레퍼런스를 관련 컷에 배정하는 것은 기획 Agent의 책임이다.
 출력 계약은 기존 image-plan-v3를 유지하며 실제 생성 품질은 별도 평가 대상이다.
+`PostPipelineV3Runner`는 게시물 전용 `imageStyle`을 우선하고, 비어 있으면
+기존 visual profile의 스타일을 선택해 `imagePlanning.input.contentProfile.imageStyle`에
+보존한다. 최종 프롬프트도 이 snapshot을 사용한다. 두 설정 모두 비어 있으면
+스타일을 만들지 않는다. 이전 초안은 저장된 입력의 게시물/기존 스타일을 순서대로
+읽고, 둘 다 저장되어 있지 않을 때만 현재 기존 스타일로 fallback한다.
+`post-pipeline-v3.runner.spec.ts`가 우선순위·빈 값·설정 변경·인물 비노출·이전
+초안 호환을 검증한다. 가시성과 레퍼런스 보존은 특정 촬영 방식·사물의 일괄 금지
+대신 기획된 시점·가림 관계와 선택된 속성을 기준으로 지시한다.
 `DraftsService.generationTrace`는 fal/OpenAI 모델을 접두어와 구분해 비교한다.
 기존 경로·레퍼런스 일치 검사와 함께 `drafts.service.spec.ts`가 회귀를 검증한다.
 
@@ -75,7 +83,7 @@ auto·이전 제출의 snapshot 누락은 비율을 추측하지 않는다. 비�
 
 `src/worker/image-model-policy.ts`의 `buildPromptGenerationInput`은 원본
 package를 보존하면서 LLM 입력의 중복 바인딩·정책·내부 식별자를 제외한다.
-공통 프롬프트 v7은 중복 시각 정보의 통합과 독립 실행 가능한 컷별 묘사를 지시한다. 입력 축약의
+공통 프롬프트 v8은 중복 시각 정보의 통합과 독립 실행 가능한 컷별 묘사를 지시한다. 입력 축약의
 정보 보존·인물 비노출·구버전 호환은 image-model-policy/image-prompt-generator
 spec이 검증하며, 실제 이미지의 자연스러움은 별도 모델 평가 대상이다.
 

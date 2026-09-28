@@ -29,7 +29,6 @@ export type ImagePlannerInput = {
   characterVisualContext: {
     name: string;
     appearance: string;
-    visualStyle: string;
     boundaries: string[];
     capturePreferences: string[];
     personaContext: { title: string; content: string }[];

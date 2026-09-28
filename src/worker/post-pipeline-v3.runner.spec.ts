@@ -1,6 +1,7 @@
 import { EMPTY_CONTENT_PROFILE } from "../domain/character-content-profiles/character-content-profile";
 import { UNION_ENVELOPE_KEY } from "../../prompts/strict-schema";
 import { PostPipelineV3Runner } from "./post-pipeline-v3.runner";
+import { ImagePlanReady } from "./image-planner";
 
 function draft(
   conceptJson: Record<string, unknown>,
@@ -171,6 +172,187 @@ function readyPostPlan() {
 }
 
 describe("PostPipelineV3Runner", () => {
+  it.each([
+    [
+      "publication style wins",
+      " phone photo ",
+      "editorial",
+      "phone photo",
+      "partial",
+    ],
+    ["blank profile falls back", "  ", " film photo ", "film photo", "partial"],
+    ["no style stays unspecified", "", "", null, "partial"],
+    [
+      "no-character photo keeps style",
+      "monochrome",
+      "editorial",
+      "monochrome",
+      "none",
+    ],
+  ] as const)(
+    "%s through planning and prompting even after settings change",
+    async (_label, imageStyle, legacyStyle, expectedStyle, mode) => {
+      const current = captionStageDraft();
+      current.character.visualProfile.stylePrompt = legacyStyle;
+      const imagePlan: ImagePlanReady = {
+        status: "ready",
+        locationId: null,
+        continuity: { lockedElements: [] },
+        shots: [
+          {
+            sortOrder: 0,
+            visualPurpose: "이번 순간의 기록",
+            scene:
+              mode === "none" ? "A table by the window" : "A hand on a table",
+            captureSetup: "Viewed from above",
+            characterPresentation: {
+              mode,
+              visibleParts: mode === "none" ? [] : ["hand"],
+              faceVisible: false,
+              identityPreservationRequired: false,
+            },
+            subjectState: "",
+            motionEvidence: "",
+            notInFrame: [],
+            subjectCameraRelation:
+              mode === "none" ? "not_applicable" : "aware_unposed",
+            referenceBindings: [],
+          },
+        ],
+      };
+      const planning = setup(
+        {
+          ...current,
+          conceptJson: {
+            ...current.conceptJson,
+            pipeline: { stage: "image_plan", state: "running", imageCount: 1 },
+          },
+        },
+        imagePlan,
+        { profile: { ...EMPTY_CONTENT_PROFILE, imageStyle } },
+      );
+      await planning.runner.runCurrentStage("draft-1");
+      expect(planning.repository.requeueOrFailV3).not.toHaveBeenCalled();
+      const planningInput = JSON.parse(
+        JSON.parse(planning.fetchMock.mock.calls[0][1].body).messages[1]
+          .content,
+      );
+      expect(planningInput.contentProfile.imageStyle).toBe(expectedStyle ?? "");
+      expect(planningInput.characterVisualContext.visualStyle).toBeUndefined();
+      const concept =
+        planning.repository.persistV3Artifact.mock.calls[0][0].conceptJson;
+      current.character.visualProfile.stylePrompt = "changed legacy style";
+      const prompting = setup(
+        {
+          ...current,
+          conceptJson: {
+            ...concept,
+            pipeline: { ...concept.pipeline, state: "running" },
+          },
+        },
+        undefined,
+        {
+          profile: {
+            ...EMPTY_CONTENT_PROFILE,
+            imageStyle: "changed publication style",
+          },
+        },
+      );
+      prompting.fetchMock.mockResolvedValue(
+        Response.json({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  shots: [
+                    {
+                      sortOrder: 0,
+                      prompt: "The planned scene.",
+                      negativePrompt: null,
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+      );
+      await prompting.runner.runCurrentStage("draft-1");
+      expect(prompting.repository.requeueOrFailV3).not.toHaveBeenCalled();
+      const promptInput = JSON.parse(
+        JSON.parse(prompting.fetchMock.mock.calls[0][1].body).messages[1]
+          .content,
+      );
+      expect(promptInput.subjectContract.visualStyle).toBe(expectedStyle);
+      if (mode === "none")
+        expect(promptInput.subjectContract.appearance).toBe("");
+      expect(
+        prompting.repository.persistV3PromptJobs.mock.calls[0][0].conceptJson
+          .promptBuild.input.subjectContract.visualStyle,
+      ).toBe(expectedStyle);
+    },
+  );
+
+  it.each([
+    [
+      {
+        contentProfile: { imageStyle: "saved publication" },
+        characterVisualContext: { visualStyle: "saved legacy" },
+      },
+      "saved publication",
+    ],
+    [
+      {
+        contentProfile: { imageStyle: " " },
+        characterVisualContext: { visualStyle: "saved legacy" },
+      },
+      "saved legacy",
+    ],
+    [
+      { characterVisualContext: { visualStyle: "saved legacy" } },
+      "saved legacy",
+    ],
+    [{ characterVisualContext: { visualStyle: "" } }, null],
+    [undefined, "ordinary phone photo"],
+  ])(
+    "uses recorded style in older artifacts, falling back only without a snapshot (%j)",
+    async (input, expectedStyle) => {
+      const current = captionStageDraft();
+      const concept = current.conceptJson as {
+        pipeline: { stage: string };
+        imagePlanning: { input?: unknown };
+      };
+      concept.pipeline.stage = "image_prompt";
+      concept.imagePlanning.input = input;
+      const { runner, repository, fetchMock } = setup(current);
+      fetchMock.mockResolvedValue(
+        Response.json({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  shots: [
+                    {
+                      sortOrder: 0,
+                      prompt: "The planned scene.",
+                      negativePrompt: null,
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+      );
+      await runner.runCurrentStage("draft-1");
+      expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+      const promptInput = JSON.parse(
+        JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+      );
+      expect(promptInput.subjectContract.visualStyle).toBe(expectedStyle);
+    },
+  );
+
   it("carries the selected location exclusions into prompt generation before resolving them", async () => {
     const current = captionStageDraft();
     const plan = {

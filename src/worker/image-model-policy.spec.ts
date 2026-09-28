@@ -120,13 +120,7 @@ describe("image model policy", () => {
         slot: "Image 1",
       }),
     ]);
-    expect(result.modelPolicy.version).toBe("nano-banana-policy-v3");
-    expect(result.modelPolicy.instructions).toContain(
-      "Never copy its pose, crop, background, camera geometry, or composition",
-    );
-    expect(result.modelPolicy.instructions).toContain(
-      "requested identity or wardrobe attributes",
-    );
+    expect(result.modelPolicy.version).toBe("nano-banana-policy-v4");
   });
 
   it("rejects unknown exact model IDs before an Agent call", () => {
@@ -194,7 +188,7 @@ describe("image model policy", () => {
       }),
     ]);
     expect(result.modelPolicy).toMatchObject({
-      version: "flux-kontext-policy-v2",
+      version: "flux-kontext-policy-v3",
       usesNegativePrompt: false,
     });
   });

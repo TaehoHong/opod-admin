@@ -5,6 +5,11 @@ import {
 } from "./image-planner";
 
 const input: ImagePlannerInput = {
+  contentProfile: {
+    accountConcept: "",
+    imageStyle: "ordinary phone photo",
+    constraints: "",
+  },
   postPlan: {
     intent: {
       premise: "카페에서 친구를 기다린다.",
@@ -16,7 +21,6 @@ const input: ImagePlannerInput = {
   characterVisualContext: {
     name: "서린",
     appearance: "black bob hair",
-    visualStyle: "ordinary phone photo",
     boundaries: [],
     capturePreferences: [],
     personaContext: [],

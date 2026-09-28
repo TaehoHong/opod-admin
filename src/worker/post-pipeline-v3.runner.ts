@@ -320,7 +320,10 @@ export class PostPipelineV3Runner {
     const input: ImagePlannerInput = {
       contentProfile: {
         accountConcept: profile.accountConcept,
-        imageStyle: profile.imageStyle,
+        imageStyle:
+          profile.imageStyle.trim() ||
+          draft.character.visualProfile?.stylePrompt.trim() ||
+          "",
         constraints: profile.constraints,
       },
       postPlan: { intent: postPlan.intent },
@@ -328,7 +331,6 @@ export class PostPipelineV3Runner {
       characterVisualContext: {
         name: draft.character.displayName,
         appearance: draft.character.visualProfile?.appearancePrompt ?? "",
-        visualStyle: draft.character.visualProfile?.stylePrompt ?? "",
         boundaries: personaContents(draft, "boundaries"),
         capturePreferences: personaContents(draft, "capture_style"),
         personaContext: draft.character.personas
@@ -522,7 +524,9 @@ export class PostPipelineV3Runner {
         targetModelId,
         imagePlan,
         appearance: draft.character.visualProfile?.appearancePrompt ?? "",
-        visualStyle: draft.character.visualProfile?.stylePrompt,
+        visualStyle:
+          imagePlanningStyle(concept.imagePlanning) ??
+          draft.character.visualProfile?.stylePrompt,
         exclusions: [
           draft.character.visualProfile?.negativePrompt ?? "",
           ...(locationExclusions ?? []),
@@ -901,6 +905,25 @@ function legacyPostPlanColumns(
         ),
       }
     : null;
+}
+
+// 기획에 저장된 입력이 스타일 snapshot이다. 빈 값도 당시의 결정으로 유지한다.
+// 이전 artifact의 두 스타일 필드는 게시물 전용 설정을 우선해 읽는다.
+function imagePlanningStyle(artifact: unknown): string | undefined {
+  if (!isRecord(artifact) || !isRecord(artifact.input)) return undefined;
+  const input = artifact.input;
+  const publication = isRecord(input.contentProfile)
+    ? input.contentProfile.imageStyle
+    : undefined;
+  const legacy = isRecord(input.characterVisualContext)
+    ? input.characterVisualContext.visualStyle
+    : undefined;
+  if (typeof publication !== "string" && typeof legacy !== "string")
+    return undefined;
+  return (
+    (typeof publication === "string" ? publication.trim() : "") ||
+    (typeof legacy === "string" ? legacy.trim() : "")
+  );
 }
 
 function imageArtifact(
