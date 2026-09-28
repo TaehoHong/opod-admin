@@ -51,3 +51,36 @@ Sunburst 표시와 저장 시 기존 키 유지를 확인한다. 실제 캐릭�
 - [Sunburst 모델](https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst)
 - [이미지 편집 API](https://developers.openai.com/api/reference/resources/images/methods/edit)
 - [이미지 생성 가이드](https://developers.openai.com/api/docs/guides/image-generation)
+
+## 개발서버 적용 결과 (2026-09-28)
+
+- 기능 커밋: `7793ae1` (`main` 푸시 완료).
+- 개발 배포: `eb3131df318323f2fc72d1376046cee6033b9565`,
+  `codex/dev-sunburst-image-api`, `opod-admin:release-eb3131d`.
+- 콘텐츠 프로필 이전이 완료되지 않아 직전 개발 배포 `a6debd9`에 이번 연동만
+  적용했다. 기존 이미지 검증·캡션 개선·수동 게시 확인 팝업을 유지한다.
+- 실행 설정을 다시 조회해 `provider=openai`, t2i/edit 모두
+  `openai:gpt-image-2.5-sunburst`, 이미지 키 출처 `db`를 확인했다.
+- 기존 공식 OpenAI 기획 키를 서버 내부에서 이미지 전용 설정으로 복사했다.
+  키 값을 로컬·도구 출력으로 가져오지 않았으며 채팅 키는 사용하지 않았다.
+- 설정 변경은 기존 Settings Domain Service를 사용했다. 이 서버 내부 작업은
+  관리 HTTP endpoint를 통하지 않았으므로 UI의 설정 감사 이력에는 남지 않는다.
+- main 검증: 단위 502개·UI 73개·E2E 36개, lint·format·build 통과.
+- 실제 개발 배포 소스 검증: 단위 506개·UI 72개·E2E 33개,
+  lint·format·build와 Linux/amd64 Docker 빌드 통과.
+- 실제 Sunburst `/images/edits` 호출 1회 성공. 서버에서 만든 단색 PNG만
+  레퍼런스로 사용했고 캐릭터 데이터는 보내지 않았다. 출력 1024×1280 PNG의
+  전체 디코딩·4:5 비율 검증 통과. 응답 사용량 기준 비용은 `$0.007443`.
+  테스트 결과는 게시물이나 캐릭터 미디어로 등록하지 않았다.
+- 외부 상태 API·DB 연결과 Sunburst 설정 화면의 정적 자산 확인 완료.
+  앱·초안 워커·이미지 워커 기동 정상, 컨테이너 재시작 횟수 0.
+- desktop/mobile 합성 설정 화면을 검증했다. 독립 UI 검토에서 키의 env 출처
+  표시 1건을 수정한 뒤 해당 수정 범위의 ship 판정을 받았다.
+
+복구 시 먼저 Settings Domain Service 또는 설정 화면에서 이미지 공급자를
+`opod-flux`로 되돌린다. 이전 fal 논리 모델 ID와 opod-flux 연결 설정은 보존돼 있다.
+이전 이미지 태그는 `opod-admin:before-sunburst-20260928`이며, 필요하면 이를
+`opod-admin:latest`로 지정하고 서버 `/home/taeho/opod-admin`에서
+`docker compose up -d --no-build --no-deps admin`을 실행한다.
+이미지 공급자를 되돌리기 전에 구버전 이미지만 재시작하면 `openai`를 인식하지
+못하므로 이 순서를 지킨다. DDL은 없다.
