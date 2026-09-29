@@ -1,5 +1,5 @@
 import { IsString, MaxLength } from "class-validator";
-import { CharacterContentProfile } from "../../domain/character-content-profiles/character-content-profile";
+import { CharacterContentProfile } from "../../character-content-profiles/character-content-profile";
 
 export class PutCharacterContentProfileDto implements CharacterContentProfile {
   @IsString()

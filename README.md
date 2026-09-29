@@ -4,9 +4,14 @@ Admin backend and admin UI for OPOD.
 
 ## Structure
 
-- `src/admin`: `/api/*` NestJS API
-- `src/domain/database`: canonical Drizzle schema and database adapter
-- `packages/admin`: dependency-free admin UI and proxy server
+- `src/<feature>/`: admin controllers, services, repositories, DTOs and unit tests
+- `src/administration/`: general admin API and HTTP module wiring
+- `src/generation/`: image generation jobs, workers and provider adapters
+- `src/drafts/`: draft API and draft workers
+- `src/post-production/`: post planning pipeline and runtime module wiring
+- `src/core/`: configuration and database infrastructure; schema mirrors the backend
+- `src/shared/`: filters, middleware and pure utilities
+- `packages/admin/`: React admin UI (already organized by feature)
 - `drizzle.config.ts`: Drizzle Kit configuration
 - `test`: admin-only tests
 

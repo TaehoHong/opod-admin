@@ -1,6 +1,6 @@
 // 이미지 프롬프트 빌더 LLM 프롬프트 — 한국어 컷 기획을 이미지 모델용 영어
 // 프롬프트로 변환한다. fetch·파싱·오케스트레이션은
-// src/worker/image-prompt-builder.ts에 있다.
+// src/post-production/image-prompt-builder.ts에 있다.
 
 export type ImagePromptBuilderPromptInput = {
   appearancePrompt: string;

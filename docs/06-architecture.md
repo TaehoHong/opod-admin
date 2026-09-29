@@ -21,6 +21,15 @@
   production migration
 - admin은 공유 DB를 직접 조회·변경하지만 schema owner는 아니다.
 
+## Backend Folder Structure
+
+기능별 `src/<feature>/`에 HTTP·서비스·Repository·DTO·단위 테스트를 모은다.
+`core/config/`와 `core/database/`는 설정과 DB 인프라, `shared/`는 공통
+filter·middleware·순수 헬퍼를 둔다. 기존 provider 등록과 export 경계는 유지한다.
+`administration/admin.module.ts`가 HTTP 기능을 연결하고,
+`post-production/post-production.module.ts`가 생성·초안 워커와 파이프라인을 연결한다.
+도메인 모듈은 HTTP 모듈에 역의존하지 않는다.
+
 ## Target Backend Module Shape
 
 entity 단위 Nest module 안에 필요한 요소를 함께 둔다.

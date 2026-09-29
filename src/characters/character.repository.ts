@@ -8,7 +8,7 @@ import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import {
   type DatabaseClient,
   DatabaseService,
-} from "../domain/database/database.service";
+} from "../core/database/database.service";
 import {
   characterActionLogs,
   characterMemories,
@@ -20,9 +20,9 @@ import {
   postReactions,
   posts,
   userCharacterFollows,
-} from "../domain/database/schema";
-import { lockCharacterSocial } from "../domain/database/character-social-lock";
-import { DatabaseTransactionContext } from "../domain/database/database-transaction-context";
+} from "../core/database/schema";
+import { lockCharacterSocial } from "../core/database/character-social-lock";
+import { DatabaseTransactionContext } from "../core/database/database-transaction-context";
 
 const characterFields = {
   id: characters.id,

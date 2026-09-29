@@ -13,9 +13,16 @@
 
 ## Current Module Map
 
-게시물 Agent 설정은 `src/domain/ai-models/`와 `src/domain/post-agent-prompts/`가
+백엔드는 `src/<feature>/`에 컨트롤러·서비스·Repository·DTO·unit spec을 모은다.
+`core/`에는 설정과 DB 인프라, `shared/`에는 filter·middleware·순수 헬퍼를 둔다.
+생성 실행은 `generation/`, 초안 워커는 `drafts/`, 기획 파이프라인은
+`post-production/`에 있다. HTTP wiring은 `administration/admin.module.ts`,
+런타임 wiring은 `post-production/post-production.module.ts`가 기존 DI 경계를 유지한다.
+단위 테스트는 구현 옆, E2E는 `test/`에 둔다.
+
+게시물 Agent 설정은 `src/ai-models/`와 `src/post-agent-prompts/`가
 각각 모델 목록과 단계별 지침 이력을 소유한다. 각 Service만 자기 Repository를
-주입하고, `PostGenerationAgentsController` / `WorkerModule`이 두 Service와
+주입하고, `PostGenerationAgentsController` / `PostProductionModule`이 두 Service와
 `GenerationSettingsService`를 조합한다. 정본 DDL은 backend의
 `drizzle/20260928080853_post_agent_prompts/migration.sql`, Admin schema는 mirror다.
 `ai_models`의 type ENUM / provider TEXT / model과 `post_agent_prompts`의 필수
@@ -62,7 +69,7 @@ agentConfig가 적용 설정을 기록한다. 기존 metadata 없는 잡은 기�
 `DraftsService.generationTrace`는 fal/OpenAI 모델을 접두어와 구분해 비교한다.
 기존 경로·레퍼런스 일치 검사와 함께 `drafts.service.spec.ts`가 회귀를 검증한다.
 
-OpenAI Sunburst 이미지 생성은 `src/worker/openai-image.provider.ts`가 소유하며,
+OpenAI Sunburst 이미지 생성은 `src/generation/providers/openai-image.provider.ts`가 소유하며,
 `image-generation.provider.ts`의 `provider="openai"` 분기에서 연결한다. 로컬 접수
 ID를 반환한 뒤 `poll`에서 Images API의 `generations` 또는 `edits`를 호출하고,
 재시작으로 접수 상태가 유실되면 자동 재생성 없이 실패한다. `GenerationSettingsService`는
@@ -86,7 +93,7 @@ OpenAI 공급자·Sunburst 모델 선택을 연결한다. 키는 설정 여부·
 자동 예약 게시 경로는 바꾸지 않는다. `PostWorkPage.test.tsx`가 확인 전 요청 없음,
 사진 순서·누락 차단, 중복 요청 방지, 실패 후 재시도 가능 상태와 확대 사진 Escape 동작을 검증한다.
 
-캡션 작성 owner는 `prompts/caption-writer.ts`와 `src/worker/caption-writer.ts`다.
+캡션 작성 owner는 `prompts/caption-writer.ts`와 `src/post-production/caption-writer.ts`다.
 스킬 작업 피드백에서 가져온 작성 원칙과 품질 비교 기준은
 [캡션 작성 원칙](caption-writing.md)에 있다. `caption-writer-v3`는 설명·슬로건·
 의무적인 감상/질문과 과거 문장의 틀 재사용을 줄이되 캐릭터별 말투를 유지한다.
@@ -115,7 +122,7 @@ auto·이전 제출의 snapshot 누락은 비율을 추측하지 않는다. 비�
 `GenerationWorkerService`가 담당한다. 관련 runner/worker spec이 신규·이전
 초안의 전달 계약을 검증한다.
 
-`src/worker/image-model-policy.ts`의 `buildPromptGenerationInput`은 원본
+`src/post-production/image-model-policy.ts`의 `buildPromptGenerationInput`은 원본
 package를 보존하면서 LLM 입력의 중복 바인딩·정책·내부 식별자를 제외한다.
 공통 프롬프트 v9는 입력 항목의 나열 대신 시각적 의미와 필수 조건을 보존하며,
 레퍼런스 역할에 포함되는 중복 정보는 통합한다. 두 Agent는 이미지 픽셀이 아닌
@@ -126,22 +133,22 @@ spec이 검증하며, 실제 이미지의 자연스러움은 별도 모델 평�
 
 | 영역           | 현재 경로                                                                                                                          | 현재 책임                                                                       | 주요 진입점                                                                                  | 테스트·증거                                                 |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Bootstrap/HTTP | `src/main.ts`, `src/app.module.ts`, `src/common/`                                                                                  | Nest 시작, static UI, validation, exception, HTTP log                           | `bootstrap`, `AppModule`                                                                     | `src/main.ts`, `src/app.module.ts`, `src/common/`           |
-| Admin auth     | `src/admin/auth/`                                                                                                                  | login, admin 생성, cookie 세션, CSRF/JWT guard                                  | `AdminAuthController`, `AdminAuthService`, `AdminJwtGuard`                                   | `src/admin/auth/*.spec.ts`, `test/admin-auth.e2e-spec.ts`   |
-| General admin  | `src/admin/admin.controller.ts`, `src/admin/admin.service.ts`, `src/admin/admin-*.repository.ts`, `src/admin/dto/`                 | user/content/credit/payment/report/analytics                                    | `AdminController`, `AdminService`                                                            | colocated specs, `test/admin-analytics.e2e-spec.ts`         |
-| Drafts         | `src/admin/drafts/`                                                                                                                | draft CRUD, planning, generation, approval, publish, 수동 memory candidate 선택 | `DraftsController`, `DraftsService`                                                          | `drafts.service.spec.ts`, generation E2E                    |
-| Post workspace | `src/admin/post-workspace/`                                                                                                        | draft/Post 통합 운영 큐, legacy/V3 단계와 paused next-action read model         | `PostWorkspaceController`, `PostWorkspaceService`                                            | `post-workspace.service.spec.ts`                            |
-| Generation     | `src/admin/generation/`, `src/worker/`, `prompts/post-planner.ts`, `prompts/image-planner.ts`, `prompts/image-prompt-generator.ts` | job/provider/lease/publish와 V3 생성 Agent 오케스트레이션                       | `GenerationService`, `GenerationWorkerService`, `DraftWorkerService`, `PostPipelineV3Runner` | colocated specs, `test/generation.e2e-spec.ts`              |
-| Evaluations    | `src/admin/evaluations/`, `src/worker/evaluation*`, `src/worker/v3-evaluators.ts`, `prompts/v3-evaluators.ts`                      | legacy 3종과 V3 4종의 비차단 평가·이력                                          | `EvaluationWorkerService`, `EvaluationsService`                                              | evaluator/worker/evaluations specs                          |
+| Bootstrap/HTTP | `src/main.ts`, `src/app.module.ts`, `src/shared/`                                                                                  | Nest 시작, static UI, validation, exception, HTTP log                           | `bootstrap`, `AppModule`                                                                     | `src/main.ts`, `src/app.module.ts`, `src/shared/`           |
+| Admin auth     | `src/auth/`                                                                                                                  | login, admin 생성, cookie 세션, CSRF/JWT guard                                  | `AdminAuthController`, `AdminAuthService`, `AdminJwtGuard`                                   | `src/auth/*.spec.ts`, `test/admin-auth.e2e-spec.ts`   |
+| General admin  | `src/administration/admin.controller.ts`, `src/administration/admin.service.ts`, `src/administration/admin-*.repository.ts`, `src/administration/dto/`                 | user/content/credit/payment/report/analytics                                    | `AdminController`, `AdminService`                                                            | colocated specs, `test/admin-analytics.e2e-spec.ts`         |
+| Drafts         | `src/drafts/`                                                                                                                | draft CRUD, planning, generation, approval, publish, 수동 memory candidate 선택 | `DraftsController`, `DraftsService`                                                          | `drafts.service.spec.ts`, generation E2E                    |
+| Post workspace | `src/post-workspace/`                                                                                                        | draft/Post 통합 운영 큐, legacy/V3 단계와 paused next-action read model         | `PostWorkspaceController`, `PostWorkspaceService`                                            | `post-workspace.service.spec.ts`                            |
+| Generation     | `src/generation/`, `src/post-production/`, `prompts/post-planner.ts`, `prompts/image-planner.ts`, `prompts/image-prompt-generator.ts` | job/provider/lease/publish와 V3 생성 Agent 오케스트레이션                       | `GenerationService`, `GenerationWorkerService`, `DraftWorkerService`, `PostPipelineV3Runner` | colocated specs, `test/generation.e2e-spec.ts`              |
+| Evaluations    | `src/administration/evaluations/`, `src/post-production/evaluation*`, `src/post-production/v3-evaluators.ts`, `prompts/v3-evaluators.ts`                      | legacy 3종과 V3 4종의 비차단 평가·이력                                          | `EvaluationWorkerService`, `EvaluationsService`                                              | evaluator/worker/evaluations specs                          |
 | Characters     | `src/characters/`                                                                                                                  | character/persona/memory/profile image/posting policy/visual profile            | `CharactersController`, feature services와 repositories                                      | colocated specs, `test/character-profile-image.e2e-spec.ts` |
-| Locations      | `src/admin/locations/`                                                                                                             | global/character location CRUD, filtering, ordered references                   | `LocationsController`, `LocationsService`, `LocationsRepository`                             | `locations.service.spec.ts`, `test/locations.e2e-spec.ts`   |
-| Media          | `src/admin/media/`, `src/worker/generated-media-store.ts`, `src/worker/film-finish.ts`                                             | upload, signing, generated media persistence                                    | `MediaService`, store factories                                                              | media/film specs                                            |
-| Settings       | `src/admin/settings/`, `src/domain/settings/`                                                                                      | provider 설정과 audit                                                           | `GenerationSettingsService`                                                                  | settings specs, `docs/api/admin-settings.md`                |
-| LLM logs       | `src/admin/llm-logs/`, `src/domain/llm-logs/`                                                                                      | LLM 실행 기록·조회와 토큰 사용량 집계                                           | `LlmLogService`, `LlmLogsController`, `TokenUsageService`                                    | LLM log specs, `token-usage.service.spec.ts`                |
-| Prompt code    | `prompts/`, `src/worker/*prompt*`                                                                                                  | pure prompt 구성과 worker orchestration                                         | exported builders                                                                            | prompt/worker specs                                         |
-| Config         | `src/domain/config/`                                                                                                               | 부팅 설정 로드·검증과 typed 주입                                                | `AppConfigService`, `loadAppConfig`, `ConfigModule`                                          | `admin-auth.service.spec.ts`가 주입 경로 사용               |
+| Locations      | `src/locations/`                                                                                                             | global/character location CRUD, filtering, ordered references                   | `LocationsController`, `LocationsService`, `LocationsRepository`                             | `locations.service.spec.ts`, `test/locations.e2e-spec.ts`   |
+| Media          | `src/media/`, `src/media/generated-media-store.ts`, `src/media/film-finish.ts`                                             | upload, signing, generated media persistence                                    | `MediaService`, store factories                                                              | media/film specs                                            |
+| Settings       | `src/settings/`                                                                                      | provider 설정과 audit                                                           | `GenerationSettingsService`                                                                  | settings specs, `docs/api/admin-settings.md`                |
+| LLM logs       | `src/llm-logs/`                                                                                      | LLM 실행 기록·조회와 토큰 사용량 집계                                           | `LlmLogService`, `LlmLogsController`, `TokenUsageService`                                    | LLM log specs, `token-usage.service.spec.ts`                |
+| Prompt code    | `prompts/`, `src/post-production/*prompt*`                                                                                                  | pure prompt 구성과 worker orchestration                                         | exported builders                                                                            | prompt/worker specs                                         |
+| Config         | `src/core/config/`                                                                                                               | 부팅 설정 로드·검증과 typed 주입                                                | `AppConfigService`, `loadAppConfig`, `ConfigModule`                                          | `admin-auth.service.spec.ts`가 주입 경로 사용               |
 | Health         | `src/health/`                                                                                                                      | 인증 없는 liveness/readiness와 DB 도달성 확인                                   | `HealthController`, `HealthService`, `HealthRepository`                                      | `health.controller.spec.ts`                                 |
-| Drizzle/schema | `src/domain/database/`, `drizzle.config.ts`, `scripts/check-schema-sync.mjs`                                                       | canonical `schema.ts`와 admin mirror                                            | `DatabaseModule`, `DatabaseService`                                                          | schema check, E2E setup                                     |
+| Drizzle/schema | `src/core/database/`, `drizzle.config.ts`, `scripts/check-schema-sync.mjs`                                                       | canonical `schema.ts`와 admin mirror                                            | `DatabaseModule`, `DatabaseService`                                                          | schema check, E2E setup                                     |
 | Admin UI       | `packages/admin/src/`, `packages/admin/index.html`                                                                                 | React admin과 `/api/admin/v1/*` 호출                                            | `main.tsx`, `app/`, `features/`                                                              | `src/**/*.test.tsx`, `npm run admin:check`                  |
 | E2E            | `test/`                                                                                                                            | Testcontainers PostgreSQL와 API contract                                        | Jest global setup                                                                            | `test/jest-e2e.json`, `test/e2e-global-setup.ts`            |
 
@@ -151,14 +158,14 @@ spec이 검증하며, 실제 이미지의 자연스러움은 별도 모델 평�
 | ------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
 | Drizzle connection        | `DatabaseModule`, `DatabaseService`                                       | migration 소유권 없음                                                                                                                                                                                                                                                                                                                                                                | admin, characters, worker                             |
 | Admin auth                | `AdminJwtGuard`, `AdminCsrfGuard`, `AdminAuthService`                     | `__Host-` cookie 세션, 상태 변경 시 고정 헤더                                                                                                                                                                                                                                                                                                                                        | protected controllers/UI                              |
-| Pagination                | `src/domain/database/page.ts`                                             | active filter 안에서 cursor 검증                                                                                                                                                                                                                                                                                                                                                     | list endpoints                                        |
+| Pagination                | `src/shared/utils/page.ts`                                             | active filter 안에서 cursor 검증                                                                                                                                                                                                                                                                                                                                                     | list endpoints                                        |
 | Provider settings         | `GenerationSettingsService`                                               | secret response masking                                                                                                                                                                                                                                                                                                                                                              | worker, settings, generation                          |
 | LLM logging               | `LlmLogService`                                                           | 현재 구현과 목표 4-table 구조 구분                                                                                                                                                                                                                                                                                                                                                   | planners/providers/admin                              |
 | Image provider resolution | `resolveImageGenerationProviders`                                         | `GenerationSettingsService`의 명시적 `fal`/`opod-flux` 선택을 현재 잡마다 해석. opod-flux는 v1 named profile·idempotency·POST SSE 계약을 사용하고, `accepted` 이후 stream 단절·재시작만 status polling으로 복구. API key가 있을 때만 Bearer 전송. 진행 이벤트는 `GenerationJobRepository.recordProviderProgress`가 `paramsJson._providerProgress`에 저장하고 생성 상세 API/UI가 읽음 | generation worker, `docs/opod-flux-v1-integration.md` |
 | Generated media storage   | `createGeneratedMediaStore`, `createReferenceUrlSigner`                   | provider 임시 결과를 owned storage에 보존. opod-flux SSE image base64 또는 복구 polling의 same-origin output을 SHA-256 확인한 뒤 저장                                                                                                                                                                                                                                                | worker, draft publish                                 |
 | Prompt construction       | exports under `prompts/`                                                  | pure construction; network/DB 없음                                                                                                                                                                                                                                                                                                                                                   | planner, prompt builder                               |
 | V3 post pipeline          | `PostPipelineV3Runner` + `DraftWorkerRepository`                          | 신규 draft version pin; stage별 attempt reset와 failed 수동 복구, 구조화 `pipeline.failure`, PostPlan → ImagePlan → PromptSet artifact revision/hash/CAS. 게시에는 15분 lease/CAS·오류 backoff, scheduler에는 캐릭터 advisory lock을 적용. ③은 최근 ready ImagePlan을 반복 ledger로 사용                                                                                             | V3 runner/agent/repository specs                      |
-| V3 model policy           | `src/worker/image-model-policy.ts`                                        | exact model ID의 capability, 모델별 reference slot 표기/order와 prompt 문법만 소유; scene 의미나 generation parameter를 만들지 않음. Nano는 `Image N`, FLUX.1 Kontext-dev는 `Reference image N`을 쓰며 identity/person과 environment 계약을 각각 적용. identity reference는 정체성 또는 요청된 의상 속성만 보존하고 pose/crop/background/camera geometry는 ImagePlan이 소유          | prompt Agent, generation worker                       |
+| V3 model policy           | `src/post-production/image-model-policy.ts`                                        | exact model ID의 capability, 모델별 reference slot 표기/order와 prompt 문법만 소유; scene 의미나 generation parameter를 만들지 않음. Nano는 `Image N`, FLUX.1 Kontext-dev는 `Reference image N`을 쓰며 identity/person과 environment 계약을 각각 적용. identity reference는 정체성 또는 요청된 의상 속성만 보존하고 pose/crop/background/camera geometry는 ImagePlan이 소유          | prompt Agent, generation worker                       |
 | Shot generation contract  | `ContentPlanShot`, `paramsJson._shot`                                     | `scene`과 `captureSetup` 분리, 인물 노출 샷은 업로드 완료 identity reference 필수. 장소는 게시물당 하나를 선택하며 environment reference는 별도 선별하고 인물 비노출 샷에도 사용 가능. provider 제출 사실은 `_shot.execution`에 기록하며 기획·실행 불일치는 검수 경고일 뿐 승인을 차단하지 않음                                                                                      | planner, draft/generation worker, retry/regeneration  |
 | Runtime config            | `AppConfigService` (`ConfigModule`은 `@Global`)                           | database/auth/TLS/S3/worker의 부팅 고정값 소유. DB 우선 provider 설정과 워커 자동 루프 on/off는 `GenerationSettingsService`가 유지                                                                                                                                                                                                                                                   | `app-config.spec.ts`, module factories                |
 | Worker 자동 루프 on/off   | `GenerationSettingsService.resolveWorkerToggles`                          | `admin_settings`의 `worker.enabled`(생성+draft), `evaluator.workerEnabled`(평가). 워커가 tick마다 재해석하므로 재시작 불필요. env는 DB 미설정 시 초기 기본값. 수동 실행 경로는 게이트하지 않는다                                                                                                                                                                                     | 세 워커 spec의 "loop switched off" 케이스             |
@@ -174,12 +181,12 @@ spec이 검증하며, 실제 이미지의 자연스러움은 별도 모델 평�
 
 | 관심사                              | example                       | 이유                                                                                              | 증거                                                                |
 | ----------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Nest feature co-location            | character와 draft feature     | controller/service/DTO/spec가 기능 경계에 함께 있음                                               | `src/characters/`, `src/admin/drafts/`                              |
-| DTO validation                      | draft DTO                     | HTTP input decorator와 validation 사용                                                            | `src/admin/drafts/dto/`                                             |
-| Observable behavior tests           | draft/generation worker specs | 상태 전이와 결과를 보호                                                                           | `src/admin/drafts/drafts.service.spec.ts`, `src/worker/*.spec.ts`   |
+| Nest feature co-location            | character와 draft feature     | controller/service/DTO/spec가 기능 경계에 함께 있음                                               | `src/characters/`, `src/drafts/`                              |
+| DTO validation                      | draft DTO                     | HTTP input decorator와 validation 사용                                                            | `src/drafts/dto/`                                             |
+| Observable behavior tests           | draft/generation worker specs | 상태 전이와 결과를 보호                                                                           | `src/drafts/drafts.service.spec.ts`, `src/post-production/*.spec.ts`   |
 | Cross-module DB contract            | auth/generation E2E           | 실제 PostgreSQL과 API 경계 검증                                                                   | `test/admin-auth.e2e-spec.ts`, `test/generation.e2e-spec.ts`        |
 | Pure prompt logic                   | prompt builders               | network/persistence 없이 deterministic 구성                                                       | `prompts/`, 관련 specs                                              |
-| 기존 DB 접근 분리 사례 | health, characters, admin | DB 접근 분리의 현황 참고용. Application Service → Repository 직접 의존은 새 절대 규칙의 미준수 대상 | `src/health/`, `src/characters/`, `src/admin/admin-*.repository.ts` |
+| 기존 DB 접근 분리 사례 | health, characters, admin | DB 접근 분리의 현황 참고용. Application Service → Repository 직접 의존은 새 절대 규칙의 미준수 대상 | `src/health/`, `src/characters/`, `src/administration/admin-*.repository.ts` |
 
 health·character profile image 등은 기존 DB 접근 분리의 현황을 확인하는 사례다.
 기존의 Application Service → Repository 직접 의존이나 여러 테이블을 묶은 Repository는
@@ -342,9 +349,9 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   정책 변경과 미완료 작업 취소를 하나의 트랜잭션에서 처리한다.
 - `CharacterService.withActivityTransaction` → `CharacterRepository`가
   `character_social:<UUID>` advisory lock과 트랜잭션을 시작한다.
-  `src/domain/database/database-transaction-context.ts`는 같은 비동기 흐름의
+  `src/core/database/database-transaction-context.ts`는 같은 비동기 흐름의
   Repository에 트랜잭션을 전달한다. DB client는 Service로 전달하지 않는다.
-- 수동 반응은 `src/admin/post-reaction.service.ts`의 `PostReactionService`가
+- 수동 반응은 `src/administration/post-reaction.service.ts`의 `PostReactionService`가
   `PostReactionRepository`를 소유한다. 같은 캐릭터 잠금 안에서 멱등 반응을 저장하고,
   새 반응일 때만 `src/characters/character-action-log.service.ts`의
   `CharacterActionLogService`를 통해 로그를 기록한다. 로그 Repository는 이 Service만 사용한다.
@@ -374,7 +381,7 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
 
 - `DraftWorkerRepository.hydratePlannedCharacter`가 V3/V4용 활성 persona source와 조각,
   같은 캐릭터의 활성 Canon 및 연결을 읽는다. Canon은 최근 20개로 먼저 자르지 않는다.
-  `src/worker/post-persona-context.ts`는 DB 접근 없이 prompt에 보낼 조각과 기억을 선별한다.
+  `src/post-production/post-persona-context.ts`는 DB 접근 없이 prompt에 보낼 조각과 기억을 선별한다.
   `PostPipelineV3Runner`가 alias 해석·LLM 로그·artifact 저장 전에 이를 적용한다.
 - v2는 제목 대신 kind로 역할을 해석하고 sourceId/fragmentId/schemaVersion/injection/recallKeys를
   유지한다. `creator_note`, `greeting`, `never_prompt`, `start_only`는 게시 입력에 넣지 않는다.
@@ -388,8 +395,8 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
 - v1/v2 모두 bio 또는 캐릭터 역할 문맥이 있으면 옛 content_style/voice 제목 없이 기획할 수 있다.
   boundary 역할은 이미지 기획·캡션의 제약으로 연결한다. example은 비사실 해석 규칙이 있는
   게시 기획에만 전달한다. `post-planner-v3`는 입력 의미만 갱신하며 출력은 `post-plan-v2`를 유지한다.
-- 회귀 위치: `src/worker/post-persona-context.spec.ts`,
-  `src/worker/post-pipeline-v3.runner.spec.ts`, `test/post-planning-context.e2e-spec.ts`.
+- 회귀 위치: `src/post-production/post-persona-context.spec.ts`,
+  `src/post-production/post-pipeline-v3.runner.spec.ts`, `test/post-planning-context.e2e-spec.ts`.
   DB E2E는 최근 21개에 가려진 관련 Canon, 삭제·다른 캐릭터 연결 제외, 비공개 원문 제외를 검증한다.
   실제 모델의 자연스러움이나 자동 채택·재기획 품질을 검증한 결과는 아니다.
 - 검증: `npm run lint`, `npm run build`, 변경 TS 파일의 Prettier check 통과.
@@ -413,8 +420,8 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   기존 v1/v2 artifact의 후속 이미지·캡션 실행은 기존 intent를 계속 읽는다.
 - v1 입력 필수조건과 v2 최소 문맥 조건은 유지한다. v2에 명시적 컨셉이 없으면
   임의의 컨셉을 만들지 않고 그 부재를 accountFit에 기록하도록 지시한다.
-- 회귀 owner: `src/worker/post-pipeline-v3.runner.spec.ts`의 v1/v2·두 제목별 전달과
-  제외 조각·artifact 저장 테스트, `src/worker/post-planner.spec.ts`의 새 설명 필수 계약.
+- 회귀 owner: `src/post-production/post-pipeline-v3.runner.spec.ts`의 v1/v2·두 제목별 전달과
+  제외 조각·artifact 저장 테스트, `src/post-production/post-planner.spec.ts`의 새 설명 필수 계약.
   실제 모델의 일상 허용·컨셉 유지 품질은 별도 평가가 필요하다.
 - 검증: 관련 3 suites/30 tests, 전체 50 suites/469 tests, lint와 build 통과.
   전체 테스트는 샌드박스의 HTTP listen 제한으로 한 번 실패한 뒤 포트 사용이 가능한
@@ -477,7 +484,7 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   캡션 스타일·제작 제한이며 채팅에서는 사용하지 않는다. 소재 허용 목록이나 고정 비율은 만들지 않는다.
 - backend 정본 `character_content_profiles`는 character_id PK/FK인 추가형 테이블이다.
   migration은 `20260927073129_character_content_profiles`이고 admin schema는 정본 미러다.
-- `src/domain/character-content-profiles/`의 CharacterContentProfileService가 Repository의
+- `src/character-content-profiles/`의 CharacterContentProfileService가 Repository의
   유일한 호출자다. CharactersController는 CharacterService의 캐릭터 확인/트랜잭션과
   CharacterActionLogService를 조합해 GET/PUT `/api/admin/v1/characters/:id/content-profile`을 제공한다.
   worker는 HTTP 모듈 대신 CharacterContentProfilesModule을 통해 이 Service를 사용한다.
@@ -501,7 +508,7 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
 - 프롬프트는 post-planner-v5 / image-planner-v6 / caption-writer-v2.
   출력 구조와 이전 artifact 읽기 호환성을 유지하고 새 기획 conflict 출처를 parser에 추가했다.
 - 검증 위치: `test/character-content-profile.e2e-spec.ts`(인증·저장·격리·초기화·FK·기존 persona 보존),
-  `src/worker/post-pipeline-v3.runner.spec.ts`(단계별 실제 LLM 입력),
+  `src/post-production/post-pipeline-v3.runner.spec.ts`(단계별 실제 LLM 입력),
   `CharacterContentProfilePanel.test.tsx`(저장 실패 후 입력 보존), agent의
   `postgres-persona-store.test.ts`(실제 DB→채팅 입력 분리, TEST_DATABASE_URL 필요).
 - 실제 캐릭터 이전 검토 및 배포 전 주의사항은 `docs/post-production-settings-design-2026-09-27.md`.

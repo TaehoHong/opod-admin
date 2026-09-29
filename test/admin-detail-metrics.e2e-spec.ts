@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
-import { DatabaseService } from "../src/domain/database/database.service";
+import { DatabaseService } from "../src/core/database/database.service";
 import {
   characters,
   generationJobs,
@@ -12,7 +12,7 @@ import {
   postDrafts,
   postReactions,
   posts,
-} from "../src/domain/database/schema";
+} from "../src/core/database/schema";
 import { adminHeaders } from "./admin-auth";
 
 describe("admin detail metrics", () => {

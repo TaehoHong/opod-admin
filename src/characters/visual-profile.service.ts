@@ -1,12 +1,12 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import type { JsonValue } from "../domain/database/json";
+import type { JsonValue } from "../shared/utils/json";
 import { compileImagePrompt } from "../../prompts/image-prompt";
-import { assertUploadedMediaRow } from "../admin/media/media.service";
+import { assertUploadedMediaRow } from "../media/media.service";
 import {
   VisualProfileRepository,
   type VisualProfileRow,
 } from "./visual-profile.repository";
-import { ReferenceCaptioner } from "../worker/reference-captioner";
+import { ReferenceCaptioner } from "../post-production/reference-captioner";
 
 const PROMPT_MAX_LENGTH = 4000;
 const REFERENCE_MAX_COUNT = 20;

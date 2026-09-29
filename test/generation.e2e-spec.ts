@@ -4,16 +4,16 @@ import { randomUUID } from "node:crypto";
 import request from "supertest";
 import sharp from "sharp";
 import { AppModule } from "../src/app.module";
-import type { GeneratedMediaStore } from "../src/worker/generated-media-store";
-import { GenerationJobRepository } from "../src/worker/generation-job.repository";
+import type { GeneratedMediaStore } from "../src/media/generated-media-store";
+import { GenerationJobRepository } from "../src/generation/generation-job.repository";
 import {
   GenerationWorkerService,
   WorkerConfig,
-} from "../src/worker/generation-worker.service";
+} from "../src/generation/generation-worker.service";
 import type {
   ImageGenerationProvider,
   ImageGenerationRequest,
-} from "../src/worker/image-generation.provider";
+} from "../src/generation/providers/image-generation.provider";
 import { adminHeaders } from "./admin-auth";
 
 const uniqueHandle = (base: string) => `${base}-${randomUUID().slice(0, 8)}`;

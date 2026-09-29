@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { and, asc, desc, eq, isNotNull, notInArray } from "drizzle-orm";
-import type { AssertableMedia } from "../admin/media/media.service";
-import { DatabaseService } from "../domain/database/database.service";
+import type { AssertableMedia } from "../media/media.service";
+import { DatabaseService } from "../core/database/database.service";
 import {
   characterActionLogs,
   characterVisualProfileReferences,
@@ -9,7 +9,7 @@ import {
   characters,
   generationJobs,
   media,
-} from "../domain/database/schema";
+} from "../core/database/schema";
 
 type ReferenceRow = Omit<
   typeof characterVisualProfileReferences.$inferSelect,

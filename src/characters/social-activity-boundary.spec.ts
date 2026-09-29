@@ -28,7 +28,7 @@ describe("admin social activity ownership", () => {
       ],
       [
         "post-reaction.repository",
-        resolve(src, "admin/post-reaction.service.ts"),
+        resolve(src, "administration/post-reaction.service.ts"),
       ],
     ]);
     const scopedServices = new Set([

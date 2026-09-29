@@ -1,5 +1,5 @@
 // 레퍼런스 캡셔닝 LLM 프롬프트. 비전 호출·S3 접근 로직은
-// src/worker/reference-captioner.ts에 있다.
+// src/post-production/reference-captioner.ts에 있다.
 
 export const CAPTION_SYSTEM_PROMPT = [
   "You are a photo archivist building a reference catalog for character identity.",

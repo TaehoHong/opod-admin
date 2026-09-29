@@ -2,7 +2,7 @@ import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../src/app.module";
-import { DatabaseService } from "../src/domain/database/database.service";
+import { DatabaseService } from "../src/core/database/database.service";
 import {
   characters,
   characterPersonas,
@@ -10,9 +10,9 @@ import {
   characterPersonaCanonLinks,
   characterMemories,
   postDrafts,
-} from "../src/domain/database/schema";
-import { DraftWorkerRepository } from "../src/worker/draft-worker.repository";
-import { projectPostPersonaContext } from "../src/worker/post-persona-context";
+} from "../src/core/database/schema";
+import { DraftWorkerRepository } from "../src/drafts/draft-worker.repository";
+import { projectPostPersonaContext } from "../src/post-production/post-persona-context";
 
 describe("post planning persisted context", () => {
   let app: INestApplication;

@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
-import { DatabaseService } from "../src/domain/database/database.service";
+import { DatabaseService } from "../src/core/database/database.service";
 import { CharacterService } from "../src/characters/character.service";
 import { CharacterActionLogService } from "../src/characters/character-action-log.service";
 import { CharacterSocialActivityPolicyService } from "../src/characters/character-social-activity-policy.service";
@@ -14,7 +14,7 @@ import {
   characters,
   postReactions,
   posts,
-} from "../src/domain/database/schema";
+} from "../src/core/database/schema";
 import { and, eq } from "drizzle-orm";
 import { adminHeaders } from "./admin-auth";
 

@@ -4,7 +4,8 @@
 
 - Project: `opod-admin`
 - Role: admin NestJS API plus admin UI/proxy.
-- Owns admin API routes under `src/admin` and `src/characters`, currently
+- Owns admin API routes under feature folders such as `src/administration`
+  and `src/characters`, currently
   mounted under `/api/*`.
 - Approved API target is `/api/admin/v1/*`; migrate backend and UI together in
   a separate implementation task.

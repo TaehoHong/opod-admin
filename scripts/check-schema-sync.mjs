@@ -4,10 +4,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const adminSchemaPath = resolve(here, "../src/domain/database/schema.ts");
+const adminSchemaPath = resolve(here, "../src/core/database/schema.ts");
 const canonicalSchemaPath = resolve(
   here,
-  process.argv[2] ?? "../../opod-service-backend/src/domain/database/schema.ts",
+  process.argv[2] ?? "../../opod-service-backend/src/core/database/schema.ts",
 );
 
 const normalize = (source) => source.replace(/\r\n/g, "\n").trim();

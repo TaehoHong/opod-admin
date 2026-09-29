@@ -4,7 +4,7 @@ import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
-import { loadAppConfig } from "./domain/config/app-config";
+import { loadAppConfig } from "./core/config/app-config";
 
 async function bootstrap() {
   // composition root — 여기서 한 번 읽고 검증한 뒤 나머지 코드는

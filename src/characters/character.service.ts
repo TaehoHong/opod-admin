@@ -10,7 +10,7 @@ import {
   Page,
   PageInput,
   pageFromRows,
-} from "../domain/database/page";
+} from "../shared/utils/page";
 import {
   CharacterRepository,
   type CharacterListRow,

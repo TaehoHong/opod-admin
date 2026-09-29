@@ -3,7 +3,7 @@ import request from "supertest";
 import {
   ADMIN_REQUEST_HEADER,
   ADMIN_SESSION_COOKIE,
-} from "../src/admin/auth/admin-session";
+} from "../src/auth/admin-session";
 
 // 로그인은 세션을 HttpOnly cookie로만 돌려준다. 이후 요청은 그 cookie와
 // 상태 변경용 고정 헤더를 함께 보내야 한다

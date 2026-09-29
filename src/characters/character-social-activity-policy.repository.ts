@@ -1,8 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import { eq } from "drizzle-orm";
-import { DatabaseService } from "../domain/database/database.service";
-import { DatabaseTransactionContext } from "../domain/database/database-transaction-context";
-import { characterSocialActivityPolicies } from "../domain/database/schema";
+import { DatabaseService } from "../core/database/database.service";
+import { DatabaseTransactionContext } from "../core/database/database-transaction-context";
+import { characterSocialActivityPolicies } from "../core/database/schema";
 
 export type CharacterSocialActivityPolicyValues = {
   enabled: boolean;

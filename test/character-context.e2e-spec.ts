@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import { createHash, randomUUID } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
-import { DatabaseService } from "../src/domain/database/database.service";
+import { DatabaseService } from "../src/core/database/database.service";
 import { CharacterRepository } from "../src/characters/character.repository";
 import { adminHeaders } from "./admin-auth";
 

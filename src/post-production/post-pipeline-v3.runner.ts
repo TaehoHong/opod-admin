@@ -1,0 +1,1122 @@
+import {
+  PostAgentPromptService,
+  postAgentStage,
+} from "../post-agent-prompts/post-agent-prompt.service";
+import { CharacterContentProfile } from "../character-content-profiles/character-content-profile";
+import { CharacterContentProfileService } from "../character-content-profiles/character-content-profile.service";
+import { Injectable, Logger } from "@nestjs/common";
+import type { JsonValue } from "../shared/utils/json";
+import {
+  IMAGE_PLAN_CONTRACT_VERSION,
+  IMAGE_PLANNER_PROMPT_VERSION,
+} from "../../prompts/image-planner";
+import {
+  IMAGE_PROMPT_GENERATOR_VERSION,
+  PROMPT_SET_CONTRACT_VERSION,
+} from "../../prompts/image-prompt-generator";
+import {
+  POST_PLAN_CONTRACT_VERSION,
+  POST_PLANNER_PROMPT_VERSION,
+} from "../../prompts/post-planner";
+import {
+  CAPTION_SET_CONTRACT_VERSION,
+  CAPTION_WRITER_PROMPT_VERSION,
+} from "../../prompts/caption-writer";
+import { AppConfigService } from "../core/config/app-config.service";
+import { LlmLogService } from "../llm-logs/llm-log.service";
+import { GenerationSettingsService } from "../settings/generation-settings.service";
+import {
+  DraftWorkerRepository,
+  PlannedDraft,
+  RecentVisualPlanDraft,
+} from "../drafts/draft-worker.repository";
+import {
+  ImagePlanningAgent,
+  ImagePlanReady,
+  ImagePlannerInput,
+  SubjectCameraRelation,
+} from "./image-planner";
+import {
+  buildPromptPackage,
+  UnsupportedImagePlanError,
+} from "./image-model-policy";
+import { ImagePromptGenerationAgent } from "./image-prompt-generator";
+import { CaptionWriterAgent, CaptionWriterInput } from "./caption-writer";
+import {
+  canonicalJsonHash,
+  generationSetHash,
+  isPostPipelineV3,
+  isPostPipelineV4,
+} from "./post-pipeline-v3";
+import { MediaBytesReader } from "./reference-captioner";
+import {
+  PostPlanningAgent,
+  PostPlannerInput,
+  PostPlanReady,
+} from "./post-planner";
+import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
+import { isRecord } from "../shared/utils/value-utils";
+import { pipelineFailure } from "./pipeline-error";
+import {
+  postPersonaRole,
+  projectPostPersonaContext,
+} from "./post-persona-context";
+
+type V3Concept = Record<string, unknown> & {
+  pipelineVersion: "post-pipeline-v3" | "post-pipeline-v4";
+  pipeline: Record<string, unknown>;
+};
+
+@Injectable()
+export class PostPipelineV3Runner {
+  private readonly logger = new Logger(PostPipelineV3Runner.name);
+
+  constructor(
+    private readonly repository: DraftWorkerRepository,
+    private readonly settings: GenerationSettingsService,
+    private readonly llmLogs: LlmLogService,
+    private readonly config: AppConfigService,
+    private readonly contentProfiles: CharacterContentProfileService,
+    private readonly random: () => number = Math.random,
+    private readonly fetchFn: typeof fetch = fetch,
+    // V4 ⑥ 캡션 단계가 생성 이미지를 읽는 데 쓴다. 없으면 캡션 단계는
+    // needs_configuration으로 정지한다.
+    private readonly readMediaBytes: MediaBytesReader | null = null,
+    private readonly agentPrompts?: PostAgentPromptService,
+  ) {}
+
+  async runCurrentStage(
+    draftId: string,
+    options?: { operatorNote?: string },
+  ): Promise<void> {
+    const draft = await this.repository.findPlannedDraft(draftId);
+    if (
+      !draft ||
+      draft.status !== "generating" ||
+      !isPostPipelineV3(draft.conceptJson)
+    )
+      return;
+    const concept = draft.conceptJson as V3Concept;
+    const stage = concept.pipeline.stage;
+    try {
+      const needsContext = ["post_plan", "image_plan", "caption"].includes(
+        String(stage),
+      );
+      const context = needsContext
+        ? projectPostPersonaContext({
+            personas: draft.character.personas,
+            memories: draft.character.memories,
+            bio: draft.character.bio,
+            interests: draft.character.interests,
+            query: [
+              operatorRequest(concept),
+              ...(stage === "post_plan"
+                ? []
+                : [postPlanReady(concept)?.intent.premise]),
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          })
+        : {
+            status: "ready" as const,
+            hasV2: false,
+            personas: draft.character.personas,
+            memories: draft.character.memories,
+          };
+      if (context.status === "invalid") {
+        await this.pause(draft, concept, "needs_input", [
+          "invalid_persona_structure",
+        ]);
+        return;
+      }
+      const profile = needsContext
+        ? await this.contentProfiles.get(draft.characterId)
+        : null;
+      const normalizedDraft: PlannedDraft = {
+        ...draft,
+        character: {
+          ...draft.character,
+          personas: context.personas,
+          memories: context.memories,
+        },
+      };
+      const savedAgent =
+        this.agentPrompts &&
+        ["post_plan", "image_plan", "image_prompt", "caption"].includes(
+          String(stage),
+        )
+          ? await this.agentPrompts.execution(postAgentStage(String(stage)))
+          : null;
+      const planner = await this.settings.resolvePlannerSettings();
+      if (savedAgent?.id)
+        planner.model = savedAgent.effectiveModel ?? undefined;
+      if (!planner.apiUrl || !planner.apiKey || !planner.model) {
+        await this.pause(draft, concept, "needs_configuration", [
+          "planner_llm_missing",
+        ]);
+        return;
+      }
+      const client = new StrictJsonAgentClient(
+        {
+          apiUrl: planner.apiUrl,
+          apiKey: planner.apiKey,
+          model: planner.model,
+        },
+        this.fetchFn,
+        this.llmLogs,
+        savedAgent?.id
+          ? {
+              systemPrompt: savedAgent.systemPrompt!,
+              outputSchema: savedAgent.outputSchema as Record<string, unknown>,
+              metadata: {
+                promptId: savedAgent.id,
+                revision: savedAgent.revision,
+                aiModelId: savedAgent.aiModelId,
+                provider: savedAgent.provider,
+                model: savedAgent.effectiveModel,
+              },
+            }
+          : undefined,
+      );
+      if (stage === "post_plan") {
+        await this.runPostPlanning(normalizedDraft, concept, client, profile!);
+      } else if (stage === "image_plan") {
+        await this.runImagePlanning(normalizedDraft, concept, client, profile!);
+      } else if (stage === "image_prompt") {
+        await this.runPromptGeneration(normalizedDraft, concept, client);
+      } else if (stage === "caption") {
+        await this.runCaption(
+          normalizedDraft,
+          concept,
+          client,
+          profile!,
+          options?.operatorNote,
+        );
+      } else {
+        // ⑦ 게시·⑧ 메모리는 러너의 단계가 아니다. 여기까지 왔다면 claim 게이트가
+        // 뚫린 것이므로 초안을 죽이지 말고 집기 전(pending)으로 돌려놓는다 —
+        // 게시 대기 초안을 failed로 만들면 게시·캡션 편집·컷 재생성 게이트가
+        // 전부 state=pending을 요구해 되살릴 방법이 없어진다.
+        this.logger.warn(
+          `V3 draft ${draft.id} claimed at non-agent stage ${String(stage)}; released`,
+        );
+        await this.release(draft, concept);
+      }
+    } catch (error) {
+      const failure = pipelineFailure(error, stage);
+      const message = failure.technicalDetail;
+      const terminal =
+        draft.attemptCount >= this.config.draftWorker.maxAttempts;
+      await this.repository.requeueOrFailV3({
+        draftId: draft.id,
+        conceptJson: {
+          ...concept,
+          pipeline: {
+            ...concept.pipeline,
+            state: terminal ? "failed" : "pending",
+            reasonCodes: [failure.code],
+            failure,
+          },
+        } as JsonValue,
+        message,
+        terminal,
+      });
+      this.logger.error(
+        `V3 draft ${draft.id} ${String(stage)} failed: ${message}`,
+      );
+    }
+  }
+
+  private async runPostPlanning(
+    draft: PlannedDraft,
+    concept: V3Concept,
+    client: StrictJsonAgentClient,
+    profile: CharacterContentProfile,
+  ): Promise<void> {
+    const input = postPlannerInput(draft, concept, profile);
+    const missing =
+      input.character.bio.trim() || input.persona.characterContext.length
+        ? []
+        : ["character_context"];
+    if (missing.length) {
+      await this.pause(
+        draft,
+        concept,
+        "needs_input",
+        missing.map((value) => `missing_${value}`),
+      );
+      return;
+    }
+    const result = await new PostPlanningAgent(client).plan(input, {
+      requestId: draft.id,
+      characterId: draft.characterId,
+      metadata: {
+        pipelineVersion: concept.pipelineVersion,
+        stage: "post_plan",
+        promptVersion: POST_PLANNER_PROMPT_VERSION,
+      },
+    });
+    const revision = artifactRevision(concept.postPlanning) + 1;
+    const hash = canonicalJsonHash(result.output);
+    const artifact = {
+      revision,
+      hash,
+      producerLogId: result.producerLogId,
+      agentConfig: client.agentSettings?.metadata ?? null,
+      contractVersion: POST_PLAN_CONTRACT_VERSION,
+      promptVersion: POST_PLANNER_PROMPT_VERSION,
+      input,
+      output: result.output,
+    };
+    if (result.output.status === "conflict") {
+      await this.repository.persistV3Paused({
+        draftId: draft.id,
+        characterId: draft.characterId,
+        expectedStage: "post_plan",
+        conceptJson: {
+          ...concept,
+          postPlanning: artifact,
+          pipeline: {
+            ...concept.pipeline,
+            state: "conflict",
+            reasonCodes: ["semantic_conflict"],
+          },
+        } as JsonValue,
+        reason: "Post Planning Agent returned conflict",
+      });
+      return;
+    }
+    const max = Math.max(1, Math.min(this.config.draftWorker.maxShots, 3));
+    const imageCount =
+      existingImageCount(concept) ??
+      Math.min(max, Math.floor(this.random() * max) + 1);
+    const memoryCandidates = result.output.newMemoryCandidates.map(
+      (candidate) => ({
+        key: canonicalJsonHash(candidate),
+        ...candidate,
+        selected: concept.mode !== "manual",
+        sourcePostPlanHash: hash,
+      }),
+    );
+    const nextConcept = {
+      ...concept,
+      postPlanning: artifact,
+      memoryCandidates,
+      pipeline: {
+        stage: "image_plan",
+        state: "pending",
+        imageCount,
+        reasonCodes: [],
+      },
+    };
+    const saved = await this.repository.persistV3Artifact({
+      draftId: draft.id,
+      characterId: draft.characterId,
+      expected: {
+        stage: "post_plan",
+        state: "running",
+        artifactKey: "postPlanning",
+        revision: artifactRevision(concept.postPlanning) || null,
+      },
+      conceptJson: nextConcept as JsonValue,
+      actionType: "DRAFT_V3_POST_PLAN_READY",
+      reason: `PostPlan revision ${revision} stored`,
+    });
+    if (!saved) throw new Error("post plan revision CAS lost");
+  }
+
+  private async runImagePlanning(
+    draft: PlannedDraft,
+    concept: V3Concept,
+    client: StrictJsonAgentClient,
+    profile: CharacterContentProfile,
+  ): Promise<void> {
+    const postPlan = postPlanReady(concept);
+    const imageCount = existingImageCount(concept);
+    if (!postPlan || imageCount === null)
+      throw new Error(
+        "Image Planning requires a ready PostPlan and imageCount",
+      );
+    const [availableLocations, recentDrafts] = await Promise.all([
+      this.repository.findAvailableLocations(draft.characterId),
+      this.repository.findRecentVisualPlanDrafts(
+        draft.characterId,
+        draft.id,
+        8,
+      ),
+    ]);
+    const input: ImagePlannerInput = {
+      contentProfile: {
+        accountConcept: profile.accountConcept,
+        imageStyle:
+          profile.imageStyle.trim() ||
+          draft.character.visualProfile?.stylePrompt.trim() ||
+          "",
+        constraints: profile.constraints,
+      },
+      postPlan: { intent: postPlan.intent },
+      imageCount,
+      characterVisualContext: {
+        name: draft.character.displayName,
+        appearance: draft.character.visualProfile?.appearancePrompt ?? "",
+        boundaries: personaContents(draft, "boundaries"),
+        capturePreferences: personaContents(draft, "capture_style"),
+        personaContext: draft.character.personas
+          .filter(
+            (entry) =>
+              entry.content.trim() &&
+              ![
+                "voice",
+                "capture_style",
+                "boundaries",
+                "greeting",
+                "examples",
+              ].includes(postPersonaRole(entry)) &&
+              entry.kind !== "example",
+          )
+          .map((entry) => ({ ...entry })),
+      },
+      memories: draft.character.memories.filter((memory) =>
+        memory.content.trim(),
+      ),
+      recentVisualHistory: recentVisualHistory(recentDrafts),
+      ...(operatorRequest(concept)
+        ? { operatorRequest: operatorRequest(concept) }
+        : {}),
+      identityReferences: (draft.character.visualProfile?.referenceMedia ?? [])
+        .filter(
+          (reference) =>
+            reference.description.trim() && reference.media.uploadedAt,
+        )
+        .map((reference) => ({
+          id: reference.mediaId,
+          description: reference.description,
+        })),
+      locations: availableLocations.map((location) => ({
+        id: location.id,
+        name: location.displayName,
+        description: location.description,
+        references: location.references
+          .filter((reference) => reference.media.uploadedAt)
+          .map((reference) => ({
+            id: reference.mediaId,
+            description: reference.description,
+          })),
+      })),
+    };
+    const result = await new ImagePlanningAgent(client).plan(input, {
+      requestId: draft.id,
+      characterId: draft.characterId,
+      metadata: {
+        pipelineVersion: concept.pipelineVersion,
+        stage: "image_plan",
+        promptVersion: IMAGE_PLANNER_PROMPT_VERSION,
+      },
+    });
+    if (result.output.status === "blocked") {
+      const onlyInsufficient = result.output.reasons.every(
+        (reason) => reason.code === "insufficient_distinct_shots",
+      );
+      if (onlyInsufficient && imageCount > 1) {
+        const adjusted = {
+          ...concept,
+          pipeline: {
+            ...concept.pipeline,
+            state: "pending",
+            imageCount: imageCount - 1,
+            reasonCodes: ["image_count_reduced"],
+          },
+        };
+        const saved = await this.repository.persistV3Artifact({
+          draftId: draft.id,
+          characterId: draft.characterId,
+          expected: {
+            stage: "image_plan",
+            state: "running",
+            artifactKey: "imagePlanning",
+            revision: artifactRevision(concept.imagePlanning) || null,
+          },
+          conceptJson: adjusted as JsonValue,
+          actionType: "DRAFT_V3_IMAGE_COUNT_REDUCED",
+          reason: `imageCount reduced from ${imageCount} to ${imageCount - 1}`,
+        });
+        if (!saved) throw new Error("imageCount revision CAS lost");
+        return;
+      }
+      const revision = artifactRevision(concept.imagePlanning) + 1;
+      const hash = canonicalJsonHash(result.output);
+      await this.repository.persistV3Paused({
+        draftId: draft.id,
+        characterId: draft.characterId,
+        expectedStage: "image_plan",
+        conceptJson: {
+          ...concept,
+          imagePlanning: imageArtifact(
+            revision,
+            hash,
+            result.producerLogId,
+            concept,
+            input,
+            result.output,
+            client.agentSettings?.metadata,
+          ),
+          pipeline: {
+            ...concept.pipeline,
+            state: "blocked",
+            reasonCodes: result.output.reasons.map((reason) => reason.code),
+          },
+        } as JsonValue,
+        reason: `Image Planning blocked: ${result.output.reasons.map((reason) => reason.code).join(",")}`,
+      });
+      return;
+    }
+    const revision = artifactRevision(concept.imagePlanning) + 1;
+    const hash = canonicalJsonHash(result.output);
+    const selectedLocationId = result.output.locationId;
+    const locationExclusions = availableLocations
+      .filter((location) => location.id === selectedLocationId)
+      .map((location) => location.negativePrompt.trim())
+      .filter(Boolean);
+    const nextConcept = {
+      ...concept,
+      imagePlanning: {
+        ...imageArtifact(
+          revision,
+          hash,
+          result.producerLogId,
+          concept,
+          input,
+          result.output,
+          client.agentSettings?.metadata,
+        ),
+        locationExclusions,
+      },
+      pipeline: {
+        ...concept.pipeline,
+        stage: "image_prompt",
+        state: "pending",
+        reasonCodes: [],
+      },
+    };
+    const saved = await this.repository.persistV3Artifact({
+      draftId: draft.id,
+      characterId: draft.characterId,
+      expected: {
+        stage: "image_plan",
+        state: "running",
+        artifactKey: "imagePlanning",
+        revision: artifactRevision(concept.imagePlanning) || null,
+      },
+      conceptJson: nextConcept as JsonValue,
+      actionType: "DRAFT_V3_IMAGE_PLAN_READY",
+      reason: `ImagePlan revision ${revision} stored`,
+    });
+    if (!saved) throw new Error("image plan revision CAS lost");
+  }
+
+  private async runPromptGeneration(
+    draft: PlannedDraft,
+    concept: V3Concept,
+    client: StrictJsonAgentClient,
+  ): Promise<void> {
+    const postPlan = postPlanReady(concept);
+    const imagePlan = imagePlanReady(concept);
+    if (!postPlan || !imagePlan)
+      throw new Error("Prompt Generation requires ready upstream artifacts");
+    const imageAgent = this.agentPrompts
+      ? await this.agentPrompts.execution("generation")
+      : null;
+    const providers = imageAgent?.id
+      ? await this.settings.resolveImageModelSettings(
+          imageAgent.provider!,
+          imageAgent.effectiveModel!,
+        )
+      : await this.settings.resolveProviderSettings();
+    const usesReferences = imagePlan.shots.some(
+      (shot) => shot.referenceBindings.length > 0,
+    );
+    const targetModelId = usesReferences
+      ? providers.editModel
+      : providers.t2iModel;
+    if (!targetModelId) {
+      await this.pause(draft, concept, "needs_configuration", [
+        usesReferences ? "edit_model_missing" : "t2i_model_missing",
+      ]);
+      return;
+    }
+    let promptPackage;
+    // 신규 기획은 선택 장소의 제외 조건을 보존한다. 이 정보가 없는 옛
+    // 기획은 실행 단계의 기존 제외 조건 처리를 유지한다.
+    const storedLocationExclusions = isRecord(concept.imagePlanning)
+      ? concept.imagePlanning.locationExclusions
+      : undefined;
+    const locationExclusions =
+      imagePlan.locationId === null
+        ? []
+        : Array.isArray(storedLocationExclusions) &&
+            storedLocationExclusions.every((value) => typeof value === "string")
+          ? (storedLocationExclusions as string[])
+          : undefined;
+    try {
+      promptPackage = buildPromptPackage({
+        targetModelId,
+        imagePlan,
+        appearance: draft.character.visualProfile?.appearancePrompt ?? "",
+        visualStyle:
+          imagePlanningStyle(concept.imagePlanning) ??
+          draft.character.visualProfile?.stylePrompt,
+        exclusions: [
+          draft.character.visualProfile?.negativePrompt ?? "",
+          ...(locationExclusions ?? []),
+        ],
+      });
+    } catch (error) {
+      if (error instanceof UnsupportedImagePlanError) {
+        await this.pause(draft, concept, "unsupported_plan", [error.code]);
+        return;
+      }
+      throw error;
+    }
+    const result = await new ImagePromptGenerationAgent(client).generate(
+      promptPackage,
+      {
+        requestId: draft.id,
+        characterId: draft.characterId,
+        metadata: {
+          pipelineVersion: concept.pipelineVersion,
+          stage: "image_prompt",
+          promptVersion: IMAGE_PROMPT_GENERATOR_VERSION,
+          modelPolicyVersion: promptPackage.modelPolicy.version,
+        },
+      },
+    );
+    const revision = artifactRevision(concept.promptBuild) + 1;
+    const hash = canonicalJsonHash(result.output);
+    const artifact = {
+      revision,
+      hash,
+      source: {
+        imagePlanningRevision: artifactRevision(concept.imagePlanning),
+        imagePlanningHash: artifactHash(concept.imagePlanning),
+      },
+      producerLogId: result.producerLogId,
+      agentConfig: client.agentSettings?.metadata ?? null,
+      contractVersion: PROMPT_SET_CONTRACT_VERSION,
+      commonPromptVersion: IMAGE_PROMPT_GENERATOR_VERSION,
+      modelPolicy: {
+        id: promptPackage.modelPolicy.id,
+        version: promptPackage.modelPolicy.version,
+      },
+      input: promptPackage,
+      output: result.output,
+    };
+    const nextConcept = {
+      ...concept,
+      promptBuild: artifact,
+      pipeline: {
+        ...concept.pipeline,
+        stage: "generation",
+        state: "ready",
+        reasonCodes: [],
+      },
+    };
+    // v3 계약(post-plan-v1)에는 캡션이 PostPlan에 있었고 ④가 컬럼을 채웠다.
+    // V4는 ⑥ 캡션 단계가 컬럼을 소유하므로 여기서 건드리지 않는다.
+    const legacyColumns = legacyPostPlanColumns(postPlan);
+    const saved = await this.repository.persistV3PromptJobs({
+      draftId: draft.id,
+      characterId: draft.characterId,
+      ...(legacyColumns ? { columns: legacyColumns } : {}),
+      locationId: imagePlan.locationId,
+      conceptJson: nextConcept as JsonValue,
+      manual: concept.mode === "manual",
+      // V4: 프롬프트당 1장 — 후보·선택 단계가 없다(§20.0 결정 3).
+      ...(isPostPipelineV4(concept) ? { candidateCount: 1 } : {}),
+      jobs: result.output.shots.map((shot) => {
+        const plannedShot = imagePlan.shots[shot.sortOrder];
+        const slots = promptPackage.referenceSlots.filter(
+          (slot) => slot.shotSortOrder === shot.sortOrder,
+        );
+        const identityReferenceMediaIds = slots
+          .filter((slot) => slot.source === "identity")
+          .map((slot) => slot.referenceId);
+        const environmentReferenceMediaIds = slots
+          .filter((slot) => slot.source === "environment")
+          .map((slot) => slot.referenceId);
+        return {
+          prompt: shot.prompt,
+          sortOrder: shot.sortOrder,
+          paramsJson: {
+            ...(imageAgent?.id
+              ? {
+                  _postAgent: {
+                    promptId: imageAgent.id,
+                    revision: imageAgent.revision,
+                    aiModelId: imageAgent.aiModelId,
+                    provider: imageAgent.provider,
+                    model: imageAgent.effectiveModel,
+                  },
+                }
+              : {}),
+            _shot: {
+              sortOrder: shot.sortOrder,
+              scene: plannedShot.scene,
+              captureSetup: plannedShot.captureSetup,
+              characterVisible:
+                plannedShot.characterPresentation.mode !== "none",
+              // V3 계약: 인물 레퍼런스가 필요한지는 기획이 정한다(손만 보이는
+              // 컷은 보이지만 필요 없음). 워커의 인물 레퍼런스 가드는 이 값을
+              // 본다 — characterVisible로 판단하면 계약보다 엄격해져 정당한
+              // 컷을 실패시킨다.
+              identityRequired:
+                plannedShot.characterPresentation.identityPreservationRequired,
+              identityReferenceMediaIds,
+              environmentReferenceMediaIds,
+              referenceMediaIds: slots.map((slot) => slot.referenceId),
+              targetModelId,
+            },
+            _v3: {
+              imagePlanningRevision: artifactRevision(concept.imagePlanning),
+              imagePlanningHash: artifactHash(concept.imagePlanning),
+              promptRevision: revision,
+              promptHash: hash,
+              referenceBindings: slots.map((slot) => ({
+                bindingId: slot.bindingId,
+                referenceId: slot.referenceId,
+                slot: slot.slot,
+              })),
+              negativePrompt: shot.negativePrompt,
+              exclusionsResolved: locationExclusions !== undefined,
+            },
+          } as JsonValue,
+        };
+      }),
+    });
+    if (!saved) throw new Error("prompt revision CAS lost");
+  }
+
+  // ⑥ 캡션 — 생성 이미지를 보고 캡션·해시태그를 쓴다. 표준 단계 기계(claim·
+  // CAS·pause·requeue)를 그대로 타며, 산출물 저장과 게시 컬럼 갱신을 한
+  // 트랜잭션에서 한다. 설계 정본 아키텍처 §20.5.
+  private async runCaption(
+    draft: PlannedDraft,
+    concept: V3Concept,
+    client: StrictJsonAgentClient,
+    profile: CharacterContentProfile,
+    operatorNote?: string,
+  ): Promise<void> {
+    const postPlan = postPlanReady(concept);
+    const imagePlan = imagePlanReady(concept);
+    if (!postPlan || !imagePlan) {
+      throw new Error("Caption stage requires a ready PostPlan and ImagePlan");
+    }
+    if (!this.readMediaBytes) {
+      await this.pause(draft, concept, "needs_configuration", [
+        "media_reader_missing",
+      ]);
+      return;
+    }
+    const shots = await this.repository.findCaptionShots(draft.id);
+    const missing = imagePlan.shots
+      .map((shot) => shot.sortOrder)
+      .filter(
+        (sortOrder) => !shots.some((shot) => shot.sortOrder === sortOrder),
+      );
+    if (missing.length) {
+      throw new Error(
+        `Caption stage requires a completed image for shot(s) ${missing.join(",")}`,
+      );
+    }
+    const setHash = generationSetHash(
+      shots.map((shot) => ({
+        sortOrder: shot.sortOrder,
+        jobId: shot.jobId,
+        mediaId: shot.mediaId,
+      })),
+    );
+    const input: CaptionWriterInput = {
+      contentProfile: {
+        accountConcept: profile.accountConcept,
+        captionStyle: profile.captionStyle,
+        constraints: profile.constraints,
+      },
+      ...personaInput(draft),
+      postPlan: { intent: postPlan.intent },
+      shots: imagePlan.shots.map((shot) => ({
+        sortOrder: shot.sortOrder,
+        visualPurpose: shot.visualPurpose,
+        scene: shot.scene,
+        lockedElements: imagePlan.continuity.lockedElements
+          .filter((element) => element.appliesToShots.includes(shot.sortOrder))
+          .map((element) => element.description),
+        mediaId: shots.find((item) => item.sortOrder === shot.sortOrder)!
+          .mediaId,
+      })),
+      ...(operatorRequest(concept)
+        ? { operatorRequest: operatorRequest(concept) }
+        : {}),
+      ...(operatorNote?.trim() ? { operatorNote: operatorNote.trim() } : {}),
+    };
+    const result = await new CaptionWriterAgent(
+      client,
+      this.readMediaBytes,
+    ).write(
+      input,
+      shots.map((shot) => ({
+        sortOrder: shot.sortOrder,
+        mediaId: shot.mediaId,
+        media: shot.media,
+      })),
+      {
+        requestId: draft.id,
+        characterId: draft.characterId,
+        metadata: {
+          pipelineVersion: concept.pipelineVersion,
+          stage: "caption",
+          promptVersion: CAPTION_WRITER_PROMPT_VERSION,
+        },
+      },
+    );
+    const revision = artifactRevision(concept.captionBuild) + 1;
+    const hash = canonicalJsonHash(result.output);
+    const artifact = {
+      revision,
+      hash,
+      source: {
+        postPlanningRevision: artifactRevision(concept.postPlanning),
+        postPlanningHash: artifactHash(concept.postPlanning),
+        generationSetHash: setHash,
+      },
+      producerLogId: result.producerLogId,
+      agentConfig: client.agentSettings?.metadata ?? null,
+      contractVersion: CAPTION_SET_CONTRACT_VERSION,
+      promptVersion: CAPTION_WRITER_PROMPT_VERSION,
+      input,
+      output: result.output,
+    };
+    const saved = await this.repository.persistV3Artifact({
+      draftId: draft.id,
+      characterId: draft.characterId,
+      expected: {
+        stage: "caption",
+        state: "running",
+        artifactKey: "captionBuild",
+        revision: artifactRevision(concept.captionBuild) || null,
+      },
+      conceptJson: {
+        ...concept,
+        captionBuild: artifact,
+        pipeline: {
+          ...concept.pipeline,
+          stage: "publish",
+          state: "pending",
+          reasonCodes: [],
+        },
+      } as JsonValue,
+      columns: {
+        caption: result.output.caption,
+        hashtags: result.output.hashtags,
+      },
+      actionType: "DRAFT_V3_CAPTION_READY",
+      reason: `CaptionSet revision ${revision} stored`,
+    });
+    if (!saved) throw new Error("caption revision CAS lost");
+  }
+
+  // 실행할 것이 없을 때 claim을 되돌린다. pause와 달리 운영자에게 물을 것이
+  // 없으므로 사유 코드도 남기지 않는다 — 화면에는 원래의 "게시 필요"가 그대로
+  // 남는다.
+  private async release(
+    draft: PlannedDraft,
+    concept: V3Concept,
+  ): Promise<void> {
+    await this.repository.persistV3Paused({
+      draftId: draft.id,
+      characterId: draft.characterId,
+      expectedStage: String(concept.pipeline.stage),
+      conceptJson: {
+        ...concept,
+        pipeline: { ...concept.pipeline, state: "pending", reasonCodes: [] },
+      } as JsonValue,
+      reason: `released: ${String(concept.pipeline.stage)} is not an agent stage`,
+    });
+  }
+
+  private async pause(
+    draft: PlannedDraft,
+    concept: V3Concept,
+    state: string,
+    reasonCodes: string[],
+  ): Promise<void> {
+    await this.repository.persistV3Paused({
+      draftId: draft.id,
+      characterId: draft.characterId,
+      expectedStage: String(concept.pipeline.stage),
+      conceptJson: {
+        ...concept,
+        pipeline: { ...concept.pipeline, state, reasonCodes },
+      } as JsonValue,
+      reason: `${state}: ${reasonCodes.join(",")}`,
+    });
+  }
+}
+
+function postPlannerInput(
+  draft: PlannedDraft,
+  concept: V3Concept,
+  profile: CharacterContentProfile,
+): PostPlannerInput {
+  return {
+    ...personaInput(draft, true),
+    contentProfile: {
+      accountConcept: profile.accountConcept,
+      constraints: profile.constraints,
+    },
+    ...(operatorRequest(concept)
+      ? { operatorRequest: operatorRequest(concept) }
+      : {}),
+  };
+}
+
+// ② 기획과 ⑥ 캡션은 같은 역할 분류를 사용한다. example은 사실로 오인하지
+// 않도록 해석 규칙을 가진 ② 기획에만 전달한다.
+function personaInput(
+  draft: PlannedDraft,
+  includeExamples = false,
+): Omit<PostPlannerInput, "operatorRequest" | "contentProfile"> {
+  const personas = draft.character.personas.filter(
+    (entry) =>
+      entry.content.trim() && (includeExamples || entry.kind !== "example"),
+  );
+  const take = (title: string) =>
+    personas.filter((entry) => postPersonaRole(entry) === title);
+  const characterRoles = [
+    "identity",
+    "personality",
+    "background",
+    "lifestyle",
+    "motivation",
+    "judgment",
+    "tension",
+    "relationship",
+  ];
+  const reserved = new Set([
+    ...characterRoles,
+    "voice",
+    "content_style",
+    "capture_style",
+    "boundaries",
+    "greeting",
+    "examples",
+    ...(includeExamples ? [] : ["example"]),
+  ]);
+  return {
+    character: {
+      name: draft.character.displayName,
+      bio: draft.character.bio,
+      interests: draft.character.interests,
+      defaultContentLanguage: draft.character.contentLanguage,
+    },
+    persona: {
+      characterContext: personas.filter((entry) =>
+        characterRoles.includes(postPersonaRole(entry)),
+      ),
+      writingProfile: {
+        contentStyle: take("content_style"),
+        voice: take("voice"),
+      },
+      boundaries: take("boundaries"),
+      additionalContext: personas.filter(
+        (entry) => !reserved.has(postPersonaRole(entry)),
+      ),
+    },
+    memories: draft.character.memories,
+    recentPosts: draft.character.posts.map((post) => ({
+      premise: recentPremise(post.sourceDrafts[0]?.conceptJson),
+      caption: post.content,
+      hashtags: post.hashtags.map((relation) => relation.hashtag.name),
+    })),
+  };
+}
+
+// v3 계약(post-plan-v1) artifact만 캡션을 들고 있다. 이 draft가 ④를 재실행하면
+// 종전처럼 컬럼을 채운다 — 읽는 쪽 캐스트가 v1/v2 호환을 보장한다.
+function legacyPostPlanColumns(
+  postPlan: PostPlanReady,
+): { caption: string; hashtags: string[] } | null {
+  const legacy = postPlan as PostPlanReady & {
+    caption?: unknown;
+    hashtags?: unknown;
+  };
+  return typeof legacy.caption === "string" && Array.isArray(legacy.hashtags)
+    ? {
+        caption: legacy.caption,
+        hashtags: legacy.hashtags.filter(
+          (tag): tag is string => typeof tag === "string",
+        ),
+      }
+    : null;
+}
+
+// 기획에 저장된 입력이 스타일 snapshot이다. 빈 값도 당시의 결정으로 유지한다.
+// 이전 artifact의 두 스타일 필드는 게시물 전용 설정을 우선해 읽는다.
+function imagePlanningStyle(artifact: unknown): string | undefined {
+  if (!isRecord(artifact) || !isRecord(artifact.input)) return undefined;
+  const input = artifact.input;
+  const publication = isRecord(input.contentProfile)
+    ? input.contentProfile.imageStyle
+    : undefined;
+  const legacy = isRecord(input.characterVisualContext)
+    ? input.characterVisualContext.visualStyle
+    : undefined;
+  if (typeof publication !== "string" && typeof legacy !== "string")
+    return undefined;
+  return (
+    (typeof publication === "string" ? publication.trim() : "") ||
+    (typeof legacy === "string" ? legacy.trim() : "")
+  );
+}
+
+function imageArtifact(
+  revision: number,
+  hash: string,
+  producerLogId: string | null,
+  concept: V3Concept,
+  input: ImagePlannerInput,
+  output: unknown,
+  agentConfig?: Record<string, unknown>,
+) {
+  return {
+    agentConfig: agentConfig ?? null,
+    revision,
+    hash,
+    source: {
+      postPlanningRevision: artifactRevision(concept.postPlanning),
+      postPlanningHash: artifactHash(concept.postPlanning),
+    },
+    producerLogId,
+    contractVersion: IMAGE_PLAN_CONTRACT_VERSION,
+    promptVersion: IMAGE_PLANNER_PROMPT_VERSION,
+    input,
+    output,
+  };
+}
+
+function postPlanReady(concept: V3Concept): PostPlanReady | null {
+  const artifact = isRecord(concept.postPlanning) ? concept.postPlanning : null;
+  const output = artifact && isRecord(artifact.output) ? artifact.output : null;
+  return output?.status === "ready" ? (output as PostPlanReady) : null;
+}
+function imagePlanReady(concept: V3Concept): ImagePlanReady | null {
+  const artifact = isRecord(concept.imagePlanning)
+    ? concept.imagePlanning
+    : null;
+  const output = artifact && isRecord(artifact.output) ? artifact.output : null;
+  return output?.status === "ready" ? (output as ImagePlanReady) : null;
+}
+
+function recentVisualHistory(
+  drafts: RecentVisualPlanDraft[],
+): ImagePlannerInput["recentVisualHistory"] {
+  const history: ImagePlannerInput["recentVisualHistory"] = [];
+  let remainingShots = 12;
+  for (const draft of drafts) {
+    if (remainingShots === 0) break;
+    if (!isRecord(draft.conceptJson)) continue;
+    const artifact = isRecord(draft.conceptJson.imagePlanning)
+      ? draft.conceptJson.imagePlanning
+      : null;
+    const output =
+      artifact && isRecord(artifact.output) ? artifact.output : null;
+    if (output?.status !== "ready" || !Array.isArray(output.shots)) continue;
+    const shots = output.shots
+      .flatMap((value) => {
+        if (!isRecord(value)) return [];
+        const presentation = isRecord(value.characterPresentation)
+          ? value.characterPresentation
+          : null;
+        if (
+          typeof value.visualPurpose !== "string" ||
+          !value.visualPurpose.trim() ||
+          typeof value.scene !== "string" ||
+          !value.scene.trim() ||
+          typeof value.captureSetup !== "string" ||
+          !value.captureSetup.trim() ||
+          typeof presentation?.mode !== "string"
+        )
+          return [];
+        const relation = value.subjectCameraRelation;
+        return [
+          {
+            visualPurpose: boundedHistoryText(value.visualPurpose, 500),
+            scene: boundedHistoryText(value.scene, 1_500),
+            captureSetup: boundedHistoryText(value.captureSetup, 750),
+            characterPresentation: presentation.mode,
+            ...(relation === "unaware" ||
+            relation === "aware_unposed" ||
+            relation === "deliberately_posed" ||
+            relation === "not_applicable"
+              ? {
+                  subjectCameraRelation: relation as SubjectCameraRelation,
+                }
+              : {}),
+          },
+        ];
+      })
+      .slice(0, remainingShots);
+    if (shots.length === 0) continue;
+    remainingShots -= shots.length;
+    const premise = recentPremise(draft.conceptJson);
+    history.push({
+      publicationState: draft.publishedPostId ? "published" : "unpublished",
+      premise: premise ? boundedHistoryText(premise, 500) : null,
+      shots,
+    });
+  }
+  return history;
+}
+function boundedHistoryText(value: string, max: number): string {
+  return value.trim().slice(0, max);
+}
+function artifactRevision(value: unknown): number {
+  return isRecord(value) && Number.isInteger(value.revision)
+    ? (value.revision as number)
+    : 0;
+}
+function artifactHash(value: unknown): string {
+  return isRecord(value) && typeof value.hash === "string" ? value.hash : "";
+}
+function existingImageCount(concept: V3Concept): number | null {
+  const value = concept.pipeline.imageCount;
+  return Number.isInteger(value) &&
+    (value as number) >= 1 &&
+    (value as number) <= 3
+    ? (value as number)
+    : null;
+}
+function operatorRequest(concept: V3Concept): string | undefined {
+  return typeof concept.operatorRequest === "string" &&
+    concept.operatorRequest.trim()
+    ? concept.operatorRequest.trim()
+    : undefined;
+}
+function personaContents(draft: PlannedDraft, title: string): string[] {
+  return draft.character.personas
+    .filter((entry) => postPersonaRole(entry) === title && entry.content.trim())
+    .map((entry) => entry.content.trim());
+}
+function recentPremise(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+  const v3 =
+    isRecord(value.postPlanning) &&
+    isRecord(value.postPlanning.output) &&
+    isRecord(value.postPlanning.output.intent)
+      ? value.postPlanning.output.intent.premise
+      : undefined;
+  if (typeof v3 === "string" && v3.trim()) return v3.trim();
+  const legacy =
+    isRecord(value.plan) && isRecord(value.plan.intent)
+      ? value.plan.intent.premise
+      : undefined;
+  return typeof legacy === "string" && legacy.trim() ? legacy.trim() : null;
+}

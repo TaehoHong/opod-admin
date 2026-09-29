@@ -1,4 +1,4 @@
-import type { JsonValue } from "../../domain/database/json";
+import type { JsonValue } from "../../shared/utils/json";
 import { IsObject, IsOptional, IsString } from "class-validator";
 
 export class UpsertVisualProfileDto {

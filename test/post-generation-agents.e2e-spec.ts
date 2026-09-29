@@ -2,7 +2,7 @@ import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
-import { ADMIN_REQUEST_HEADER } from "../src/admin/auth/admin-session";
+import { ADMIN_REQUEST_HEADER } from "../src/auth/admin-session";
 
 const base = "/api/admin/v1/post-generation-agents";
 describe("post agent management", () => {

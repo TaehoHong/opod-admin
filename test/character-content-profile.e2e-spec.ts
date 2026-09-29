@@ -4,16 +4,16 @@ import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
-import { ADMIN_REQUEST_HEADER } from "../src/admin/auth/admin-session";
-import { DatabaseService } from "../src/domain/database/database.service";
+import { ADMIN_REQUEST_HEADER } from "../src/auth/admin-session";
+import { DatabaseService } from "../src/core/database/database.service";
 import {
   characters,
   characterContentProfiles,
   characterPersonas,
   characterActionLogs,
-} from "../src/domain/database/schema";
-import { CharacterContentProfileService } from "../src/domain/character-content-profiles/character-content-profile.service";
-import { EMPTY_CONTENT_PROFILE } from "../src/domain/character-content-profiles/character-content-profile";
+} from "../src/core/database/schema";
+import { CharacterContentProfileService } from "../src/character-content-profiles/character-content-profile.service";
+import { EMPTY_CONTENT_PROFILE } from "../src/character-content-profiles/character-content-profile";
 
 describe("character content profile", () => {
   let app: INestApplication;

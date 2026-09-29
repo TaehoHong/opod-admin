@@ -1,14 +1,14 @@
-import { CharacterContentProfilesModule } from "../domain/character-content-profiles/character-content-profiles.module";
+import { CharacterContentProfilesModule } from "../character-content-profiles/character-content-profiles.module";
 import { Module } from "@nestjs/common";
-import { AdminAuthModule } from "../admin/auth/admin-auth.module";
-import { AppConfigService } from "../domain/config/app-config.service";
-import { DatabaseModule } from "../domain/database/database.module";
-import { GenerationSettingsService } from "../domain/settings/generation-settings.service";
-import { SettingsModule } from "../domain/settings/settings.module";
+import { AdminAuthModule } from "../auth/admin-auth.module";
+import { AppConfigService } from "../core/config/app-config.service";
+import { DatabaseModule } from "../core/database/database.module";
+import { GenerationSettingsService } from "../settings/generation-settings.service";
+import { SettingsModule } from "../settings/settings.module";
 import {
   createLlmReferenceCaptioner,
   createMediaBytesReader,
-} from "../worker/reference-captioner";
+} from "../post-production/reference-captioner";
 import { CharactersController } from "./characters.controller";
 import { CharacterRepository } from "./character.repository";
 import { CharacterService } from "./character.service";
@@ -25,7 +25,7 @@ import { CharacterSocialActivityPolicyRepository } from "./character-social-acti
 import { CharacterSocialActivityPolicyService } from "./character-social-activity-policy.service";
 import { VisualProfileRepository } from "./visual-profile.repository";
 import { VisualProfileService } from "./visual-profile.service";
-import { LlmLogService } from "../domain/llm-logs/llm-log.service";
+import { LlmLogService } from "../llm-logs/llm-log.service";
 
 @Module({
   imports: [

@@ -1,8 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import { and, desc, eq, lt, or } from "drizzle-orm";
-import { DatabaseService } from "../domain/database/database.service";
-import { DatabaseTransactionContext } from "../domain/database/database-transaction-context";
-import { characterActionLogs } from "../domain/database/schema";
+import { DatabaseService } from "../core/database/database.service";
+import { DatabaseTransactionContext } from "../core/database/database-transaction-context";
+import { characterActionLogs } from "../core/database/schema";
 
 @Injectable()
 export class CharacterActionLogRepository {

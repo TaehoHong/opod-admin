@@ -3,10 +3,10 @@ import { Test } from "@nestjs/testing";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
-import { ADMIN_REQUEST_HEADER } from "../src/admin/auth/admin-session";
+import { ADMIN_REQUEST_HEADER } from "../src/auth/admin-session";
 import { eq } from "drizzle-orm";
-import { DatabaseService } from "../src/domain/database/database.service";
-import { media } from "../src/domain/database/schema";
+import { DatabaseService } from "../src/core/database/database.service";
+import { media } from "../src/core/database/schema";
 
 describe("character profile image", () => {
   let app: INestApplication;

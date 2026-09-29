@@ -20,7 +20,7 @@ Node.js 26과 npm을 사용한다. `package-lock.json`을 변경 이력에 포�
 
 `npm run test:e2e`는 Testcontainers PostgreSQL과 Docker가 필요하다.
 `npm run schema:check`는 기본적으로
-`../opod-service-backend/src/domain/database/schema.ts`와 mirror를 비교한다.
+`../opod-service-backend/src/core/database/schema.ts`와 mirror를 비교한다.
 
 ## Decision and Change Policy
 

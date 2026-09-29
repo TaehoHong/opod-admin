@@ -1,5 +1,5 @@
 // 기획 LLM 프롬프트 — 시스템 규칙과 유저 프롬프트 조립만 담당한다.
-// fetch·파싱·오케스트레이션은 src/worker/content-planner.ts에 있다.
+// fetch·파싱·오케스트레이션은 src/post-production/content-planner.ts에 있다.
 // LLM 프롬프트 상수·순수 조립 함수는 전부 이 prompts/ 폴더에서 관리한다.
 
 export type ContentPlanInput = {

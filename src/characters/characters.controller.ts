@@ -1,4 +1,4 @@
-import { CharacterContentProfileService } from "../domain/character-content-profiles/character-content-profile.service";
+import { CharacterContentProfileService } from "../character-content-profiles/character-content-profile.service";
 import { CharacterActionLogService } from "./character-action-log.service";
 import { PutCharacterContentProfileDto } from "./dto/put-character-content-profile.dto";
 import {
@@ -14,8 +14,8 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
-import { AdminJwtGuard } from "../admin/auth/admin-jwt.guard";
-import { parsePageQuery } from "../domain/database/page";
+import { AdminJwtGuard } from "../auth/admin-jwt.guard";
+import { parsePageQuery } from "../shared/utils/page";
 import { CharacterService } from "./character.service";
 import { PutPersonaStructureDto } from "./dto/put-persona-structure.dto";
 import { PutMemoryRoutingDto } from "./dto/put-memory-routing.dto";

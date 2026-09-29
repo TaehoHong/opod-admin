@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { eq } from "drizzle-orm";
-import { DatabaseService } from "../domain/database/database.service";
-import { characters, media } from "../domain/database/schema";
+import { DatabaseService } from "../core/database/database.service";
+import { characters, media } from "../core/database/schema";
 
 type ProfileRow = {
   id: string;

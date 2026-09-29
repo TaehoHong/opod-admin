@@ -1,11 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { eq } from "drizzle-orm";
-import { DatabaseService } from "../domain/database/database.service";
+import { DatabaseService } from "../core/database/database.service";
 import {
   characterActionLogs,
   characterPostingPolicies,
   characters,
-} from "../domain/database/schema";
+} from "../core/database/schema";
 
 // entity repository — DatabaseService는 이 계층에서만 쓴다
 // (docs/02-development-rules.md "Module and Repository Rules").
