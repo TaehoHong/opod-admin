@@ -2,8 +2,8 @@ import { rootUnionSchema } from "./strict-schema";
 
 // v3: 계정 흐름과 이번 순간의 관계(accountFit)를 기획 artifact에 남긴다.
 // 기존 v1/v2 artifact의 후속 실행은 intent를 계속 읽는다. 캡션은 별도 Agent 소유다.
-export const POST_PLANNER_PROMPT_VERSION = "post-planner-v6";
-export const POST_PLAN_CONTRACT_VERSION = "post-plan-v3";
+export const POST_PLANNER_PROMPT_VERSION = "post-planner-v7";
+export const POST_PLAN_CONTRACT_VERSION = "post-plan-v4";
 
 const text = (maxLength: number, minLength = 1) => ({
   type: "string",
@@ -18,6 +18,7 @@ const operand = {
       type: "string",
       enum: [
         "operatorRequest",
+        "productionContext.mediaType",
         "contentProfile.accountConcept",
         "contentProfile.constraints",
         "persona.boundaries",

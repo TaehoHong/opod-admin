@@ -19,6 +19,32 @@ const ready = {
 };
 
 describe("Post Planning Agent contract (v3)", () => {
+  it("accepts an image-only production conflict only with a truthful medium quote", () => {
+    const input = {
+      productionContext: { contentType: "feed", mediaType: "image" },
+      operatorRequest: "영상으로만 올려줘",
+    } as unknown as PostPlannerInput;
+    const conflict = (text: string) => ({
+      status: "conflict",
+      conflicts: [
+        {
+          left: { source: "operatorRequest", text: "영상으로만 올려줘" },
+          right: { source: "productionContext.mediaType", text },
+          reason: "요청은 영상만 허용하고 현재 제작 경로는 이미지다.",
+        },
+      ],
+    });
+    expect(parsePostPlan(conflict("image"), input)).toMatchObject({
+      status: "conflict",
+    });
+    expect(() => parsePostPlan(conflict("video"), input)).toThrow();
+    expect(() =>
+      parsePostPlan(conflict("image"), {
+        operatorRequest: input.operatorRequest,
+      } as PostPlannerInput),
+    ).toThrow();
+  });
+
   it("accepts intent, account fit, and memory candidates", () => {
     expect(parsePostPlan(ready)).toEqual(ready);
   });

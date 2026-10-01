@@ -563,3 +563,11 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
 - 의도 검색은 최대 4개, 이미지 기획의 별도 고정 외형 검색은 authored fact만 신체 최대 2개·머리 1개·얼굴 1개를 선택한다. 합집합은 최대 8개다. 각 질의는 cosine score > max(일반 fact 0.3 또는 과거 event 0.52, 최고점 × 0.75)을 요구하며, 예산이 남아도 약한 후보로 채우지 않는다. 기존 `always`와 legacy 주입 규칙 및 persona 정체성 조각을 유지하며, 사건을 `always`로 바꾸지 않는다. 첫 실제 검색의 과다 회수와 관련/무관·복합 의도 대조 질의를 근거로 좁혔으며 실모델의 모든 관련성/누락 품질을 보증하지 않는다.
 - 검색 후보는 같은 캐릭터·미삭제·`retrieved`·현재 모델·현재 본문 SHA·유효 벡터 범위만 사용한다. 색인 누락/오래된 SHA/모델 불일치, draft와 현재 정책 불일치, 검색 중 원문/metadata 변경은 `needs_configuration/memory_retrieval_failed`로 원문을 보존하고 멈춘다. 전체 최근 메모리로 fallback하거나 자동 재시도하지 않는다.
 - 단계별 `concept.memoryRetrieval`에 검색어, 선택/제외 점수, 이유, 원문 SHA, 정책 및 source snapshot SHA를 남긴다. 원문은 기존 단계 입력 그대로 전달한다. 회귀 owner는 `memory-retrieval.service.spec.ts`, `post-persona-context.spec.ts`, runner spec의 세 단계 입력/실패 정지와 `test/memory-retrieval.e2e-spec.ts`의 실제 DB 검색·범위·본문 및 라우팅 CAS다.
+
+
+## 게시 기획 제작 매체와 판정 계약
+
+- `PostPipelineV3Runner.postPlannerInput`은 실제 `contentType`과 현재 이미지 생성 경로의 `productionContext.mediaType=image`를 제공하고 같은 원본을 artifact에 남긴다. 게시 기획은 사건·장소·목적만 소유하며, 사진 구성과 캡션 표현은 각각 후속 Agent의 책임이다.
+- `post-plan-v4` / `post-planner-v7`은 `productionContext.mediaType`을 conflict의 검증 가능한 입력 출처로 허용한다. `parsePostPlan`은 실제 값과 일치하지 않는 인용을 계속 거부한다. 이전 artifact의 기존 출처는 읽을 수 있다.
+- 시스템 지침은 DB `PostAgentPromptService`가 소유한다. 지침/출력 schema는 원본 버전을 보존한 revision CAS로 교체하고 모델 설정은 유지한다. 역할·사진/캡션 범위·선택 장소·참조 목적·완료 판정은 지침에서 설명하며 parser의 단어 목록으로 의미 판단을 대체하지 않는다.
+- 회귀 검증은 `post-planner.spec.ts`(매체 출처/허구 인용), `post-pipeline-v3.runner.spec.ts`(feed/reel의 실제 입력 및 artifact), `post-generation-agents.e2e-spec.ts`(저장 계약/CAS), `planning-evidence.e2e-spec.ts`(잘못된 응답 원본 보존/재시도 제외)가 담당한다. 원본 실패 사례의 provider 대조는 기존 초안을 수정하지 않는 별도 평가로 수행한다.

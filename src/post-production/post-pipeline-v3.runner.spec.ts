@@ -688,6 +688,36 @@ describe("PostPipelineV3Runner", () => {
     ]);
   });
 
+  it.each(["feed", "reel"])(
+    "supplies the actual image pipeline medium for %s without rewriting the request",
+    async (contentType) => {
+      const current = draft(
+        {
+          pipelineVersion: "post-pipeline-v4",
+          operatorRequest: "카페에서 쉬는 순간을 영상으로만 올려줘",
+          pipeline: { stage: "post_plan", state: "running" },
+        },
+        { contentType },
+      );
+      const { runner, repository, fetchMock } = setup(current, readyPostPlan());
+      await runner.runCurrentStage("draft-1");
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      const input = JSON.parse(body.messages[1].content);
+      expect(input.productionContext).toEqual({
+        contentType,
+        mediaType: "image",
+      });
+      expect(input.operatorRequest).toBe(
+        "카페에서 쉬는 순간을 영상으로만 올려줘",
+      );
+      expect(input).not.toHaveProperty("imageCount");
+      expect(
+        repository.persistV3Artifact.mock.calls[0][0].conceptJson.postPlanning
+          .input,
+      ).toEqual(input);
+    },
+  );
+
   it.each([undefined, "카페에서 쉬는 순간"])(
     "always supplies authored account concept with request=%s",
     async (operatorRequest) => {

@@ -1039,6 +1039,7 @@ function postPlannerInput(
 ): PostPlannerInput {
   return {
     ...personaInput(draft, true),
+    productionContext: { contentType: draft.contentType, mediaType: "image" },
     contentProfile: {
       accountConcept: profile.accountConcept,
       constraints: profile.constraints,

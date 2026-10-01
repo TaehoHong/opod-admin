@@ -12,6 +12,7 @@ import { InvalidPlanningResponseError } from "./pipeline-error";
 
 const SOURCES = new Set([
   "operatorRequest",
+  "productionContext.mediaType",
   "contentDirection", // Old artifact conflict sources remain readable.
   "contentProfile.accountConcept",
   "contentProfile.constraints",
@@ -32,6 +33,7 @@ const MEMORY_TYPES = new Set([
 
 export type PersonaEntry = PostPersonaEntry;
 export type PostPlannerInput = {
+  productionContext?: { contentType: string; mediaType: "image" };
   contentProfile: Pick<
     CharacterContentProfile,
     "accountConcept" | "constraints"
@@ -89,7 +91,7 @@ export class PostPlanningAgent {
     try {
       result = await this.client.run({
         logType: LLM_LOG_TYPE.postPlanV3,
-        schemaName: "opod_post_plan_v3",
+        schemaName: "opod_post_plan_v4",
         schema: settings.outputSchema,
         systemPrompt: settings.systemPrompt,
         input,
