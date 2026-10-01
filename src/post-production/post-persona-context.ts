@@ -42,6 +42,7 @@ export function projectPostPersonaContext(input: {
   personas: StoredPostPersona[];
   memories: PostMemoryEntry[];
   query: string;
+  semanticMemoryIds?: string[];
   bio: string;
   interests: string[];
 }):
@@ -104,28 +105,7 @@ export function projectPostPersonaContext(input: {
   // Before a candidate exists, only authored stable context seeds recall.
   // Retrieved text, examples and recent generated posts cannot retrieve themselves.
   const query = normalize(
-    input.query.trim() ||
-      [
-        input.bio,
-        ...input.interests,
-        ...entries
-          .filter(
-            (entry) =>
-              entry.injection !== "retrieved" &&
-              entry.kind !== "example" &&
-              [
-                "identity",
-                "personality",
-                "background",
-                "lifestyle",
-                "motivation",
-                "judgment",
-                "tension",
-                "relationship",
-              ].includes(postPersonaRole(entry)),
-          )
-          .map((entry) => entry.content),
-      ].join("\n"),
+    postPersonaRecallQuery({ ...input, personas: entries }),
   );
   const relevant = (keys: string[] = []) =>
     keys.some((key) => normalize(key) && query.includes(normalize(key)));
@@ -143,11 +123,47 @@ export function projectPostPersonaContext(input: {
       // Canon links are provenance, not a command to retrieve a memory.
       return (
         memory.injection === "retrieved" &&
-        relevant(memory.recallKeys) &&
-        recalledCount++ < 20
+        (input.semanticMemoryIds
+          ? !!memory.sourceId &&
+            input.semanticMemoryIds.includes(memory.sourceId)
+          : relevant(memory.recallKeys)) &&
+        recalledCount++ < (input.semanticMemoryIds ? 8 : 20)
       );
     }),
   };
+}
+
+// The same authored seed serves keyword persona recall and semantic Canon queries.
+export function postPersonaRecallQuery(input: {
+  query: string;
+  bio: string;
+  interests: string[];
+  personas: PostPersonaEntry[];
+}) {
+  return (
+    input.query.trim() ||
+    [
+      input.bio,
+      ...input.interests,
+      ...input.personas
+        .filter(
+          (entry) =>
+            entry.injection !== "retrieved" &&
+            entry.kind !== "example" &&
+            [
+              "identity",
+              "personality",
+              "background",
+              "lifestyle",
+              "motivation",
+              "judgment",
+              "tension",
+              "relationship",
+            ].includes(postPersonaRole(entry)),
+        )
+        .map((entry) => entry.content),
+    ].join("\n")
+  );
 }
 
 export function postPersonaRole(entry: PostPersonaEntry): string {

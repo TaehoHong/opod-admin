@@ -108,6 +108,14 @@ export type MemoryRow = Pick<
   typeof characterMemories.$inferSelect,
   keyof typeof memoryFields
 >;
+export type MemoryEmbeddingSource = MemoryRow & {
+  sourceSha256: string;
+  memorySha256: string;
+  embeddingModel: string | null;
+  embeddedTextSha256: string | null;
+  indexed: boolean;
+};
+
 export type CharacterStatus = "active" | "inactive";
 export type CharacterMetricsRow = {
   lastPostAt: Date | string | null;
@@ -841,6 +849,100 @@ export class CharacterRepository {
         .returning(personaFields);
       return row;
     });
+  }
+
+  async listMemoryEmbeddingSources(
+    characterId?: string,
+  ): Promise<MemoryEmbeddingSource[]> {
+    const rows = await this.database.client
+      .select({
+        ...memoryFields,
+        embeddingModel: characterMemories.embeddingModel,
+        embeddedTextSha256: characterMemories.embeddingSourceSha256,
+        indexed: sql<boolean>`${characterMemories.embedding} IS NOT NULL AND ${characterMemories.embeddedAt} IS NOT NULL AND public.vector_norm(${characterMemories.embedding}) > 0`,
+      })
+      .from(characterMemories)
+      .where(
+        and(
+          isNull(characterMemories.deletedAt),
+          characterId
+            ? eq(characterMemories.characterId, characterId)
+            : undefined,
+        ),
+      )
+      .orderBy(asc(characterMemories.id));
+    return rows.map((row) => ({
+      ...row,
+      sourceSha256: sourceHash(row.content),
+      memorySha256: memoryHash(row),
+    }));
+  }
+
+  async saveMemoryEmbedding(input: {
+    characterId: string;
+    memoryId: string;
+    content: string;
+    memorySha256: string;
+    embedding: number[];
+    model: string;
+  }): Promise<boolean> {
+    return this.database.client.transaction(async (tx) => {
+      const [current] = await tx
+        .select(memoryFields)
+        .from(characterMemories)
+        .where(
+          and(
+            eq(characterMemories.id, input.memoryId),
+            eq(characterMemories.characterId, input.characterId),
+            isNull(characterMemories.deletedAt),
+          ),
+        )
+        .for("update");
+      if (
+        !current ||
+        current.content !== input.content ||
+        memoryHash(current) !== input.memorySha256
+      )
+        return false;
+      await tx
+        .update(characterMemories)
+        .set({
+          embedding: input.embedding,
+          embeddingModel: input.model,
+          embeddingSourceSha256: sourceHash(input.content),
+          embeddedAt: new Date(),
+        })
+        .where(eq(characterMemories.id, input.memoryId));
+      return true;
+    });
+  }
+
+  async searchMemoryEmbeddings(
+    characterId: string,
+    embedding: number[],
+    model: string,
+    factsOnly = false,
+  ) {
+    const distance = sql<number>`${characterMemories.embedding} OPERATOR(public.<=>) ${JSON.stringify(embedding)}::public.vector(1024)`;
+    return this.database.client
+      .select({
+        id: characterMemories.id,
+        sourceSha256: sql<string>`encode(sha256(convert_to(${characterMemories.content}, 'UTF8')), 'hex')`,
+        score: sql<number>`1 - (${distance})`,
+      })
+      .from(characterMemories)
+      .where(
+        and(
+          eq(characterMemories.characterId, characterId),
+          isNull(characterMemories.deletedAt),
+          eq(characterMemories.injection, "retrieved"),
+          factsOnly ? eq(characterMemories.kind, "fact") : undefined,
+          eq(characterMemories.embeddingModel, model),
+          sql`${characterMemories.embeddingSourceSha256} = encode(sha256(convert_to(${characterMemories.content}, 'UTF8')), 'hex')`,
+          sql`${characterMemories.embeddedAt} IS NOT NULL AND public.vector_norm(${characterMemories.embedding}) > 0`,
+        ),
+      )
+      .orderBy(distance, asc(characterMemories.id));
   }
 
   async findMemories(

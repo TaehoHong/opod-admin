@@ -1,3 +1,5 @@
+import { CharacterService } from "../characters/character.service";
+import { MemoryRetrievalService } from "./memory-retrieval.service";
 import { CharactersModule } from "../characters/characters.module";
 import { VisualProfileService } from "../characters/visual-profile.service";
 import { LocationsModule } from "../locations/locations.module";
@@ -54,6 +56,15 @@ function storageEnv(config: S3Config | undefined) {
   ],
   providers: [
     {
+      provide: MemoryRetrievalService,
+      useFactory: (
+        characters: CharacterService,
+        settings: GenerationSettingsService,
+        logs: LlmLogService,
+      ) => new MemoryRetrievalService(characters, settings, logs),
+      inject: [CharacterService, GenerationSettingsService, LlmLogService],
+    },
+    {
       provide: ReferenceRetrievalService,
       useFactory: (
         visual: VisualProfileService,
@@ -80,6 +91,7 @@ function storageEnv(config: S3Config | undefined) {
         profiles: CharacterContentProfileService,
         agentPrompts: PostAgentPromptService,
         references: ReferenceRetrievalService,
+        memories: MemoryRetrievalService,
       ) =>
         new PostPipelineV3Runner(
           drafts,
@@ -92,6 +104,7 @@ function storageEnv(config: S3Config | undefined) {
           createMediaBytesReader(config.s3),
           agentPrompts,
           references,
+          memories,
         ),
       inject: [
         DraftWorkerRepository,
@@ -101,6 +114,7 @@ function storageEnv(config: S3Config | undefined) {
         CharacterContentProfileService,
         PostAgentPromptService,
         ReferenceRetrievalService,
+        MemoryRetrievalService,
       ],
     },
     {

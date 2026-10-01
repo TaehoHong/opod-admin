@@ -153,6 +153,12 @@ function setup(
         trace: { model: "test" },
       }),
     } as never,
+    {
+      retrieve: jest.fn().mockResolvedValue({
+        selectedIds: [],
+        trace: { model: "fixture-memory" },
+      }),
+    } as never,
   );
   return { runner, repository, settings, fetchMock, readMedia };
 }
@@ -1664,4 +1670,106 @@ it("pauses image planning on embedding failure without a planner call or retry",
       },
     },
   );
+});
+
+describe("semantic Canon pipeline input", () => {
+  it.each(["post_plan", "image_plan", "caption"])(
+    "passes selected Canon unchanged to %s and records retrieval evidence",
+    async (stage) => {
+      const current = captionStageDraft();
+      (current.conceptJson.pipeline as Record<string, unknown>).stage = stage;
+      const selected = {
+        sourceId: "selected-canon",
+        type: "fact",
+        content: "고정 블루블랙 단발",
+        kind: "fact",
+        injection: "retrieved",
+        recallKeys: ["머리"],
+      };
+      const excluded = {
+        sourceId: "excluded-canon",
+        type: "episode",
+        content: "이전 밤 산책",
+        kind: "event",
+        injection: "retrieved",
+        recallKeys: ["운동"],
+      };
+      Object.assign(current.character, { memories: [selected, excluded] });
+      const { runner, repository, fetchMock } = setup(
+        current,
+        stage === "caption"
+          ? {
+              status: "ready",
+              caption: "커피 한 잔",
+              captionLanguages: ["ko"],
+              hashtags: [],
+            }
+          : undefined,
+        {
+          captionShots: [
+            {
+              sortOrder: 0,
+              jobId: "job",
+              mediaId: "media",
+              media: {
+                url: "https://cdn.test/1.png",
+                storageKey: null,
+                contentType: "image/png",
+              },
+            },
+          ],
+        },
+      );
+      const trace = { model: "semantic-test", selectedIds: ["selected-canon"] };
+      Object.assign(runner, {
+        memoryRetrieval: {
+          retrieve: async () => ({ selectedIds: ["selected-canon"], trace }),
+        },
+      });
+      await runner.runCurrentStage("draft-1");
+      const messages = JSON.parse(fetchMock.mock.calls[0][1].body).messages;
+      const rawInput =
+        typeof messages[1].content === "string"
+          ? messages[1].content
+          : messages[1].content[0].text;
+      expect(rawInput).toContain("고정 블루블랙 단발");
+      expect(rawInput).toContain("selected-canon");
+      expect(rawInput).not.toContain("이전 밤 산책");
+      expect(rawInput).not.toContain("excluded-canon");
+      const saved =
+        stage === "caption"
+          ? repository.persistV3Artifact.mock.calls[0][0].conceptJson
+          : repository.persistV3Paused.mock.calls[0][0].conceptJson;
+      expect(saved.memoryRetrieval[stage]).toEqual(trace);
+    },
+  );
+  it("preserves upstream data and stops without a planner call or retry on memory index failure", async () => {
+    const current = captionStageDraft();
+    (current.conceptJson.pipeline as Record<string, unknown>).stage =
+      "image_plan";
+    const before = current.conceptJson.postPlanning;
+    const { runner, repository, fetchMock } = setup(current);
+    Object.assign(runner, {
+      memoryRetrieval: {
+        retrieve: async () => {
+          throw new Error("memory_embedding_index_required:source");
+        },
+      },
+    });
+    await runner.runCurrentStage("draft-1");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+    expect(
+      repository.persistV3Paused.mock.calls[0][0].conceptJson,
+    ).toMatchObject({
+      postPlanning: before,
+      memoryRetrieval: {
+        image_plan: { failure: "memory_embedding_index_required:source" },
+      },
+      pipeline: {
+        state: "needs_configuration",
+        reasonCodes: ["memory_retrieval_failed"],
+      },
+    });
+  });
 });

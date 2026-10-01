@@ -2,6 +2,7 @@ import {
   LLM_LOG_TYPE,
   LlmLogContext,
   LlmLogService,
+  LlmLogType,
 } from "../../llm-logs/llm-log.service";
 
 export const REFERENCE_EMBEDDING_DIMENSIONS = 1024;
@@ -47,6 +48,7 @@ export class ReferenceEmbeddingClient {
     private readonly config: { apiUrl: string; apiKey?: string; model: string },
     private readonly llmLogs: LlmLogService,
     private readonly fetchFn: typeof fetch = fetch,
+    private readonly logType: LlmLogType = LLM_LOG_TYPE.referenceEmbedding,
   ) {}
 
   async embed(input: string[], context?: LlmLogContext): Promise<number[][]> {
@@ -57,7 +59,7 @@ export class ReferenceEmbeddingClient {
       encoding_format: "float",
     };
     const response = await this.llmLogs.runJsonFetch({
-      type: LLM_LOG_TYPE.referenceEmbedding,
+      type: this.logType,
       provider: "openai-compatible",
       model: this.config.model,
       endpoint: this.config.apiUrl,

@@ -201,3 +201,61 @@ describe("post persona context", () => {
     ).toEqual({ status: "invalid" });
   });
 });
+
+it("uses selected semantic Canon IDs while preserving authored always identity", () => {
+  const result = projectPostPersonaContext({
+    personas: [
+      {
+        title: "identity",
+        content: "성인이다",
+        schemaVersion: 2,
+        fragments: [
+          {
+            id: "identity",
+            content: "성인이다",
+            kind: "identity",
+            injection: "always",
+            recallKeys: [],
+            canonIds: [],
+          },
+        ],
+      },
+    ],
+    memories: [
+      {
+        sourceId: "selected",
+        type: "fact",
+        content: "블루블랙 단발",
+        kind: "fact",
+        injection: "retrieved",
+        recallKeys: ["머리"],
+      },
+      {
+        sourceId: "unrelated",
+        type: "episode",
+        content: "이전 산책",
+        kind: "event",
+        injection: "retrieved",
+        recallKeys: ["성인"],
+      },
+      {
+        sourceId: "always",
+        type: "fact",
+        content: "성인",
+        kind: "fact",
+        injection: "always",
+      },
+    ],
+    semanticMemoryIds: ["selected"],
+    query: "성인 카페",
+    bio: "",
+    interests: [],
+  });
+  expect(result.status).toBe("ready");
+  if (result.status !== "ready") throw new Error("Expected ready context");
+  expect(result.personas.map((entry) => entry.content)).toEqual(["성인이다"]);
+  expect(result.memories.map((entry) => entry.sourceId)).toEqual([
+    "selected",
+    "always",
+  ]);
+});

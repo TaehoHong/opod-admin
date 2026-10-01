@@ -1,3 +1,4 @@
+import { MemoryRetrievalService } from "./memory-retrieval.service";
 import { ReferenceRetrievalService } from "./reference-retrieval.service";
 import { resolveImageGenerationParams } from "../generation/image-generation-params";
 import { requestedImageAspectRatio } from "./generated-image-validation";
@@ -66,6 +67,7 @@ import {
 import {
   postPersonaRole,
   projectPostPersonaContext,
+  postPersonaRecallQuery,
 } from "./post-persona-context";
 
 type V3Concept = Record<string, unknown> & {
@@ -90,6 +92,7 @@ export class PostPipelineV3Runner {
     private readonly readMediaBytes: MediaBytesReader | null = null,
     private readonly agentPrompts?: PostAgentPromptService,
     private readonly referenceRetrieval?: ReferenceRetrievalService,
+    private readonly memoryRetrieval?: MemoryRetrievalService,
   ) {}
 
   async runCurrentStage(
@@ -136,17 +139,6 @@ export class PostPipelineV3Runner {
         ]);
         return;
       }
-      const profile = needsContext
-        ? await this.contentProfiles.get(draft.characterId)
-        : null;
-      const normalizedDraft: PlannedDraft = {
-        ...draft,
-        character: {
-          ...draft.character,
-          personas: context.personas,
-          memories: context.memories,
-        },
-      };
       const savedAgent =
         this.agentPrompts &&
         ["post_plan", "image_plan", "image_prompt", "caption"].includes(
@@ -174,6 +166,78 @@ export class PostPipelineV3Runner {
         ]);
         return;
       }
+      if (needsContext) {
+        if (!this.memoryRetrieval) {
+          await this.pause(draft, concept, "needs_configuration", [
+            "memory_retrieval_not_configured",
+          ]);
+          return;
+        }
+        const intent =
+          stage === "post_plan" ? null : postPlanReady(concept)?.intent;
+        const query = postPersonaRecallQuery({
+          query: [
+            operatorRequest(concept),
+            intent?.premise,
+            intent?.primaryPurpose,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          bio: draft.character.bio,
+          interests: draft.character.interests,
+          personas: context.personas,
+        });
+        try {
+          const memories = await this.memoryRetrieval.retrieve({
+            characterId: draft.characterId,
+            requestId: draft.id,
+            stage: String(stage),
+            query,
+            memories: draft.character.memories,
+          });
+          concept.memoryRetrieval = {
+            ...(isRecord(concept.memoryRetrieval)
+              ? concept.memoryRetrieval
+              : {}),
+            [String(stage)]: memories.trace,
+          };
+          const selected = projectPostPersonaContext({
+            personas: draft.character.personas,
+            memories: draft.character.memories,
+            bio: draft.character.bio,
+            interests: draft.character.interests,
+            query,
+            semanticMemoryIds: memories.selectedIds,
+          });
+          if (selected.status !== "ready")
+            throw new Error("invalid_persona_structure");
+          context.memories = selected.memories;
+        } catch (error) {
+          concept.memoryRetrieval = {
+            ...(isRecord(concept.memoryRetrieval)
+              ? concept.memoryRetrieval
+              : {}),
+            [String(stage)]: {
+              failure: error instanceof Error ? error.message : String(error),
+            },
+          };
+          await this.pause(draft, concept, "needs_configuration", [
+            "memory_retrieval_failed",
+          ]);
+          return;
+        }
+      }
+      const profile = needsContext
+        ? await this.contentProfiles.get(draft.characterId)
+        : null;
+      const normalizedDraft: PlannedDraft = {
+        ...draft,
+        character: {
+          ...draft.character,
+          personas: context.personas,
+          memories: context.memories,
+        },
+      };
       const client = new StrictJsonAgentClient(
         {
           apiUrl: planner.apiUrl,

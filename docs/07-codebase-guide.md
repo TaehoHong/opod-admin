@@ -554,3 +554,12 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
 - 이미지 기획은 필요한 캡션의 임베딩이 없거나 설정 모델과 다르거나 검색 중 원문이 바뀌면 `needs_configuration/reference_retrieval_failed`로 멈춘다. 전체 캡션 전달로 우회하거나 자동 재시도하지 않는다. 검색어·모델·점수·선택 목적은 concept의 `referenceRetrieval`, 임베딩 요청/응답은 `admin.reference.embedding` 로그에 남긴다. 검색 후보는 이미지 기획 Agent가 컷별 역할을 판단할 근거다.
 - 개발 앱의 search_path는 opod만 포함하므로 pgvector 함수와 cosine 연산자는 public 스키마를 명시한다.
 - DB 스키마는 backend 정본의 기존 vector(1024), embedding_model, embedded_at 컬럼을 사용한다. 새 DDL/API/설정 화면은 추가하지 않는다.
+
+## Canon 메모리 의미 검색
+
+- `CharacterService` / `CharacterRepository`가 Canon 색인 원문 조회, 같은 캐릭터의 pgvector cosine 검색, 본문·라우팅 SHA를 잠가 확인하는 조건부 색인 저장을 소유한다. 기존 `canon_embedding`, `embedding_model`, `embedded_text_sha256`, `embedding_generated_at`을 쓰며 새 DDL은 없다.
+- `MemoryRetrievalService`는 현재 임베딩 설정을 사용한다. 명시한 Canon ID만 `indexMissing(memoryIds)`로 보완하고 현재 모델·본문 SHA가 일치하는 기존 벡터는 재사용한다. 문서는 원문 그대로, Qwen 검색 지시는 검색어에만 붙인다. `admin.memory.embedding`에 실제 요청·응답을 기록한다.
+- `PostPipelineV3Runner`는 게시 기획·이미지 기획·캡션 전에 의미 검색을 실행한다. 게시 의도가 있으면 premise/purpose/운영자 요청, 없으면 `postPersonaRecallQuery`의 authored 안정 맥락을 검색어로 쓴다. persona fragment의 기존 검색 정책은 변경하지 않는다.
+- 의도 검색은 최대 4개, 이미지 기획의 별도 고정 외형 검색은 authored fact만 신체 최대 2개·머리 1개·얼굴 1개를 선택한다. 합집합은 최대 8개다. 각 질의는 cosine score > max(일반 fact 0.3 또는 과거 event 0.52, 최고점 × 0.75)을 요구하며, 예산이 남아도 약한 후보로 채우지 않는다. 기존 `always`와 legacy 주입 규칙 및 persona 정체성 조각을 유지하며, 사건을 `always`로 바꾸지 않는다. 첫 실제 검색의 과다 회수와 관련/무관·복합 의도 대조 질의를 근거로 좁혔으며 실모델의 모든 관련성/누락 품질을 보증하지 않는다.
+- 검색 후보는 같은 캐릭터·미삭제·`retrieved`·현재 모델·현재 본문 SHA·유효 벡터 범위만 사용한다. 색인 누락/오래된 SHA/모델 불일치, draft와 현재 정책 불일치, 검색 중 원문/metadata 변경은 `needs_configuration/memory_retrieval_failed`로 원문을 보존하고 멈춘다. 전체 최근 메모리로 fallback하거나 자동 재시도하지 않는다.
+- 단계별 `concept.memoryRetrieval`에 검색어, 선택/제외 점수, 이유, 원문 SHA, 정책 및 source snapshot SHA를 남긴다. 원문은 기존 단계 입력 그대로 전달한다. 회귀 owner는 `memory-retrieval.service.spec.ts`, `post-persona-context.spec.ts`, runner spec의 세 단계 입력/실패 정지와 `test/memory-retrieval.e2e-spec.ts`의 실제 DB 검색·범위·본문 및 라우팅 CAS다.

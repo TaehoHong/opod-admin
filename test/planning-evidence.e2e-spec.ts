@@ -166,6 +166,12 @@ describe("planning response evidence persistence", () => {
             trace: { model: "fixture" },
           }),
         } as never,
+        {
+          retrieve: async () => ({
+            selectedIds: [],
+            trace: { model: "fixture-memory" },
+          }),
+        } as never,
       );
       await runner.runCurrentStage(draftId);
       const [saved] = await db

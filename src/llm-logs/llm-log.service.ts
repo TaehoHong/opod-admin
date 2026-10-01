@@ -17,6 +17,7 @@ export const LLM_LOG_TYPE = {
   imagePromptV3: "admin.v3.image.prompt",
   captionWriteV4: "admin.v4.caption.write",
   referenceCaption: "admin.reference.caption",
+  memoryEmbedding: "admin.memory.embedding",
   referenceEmbedding: "admin.reference.embedding",
   connectionTest: "admin.connection.test",
   imageGenerate: "admin.image.generate",

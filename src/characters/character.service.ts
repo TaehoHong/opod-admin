@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { assertReferenceEmbedding } from "../shared/ai/reference-embedding";
 import { PutPersonaStructureDto } from "./dto/put-persona-structure.dto";
 import { PutMemoryRoutingDto } from "./dto/put-memory-routing.dto";
 import {
@@ -313,6 +314,41 @@ export class CharacterService {
     return pageFromRows(
       characters.map((character) => this.toCharacterListItem(character)),
       input.limit,
+    );
+  }
+
+  listMemoryEmbeddingSources(characterId?: string) {
+    return this.characters.listMemoryEmbeddingSources(characterId);
+  }
+
+  saveMemoryEmbedding(input: {
+    characterId: string;
+    memoryId: string;
+    content: string;
+    memorySha256: string;
+    embedding: number[];
+    model: string;
+  }) {
+    assertReferenceEmbedding(input.embedding);
+    if (!input.model.trim() || !input.content.trim())
+      throw new BadRequestException(
+        "Memory embedding model and content are required",
+      );
+    return this.characters.saveMemoryEmbedding(input);
+  }
+
+  searchMemoryEmbeddings(
+    characterId: string,
+    embedding: number[],
+    model: string,
+    factsOnly = false,
+  ) {
+    assertReferenceEmbedding(embedding);
+    return this.characters.searchMemoryEmbeddings(
+      characterId,
+      embedding,
+      model,
+      factsOnly,
     );
   }
 
