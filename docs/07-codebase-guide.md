@@ -552,4 +552,5 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
 - `ReferenceRetrievalService`는 기존 embedding 설정을 읽어 이미지 기획 전에 장면·얼굴·전신 검색어를 임베딩한다. 같은 캐릭터의 활성·업로드된 정체성 후보 최대 6개(얼굴/전신 검색 1개씩 포함), 이용 가능한 캐릭터/공용 장소별 후보 최대 4개를 검색한다. 서버는 캡션을 재작성하지 않는다. 모델/1024차원/유한·비영 벡터를 검증한다.
 - 캡션 문서는 원문 그대로 임베딩하고 검색어에만 Qwen 검색 지시를 붙인다. 관리 작업 `ReferenceRetrievalService.indexAll()`은 업로드된 활성 정체성·삭제되지 않은 장소 캡션을 4개씩 색인한다. 저장 시 owner/media/caption 조건이 일치해야 하므로 중간에 바뀐 캡션을 덮어쓰지 않는다. 캡션 변경은 기존 벡터를 무효화하며 재색인이 필요하다.
 - 이미지 기획은 필요한 캡션의 임베딩이 없거나 설정 모델과 다르거나 검색 중 원문이 바뀌면 `needs_configuration/reference_retrieval_failed`로 멈춘다. 전체 캡션 전달로 우회하거나 자동 재시도하지 않는다. 검색어·모델·점수·선택 목적은 concept의 `referenceRetrieval`, 임베딩 요청/응답은 `admin.reference.embedding` 로그에 남긴다. 검색 후보는 이미지 기획 Agent가 컷별 역할을 판단할 근거다.
+- 개발 앱의 search_path는 opod만 포함하므로 pgvector 함수와 cosine 연산자는 public 스키마를 명시한다.
 - DB 스키마는 backend 정본의 기존 vector(1024), embedding_model, embedded_at 컬럼을 사용한다. 새 DDL/API/설정 화면은 추가하지 않는다.

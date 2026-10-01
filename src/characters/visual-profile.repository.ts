@@ -7,7 +7,6 @@ import { Injectable } from "@nestjs/common";
 import {
   and,
   asc,
-  cosineDistance,
   desc,
   eq,
   isNotNull,
@@ -59,7 +58,7 @@ export class VisualProfileRepository {
         mediaId: r.mediaId,
         description: r.description,
         embeddingModel: r.embeddingModel,
-        indexed: sql<boolean>`(${r.embedding} IS NOT NULL AND ${r.embeddedAt} IS NOT NULL AND vector_norm(${r.embedding}) > 0)`,
+        indexed: sql<boolean>`(${r.embedding} IS NOT NULL AND ${r.embeddedAt} IS NOT NULL AND public.vector_norm(${r.embedding}) > 0)`,
       })
       .from(r)
       .innerJoin(
@@ -111,7 +110,7 @@ export class VisualProfileRepository {
     limit: number,
   ): Promise<RankedReference[]> {
     const r = characterVisualProfileReferences;
-    const distance = cosineDistance(r.embedding, embedding);
+    const distance = sql`${r.embedding} OPERATOR(public.<=>) ${JSON.stringify(embedding)}`;
     return this.database.client
       .select({
         id: r.mediaId,
@@ -132,7 +131,7 @@ export class VisualProfileRepository {
           ne(r.description, ""),
           eq(r.embeddingModel, model),
           isNotNull(r.embeddedAt),
-          sql`vector_norm(${r.embedding}) > 0`,
+          sql`public.vector_norm(${r.embedding}) > 0`,
         ),
       )
       .orderBy(asc(distance), asc(r.sortOrder), asc(r.mediaId))

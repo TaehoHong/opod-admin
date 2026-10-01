@@ -7,7 +7,6 @@ import { Injectable } from "@nestjs/common";
 import {
   and,
   asc,
-  cosineDistance,
   desc,
   eq,
   isNotNull,
@@ -58,7 +57,7 @@ export class LocationsRepository {
         mediaId: r.mediaId,
         description: r.description,
         embeddingModel: r.embeddingModel,
-        indexed: sql<boolean>`(${r.embedding} IS NOT NULL AND ${r.embeddedAt} IS NOT NULL AND vector_norm(${r.embedding}) > 0)`,
+        indexed: sql<boolean>`(${r.embedding} IS NOT NULL AND ${r.embeddedAt} IS NOT NULL AND public.vector_norm(${r.embedding}) > 0)`,
       })
       .from(r)
       .innerJoin(characterLocations, eq(characterLocations.id, r.locationId))
@@ -111,7 +110,7 @@ export class LocationsRepository {
     limit: number,
   ): Promise<RankedReference[]> {
     const r = characterLocationReferences;
-    const distance = cosineDistance(r.embedding, embedding);
+    const distance = sql`${r.embedding} OPERATOR(public.<=>) ${JSON.stringify(embedding)}`;
     return this.database.client
       .select({
         id: r.mediaId,
@@ -133,7 +132,7 @@ export class LocationsRepository {
           ne(r.description, ""),
           eq(r.embeddingModel, model),
           isNotNull(r.embeddedAt),
-          sql`vector_norm(${r.embedding}) > 0`,
+          sql`public.vector_norm(${r.embedding}) > 0`,
         ),
       )
       .orderBy(asc(distance), asc(r.sortOrder), asc(r.mediaId))

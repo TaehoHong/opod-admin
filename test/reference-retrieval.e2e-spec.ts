@@ -25,6 +25,10 @@ describe("scoped pgvector reference retrieval", () => {
   let locationId: string;
   let foreignLocationId: string;
   beforeAll(async () => {
+    await db.pool.query("SET search_path = opod");
+    expect((await db.pool.query("SHOW search_path")).rows[0].search_path).toBe(
+      "opod",
+    );
     ids = (
       await db.client
         .insert(characters)
