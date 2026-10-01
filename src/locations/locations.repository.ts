@@ -9,6 +9,7 @@ import {
   lt,
   notInArray,
   or,
+  sql,
 } from "drizzle-orm";
 import type { AssertableMedia } from "../media/media.service";
 import { DatabaseService } from "../core/database/database.service";
@@ -213,6 +214,9 @@ export class LocationsRepository {
             set: {
               description: reference.description,
               sortOrder: (index + 1) * 10,
+              embedding: sql`CASE WHEN ${characterLocationReferences.description} IS DISTINCT FROM ${reference.description} THEN NULL ELSE ${characterLocationReferences.embedding} END`,
+              embeddingModel: sql`CASE WHEN ${characterLocationReferences.description} IS DISTINCT FROM ${reference.description} THEN NULL ELSE ${characterLocationReferences.embeddingModel} END`,
+              embeddedAt: sql`CASE WHEN ${characterLocationReferences.description} IS DISTINCT FROM ${reference.description} THEN NULL ELSE ${characterLocationReferences.embeddedAt} END`,
             },
           });
       }

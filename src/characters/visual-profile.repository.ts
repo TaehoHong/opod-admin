@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { and, asc, desc, eq, isNotNull, notInArray } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, notInArray, sql } from "drizzle-orm";
 import type { AssertableMedia } from "../media/media.service";
 import { DatabaseService } from "../core/database/database.service";
 import {
@@ -140,7 +140,12 @@ export class VisualProfileRepository {
   ): Promise<void> {
     await this.database.client
       .update(characterVisualProfileReferences)
-      .set({ description })
+      .set({
+        description,
+        embedding: sql`CASE WHEN ${characterVisualProfileReferences.description} IS DISTINCT FROM ${description} THEN NULL ELSE ${characterVisualProfileReferences.embedding} END`,
+        embeddingModel: sql`CASE WHEN ${characterVisualProfileReferences.description} IS DISTINCT FROM ${description} THEN NULL ELSE ${characterVisualProfileReferences.embeddingModel} END`,
+        embeddedAt: sql`CASE WHEN ${characterVisualProfileReferences.description} IS DISTINCT FROM ${description} THEN NULL ELSE ${characterVisualProfileReferences.embeddedAt} END`,
+      })
       .where(
         and(
           eq(characterVisualProfileReferences.profileId, profileId),
