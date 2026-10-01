@@ -1,3 +1,5 @@
+import { resolveImageGenerationParams } from "../generation/image-generation-params";
+import { requestedImageAspectRatio } from "./generated-image-validation";
 import {
   PostAgentPromptService,
   postAgentStage,
@@ -147,6 +149,17 @@ export class PostPipelineV3Runner {
         )
           ? await this.agentPrompts.execution(postAgentStage(String(stage)))
           : null;
+      if (
+        ["post_plan", "image_plan", "image_prompt", "caption"].includes(
+          String(stage),
+        ) &&
+        !savedAgent?.id
+      ) {
+        await this.pause(draft, concept, "needs_configuration", [
+          `${String(stage)}_prompt_missing`,
+        ]);
+        return;
+      }
       const planner = await this.settings.resolvePlannerSettings();
       if (savedAgent?.id)
         planner.model = savedAgent.effectiveModel ?? undefined;
@@ -345,6 +358,16 @@ export class PostPipelineV3Runner {
         8,
       ),
     ]);
+    const ratios = await this.settings.resolveAspectRatios();
+    const generationParams = resolveImageGenerationParams(
+      draft,
+      {
+        feed: ratios.feed.value,
+        story: ratios.story.value,
+        reel: ratios.reel.value,
+      },
+      draft.character.visualProfile?.providerConfig,
+    );
     const input: ImagePlannerInput = {
       contentProfile: {
         accountConcept: profile.accountConcept,
@@ -356,9 +379,13 @@ export class PostPipelineV3Runner {
       },
       postPlan: { intent: postPlan.intent },
       imageCount,
+      canvas: { aspectRatio: requestedImageAspectRatio(generationParams) },
       characterVisualContext: {
         name: draft.character.displayName,
         appearance: draft.character.visualProfile?.appearancePrompt ?? "",
+        exclusions: [
+          draft.character.visualProfile?.negativePrompt.trim() ?? "",
+        ].filter(Boolean),
         boundaries: personaContents(draft, "boundaries"),
         capturePreferences: personaContents(draft, "capture_style"),
         personaContext: draft.character.personas
@@ -396,6 +423,7 @@ export class PostPipelineV3Runner {
         id: location.id,
         name: location.displayName,
         description: location.description,
+        exclusions: [location.negativePrompt.trim()].filter(Boolean),
         references: location.references
           .filter((reference) => reference.media.uploadedAt)
           .map((reference) => ({
@@ -490,6 +518,7 @@ export class PostPipelineV3Runner {
           client.agentSettings?.metadata,
         ),
         locationExclusions,
+        generationParams,
       },
       pipeline: {
         ...concept.pipeline,
@@ -557,6 +586,25 @@ export class PostPipelineV3Runner {
             storedLocationExclusions.every((value) => typeof value === "string")
           ? (storedLocationExclusions as string[])
           : undefined;
+    const planningInput =
+      isRecord(concept.imagePlanning) && isRecord(concept.imagePlanning.input)
+        ? concept.imagePlanning.input
+        : undefined;
+    const storedCharacterExclusions = isRecord(
+      planningInput?.characterVisualContext,
+    )
+      ? planningInput.characterVisualContext.exclusions
+      : undefined;
+    const characterExclusions =
+      Array.isArray(storedCharacterExclusions) &&
+      storedCharacterExclusions.every((value) => typeof value === "string")
+        ? (storedCharacterExclusions as string[])
+        : [draft.character.visualProfile?.negativePrompt ?? ""].filter(Boolean);
+    const generationParams =
+      isRecord(concept.imagePlanning) &&
+      isRecord(concept.imagePlanning.generationParams)
+        ? concept.imagePlanning.generationParams
+        : undefined;
     try {
       promptPackage = buildPromptPackage({
         targetModelId,
@@ -565,10 +613,28 @@ export class PostPipelineV3Runner {
         visualStyle:
           imagePlanningStyle(concept.imagePlanning) ??
           draft.character.visualProfile?.stylePrompt,
-        exclusions: [
-          draft.character.visualProfile?.negativePrompt ?? "",
-          ...(locationExclusions ?? []),
-        ],
+        exclusions: [...characterExclusions, ...(locationExclusions ?? [])],
+        ...(generationParams
+          ? {
+              canvas: {
+                aspectRatio: requestedImageAspectRatio(generationParams),
+              },
+            }
+          : {}),
+        ...(Array.isArray(storedCharacterExclusions)
+          ? {
+              exclusionSources: [
+                {
+                  source: "character" as const,
+                  exclusions: characterExclusions,
+                },
+                {
+                  source: "location" as const,
+                  exclusions: locationExclusions ?? [],
+                },
+              ],
+            }
+          : {}),
       });
     } catch (error) {
       if (error instanceof UnsupportedImagePlanError) {
@@ -687,6 +753,7 @@ export class PostPipelineV3Runner {
               })),
               negativePrompt: shot.negativePrompt,
               exclusionsResolved: locationExclusions !== undefined,
+              ...(generationParams ? { generationParams } : {}),
             },
           } as JsonValue,
         };

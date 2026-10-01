@@ -21,7 +21,6 @@ import { LoadMore } from "../../shared/ui/DataPage";
 import { useCursorList } from "../../shared/api/useCursorList";
 import {
   fetchHistory,
-  resetAgent,
   restoreAgent,
   saveAgent,
   type AgentConfig,
@@ -84,9 +83,7 @@ export function AgentEditor({
   });
   const isImage = config.stage === "generation";
   const [preview, setPreview] = useState<AgentConfig | null>(null);
-  const [confirmation, setConfirmation] = useState<"restore" | "reset" | null>(
-    null,
-  );
+  const [confirmation, setConfirmation] = useState<"restore" | null>(null);
   const form = useForm<Values>({
     mode: "uncontrolled",
     initialValues: initial.values,
@@ -164,12 +161,8 @@ export function AgentEditor({
       restoreAgent(config.stage, preview!.id!, expectedRevision),
     onSuccess: accepted,
   });
-  const reset = useMutation({
-    mutationFn: () => resetAgent(config.stage, expectedRevision),
-    onSuccess: accepted,
-  });
-  const busy = save.isPending || restore.isPending || reset.isPending;
-  const error = save.error ?? restore.error ?? reset.error;
+  const busy = save.isPending || restore.isPending;
+  const error = save.error ?? restore.error;
   const history = useCursorList(
     ["post-agent-history", config.stage],
     (cursor) => fetchHistory(config.stage, cursor),
@@ -197,17 +190,23 @@ export function AgentEditor({
             현재 모델:{" "}
             {config.provider && config.effectiveModel
               ? `${config.provider} / ${config.effectiveModel}`
-              : "공통 연결 설정 필요"}
+              : "모델 설정 필요"}
           </Text>
         </Stack>
         <Badge variant="light">
-          {config.revision ? `버전 ${config.revision}` : "코드 기본값"}
+          {config.revision ? `버전 ${config.revision}` : "미설정"}
         </Badge>
       </Group>
       <Text size="sm" c="dimmed">
         저장한 설정은 다음 실행부터 사용합니다. 이미지 설정은 새 프롬프트
         생성부터 적용됩니다.
       </Text>
+      {!config.id && !isImage ? (
+        <Alert color="attention" role="alert">
+          저장된 지침이 없습니다. 모델과 시스템 지침을 저장해야 이 단계를 실행할
+          수 있습니다.
+        </Alert>
+      ) : null}
       <form onSubmit={form.onSubmit((values) => save.mutate(values))}>
         <Stack gap="md">
           <Select
@@ -286,17 +285,16 @@ export function AgentEditor({
                 variant="default"
                 onClick={() => {
                   setExpectedRevision(config.revision);
-                  setOutputSchema(config.defaultOutputSchema);
+                  setOutputSchema(config.outputSchema);
                   save.reset();
                   restore.reset();
-                  reset.reset();
                   try {
                     sessionStorage.setItem(
                       storageKey(config.stage),
                       JSON.stringify({
                         values: form.getValues(),
                         expectedRevision: config.revision,
-                        outputSchema: config.defaultOutputSchema,
+                        outputSchema: config.outputSchema,
                       }),
                     );
                   } catch {
@@ -327,18 +325,11 @@ export function AgentEditor({
             <Button
               type="submit"
               loading={save.isPending}
-              disabled={restore.isPending || reset.isPending}
+              disabled={restore.isPending}
             >
               저장하고 적용
             </Button>
-            <Button
-              variant="default"
-              onClick={() => setConfirmation("reset")}
-              disabled={busy || !config.id}
-            >
-              코드 기본값 적용
-            </Button>
-            {save.isSuccess || restore.isSuccess || reset.isSuccess ? (
+            {save.isSuccess || restore.isSuccess ? (
               <Text role="status" size="sm" c="teal">
                 적용했습니다.
               </Text>
@@ -438,15 +429,11 @@ export function AgentEditor({
         opened={!!confirmation}
         closeButtonProps={{ "aria-label": "적용 취소" }}
         onClose={() => !busy && setConfirmation(null)}
-        title={
-          confirmation === "restore" ? "이전 버전 적용" : "코드 기본값 적용"
-        }
+        title="이전 버전 적용"
       >
         <Stack>
           <Text>
-            {confirmation === "restore"
-              ? `버전 ${preview?.revision}의 지침과 모델을 새 버전으로 적용합니다.`
-              : "현재 코드의 지침과 출력 규격으로 새 버전을 저장합니다. 모델 override는 비웁니다."}{" "}
+            {`버전 ${preview?.revision}의 지침과 모델을 새 버전으로 적용합니다.`}{" "}
             수정 중인 입력도 적용한 설정으로 바뀝니다.
           </Text>
           {error ? (
@@ -462,12 +449,7 @@ export function AgentEditor({
             >
               취소
             </Button>
-            <Button
-              loading={busy}
-              onClick={() =>
-                confirmation === "restore" ? restore.mutate() : reset.mutate()
-              }
-            >
+            <Button loading={busy} onClick={() => restore.mutate()}>
               확인하고 적용
             </Button>
           </Group>

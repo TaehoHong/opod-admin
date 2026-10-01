@@ -1,13 +1,12 @@
-import {
-  IMAGE_PROMPT_GENERATOR_SYSTEM_PROMPT,
-  PROMPT_SET_JSON_SCHEMA,
-} from "../../prompts/image-prompt-generator";
 import { LLM_LOG_TYPE, LlmLogContext } from "../llm-logs/llm-log.service";
 import {
   buildPromptGenerationInput,
   PromptBuildPackage,
 } from "./image-model-policy";
-import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
+import {
+  StrictJsonAgentClient,
+  requireAgentPromptSettings,
+} from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
 
 export type PromptSet = {
@@ -20,13 +19,12 @@ export class ImagePromptGenerationAgent {
     input: PromptBuildPackage,
     context?: LlmLogContext,
   ): Promise<{ output: PromptSet; producerLogId: string | null }> {
+    const settings = requireAgentPromptSettings(this.client.agentSettings);
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.imagePromptV3,
       schemaName: "opod_prompt_set_v1",
-      schema:
-        this.client.agentSettings?.outputSchema ??
-        (PROMPT_SET_JSON_SCHEMA as unknown as Record<string, unknown>),
-      systemPrompt: `${this.client.agentSettings?.systemPrompt ?? IMAGE_PROMPT_GENERATOR_SYSTEM_PROMPT}\n\nActive model policy\n${input.modelPolicy.instructions}`,
+      schema: settings.outputSchema,
+      systemPrompt: `${settings.systemPrompt}\n\nActive model policy\n${input.modelPolicy.instructions}`,
       input: buildPromptGenerationInput(input),
       context,
     });

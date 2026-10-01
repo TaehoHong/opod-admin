@@ -1,6 +1,7 @@
 import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
+import { PostAgentPromptService } from "../src/post-agent-prompts/post-agent-prompt.service";
 import { AppModule } from "../src/app.module";
 import { ADMIN_REQUEST_HEADER } from "../src/auth/admin-session";
 
@@ -38,6 +39,14 @@ describe("post agent management", () => {
       "generation",
       "caption",
     ]);
+    for (const stage of [
+      "post_plan",
+      "image_plan",
+      "image_prompt",
+      "caption",
+    ] as const) {
+      expect(await app.get(PostAgentPromptService).execution(stage)).toBeNull();
+    }
     const model = (
       await request(app.getHttpServer())
         .post(`${base}/models`)
@@ -53,6 +62,12 @@ describe("post agent management", () => {
     const initial = defaults.find(
       (v: { stage: string }) => v.stage === "post_plan",
     );
+    expect(initial).toMatchObject({
+      id: null,
+      revision: 0,
+      systemPrompt: null,
+    });
+    expect(initial).not.toHaveProperty("defaultSystemPrompt");
     const body = {
       expectedRevision: 0,
       aiModelId: model.id,
@@ -115,19 +130,11 @@ describe("post agent management", () => {
     expect(
       current.find((v: { stage: string }) => v.stage === "post_plan"),
     ).toMatchObject({ id: restored.id, effectiveModel: "overridden-model" });
-    const reset = (
-      await request(app.getHttpServer())
-        .post(`${base}/post_plan/reset`)
-        .set(headers)
-        .send({ expectedRevision: 3 })
-        .expect(201)
-    ).body;
-    expect(reset).toMatchObject({
-      revision: 4,
-      systemPrompt: initial.defaultSystemPrompt,
-      effectiveModel: "shared-model",
-      model: null,
-    });
+    await request(app.getHttpServer())
+      .post(`${base}/post_plan/reset`)
+      .set(headers)
+      .send({ expectedRevision: 3 })
+      .expect(404);
   });
 
   it("requires authentication, CSRF, a model reference and a compatible output schema/type", async () => {

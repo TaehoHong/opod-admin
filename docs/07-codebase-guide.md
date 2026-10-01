@@ -11,6 +11,25 @@
 3. evidence path가 현재 코드와 맞는지 확인한다.
 4. 소유권이 없거나 증거가 충돌할 때만 탐색 범위를 넓힌다.
 
+## Image planning execution inputs
+
+이미지 기획·프롬프트·생성은 같은 `canvas.aspectRatio`(width/height)와 생성
+파라미터를 사용한다. `generation/image-generation-params.ts`는 기존 worker의
+포맷 기본값 < 프로필 < 잡 우선순위와 메타 키 제외를 공유한다. 실제 비율 해석은
+`post-production/generated-image-validation.ts`의 기존 owner를 사용하며 provider 전용 크기 이름과 auto는
+비율을 추측하지 않는다. 신규 `imagePlanning.generationParams`는 잡의
+`_v3.generationParams`까지 보존하고, 이전 artifact는 기존 실행 경로를 유지한다.
+캐릭터·장소 제외 조건은 기획 입력에 먼저 제공하고, 프롬프트 입력의
+`subjectContract.exclusionSources`는 당시 캐릭터와 선택 장소의 출처를 구분한다.
+회귀 owner는 runner/worker spec이며 실제 모델의 의미 보존과 사진 자연스러움은
+코드 계약 테스트가 보증하지 않는다.
+
+공통 Agent 지침은 `post_agent_prompts`의 저장 버전만 실행한다.
+`prompts/post-agent-contracts.ts`는 단계 목록·출력 규격만 소유하며 지침 본문·
+기본값 복원은 제공하지 않는다. 네 LLM 단계는 미설정이면 외부 호출 전에
+`needs_configuration/<stage>_prompt_missing`으로 멈춘다. 출력의 장면 의미·
+영어 작성·레퍼런스별 범위는 DB 지침과 실모델 출력으로 확인한다.
+
 ## Current Module Map
 
 백엔드는 `src/<feature>/`에 컨트롤러·서비스·Repository·DTO·unit spec을 모은다.

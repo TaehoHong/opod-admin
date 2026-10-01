@@ -1002,6 +1002,42 @@ describe("GenerationWorkerService", () => {
     );
   });
 
+  it("uses the planned canvas parameters after profile defaults change", async () => {
+    const repository = repositoryFake();
+    repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        paramsJson: {
+          _v3: { generationParams: { aspect_ratio: "4:5", size: "auto" } },
+        },
+        character: {
+          visualProfile: {
+            negativePrompt: "",
+            providerConfig: { aspect_ratio: "1:1", size: "1024x1024" },
+            referenceMedia: [
+              {
+                media: {
+                  url: "https://cdn.local/reference.png",
+                  uploadedAt: new Date("2026-07-01T00:00:00.000Z"),
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://p.local/a.png" }] },
+    ]);
+    const { service } = makeService(repository, provider);
+    await service.tick();
+    expect(provider.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extraParams: { aspect_ratio: "4:5", size: "auto" },
+      }),
+    );
+  });
+
   // 종횡비를 데이터에만 맡겼더니 아무도 설정하지 않아 전 게시물이 모델 기본값인
   // 가로(16:9)로 나왔다. 피드에 그대로 쓸 수 없는 이미지가 만들어진다.
   it.each([

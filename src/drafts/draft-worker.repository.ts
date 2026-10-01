@@ -72,6 +72,7 @@ type PlannedCharacter = Pick<
         typeof characterVisualProfiles.$inferSelect,
         "appearancePrompt" | "stylePrompt" | "negativePrompt"
       > & {
+        providerConfig?: (typeof characterVisualProfiles.$inferSelect)["providerConfig"];
         referenceMedia: Array<
           Pick<
             typeof characterVisualProfileReferences.$inferSelect,

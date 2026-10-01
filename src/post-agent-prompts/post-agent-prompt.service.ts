@@ -6,10 +6,10 @@ import {
 } from "@nestjs/common";
 import { isDeepStrictEqual } from "node:util";
 import {
-  POST_AGENT_DEFAULTS,
+  POST_AGENT_CONTRACTS,
   POST_AGENT_STAGES,
   PostAgentStage,
-} from "../../prompts/post-agent-defaults";
+} from "../../prompts/post-agent-contracts";
 import { AiModelService, validateAiModel } from "../ai-models/ai-model.service";
 import { aiConfigId } from "../ai-models/ai-model-id";
 import { decodeCursor, PageInput, pageFromRows } from "../shared/utils/page";
@@ -48,15 +48,14 @@ export class PostAgentPromptService {
           provider: null,
           effectiveModel: null,
           createdAt: null,
-          ...POST_AGENT_DEFAULTS[stage],
-          defaultSystemPrompt: POST_AGENT_DEFAULTS[stage].systemPrompt,
-          defaultOutputSchema: POST_AGENT_DEFAULTS[stage].outputSchema,
+          ...POST_AGENT_CONTRACTS[stage],
+          systemPrompt: null,
         };
   }
   async execution(stage: PostAgentStage) {
     const selected = await this.current(stage);
-    if (selected.id)
-      this.validateContent(stage, selected.systemPrompt, selected.outputSchema);
+    if (!selected.id) return null;
+    this.validateContent(stage, selected.systemPrompt, selected.outputSchema);
     return selected;
   }
   async all() {
@@ -119,18 +118,6 @@ export class PostAgentPromptService {
       outputSchema: version.outputSchema,
     });
   }
-  async reset(stage: PostAgentStage, expectedRevision: number) {
-    const current = await this.prompts.current(stage);
-    if (!current)
-      throw new BadRequestException("모델을 먼저 선택하고 저장하세요.");
-    return this.save(stage, {
-      expectedRevision,
-      aiModelId: String(current.aiModelId),
-      model: null,
-      systemPrompt: POST_AGENT_DEFAULTS[stage].systemPrompt,
-      outputSchema: POST_AGENT_DEFAULTS[stage].outputSchema,
-    });
-  }
   private validateContent(
     stage: PostAgentStage,
     prompt: string | null,
@@ -144,7 +131,7 @@ export class PostAgentPromptService {
     } else if (
       !prompt?.trim() ||
       prompt.length > 50000 ||
-      !isDeepStrictEqual(schema, POST_AGENT_DEFAULTS[stage].outputSchema)
+      !isDeepStrictEqual(schema, POST_AGENT_CONTRACTS[stage].outputSchema)
     ) {
       throw new BadRequestException(
         "시스템 지침과 현재 단계의 출력 규격을 확인하세요.",
@@ -167,9 +154,7 @@ export class PostAgentPromptService {
       provider: target.provider,
       effectiveModel: row.model ?? target.model,
       createdAt: row.createdAt.toISOString(),
-      label: POST_AGENT_DEFAULTS[row.stage].label,
-      defaultSystemPrompt: POST_AGENT_DEFAULTS[row.stage].systemPrompt,
-      defaultOutputSchema: POST_AGENT_DEFAULTS[row.stage].outputSchema,
+      label: POST_AGENT_CONTRACTS[row.stage].label,
     };
   }
 }

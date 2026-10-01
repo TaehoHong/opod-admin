@@ -23,6 +23,15 @@ export type AgentPromptSettings = {
   metadata: Record<string, unknown>;
 };
 
+// Post-production agents execute only explicitly saved DB settings.
+export function requireAgentPromptSettings(
+  settings: AgentPromptSettings | undefined,
+): AgentPromptSettings {
+  if (!settings?.systemPrompt.trim() || !settings.outputSchema)
+    throw new Error("Saved agent prompt is required");
+  return settings;
+}
+
 export type StrictJsonAgentRequest = {
   logType: LlmLogType;
   schemaName: string;

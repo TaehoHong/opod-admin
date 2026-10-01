@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { DatabaseService } from "../core/database/database.service";
 import { postAgentPrompts } from "../core/database/schema";
-import { PostAgentStage } from "../../prompts/post-agent-defaults";
+import { PostAgentStage } from "../../prompts/post-agent-contracts";
 export type PostAgentPromptRow = typeof postAgentPrompts.$inferSelect;
 @Injectable()
 export class PostAgentPromptRepository {

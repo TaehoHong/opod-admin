@@ -1,10 +1,9 @@
 import type { CharacterContentProfile } from "../character-content-profiles/character-content-profile";
-import {
-  IMAGE_PLAN_JSON_SCHEMA,
-  IMAGE_PLANNER_SYSTEM_PROMPT,
-} from "../../prompts/image-planner";
 import { LLM_LOG_TYPE, LlmLogContext } from "../llm-logs/llm-log.service";
-import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
+import {
+  StrictJsonAgentClient,
+  requireAgentPromptSettings,
+} from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
 
 export type ImagePlannerInput = {
@@ -23,9 +22,11 @@ export type ImagePlannerInput = {
     // 죽은 문장이다(research-log image-planner-v3 항목).
   };
   imageCount: number;
+  canvas?: { aspectRatio: number | null };
   characterVisualContext: {
     name: string;
     appearance: string;
+    exclusions?: string[];
     boundaries: string[];
     capturePreferences: string[];
     personaContext: { title: string; content: string }[];
@@ -48,6 +49,7 @@ export type ImagePlannerInput = {
     id: string;
     name: string;
     description: string;
+    exclusions?: string[];
     references: { id: string; description: string }[];
   }[];
 };
@@ -136,14 +138,12 @@ export class ImagePlanningAgent {
     input: ImagePlannerInput,
     context?: LlmLogContext,
   ): Promise<{ output: ImagePlan; producerLogId: string | null }> {
+    const settings = requireAgentPromptSettings(this.client.agentSettings);
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.imagePlanV3,
       schemaName: "opod_image_plan_v3",
-      schema:
-        this.client.agentSettings?.outputSchema ??
-        (IMAGE_PLAN_JSON_SCHEMA as unknown as Record<string, unknown>),
-      systemPrompt:
-        this.client.agentSettings?.systemPrompt ?? IMAGE_PLANNER_SYSTEM_PROMPT,
+      schema: settings.outputSchema,
+      systemPrompt: settings.systemPrompt,
       input,
       context,
     });

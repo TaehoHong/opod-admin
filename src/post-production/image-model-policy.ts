@@ -17,11 +17,16 @@ export type PromptReferenceSlot = {
 
 export type PromptBuildPackage = {
   targetModelId: string;
+  canvas?: { aspectRatio: number | null };
   imagePlan: ImagePlanReady;
   subjectContract: {
     appearance: string;
     visualStyle: string | null;
     exclusions: string[];
+    exclusionSources?: {
+      source: "character" | "location";
+      exclusions: string[];
+    }[];
   };
   referenceSlots: PromptReferenceSlot[];
   modelPolicy: {
@@ -54,6 +59,8 @@ export function buildPromptPackage(input: {
   appearance: string;
   visualStyle?: string;
   exclusions?: string[];
+  exclusionSources?: PromptBuildPackage["subjectContract"]["exclusionSources"];
+  canvas?: PromptBuildPackage["canvas"];
 }): PromptBuildPackage {
   const policy = resolveImageModelPolicy(input.targetModelId);
   const referenceSlots: PromptReferenceSlot[] = [];
@@ -79,6 +86,7 @@ export function buildPromptPackage(input: {
   }
   return {
     targetModelId: input.targetModelId,
+    ...(input.canvas ? { canvas: input.canvas } : {}),
     imagePlan: input.imagePlan,
     subjectContract: {
       appearance: input.appearance.trim(),
@@ -86,6 +94,9 @@ export function buildPromptPackage(input: {
       exclusions: (input.exclusions ?? [])
         .map((value) => value.trim())
         .filter(Boolean),
+      ...(input.exclusionSources
+        ? { exclusionSources: input.exclusionSources }
+        : {}),
     },
     referenceSlots,
     modelPolicy: {
@@ -100,7 +111,9 @@ export function buildPromptPackage(input: {
 // 실행·추적용 원본 package는 보존하고 LLM에는 시각적 결정만 전달한다.
 // referenceBindings는 referenceSlots와 중복이고 모델 정책은 system에 있다.
 export function buildPromptGenerationInput(input: PromptBuildPackage) {
+  const { exclusions, ...subjectContract } = input.subjectContract;
   return {
+    ...(input.canvas ? { canvas: input.canvas } : {}),
     imagePlan: {
       continuity: input.imagePlan.continuity,
       shots: input.imagePlan.shots.map((shot) => ({
@@ -115,7 +128,8 @@ export function buildPromptGenerationInput(input: PromptBuildPackage) {
       })),
     },
     subjectContract: {
-      ...input.subjectContract,
+      ...subjectContract,
+      ...(subjectContract.exclusionSources ? {} : { exclusions }),
       appearance: input.imagePlan.shots.some(
         (shot) => shot.characterPresentation.mode !== "none",
       )

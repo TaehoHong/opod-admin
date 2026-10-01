@@ -37,8 +37,6 @@ function config(stage: AgentConfig["stage"], revision = 1): AgentConfig {
     effectiveModel: image ? "gpt-image-2.5-sunburst" : "llm-base",
     systemPrompt: image ? null : `Instruction ${revision}`,
     outputSchema: image ? null : schema,
-    defaultSystemPrompt: image ? null : "Code instruction",
-    defaultOutputSchema: image ? null : schema,
     createdAt: "2026-09-28T00:00:00Z",
   };
 }
@@ -75,6 +73,32 @@ function show() {
 }
 beforeEach(() => sessionStorage.clear());
 describe("post agent management", () => {
+  it("shows an empty required prompt instead of code defaults when unconfigured", async () => {
+    const state = fixture();
+    state.setCurrent({
+      ...config("post_plan", 0),
+      id: null,
+      aiModelId: null,
+      provider: null,
+      effectiveModel: null,
+      systemPrompt: null,
+    });
+    show();
+    expect(
+      await screen.findByRole("textbox", { name: "시스템 지침" }),
+    ).toHaveValue("");
+    expect(screen.getByText("미설정")).toBeInTheDocument();
+    expect(screen.getByText(/저장된 지침이 없습니다/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "코드 기본값 적용" }),
+    ).toBeNull();
+    await userEvent.click(
+      screen.getByRole("button", { name: "저장하고 적용" }),
+    );
+    expect(
+      await screen.findByText("시스템 지침을 입력하세요."),
+    ).toBeInTheDocument();
+  });
   it("preserves input after conflict, allows review/rebase, and sends the reference plus nullable override", async () => {
     const state = fixture();
     const bodies: AgentInput[] = [];

@@ -1,13 +1,12 @@
 import type { CharacterContentProfile } from "../character-content-profiles/character-content-profile";
-import {
-  CAPTION_SET_JSON_SCHEMA,
-  CAPTION_WRITER_SYSTEM_PROMPT,
-} from "../../prompts/caption-writer";
 import { LLM_LOG_TYPE, LlmLogContext } from "../llm-logs/llm-log.service";
 import { cleanHashtags } from "./content-planner";
 import { PersonaEntry } from "./post-planner";
 import { MediaBytesReader, ReferenceImage } from "./reference-captioner";
-import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
+import {
+  StrictJsonAgentClient,
+  requireAgentPromptSettings,
+} from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
 
 // V4 ⑥ 캡션 Agent — 생성 이미지를 보고 캡션·해시태그를 쓴다.
@@ -78,14 +77,12 @@ export class CaptionWriterAgent {
     images: CaptionShotImage[],
     context?: LlmLogContext,
   ): Promise<{ output: CaptionSet; producerLogId: string | null }> {
+    const settings = requireAgentPromptSettings(this.client.agentSettings);
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.captionWriteV4,
       schemaName: "opod_caption_set_v2",
-      schema:
-        this.client.agentSettings?.outputSchema ??
-        (CAPTION_SET_JSON_SCHEMA as unknown as Record<string, unknown>),
-      systemPrompt:
-        this.client.agentSettings?.systemPrompt ?? CAPTION_WRITER_SYSTEM_PROMPT,
+      schema: settings.outputSchema,
+      systemPrompt: settings.systemPrompt,
       input,
       userContent: await captionUserContent(input, images, this.readBytes),
       context,

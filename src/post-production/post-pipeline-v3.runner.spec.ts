@@ -1,4 +1,4 @@
-import { POST_AGENT_DEFAULTS } from "../../prompts/post-agent-defaults";
+import { POST_AGENT_CONTRACTS } from "../../prompts/post-agent-contracts";
 import { EMPTY_CONTENT_PROFILE } from "../character-content-profiles/character-content-profile";
 import { UNION_ENVELOPE_KEY } from "../../prompts/strict-schema";
 import { PostPipelineV3Runner } from "./post-pipeline-v3.runner";
@@ -44,6 +44,7 @@ function setup(
     readMedia?: boolean;
     profile?: typeof EMPTY_CONTENT_PROFILE;
     savedAgent?: boolean;
+    missingAgent?: boolean;
     imageAgent?: boolean;
   } = {},
 ) {
@@ -58,6 +59,11 @@ function setup(
     requeueOrFailV3: jest.fn().mockResolvedValue(undefined),
   };
   const settings = {
+    resolveAspectRatios: jest.fn().mockResolvedValue({
+      feed: { value: "4:5" },
+      story: { value: "9:16" },
+      reel: { value: "9:16" },
+    }),
     resolvePlannerSettings: jest.fn().mockResolvedValue({
       apiUrl: "https://llm.test/v1/chat",
       apiKey: "key",
@@ -109,31 +115,34 @@ function setup(
     () => 0.5,
     fetchMock as never,
     options.readMedia === false ? null : readMedia,
-    options.savedAgent || options.imageAgent
+    !options.missingAgent
       ? ({
           execution: jest.fn(
-            async (stage: keyof typeof POST_AGENT_DEFAULTS) => ({
-              ...POST_AGENT_DEFAULTS[stage],
-              ...(stage === "generation" && options.imageAgent
-                ? {
-                    id: "17",
-                    revision: 3,
-                    aiModelId: "2",
-                    model: null,
-                    effectiveModel: "gpt-image-2.5-sunburst",
-                    provider: "openai",
-                    systemPrompt: null,
-                  }
+            async (stage: keyof typeof POST_AGENT_CONTRACTS) =>
+              stage === "generation" && !options.imageAgent
+                ? null
                 : {
-                    id: "7",
-                    revision: 2,
-                    aiModelId: "9",
-                    model: "stage-model",
-                    effectiveModel: "stage-model",
-                    provider: "openai-compatible",
-                    systemPrompt: "Saved system instruction",
-                  }),
-            }),
+                    ...POST_AGENT_CONTRACTS[stage],
+                    ...(stage === "generation" && options.imageAgent
+                      ? {
+                          id: "17",
+                          revision: 3,
+                          aiModelId: "2",
+                          model: null,
+                          effectiveModel: "gpt-image-2.5-sunburst",
+                          provider: "openai",
+                          systemPrompt: null,
+                        }
+                      : {
+                          id: "7",
+                          revision: 2,
+                          aiModelId: "9",
+                          model: "stage-model",
+                          effectiveModel: "stage-model",
+                          provider: "openai-compatible",
+                          systemPrompt: "Saved system instruction",
+                        }),
+                  },
           ),
         } as never)
       : undefined,
@@ -418,6 +427,13 @@ describe("PostPipelineV3Runner", () => {
     const planning = setup(
       {
         ...current,
+        character: {
+          ...current.character,
+          visualProfile: {
+            ...current.character.visualProfile,
+            providerConfig: { size: "1536x1024" },
+          },
+        },
         conceptJson: {
           ...current.conceptJson,
           pipeline: { stage: "image_plan", state: "running", imageCount: 1 },
@@ -446,6 +462,14 @@ describe("PostPipelineV3Runner", () => {
     const concept =
       planning.repository.persistV3Artifact.mock.calls[0][0].conceptJson;
     expect(concept.imagePlanning.locationExclusions).toEqual(["neon signs"]);
+    const planningInput = JSON.parse(
+      JSON.parse(planning.fetchMock.mock.calls[0][1].body).messages[1].content,
+    );
+    expect(planningInput.canvas).toEqual({ aspectRatio: 1.5 });
+    expect(planningInput.characterVisualContext.exclusions).toEqual(["logos"]);
+    expect(planningInput.locations[0].exclusions).toEqual(["neon signs"]);
+    expect(planningInput.locations[1].exclusions).toEqual(["flowers"]);
+    current.character.visualProfile.negativePrompt = "changed exclusion";
 
     const prompting = setup({
       ...current,
@@ -479,13 +503,18 @@ describe("PostPipelineV3Runner", () => {
     const body = JSON.parse(
       prompting.fetchMock.mock.calls[0][1].body as string,
     );
-    expect(
-      JSON.parse(body.messages[1].content).subjectContract.exclusions,
-    ).toEqual(["logos", "neon signs"]);
+    const promptInput = JSON.parse(body.messages[1].content);
+    expect(promptInput.canvas).toEqual({ aspectRatio: 1.5 });
+    expect(promptInput.subjectContract.exclusionSources).toEqual([
+      { source: "character", exclusions: ["logos"] },
+      { source: "location", exclusions: ["neon signs"] },
+    ]);
+    expect(promptInput.subjectContract.exclusions).toBeUndefined();
     const saved = prompting.repository.persistV3PromptJobs.mock.calls[0][0];
     expect(saved.jobs[0].paramsJson._v3).toMatchObject({
       exclusionsResolved: true,
       negativePrompt: null,
+      generationParams: { aspect_ratio: "4:5", size: "1536x1024" },
     });
   });
 
@@ -1387,7 +1416,7 @@ describe("saved post agent execution", () => {
     expect(request.model).toBe("stage-model");
     expect(request.messages[0].content).toBe("Saved system instruction");
     expect(request.response_format.json_schema.schema).toEqual(
-      POST_AGENT_DEFAULTS.post_plan.outputSchema,
+      POST_AGENT_CONTRACTS.post_plan.outputSchema,
     );
     expect(
       repository.persistV3Artifact.mock.calls[0][0].conceptJson.postPlanning
@@ -1400,4 +1429,35 @@ describe("saved post agent execution", () => {
       model: "stage-model",
     });
   });
+});
+
+describe("required DB prompt settings", () => {
+  it.each(["post_plan", "image_plan", "image_prompt", "caption"])(
+    "pauses %s before any model call when no prompt is saved",
+    async (stage) => {
+      const { runner, repository, fetchMock, readMedia } = setup(
+        draft({
+          pipelineVersion: "post-pipeline-v4",
+          pipeline: { stage, state: "running", imageCount: 1 },
+        }),
+        undefined,
+        { missingAgent: true },
+      );
+      await runner.runCurrentStage("draft-1");
+      expect(repository.persistV3Paused).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conceptJson: expect.objectContaining({
+            pipeline: expect.objectContaining({
+              stage,
+              state: "needs_configuration",
+              reasonCodes: [`${stage}_prompt_missing`],
+            }),
+          }),
+        }),
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(readMedia).not.toHaveBeenCalled();
+      expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+    },
+  );
 });

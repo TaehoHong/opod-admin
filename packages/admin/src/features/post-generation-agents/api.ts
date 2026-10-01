@@ -32,8 +32,6 @@ export type AgentConfig = {
   effectiveModel: string | null;
   systemPrompt: string | null;
   outputSchema: unknown;
-  defaultSystemPrompt: string | null;
-  defaultOutputSchema: unknown;
   createdAt: string | null;
 };
 export type AgentInput = {
@@ -74,8 +72,3 @@ export const restoreAgent = (
     `/post-generation-agents/${stage}/versions/${id}/restore`,
     { method: "POST", body: { expectedRevision } },
   );
-export const resetAgent = (stage: Stage, expectedRevision: number) =>
-  apiRequest<AgentConfig>(`/post-generation-agents/${stage}/reset`, {
-    method: "POST",
-    body: { expectedRevision },
-  });

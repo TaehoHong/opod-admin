@@ -29,25 +29,18 @@ export class PostGenerationAgentsController {
     private readonly settings: GenerationSettingsService,
   ) {}
   @Get() async current() {
-    const [result, planner, image] = await Promise.all([
+    const [result, image] = await Promise.all([
       this.prompts.all(),
-      this.settings.resolvePlannerSettings(),
       this.settings.resolveProviderSettings(),
     ]);
     return {
       items: result.items.map((item) =>
-        item.id
+        item.id || item.stage !== "generation"
           ? item
           : {
               ...item,
-              provider:
-                item.stage === "generation"
-                  ? image.provider
-                  : "openai-compatible",
-              effectiveModel:
-                (item.stage === "generation"
-                  ? (image.editModel ?? image.t2iModel)
-                  : planner.model) ?? null,
+              provider: image.provider,
+              effectiveModel: image.editModel ?? image.t2iModel ?? null,
             },
       ),
     };
@@ -87,11 +80,5 @@ export class PostGenerationAgentsController {
       id,
       body.expectedRevision,
     );
-  }
-  @Post(":stage/reset") reset(
-    @Param("stage") stage: string,
-    @Body() body: PromptRevisionDto,
-  ) {
-    return this.prompts.reset(postAgentStage(stage), body.expectedRevision);
   }
 }

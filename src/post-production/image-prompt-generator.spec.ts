@@ -1,3 +1,4 @@
+import { PROMPT_SET_JSON_SCHEMA } from "../../prompts/image-prompt-generator";
 import { buildPromptPackage } from "./image-model-policy";
 import {
   assertProviderReferenceOrder,
@@ -85,7 +86,14 @@ describe("Image Prompt Generation Agent contract", () => {
       producerLogId: "log-1",
     });
     const original = structuredClone(promptPackage);
-    const agent = new ImagePromptGenerationAgent({ run } as never);
+    const agent = new ImagePromptGenerationAgent({
+      run,
+      agentSettings: {
+        systemPrompt: "Saved image instruction",
+        outputSchema: PROMPT_SET_JSON_SCHEMA,
+        metadata: {},
+      },
+    } as never);
 
     await agent.generate(promptPackage);
 
@@ -162,7 +170,14 @@ describe("Image Prompt Generation Agent contract", () => {
       producerLogId: null,
     });
 
-    await new ImagePromptGenerationAgent({ run } as never).generate(input);
+    await new ImagePromptGenerationAgent({
+      run,
+      agentSettings: {
+        systemPrompt: "Saved image instruction",
+        outputSchema: PROMPT_SET_JSON_SCHEMA,
+        metadata: {},
+      },
+    } as never).generate(input);
 
     expect(run.mock.calls[0][0].input.subjectContract).toEqual({
       appearance: "",

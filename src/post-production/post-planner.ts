@@ -1,10 +1,9 @@
 import type { CharacterContentProfile } from "../character-content-profiles/character-content-profile";
-import {
-  POST_PLAN_JSON_SCHEMA,
-  POST_PLANNER_SYSTEM_PROMPT,
-} from "../../prompts/post-planner";
 import { LLM_LOG_TYPE, LlmLogContext } from "../llm-logs/llm-log.service";
-import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
+import {
+  StrictJsonAgentClient,
+  requireAgentPromptSettings,
+} from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
 import type { PostMemoryEntry, PostPersonaEntry } from "./post-persona-context";
 
@@ -82,14 +81,12 @@ export class PostPlanningAgent {
     input: PostPlannerInput,
     context?: LlmLogContext,
   ): Promise<{ output: PostPlan; producerLogId: string | null }> {
+    const settings = requireAgentPromptSettings(this.client.agentSettings);
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.postPlanV3,
       schemaName: "opod_post_plan_v3",
-      schema:
-        this.client.agentSettings?.outputSchema ??
-        (POST_PLAN_JSON_SCHEMA as unknown as Record<string, unknown>),
-      systemPrompt:
-        this.client.agentSettings?.systemPrompt ?? POST_PLANNER_SYSTEM_PROMPT,
+      schema: settings.outputSchema,
+      systemPrompt: settings.systemPrompt,
       input,
       context,
     });

@@ -1,3 +1,4 @@
+import { resolveImageGenerationParams } from "./image-generation-params";
 import {
   Injectable,
   Logger,
@@ -149,24 +150,7 @@ type ClaimedJob = {
   } | null;
 };
 
-/**
- * 게시 포맷을 초안에서 유도한다. draftType을 먼저 보는 이유는 스토리 초안도
- * contentType 기본값이 feed로 들어오기 때문이다.
- *
- * 초안이 없는 잡(비주얼 프로필 테스트 생성)은 feed로 본다 — 인물 확인용
- * 세로 이미지가 맞고, 비율을 안 보내면 모델이 가로로 뽑는다.
- */
-export function aspectRatioFormatOf(
-  draft: { draftType: string; contentType: string } | null | undefined,
-): AspectRatioFormat {
-  if (!draft) {
-    return "feed";
-  }
-  if (draft.draftType === "story") {
-    return "story";
-  }
-  return draft.contentType === "reel" ? "reel" : "feed";
-}
+export { aspectRatioFormatOf } from "./image-generation-params";
 
 type CompletedGeneration = {
   images: GeneratedImage[];
@@ -591,18 +575,15 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
             : Promise.resolve(reference.media.url),
         ),
     );
-    // 우선순위: 포맷 종횡비 < 프로필 기본값(providerConfig) < 잡 파라미터.
-    // 종횡비를 맨 아래 두는 이유는 그것이 "기본값"이기 때문이다 — 명시적으로
-    // 설정한 값은 언제나 이긴다. 예전에는 데이터에만 맡겼는데 아무도 설정하지
-    // 않아 전 게시물이 모델 기본값(가로)으로 나왔다.
-    // 밑줄 접두 키(_wizard 등)는 파이프라인 메타데이터 — 프로바이더에 보내지 않는다.
     const aspectRatios = await this.resolveAspectRatios();
-    const format = aspectRatioFormatOf(job.draft);
-    const extraParams = stripMetaKeys({
-      aspect_ratio: aspectRatios[format],
-      ...(isRecord(profile?.providerConfig) ? profile.providerConfig : {}),
-      ...(isRecord(job.paramsJson) ? job.paramsJson : {}),
-    });
+    const extraParams = resolveImageGenerationParams(
+      job.draft,
+      aspectRatios,
+      isRecord(v3?.generationParams)
+        ? v3.generationParams
+        : profile?.providerConfig,
+      job.paramsJson,
+    );
     const request: ImageGenerationRequest = {
       // 프로바이더가 terminal 실패를 반환해 requestId를 버린 재시도는 새
       // 작업이어야 한다. 잡 id만 쓰면 서버의 멱등성 캐시가 취소된 작업을
@@ -875,14 +856,4 @@ function decodeBase64Image(value: string): Buffer {
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// 밑줄 접두 키는 파이프라인 메타데이터(예: 위저드의 _wizard) — 프로바이더
-// API 파라미터가 아니므로 제출 전에 걸러낸다.
-function stripMetaKeys(
-  params: Record<string, unknown>,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(params).filter(([key]) => !key.startsWith("_")),
-  );
 }
