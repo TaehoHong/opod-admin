@@ -1,4 +1,8 @@
 import {
+  assertReferenceEmbedding,
+  ReferenceEmbeddingWrite,
+} from "../shared/ai/reference-embedding";
+import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -17,6 +21,34 @@ const REFERENCE_MAX_COUNT = 20;
 @Injectable()
 export class LocationsService {
   constructor(private readonly locations: LocationsRepository) {}
+
+  listReferenceEmbeddingSources(characterId?: string) {
+    return this.locations.listReferenceEmbeddingSources(characterId);
+  }
+  saveReferenceEmbedding(input: ReferenceEmbeddingWrite) {
+    assertReferenceEmbedding(input.embedding);
+    if (!input.model.trim() || !input.description.trim())
+      throw new BadRequestException(
+        "Reference embedding requires a model and caption",
+      );
+    return this.locations.saveReferenceEmbedding(input);
+  }
+  searchReferenceEmbeddings(
+    characterId: string,
+    locationId: string,
+    embedding: number[],
+    model: string,
+    limit: number,
+  ) {
+    assertReferenceEmbedding(embedding);
+    return this.locations.searchReferenceEmbeddings(
+      characterId,
+      locationId,
+      embedding,
+      model,
+      limit,
+    );
+  }
 
   async list(input: PageInput & { characterId?: string; scope?: string }) {
     const scope = this.parseScope(input.scope);

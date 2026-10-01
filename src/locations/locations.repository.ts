@@ -1,12 +1,19 @@
+import type {
+  ReferenceEmbeddingSource,
+  ReferenceEmbeddingWrite,
+  RankedReference,
+} from "../shared/ai/reference-embedding";
 import { Injectable } from "@nestjs/common";
 import {
   and,
   asc,
+  cosineDistance,
   desc,
   eq,
   isNotNull,
   isNull,
   lt,
+  ne,
   notInArray,
   or,
   sql,
@@ -40,6 +47,98 @@ export class DuplicateLocationKeyError extends Error {}
 @Injectable()
 export class LocationsRepository {
   constructor(private readonly database: DatabaseService) {}
+
+  async listReferenceEmbeddingSources(
+    characterId?: string,
+  ): Promise<ReferenceEmbeddingSource[]> {
+    const r = characterLocationReferences;
+    return this.database.client
+      .select({
+        ownerId: r.locationId,
+        mediaId: r.mediaId,
+        description: r.description,
+        embeddingModel: r.embeddingModel,
+        indexed: sql<boolean>`(${r.embedding} IS NOT NULL AND ${r.embeddedAt} IS NOT NULL AND vector_norm(${r.embedding}) > 0)`,
+      })
+      .from(r)
+      .innerJoin(characterLocations, eq(characterLocations.id, r.locationId))
+      .innerJoin(media, eq(media.id, r.mediaId))
+      .where(
+        and(
+          isNull(characterLocations.deletedAt),
+          isNotNull(media.uploadedAt),
+          ne(r.description, ""),
+          characterId
+            ? or(
+                eq(characterLocations.characterId, characterId),
+                isNull(characterLocations.characterId),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(asc(r.locationId), asc(r.sortOrder), asc(r.mediaId));
+  }
+
+  async saveReferenceEmbedding(
+    input: ReferenceEmbeddingWrite,
+  ): Promise<boolean> {
+    const r = characterLocationReferences;
+    const rows = await this.database.client
+      .update(r)
+      .set({
+        embedding: input.embedding,
+        embeddingModel: input.model,
+        embeddedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(r.locationId, input.ownerId),
+          eq(r.mediaId, input.mediaId),
+          eq(r.description, input.description),
+          sql`EXISTS (SELECT 1 FROM ${media} WHERE ${media.id} = ${r.mediaId} AND ${media.uploadedAt} IS NOT NULL)`,
+          sql`EXISTS (SELECT 1 FROM ${characterLocations} WHERE ${characterLocations.id} = ${r.locationId} AND ${characterLocations.deletedAt} IS NULL)`,
+        ),
+      )
+      .returning({ id: r.mediaId });
+    return rows.length === 1;
+  }
+
+  async searchReferenceEmbeddings(
+    characterId: string,
+    locationId: string,
+    embedding: number[],
+    model: string,
+    limit: number,
+  ): Promise<RankedReference[]> {
+    const r = characterLocationReferences;
+    const distance = cosineDistance(r.embedding, embedding);
+    return this.database.client
+      .select({
+        id: r.mediaId,
+        description: r.description,
+        score: sql<number>`1 - (${distance})`,
+      })
+      .from(r)
+      .innerJoin(characterLocations, eq(characterLocations.id, r.locationId))
+      .innerJoin(media, eq(media.id, r.mediaId))
+      .where(
+        and(
+          or(
+            eq(characterLocations.characterId, characterId),
+            isNull(characterLocations.characterId),
+          ),
+          isNull(characterLocations.deletedAt),
+          eq(r.locationId, locationId),
+          isNotNull(media.uploadedAt),
+          ne(r.description, ""),
+          eq(r.embeddingModel, model),
+          isNotNull(r.embeddedAt),
+          sql`vector_norm(${r.embedding}) > 0`,
+        ),
+      )
+      .orderBy(asc(distance), asc(r.sortOrder), asc(r.mediaId))
+      .limit(limit);
+  }
 
   async characterExists(characterId: string): Promise<boolean> {
     const rows = await this.database.client

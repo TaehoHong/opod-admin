@@ -159,6 +159,13 @@ describe("planning response evidence persistence", () => {
             systemPrompt: "Synthetic planning contract",
           }),
         } as never,
+        {
+          retrieve: async () => ({
+            identityReferences: [],
+            locationReferences: {},
+            trace: { model: "fixture" },
+          }),
+        } as never,
       );
       await runner.runCurrentStage(draftId);
       const [saved] = await db

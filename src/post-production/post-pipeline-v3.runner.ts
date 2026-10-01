@@ -1,3 +1,4 @@
+import { ReferenceRetrievalService } from "./reference-retrieval.service";
 import { resolveImageGenerationParams } from "../generation/image-generation-params";
 import { requestedImageAspectRatio } from "./generated-image-validation";
 import {
@@ -88,6 +89,7 @@ export class PostPipelineV3Runner {
     // needs_configuration으로 정지한다.
     private readonly readMediaBytes: MediaBytesReader | null = null,
     private readonly agentPrompts?: PostAgentPromptService,
+    private readonly referenceRetrieval?: ReferenceRetrievalService,
   ) {}
 
   async runCurrentStage(
@@ -382,6 +384,33 @@ export class PostPipelineV3Runner {
         8,
       ),
     ]);
+    if (!this.referenceRetrieval) {
+      await this.pause(draft, concept, "needs_configuration", [
+        "reference_retrieval_not_configured",
+      ]);
+      return;
+    }
+    let references: Awaited<ReturnType<ReferenceRetrievalService["retrieve"]>>;
+    try {
+      references = await this.referenceRetrieval.retrieve({
+        characterId: draft.characterId,
+        requestId: draft.id,
+        name: draft.character.displayName,
+        premise: postPlan.intent.premise,
+        purpose: postPlan.intent.primaryPurpose,
+        operatorRequest: operatorRequest(concept),
+        locationIds: availableLocations.map((location) => location.id),
+      });
+    } catch (error) {
+      concept.referenceRetrieval = {
+        failure: error instanceof Error ? error.message : String(error),
+      };
+      await this.pause(draft, concept, "needs_configuration", [
+        "reference_retrieval_failed",
+      ]);
+      return;
+    }
+    concept.referenceRetrieval = references.trace;
     const ratios = await this.settings.resolveAspectRatios();
     const generationParams = resolveImageGenerationParams(
       draft,
@@ -434,26 +463,13 @@ export class PostPipelineV3Runner {
       ...(operatorRequest(concept)
         ? { operatorRequest: operatorRequest(concept) }
         : {}),
-      identityReferences: (draft.character.visualProfile?.referenceMedia ?? [])
-        .filter(
-          (reference) =>
-            reference.description.trim() && reference.media.uploadedAt,
-        )
-        .map((reference) => ({
-          id: reference.mediaId,
-          description: reference.description,
-        })),
+      identityReferences: references.identityReferences,
       locations: availableLocations.map((location) => ({
         id: location.id,
         name: location.displayName,
         description: location.description,
         exclusions: [location.negativePrompt.trim()].filter(Boolean),
-        references: location.references
-          .filter((reference) => reference.media.uploadedAt)
-          .map((reference) => ({
-            id: reference.mediaId,
-            description: reference.description,
-          })),
+        references: references.locationReferences[location.id] ?? [],
       })),
     };
     const result = await new ImagePlanningAgent(client).plan(input, {

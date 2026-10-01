@@ -85,6 +85,6 @@ import { LlmLogService } from "../llm-logs/llm-log.service";
       ],
     },
   ],
-  exports: [CharacterService, CharacterActionLogService],
+  exports: [CharacterService, CharacterActionLogService, VisualProfileService],
 })
 export class CharactersModule {}

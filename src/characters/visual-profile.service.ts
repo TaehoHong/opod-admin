@@ -1,3 +1,7 @@
+import {
+  assertReferenceEmbedding,
+  ReferenceEmbeddingWrite,
+} from "../shared/ai/reference-embedding";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import type { JsonValue } from "../shared/utils/json";
 import { compileImagePrompt } from "../../prompts/image-prompt";
@@ -49,6 +53,32 @@ export class VisualProfileService {
     private readonly resolveCaptioner: () => Promise<ReferenceCaptioner | null> = async () =>
       null,
   ) {}
+
+  listReferenceEmbeddingSources(characterId?: string) {
+    return this.visualProfiles.listReferenceEmbeddingSources(characterId);
+  }
+  saveReferenceEmbedding(input: ReferenceEmbeddingWrite) {
+    assertReferenceEmbedding(input.embedding);
+    if (!input.model.trim() || !input.description.trim())
+      throw new BadRequestException(
+        "Reference embedding requires a model and caption",
+      );
+    return this.visualProfiles.saveReferenceEmbedding(input);
+  }
+  searchReferenceEmbeddings(
+    characterId: string,
+    embedding: number[],
+    model: string,
+    limit: number,
+  ) {
+    assertReferenceEmbedding(embedding);
+    return this.visualProfiles.searchReferenceEmbeddings(
+      characterId,
+      embedding,
+      model,
+      limit,
+    );
+  }
 
   // 캡션이 비어 있는 레퍼런스를 순차 캡셔닝한다 (수동 버튼 전용 — 자동 아님).
   // 개별 실패는 건너뛰고 수집한다: 부분 성공도 저장된다.

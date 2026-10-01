@@ -1,5 +1,20 @@
+import type {
+  ReferenceEmbeddingSource,
+  ReferenceEmbeddingWrite,
+  RankedReference,
+} from "../shared/ai/reference-embedding";
 import { Injectable } from "@nestjs/common";
-import { and, asc, desc, eq, isNotNull, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  cosineDistance,
+  desc,
+  eq,
+  isNotNull,
+  ne,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import type { AssertableMedia } from "../media/media.service";
 import { DatabaseService } from "../core/database/database.service";
 import {
@@ -33,6 +48,96 @@ export type VisualProfilePrompts = {
 @Injectable()
 export class VisualProfileRepository {
   constructor(private readonly database: DatabaseService) {}
+
+  async listReferenceEmbeddingSources(
+    characterId?: string,
+  ): Promise<ReferenceEmbeddingSource[]> {
+    const r = characterVisualProfileReferences;
+    return this.database.client
+      .select({
+        ownerId: r.profileId,
+        mediaId: r.mediaId,
+        description: r.description,
+        embeddingModel: r.embeddingModel,
+        indexed: sql<boolean>`(${r.embedding} IS NOT NULL AND ${r.embeddedAt} IS NOT NULL AND vector_norm(${r.embedding}) > 0)`,
+      })
+      .from(r)
+      .innerJoin(
+        characterVisualProfiles,
+        eq(characterVisualProfiles.id, r.profileId),
+      )
+      .innerJoin(media, eq(media.id, r.mediaId))
+      .where(
+        and(
+          eq(r.isActive, true),
+          isNotNull(media.uploadedAt),
+          ne(r.description, ""),
+          characterId
+            ? eq(characterVisualProfiles.characterId, characterId)
+            : undefined,
+        ),
+      )
+      .orderBy(asc(r.profileId), asc(r.sortOrder), asc(r.mediaId));
+  }
+
+  async saveReferenceEmbedding(
+    input: ReferenceEmbeddingWrite,
+  ): Promise<boolean> {
+    const r = characterVisualProfileReferences;
+    const rows = await this.database.client
+      .update(r)
+      .set({
+        embedding: input.embedding,
+        embeddingModel: input.model,
+        embeddedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(r.profileId, input.ownerId),
+          eq(r.mediaId, input.mediaId),
+          eq(r.description, input.description),
+          eq(r.isActive, true),
+          sql`EXISTS (SELECT 1 FROM ${media} WHERE ${media.id} = ${r.mediaId} AND ${media.uploadedAt} IS NOT NULL)`,
+        ),
+      )
+      .returning({ id: r.mediaId });
+    return rows.length === 1;
+  }
+
+  async searchReferenceEmbeddings(
+    characterId: string,
+    embedding: number[],
+    model: string,
+    limit: number,
+  ): Promise<RankedReference[]> {
+    const r = characterVisualProfileReferences;
+    const distance = cosineDistance(r.embedding, embedding);
+    return this.database.client
+      .select({
+        id: r.mediaId,
+        description: r.description,
+        score: sql<number>`1 - (${distance})`,
+      })
+      .from(r)
+      .innerJoin(
+        characterVisualProfiles,
+        eq(characterVisualProfiles.id, r.profileId),
+      )
+      .innerJoin(media, eq(media.id, r.mediaId))
+      .where(
+        and(
+          eq(characterVisualProfiles.characterId, characterId),
+          eq(r.isActive, true),
+          isNotNull(media.uploadedAt),
+          ne(r.description, ""),
+          eq(r.embeddingModel, model),
+          isNotNull(r.embeddedAt),
+          sql`vector_norm(${r.embedding}) > 0`,
+        ),
+      )
+      .orderBy(asc(distance), asc(r.sortOrder), asc(r.mediaId))
+      .limit(limit);
+  }
 
   async characterExists(characterId: string): Promise<boolean> {
     const rows = await this.database.client

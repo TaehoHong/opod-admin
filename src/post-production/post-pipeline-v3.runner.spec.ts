@@ -146,6 +146,13 @@ function setup(
           ),
         } as never)
       : undefined,
+    {
+      retrieve: jest.fn().mockResolvedValue({
+        identityReferences: [],
+        locationReferences: {},
+        trace: { model: "test" },
+      }),
+    } as never,
   );
   return { runner, repository, settings, fetchMock, readMedia };
 }
@@ -1596,6 +1603,65 @@ describe("required DB prompt settings", () => {
       expect(fetchMock).not.toHaveBeenCalled();
       expect(readMedia).not.toHaveBeenCalled();
       expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("embedding reference retrieval integration", () => {
+  it("retrieves candidates before calling the image planner and records the trace", async () => {
+    const current = captionStageDraft();
+    (current.conceptJson.pipeline as Record<string, unknown>).stage =
+      "image_plan";
+    const { runner, repository, fetchMock } = setup(current);
+    const trace = {
+      model: "embedding-test",
+      queries: [{ purpose: "scene", query: "scene" }],
+    };
+    const retrieve = jest.fn().mockResolvedValue({
+      identityReferences: [
+        { id: "retrieved-id", description: "retrieved caption" },
+      ],
+      locationReferences: {},
+      trace,
+    });
+    Object.assign(runner, { referenceRetrieval: { retrieve } });
+    await runner.runCurrentStage("draft-1");
+    expect(retrieve).toHaveBeenCalledWith(
+      expect.objectContaining({ characterId: "character-1" }),
+    );
+    const input = JSON.parse(
+      JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+    );
+    expect(input.identityReferences).toEqual([
+      { id: "retrieved-id", description: "retrieved caption" },
+    ]);
+    expect(
+      repository.persistV3Paused.mock.calls[0][0].conceptJson
+        .referenceRetrieval,
+    ).toEqual(trace);
+  });
+});
+
+it("pauses image planning on embedding failure without a planner call or retry", async () => {
+  const current = captionStageDraft();
+  (current.conceptJson.pipeline as Record<string, unknown>).stage =
+    "image_plan";
+  const { runner, repository, fetchMock } = setup(current);
+  Object.assign(runner, {
+    referenceRetrieval: {
+      retrieve: jest.fn().mockRejectedValue(new Error("index missing")),
+    },
+  });
+  await runner.runCurrentStage("draft-1");
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+  expect(repository.persistV3Paused.mock.calls[0][0].conceptJson).toMatchObject(
+    {
+      referenceRetrieval: { failure: "index missing" },
+      pipeline: {
+        state: "needs_configuration",
+        reasonCodes: ["reference_retrieval_failed"],
+      },
     },
   );
 });

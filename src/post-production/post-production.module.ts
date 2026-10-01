@@ -1,3 +1,8 @@
+import { CharactersModule } from "../characters/characters.module";
+import { VisualProfileService } from "../characters/visual-profile.service";
+import { LocationsModule } from "../locations/locations.module";
+import { LocationsService } from "../locations/locations.service";
+import { ReferenceRetrievalService } from "./reference-retrieval.service";
 import { PostAgentPromptsModule } from "../post-agent-prompts/post-agent-prompts.module";
 import { PostAgentPromptService } from "../post-agent-prompts/post-agent-prompt.service";
 import { CharacterContentProfilesModule } from "../character-content-profiles/character-content-profiles.module";
@@ -40,12 +45,29 @@ function storageEnv(config: S3Config | undefined) {
 // 두지 않는다 — 추후 별도 이미지 분리 시 엔트리포인트만 추가하면 되는 구조 유지.
 @Module({
   imports: [
+    CharactersModule,
+    LocationsModule,
     DatabaseModule,
     SettingsModule,
     CharacterContentProfilesModule,
     PostAgentPromptsModule,
   ],
   providers: [
+    {
+      provide: ReferenceRetrievalService,
+      useFactory: (
+        visual: VisualProfileService,
+        locations: LocationsService,
+        settings: GenerationSettingsService,
+        logs: LlmLogService,
+      ) => new ReferenceRetrievalService(visual, locations, settings, logs),
+      inject: [
+        VisualProfileService,
+        LocationsService,
+        GenerationSettingsService,
+        LlmLogService,
+      ],
+    },
     GenerationJobRepository,
     DraftWorkerRepository,
     {
@@ -57,6 +79,7 @@ function storageEnv(config: S3Config | undefined) {
         config: AppConfigService,
         profiles: CharacterContentProfileService,
         agentPrompts: PostAgentPromptService,
+        references: ReferenceRetrievalService,
       ) =>
         new PostPipelineV3Runner(
           drafts,
@@ -68,6 +91,7 @@ function storageEnv(config: S3Config | undefined) {
           fetch,
           createMediaBytesReader(config.s3),
           agentPrompts,
+          references,
         ),
       inject: [
         DraftWorkerRepository,
@@ -76,6 +100,7 @@ function storageEnv(config: S3Config | undefined) {
         AppConfigService,
         CharacterContentProfileService,
         PostAgentPromptService,
+        ReferenceRetrievalService,
       ],
     },
     {

@@ -36,8 +36,7 @@ import { LlmLogsController } from "../llm-logs/llm-logs.controller";
 import { TokenUsageRepository } from "../llm-logs/token-usage.repository";
 import { TokenUsageService } from "../llm-logs/token-usage.service";
 import { LocationsController } from "../locations/locations.controller";
-import { LocationsRepository } from "../locations/locations.repository";
-import { LocationsService } from "../locations/locations.service";
+import { LocationsModule } from "../locations/locations.module";
 import { PostWorkspaceController } from "../post-workspace/post-workspace.controller";
 import { PostWorkspaceRepository } from "../post-workspace/post-workspace.repository";
 import { PostWorkspaceService } from "../post-workspace/post-workspace.service";
@@ -60,6 +59,7 @@ function storageEnv(config: S3Config | undefined) {
   // WorkerModule은 수동 실행(generation/worker/run)용 — 의존 방향은
   // admin → worker만 허용 (역방향 금지, docs/media-generation-pipeline.md D1).
   imports: [
+    LocationsModule,
     DatabaseModule,
     AiModelsModule,
     PostAgentPromptsModule,
@@ -93,8 +93,6 @@ function storageEnv(config: S3Config | undefined) {
     SettingsAuditRepository,
     TokenUsageService,
     TokenUsageRepository,
-    LocationsService,
-    LocationsRepository,
     PostWorkspaceService,
     PostWorkspaceRepository,
     {
