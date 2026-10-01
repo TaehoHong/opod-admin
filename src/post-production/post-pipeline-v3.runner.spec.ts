@@ -217,6 +217,99 @@ function readyPostPlan() {
 }
 
 describe("PostPipelineV3Runner", () => {
+  it("preserves an ungrounded conflict and pauses without requeueing", async () => {
+    const output = {
+      status: "conflict",
+      conflicts: [
+        {
+          left: { source: "operatorRequest", text: "광고를 쓴다" },
+          right: {
+            source: "persona.characterContext",
+            text: "광고는 쓰지 않는다",
+          },
+          reason: "요청과 설정이 충돌한다",
+        },
+      ],
+    };
+    const current = draft({
+      pipelineVersion: "post-pipeline-v4",
+      pipeline: {
+        stage: "post_plan",
+        state: "running",
+        imageCount: null,
+        reasonCodes: [],
+      },
+    });
+    const { runner, repository } = setup(current, output);
+    await runner.runCurrentStage("draft-1");
+    expect(repository.persistV3Paused).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conceptJson: expect.objectContaining({
+          rejectedAgentResponse: expect.objectContaining({
+            output,
+            producerLogId: "101",
+          }),
+          pipeline: expect.objectContaining({
+            state: "needs_input",
+            failure: expect.objectContaining({ retryable: false }),
+          }),
+        }),
+      }),
+    );
+    expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+  });
+
+  it("preserves an invalid blocker without reducing image count or creating jobs", async () => {
+    const output = {
+      status: "blocked",
+      reasons: [
+        {
+          code: "insufficient_distinct_shots",
+          detail: "두 장의 요구를 충족할 수 있으므로 차단 사유가 없다",
+        },
+      ],
+    };
+    const current = draft({
+      pipelineVersion: "post-pipeline-v4",
+      pipeline: {
+        stage: "image_plan",
+        state: "running",
+        imageCount: 2,
+        reasonCodes: [],
+      },
+      postPlanning: {
+        revision: 1,
+        hash: "post",
+        output: {
+          status: "ready",
+          intent: {
+            premise: "동네 간판을 기록한다",
+            primaryPurpose: "산책 기록",
+            secondaryPurpose: null,
+          },
+        },
+      },
+    });
+    const { runner, repository } = setup(current, output);
+    await runner.runCurrentStage("draft-1");
+    expect(repository.persistV3Paused).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conceptJson: expect.objectContaining({
+          rejectedAgentResponse: expect.objectContaining({
+            output,
+            producerLogId: "101",
+          }),
+          pipeline: expect.objectContaining({
+            state: "needs_input",
+            imageCount: 2,
+          }),
+        }),
+      }),
+    );
+    expect(repository.persistV3Artifact).not.toHaveBeenCalled();
+    expect(repository.persistV3PromptJobs).not.toHaveBeenCalled();
+    expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+  });
   it.each([
     [
       "publication style wins",
@@ -773,6 +866,21 @@ describe("PostPipelineV3Runner", () => {
                 {
                   code: "insufficient_distinct_shots",
                   detail: "촬영 근거 부족",
+                  evidence: {
+                    requirements: [
+                      {
+                        path: "contentProfile.constraints",
+                        quote: "협찬 금지",
+                      },
+                    ],
+                    referenceChecks: [],
+                    alternatives: [
+                      {
+                        description: "제약을 충족할 수 없다",
+                        satisfiesRequirements: false,
+                      },
+                    ],
+                  },
                 },
               ],
             },
@@ -980,6 +1088,18 @@ describe("PostPipelineV3Runner", () => {
         {
           code: "insufficient_distinct_shots",
           detail: "두 번째 역할을 만들 수 없다",
+          evidence: {
+            requirements: [
+              { path: "postPlan.intent.premise", quote: "빈 잔을 본다." },
+            ],
+            referenceChecks: [],
+            alternatives: [
+              {
+                description: "의미를 유지하는 두 번째 구도를 구성할 수 없다",
+                satisfiesRequirements: false,
+              },
+            ],
+          },
         },
       ],
     });
@@ -1041,7 +1161,25 @@ describe("PostPipelineV3Runner", () => {
     const { runner, repository } = setup(current, {
       status: "blocked",
       reasons: [
-        { code: "missing_identity_reference", detail: "정체성 레퍼런스 없음" },
+        {
+          code: "missing_identity_reference",
+          detail: "정체성 레퍼런스 없음",
+          evidence: {
+            requirements: [
+              {
+                path: "postPlan.intent.premise",
+                quote: "현상한 필름을 책상에 펼친다.",
+              },
+            ],
+            referenceChecks: [],
+            alternatives: [
+              {
+                description: "제약을 충족할 참조가 없다",
+                satisfiesRequirements: false,
+              },
+            ],
+          },
+        },
       ],
     });
     repository.findRecentVisualPlanDrafts.mockResolvedValue([

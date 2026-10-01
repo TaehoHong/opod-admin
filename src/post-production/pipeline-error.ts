@@ -1,5 +1,20 @@
 import { errorMessage } from "../shared/utils/value-utils";
 
+export class InvalidPlanningResponseError extends Error {
+  constructor(
+    message: string,
+    readonly response: {
+      input: unknown;
+      output: unknown;
+      producerLogId: string | null;
+      agentConfig: Record<string, unknown>;
+    },
+  ) {
+    super(message);
+    this.name = "InvalidPlanningResponseError";
+  }
+}
+
 export type PipelineFailure = {
   code: string;
   stage: string;
@@ -25,6 +40,18 @@ export function pipelineFailure(
     occurredAt: occurredAt.toISOString(),
     retryable: true,
   };
+
+  if (error instanceof InvalidPlanningResponseError) {
+    return {
+      ...base,
+      code: "invalid_agent_response",
+      retryable: false,
+      problem: "기획 Agent 응답 검증에 실패했습니다.",
+      cause: "응답의 구조·출처·근거가 입력 또는 판정과 일치하지 않았습니다.",
+      nextAction:
+        "보존된 원본 응답과 LLM 로그를 확인하세요. 자동 재시도하지 않습니다.",
+    };
+  }
 
   if (normalized.includes("timeout") || normalized.includes("aborted")) {
     return {

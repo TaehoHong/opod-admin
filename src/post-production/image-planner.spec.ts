@@ -108,11 +108,109 @@ describe("Image Planning Agent contract", () => {
             {
               code: "insufficient_distinct_shots",
               detail: "의미를 바꾸지 않고 두 번째 역할을 만들 수 없다",
+              evidence: {
+                requirements: [
+                  {
+                    path: "postPlan.intent.premise",
+                    quote: "카페에서 친구를 기다린다.",
+                  },
+                ],
+                referenceChecks: [],
+                alternatives: [
+                  {
+                    description:
+                      "같은 순간을 다른 구도로 촬영해도 필수 조건이 공존하지 못한다",
+                    satisfiesRequirements: false,
+                  },
+                ],
+              },
             },
           ],
         },
         input,
       ),
     ).toMatchObject({ status: "blocked" });
+  });
+
+  it("rejects a blocked response that has no verifiable evidence", () => {
+    expect(() =>
+      parseImagePlan(
+        {
+          status: "blocked",
+          reasons: [
+            {
+              code: "missing_identity_reference",
+              detail: "참조는 충분하므로 실제 차단 사유는 없다",
+            },
+          ],
+        },
+        input,
+      ),
+    ).toThrow("evidence");
+  });
+
+  const identityBlock = {
+    status: "blocked",
+    reasons: [
+      {
+        code: "missing_identity_reference",
+        detail: "필수로 보이는 머리의 정체성을 보존할 참조가 없다",
+        evidence: {
+          requirements: [
+            {
+              path: "characterVisualContext.appearance",
+              quote: "black bob hair",
+            },
+          ],
+          referenceChecks: [{ id: "person-1", suitable: false }],
+          alternatives: [
+            {
+              description: "얼굴을 가려도 필수 머리 특징을 보존할 참조가 없다",
+              satisfiesRequirements: false,
+            },
+          ],
+        },
+      },
+    ],
+  };
+  it("accepts an identity blocker after all supplied references are assessed as unsuitable", () => {
+    expect(parseImagePlan(identityBlock, input)).toEqual(identityBlock);
+  });
+  it("rejects an identity blocker that acknowledges a suitable reference", () => {
+    const value = structuredClone(identityBlock);
+    value.reasons[0].evidence.referenceChecks[0].suitable = true;
+    expect(() => parseImagePlan(value, input)).toThrow(
+      "suitable identity reference",
+    );
+  });
+  it("rejects a blocker that acknowledges a satisfying alternative", () => {
+    const value = structuredClone(identityBlock);
+    value.reasons[0].evidence.alternatives[0].satisfiesRequirements = true;
+    expect(() => parseImagePlan(value, input)).toThrow(
+      "satisfying alternative",
+    );
+  });
+  it.each([
+    ["unknown path", "operatorRequest", "black bob hair"],
+    ["invented quote", "characterVisualContext.appearance", "long red hair"],
+    ["metadata path", "identityReferences.0.id", "person-1"],
+  ])("rejects a requirement with %s", (_label, path, quote) => {
+    const value = structuredClone(identityBlock);
+    value.reasons[0].evidence.requirements = [{ path, quote }];
+    expect(() => parseImagePlan(value, input)).toThrow("does not match input");
+  });
+  it("rejects unavailable reference IDs", () => {
+    const value = structuredClone(identityBlock);
+    value.reasons[0].evidence.referenceChecks[0].id = "unknown";
+    expect(() => parseImagePlan(value, input)).toThrow(
+      "reference check is invalid",
+    );
+  });
+  it("requires every supplied identity reference to be checked before claiming none are suitable", () => {
+    const value = structuredClone(identityBlock);
+    value.reasons[0].evidence.referenceChecks = [];
+    expect(() => parseImagePlan(value, input)).toThrow(
+      "check all supplied identity references",
+    );
   });
 });

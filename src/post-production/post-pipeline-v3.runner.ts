@@ -58,7 +58,10 @@ import {
 } from "./post-planner";
 import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
-import { pipelineFailure } from "./pipeline-error";
+import {
+  InvalidPlanningResponseError,
+  pipelineFailure,
+} from "./pipeline-error";
 import {
   postPersonaRole,
   projectPostPersonaContext,
@@ -218,6 +221,27 @@ export class PostPipelineV3Runner {
     } catch (error) {
       const failure = pipelineFailure(error, stage);
       const message = failure.technicalDetail;
+      if (error instanceof InvalidPlanningResponseError) {
+        const saved = await this.repository.persistV3Paused({
+          draftId: draft.id,
+          characterId: draft.characterId,
+          expectedStage: String(stage),
+          conceptJson: {
+            ...concept,
+            rejectedAgentResponse: { stage, ...error.response },
+            pipeline: {
+              ...concept.pipeline,
+              state: "needs_input",
+              reasonCodes: [failure.code],
+              failure,
+            },
+          } as JsonValue,
+          reason: `Agent response validation failed: ${message}`,
+        });
+        if (!saved)
+          this.logger.warn(`V3 draft ${draft.id} rejected response CAS lost`);
+        return;
+      }
       const terminal =
         draft.attemptCount >= this.config.draftWorker.maxAttempts;
       await this.repository.requeueOrFailV3({

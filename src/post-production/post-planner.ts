@@ -2,10 +2,13 @@ import type { CharacterContentProfile } from "../character-content-profiles/char
 import { LLM_LOG_TYPE, LlmLogContext } from "../llm-logs/llm-log.service";
 import {
   StrictJsonAgentClient,
+  InvalidStructuredResponseError,
   requireAgentPromptSettings,
 } from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
 import type { PostMemoryEntry, PostPersonaEntry } from "./post-persona-context";
+import { inputValue, matchesInputQuote } from "./planning-evidence";
+import { InvalidPlanningResponseError } from "./pipeline-error";
 
 const SOURCES = new Set([
   "operatorRequest",
@@ -82,22 +85,44 @@ export class PostPlanningAgent {
     context?: LlmLogContext,
   ): Promise<{ output: PostPlan; producerLogId: string | null }> {
     const settings = requireAgentPromptSettings(this.client.agentSettings);
-    const result = await this.client.run({
-      logType: LLM_LOG_TYPE.postPlanV3,
-      schemaName: "opod_post_plan_v3",
-      schema: settings.outputSchema,
-      systemPrompt: settings.systemPrompt,
-      input,
-      context,
-    });
-    return {
-      output: parsePostPlan(result.value),
-      producerLogId: result.producerLogId,
-    };
+    let result: { value: unknown; producerLogId: string | null } | undefined;
+    try {
+      result = await this.client.run({
+        logType: LLM_LOG_TYPE.postPlanV3,
+        schemaName: "opod_post_plan_v3",
+        schema: settings.outputSchema,
+        systemPrompt: settings.systemPrompt,
+        input,
+        context,
+      });
+      return {
+        output: parsePostPlan(result.value, input),
+        producerLogId: result.producerLogId,
+      };
+    } catch (error) {
+      if (!result && !(error instanceof InvalidStructuredResponseError))
+        throw error;
+      throw new InvalidPlanningResponseError(
+        error instanceof Error ? error.message : "invalid post plan",
+        {
+          input,
+          output: result
+            ? result.value
+            : (error as InvalidStructuredResponseError).output,
+          producerLogId: result
+            ? result.producerLogId
+            : (error as InvalidStructuredResponseError).producerLogId,
+          agentConfig: settings.metadata,
+        },
+      );
+    }
   }
 }
 
-export function parsePostPlan(value: unknown): PostPlan {
+export function parsePostPlan(
+  value: unknown,
+  input?: PostPlannerInput,
+): PostPlan {
   if (
     !isRecord(value) ||
     (value.status !== "ready" && value.status !== "conflict")
@@ -124,8 +149,8 @@ export function parsePostPlan(value: unknown): PostPlan {
           `post plan conflict ${index}`,
         );
         return {
-          left: operand(item.left, index, "left"),
-          right: operand(item.right, index, "right"),
+          left: operand(item.left, index, "left", input),
+          right: operand(item.right, index, "right", input),
           reason: requiredText(item.reason, 2_000, `conflict ${index} reason`),
         };
       }),
@@ -189,16 +214,21 @@ export function parsePostPlan(value: unknown): PostPlan {
   };
 }
 
-function operand(value: unknown, index: number, side: string) {
+function operand(
+  value: unknown,
+  index: number,
+  side: string,
+  input?: PostPlannerInput,
+) {
   if (!isRecord(value)) throw new Error(`conflict ${index} ${side} is invalid`);
   exactKeys(value, ["source", "text"], `conflict ${index} ${side}`);
   if (typeof value.source !== "string" || !SOURCES.has(value.source)) {
     throw new Error(`conflict ${index} ${side} has invalid source`);
   }
-  return {
-    source: value.source,
-    text: requiredText(value.text, 2_000, `conflict ${index} ${side}`),
-  };
+  const text = requiredText(value.text, 2_000, `conflict ${index} ${side}`);
+  if (!matchesInputQuote(inputValue(input, value.source), text))
+    throw new Error(`conflict ${side} does not match input`);
+  return { source: value.source, text };
 }
 
 function requiredText(value: unknown, max: number, label: string): string {

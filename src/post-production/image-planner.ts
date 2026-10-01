@@ -2,9 +2,12 @@ import type { CharacterContentProfile } from "../character-content-profiles/char
 import { LLM_LOG_TYPE, LlmLogContext } from "../llm-logs/llm-log.service";
 import {
   StrictJsonAgentClient,
+  InvalidStructuredResponseError,
   requireAgentPromptSettings,
 } from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
+import { InputQuote, inputValue, matchesInputQuote } from "./planning-evidence";
+import { InvalidPlanningResponseError } from "./pipeline-error";
 
 export type ImagePlannerInput = {
   contentProfile?: Pick<
@@ -105,6 +108,11 @@ export type ImagePlanBlocked = {
       | "missing_identity_reference"
       | "insufficient_distinct_shots";
     detail: string;
+    evidence: {
+      requirements: InputQuote[];
+      referenceChecks: { id: string; suitable: boolean }[];
+      alternatives: { description: string; satisfiesRequirements: boolean }[];
+    };
   }[];
 };
 export type ImagePlan = ImagePlanReady | ImagePlanBlocked;
@@ -139,18 +147,37 @@ export class ImagePlanningAgent {
     context?: LlmLogContext,
   ): Promise<{ output: ImagePlan; producerLogId: string | null }> {
     const settings = requireAgentPromptSettings(this.client.agentSettings);
-    const result = await this.client.run({
-      logType: LLM_LOG_TYPE.imagePlanV3,
-      schemaName: "opod_image_plan_v3",
-      schema: settings.outputSchema,
-      systemPrompt: settings.systemPrompt,
-      input,
-      context,
-    });
-    return {
-      output: parseImagePlan(result.value, input),
-      producerLogId: result.producerLogId,
-    };
+    let result: { value: unknown; producerLogId: string | null } | undefined;
+    try {
+      result = await this.client.run({
+        logType: LLM_LOG_TYPE.imagePlanV3,
+        schemaName: "opod_image_plan_v3",
+        schema: settings.outputSchema,
+        systemPrompt: settings.systemPrompt,
+        input,
+        context,
+      });
+      return {
+        output: parseImagePlan(result.value, input),
+        producerLogId: result.producerLogId,
+      };
+    } catch (error) {
+      if (!result && !(error instanceof InvalidStructuredResponseError))
+        throw error;
+      throw new InvalidPlanningResponseError(
+        error instanceof Error ? error.message : "invalid image plan",
+        {
+          input,
+          output: result
+            ? result.value
+            : (error as InvalidStructuredResponseError).output,
+          producerLogId: result
+            ? result.producerLogId
+            : (error as InvalidStructuredResponseError).producerLogId,
+          agentConfig: settings.metadata,
+        },
+      );
+    }
   }
 }
 
@@ -176,12 +203,19 @@ export function parseImagePlan(
       reasons: value.reasons.map((reason, index) => {
         if (!isRecord(reason))
           throw new Error(`blocked reason ${index} is invalid`);
-        exactKeys(reason, ["code", "detail"], `blocked reason ${index}`);
+        if (!isRecord(reason.evidence))
+          throw new Error(`blocked reason ${index} requires evidence`);
+        exactKeys(
+          reason,
+          ["code", "detail", "evidence"],
+          `blocked reason ${index}`,
+        );
         if (typeof reason.code !== "string" || !BLOCK_CODES.has(reason.code))
           throw new Error(`blocked reason ${index} has invalid code`);
         return {
           code: reason.code as ImagePlanBlocked["reasons"][number]["code"],
           detail: text(reason.detail, 2_000, `blocked reason ${index}`),
+          evidence: parseBlockEvidence(reason.evidence, reason.code, input),
         };
       }),
     };
@@ -364,6 +398,97 @@ export function parseImagePlan(
     };
   });
   return { status: "ready", locationId, continuity: { lockedElements }, shots };
+}
+
+function parseBlockEvidence(
+  value: Record<string, unknown>,
+  code: string,
+  input: ImagePlannerInput,
+): ImagePlanBlocked["reasons"][number]["evidence"] {
+  exactKeys(
+    value,
+    ["requirements", "referenceChecks", "alternatives"],
+    "block evidence",
+  );
+  if (
+    !Array.isArray(value.requirements) ||
+    !value.requirements.length ||
+    value.requirements.length > 10
+  )
+    throw new Error("block evidence requires input requirements");
+  const requirements = value.requirements.map((item) => {
+    if (!isRecord(item)) throw new Error("block requirement is invalid");
+    exactKeys(item, ["path", "quote"], "block requirement");
+    const path = text(item.path, 300, "requirement path");
+    const quote = text(item.quote, 2_000, "requirement quote");
+    const requirementPath =
+      /^(operatorRequest|imageCount|canvas\.aspectRatio|postPlan\.intent\.(premise|primaryPurpose|secondaryPurpose)|contentProfile\.(accountConcept|imageStyle|constraints)|characterVisualContext\.(name|appearance|(exclusions|boundaries|capturePreferences)\.\d+|personaContext\.\d+\.content)|memories\.\d+\.content|locations\.\d+\.(name|description|exclusions\.\d+))$/;
+    if (
+      !requirementPath.test(path) ||
+      !matchesInputQuote(inputValue(input, path), quote)
+    )
+      throw new Error("block requirement does not match input");
+    return { path, quote };
+  });
+  const available = new Set([
+    ...input.identityReferences.map((ref) => ref.id),
+    ...input.locations.flatMap((location) =>
+      location.references.map((ref) => ref.id),
+    ),
+  ]);
+  if (
+    !Array.isArray(value.referenceChecks) ||
+    value.referenceChecks.length > available.size
+  )
+    throw new Error("block reference checks are invalid");
+  const checked = new Set<string>();
+  const referenceChecks = value.referenceChecks.map((item) => {
+    if (!isRecord(item)) throw new Error("block reference check is invalid");
+    exactKeys(item, ["id", "suitable"], "block reference check");
+    const id = text(item.id, 200, "checked reference id");
+    if (
+      !available.has(id) ||
+      checked.has(id) ||
+      typeof item.suitable !== "boolean"
+    )
+      throw new Error("block reference check is invalid");
+    checked.add(id);
+    return { id, suitable: item.suitable };
+  });
+  if (code === "missing_identity_reference") {
+    const identityIds = new Set(input.identityReferences.map((ref) => ref.id));
+    if ([...identityIds].some((id) => !checked.has(id)))
+      throw new Error(
+        "identity blocker must check all supplied identity references",
+      );
+    if (referenceChecks.some((ref) => identityIds.has(ref.id) && ref.suitable))
+      throw new Error(
+        "identity blocker acknowledges a suitable identity reference",
+      );
+  }
+  if (
+    !Array.isArray(value.alternatives) ||
+    !value.alternatives.length ||
+    value.alternatives.length > 10
+  )
+    throw new Error("block evidence requires alternatives");
+  const alternatives = value.alternatives.map((item) => {
+    if (!isRecord(item)) throw new Error("block alternative is invalid");
+    exactKeys(
+      item,
+      ["description", "satisfiesRequirements"],
+      "block alternative",
+    );
+    if (typeof item.satisfiesRequirements !== "boolean")
+      throw new Error("block alternative is invalid");
+    if (item.satisfiesRequirements)
+      throw new Error("blocker acknowledges a satisfying alternative");
+    return {
+      description: text(item.description, 2_000, "block alternative"),
+      satisfiesRequirements: item.satisfiesRequirements,
+    };
+  });
+  return { requirements, referenceChecks, alternatives };
 }
 
 function parseBinding(

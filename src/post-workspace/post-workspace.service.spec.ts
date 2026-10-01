@@ -497,6 +497,27 @@ describe("PostWorkspaceService", () => {
     expect(item.pipelineV3?.artifacts.captionBuild).toBeUndefined();
   });
 
+  it("shows the response validation problem for a paused planning stage", async () => {
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      status: "planned",
+      conceptJson: {
+        pipelineVersion: "post-pipeline-v4",
+        mode: "auto",
+        pipeline: {
+          stage: "image_plan",
+          state: "needs_input",
+          imageCount: 2,
+          failure: { problem: "기획 Agent 응답 검증에 실패했습니다." },
+        },
+      },
+      jobs: [],
+    } as never);
+    const item = await service.get("draft-1");
+    expect(item.operationalStatus).toBe("needs_action");
+    expect(item.statusDetail).toBe("기획 Agent 응답 검증에 실패했습니다.");
+  });
+
   // 게시 트랜잭션(`selectedPublishedMemories`)은 selected이면서 현재 PostPlan
   // 해시에서 나온 후보만 저장한다. read model이 다른 기준을 쓰면 화면이 저장되지
   // 않은 기억을 저장됐다고 말하게 된다.

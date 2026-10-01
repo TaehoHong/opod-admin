@@ -565,7 +565,14 @@ function statusForDraft(
         "needs_configuration",
       ].includes(state)
     ) {
-      return { status: "needs_action", detail: v3StateCopy(state).detail };
+      const failure = record(pipeline.failure);
+      return {
+        status: "needs_action",
+        detail:
+          typeof failure.problem === "string" && failure.problem
+            ? failure.problem
+            : v3StateCopy(state).detail,
+      };
     }
     if (state === "failed")
       return { status: "failed", detail: v3StateCopy(state).detail };

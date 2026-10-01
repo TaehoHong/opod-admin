@@ -71,12 +71,25 @@ agentConfig가 적용 설정을 기록한다. 기존 metadata 없는 잡은 기�
 [관리 API 계약](api/admin-post-generation-agents.md)에 저장/실행 경계를 기록한다.
 
 
-이미지 기획 `prompts/image-planner.ts` v9는 의미·제약·물리적 일관성·필요한 연속성에
+이미지 기획 `prompts/image-planner.ts` v10은 의미·제약·물리적 일관성·필요한 연속성에
 영향을 주는 시각적 결정을 우선하고 부수적인 세부사항은 열어 둔다. 운영자의 시각적
 요청은 확정된 의도·사실·제약과 양립할 때 반영한다. 필요한 상태·동작 단서만 작성하고,
 같은 순간의 유사 컷을 허용하며 입력 제약·촬영 구조 밖의 임의 제외를 제한한다.
 공유 요소의 근거 레퍼런스를 관련 컷에 배정하는 것은 기획 Agent의 책임이다.
-출력 계약은 기존 image-plan-v3를 유지하며 실제 생성 품질은 별도 평가 대상이다.
+출력 계약 image-plan-v4는 ready 구조를 유지하고 blocked 이유에 `evidence`를 요구한다.
+`requirements`는 실제 입력의 조건 경로·원문 인용, `referenceChecks`는 제공된 참조 ID와
+적합 여부, `alternatives`는 검토한 대안과 조건 충족 여부를 담는다. DB 지침과 출력
+규격을 함께 갱신해야 실행할 수 있다. 실제 생성 품질은 별도 평가 대상이다.
+`post-planner.ts`는 충돌의 양쪽 출처와 인용을 실제 입력에서 검증한다.
+`image-planner.ts`는 차단 조건의 입력 근거, 참조 ID, 적합한 정체성 참조와 가능한
+대안이 있는데도 차단하는 응답을 검사한다. 조건 경로에서 ID 등 내부 metadata는 제외한다.
+인용과 구조 검증은 자연어 조건의 실제 충돌 여부까지 보증하지 않는다.
+검증 실패는 `InvalidPlanningResponseError`로 입력·출력·로그 ID·Agent 설정을 전달한다.
+러너는 기존 산출물을 유지하고 `rejectedAgentResponse`에 원문을 보존하며
+`needs_input/invalid_agent_response`로 정지한다. 수량 축소·다음 단계·자동 재시도를
+실행하지 않고, 작업 화면은 `pipeline.failure.problem`을 표시한다. 실제 구조가 있는
+차단의 기존 처리와 이력의 읽기 경로는 유지한다. 회귀 owner는 기획 parser/runner spec,
+`post-workspace.service.spec.ts`, `test/planning-evidence.e2e-spec.ts`다.
 `PostPipelineV3Runner`는 게시물 전용 `imageStyle`을 우선하고, 비어 있으면
 기존 visual profile의 스타일을 선택해 `imagePlanning.input.contentProfile.imageStyle`에
 보존한다. 최종 프롬프트도 이 snapshot을 사용한다. 두 설정 모두 비어 있으면

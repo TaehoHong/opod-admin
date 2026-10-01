@@ -1,4 +1,10 @@
-import { parsePostPlan } from "./post-planner";
+import {
+  parsePostPlan,
+  PostPlanningAgent,
+  PostPlannerInput,
+} from "./post-planner";
+import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
+import { POST_PLAN_JSON_SCHEMA } from "../../prompts/post-planner";
 
 const ready = {
   status: "ready",
@@ -40,22 +46,112 @@ describe("Post Planning Agent contract (v3)", () => {
 
   it("keeps symmetric truthful conflict operands", () => {
     expect(
-      parsePostPlan({
+      parsePostPlan(
+        {
+          status: "conflict",
+          conflicts: [
+            {
+              left: {
+                source: "persona.writingProfile.contentStyle",
+                text: "광고는 쓰지 않는다",
+              },
+              right: {
+                source: "persona.writingProfile.voice",
+                text: "항상 광고 문구로 쓴다",
+              },
+              reason: "동시에 만족할 수 없다",
+            },
+          ],
+        },
+        {
+          persona: {
+            writingProfile: {
+              contentStyle: [{ content: "광고는 쓰지 않는다" }],
+              voice: [{ content: "항상 광고 문구로 쓴다" }],
+            },
+          },
+        } as PostPlannerInput,
+      ),
+    ).toMatchObject({ status: "conflict" });
+  });
+});
+
+describe("Post Planning Agent conflict evidence", () => {
+  const input: PostPlannerInput = {
+    character: {
+      name: "Test",
+      bio: "사진을 찍는다",
+      interests: [],
+      defaultContentLanguage: "ko",
+    },
+    contentProfile: {
+      accountConcept: "일상 사진",
+      constraints: "광고는 쓰지 않는다",
+    },
+    persona: {
+      characterContext: [],
+      writingProfile: { contentStyle: [], voice: [] },
+      boundaries: [],
+      additionalContext: [],
+    },
+    memories: [],
+    recentPosts: [],
+  };
+  function agent(output: unknown) {
+    return new PostPlanningAgent(
+      new StrictJsonAgentClient(
+        {
+          apiUrl: "https://llm.test/chat",
+          apiKey: "fixture",
+          model: "fixture",
+        },
+        async () =>
+          Response.json({
+            choices: [
+              { message: { content: JSON.stringify({ result: output }) } },
+            ],
+          }),
+        undefined,
+        {
+          systemPrompt: "Plan a post.",
+          outputSchema: POST_PLAN_JSON_SCHEMA,
+          metadata: {},
+        },
+      ),
+    );
+  }
+  it("rejects an operator conflict when no operator request was supplied", async () => {
+    await expect(
+      agent({
+        status: "conflict",
+        conflicts: [
+          {
+            left: { source: "operatorRequest", text: "광고를 쓴다" },
+            right: {
+              source: "contentProfile.constraints",
+              text: "광고는 쓰지 않는다",
+            },
+            reason: "광고 요청이 제한과 충돌한다",
+          },
+        ],
+      }).plan(input),
+    ).rejects.toThrow("conflict left does not match input");
+  });
+  it("rejects a quotation assigned to the wrong input source", async () => {
+    await expect(
+      agent({
         status: "conflict",
         conflicts: [
           {
             left: {
-              source: "persona.writingProfile.contentStyle",
+              source: "persona.characterContext",
               text: "광고는 쓰지 않는다",
             },
-            right: {
-              source: "persona.writingProfile.voice",
-              text: "항상 광고 문구로 쓴다",
-            },
-            reason: "동시에 만족할 수 없다",
+            right: { source: "operatorRequest", text: "광고를 쓴다" },
+            reason: "광고 요청이 제한과 충돌한다",
           },
         ],
-      }),
-    ).toMatchObject({ status: "conflict" });
+      }).plan({ ...input, operatorRequest: "광고를 쓴다" }),
+    ).rejects.toThrow("conflict left does not match input");
   });
 });

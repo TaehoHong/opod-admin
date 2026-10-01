@@ -1,7 +1,7 @@
 import { rootUnionSchema } from "./strict-schema";
 
-export const IMAGE_PLANNER_PROMPT_VERSION = "image-planner-v9";
-export const IMAGE_PLAN_CONTRACT_VERSION = "image-plan-v3";
+export const IMAGE_PLANNER_PROMPT_VERSION = "image-planner-v10";
+export const IMAGE_PLAN_CONTRACT_VERSION = "image-plan-v4";
 
 const text = (maxLength: number) => ({
   type: "string",
@@ -168,8 +168,52 @@ export const IMAGE_PLAN_JSON_SCHEMA = rootUnionSchema([
               ],
             },
             detail: text(2_000),
+            evidence: {
+              type: "object",
+              properties: {
+                requirements: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 10,
+                  items: {
+                    type: "object",
+                    properties: { path: text(300), quote: text(2_000) },
+                    required: ["path", "quote"],
+                    additionalProperties: false,
+                  },
+                },
+                referenceChecks: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      id: text(200),
+                      suitable: { type: "boolean" },
+                    },
+                    required: ["id", "suitable"],
+                    additionalProperties: false,
+                  },
+                },
+                alternatives: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 10,
+                  items: {
+                    type: "object",
+                    properties: {
+                      description: text(2_000),
+                      satisfiesRequirements: { type: "boolean" },
+                    },
+                    required: ["description", "satisfiesRequirements"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ["requirements", "referenceChecks", "alternatives"],
+              additionalProperties: false,
+            },
           },
-          required: ["code", "detail"],
+          required: ["code", "detail", "evidence"],
           additionalProperties: false,
         },
       },

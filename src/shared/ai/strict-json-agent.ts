@@ -44,6 +44,17 @@ export type StrictJsonAgentRequest = {
 
 type TokenField = "max_tokens" | "max_completion_tokens";
 
+export class InvalidStructuredResponseError extends Error {
+  constructor(
+    message: string,
+    readonly output: unknown,
+    readonly producerLogId: string | null,
+  ) {
+    super(message);
+    this.name = "InvalidStructuredResponseError";
+  }
+}
+
 // 최신 OpenAI 모델(o-시리즈·gpt-5 계열)은 max_tokens를 거부하고
 // max_completion_tokens를 요구한다. 반대로 많은 OpenAI 호환 서버는 새 이름을
 // 모른다. 어느 쪽인지는 (엔드포인트, 모델) 조합이 정하므로 한 번 알아낸 답을
@@ -163,18 +174,30 @@ export class StrictJsonAgentClient {
         `structured agent failed (${result.response.status}): ${detail.slice(0, 300)}`,
       );
     }
-    const content = contentFromChatCompletion(await result.response.json());
-    if (!content) throw new Error("structured agent returned no content");
-    let parsed: unknown;
+    const raw = await result.response.text();
+    let output: unknown = raw;
     try {
-      parsed = JSON.parse(content);
-    } catch {
-      throw new Error("structured agent returned invalid JSON content");
+      const response: unknown = JSON.parse(raw);
+      output = response;
+      const content = contentFromChatCompletion(response);
+      if (!content) throw new Error("structured agent returned no content");
+      output = content;
+      try {
+        output = JSON.parse(content);
+      } catch {
+        throw new Error("structured agent returned invalid JSON content");
+      }
+      return {
+        value: unwrapUnionEnvelope(output, request.schema),
+        producerLogId: result.producerLogId,
+      };
+    } catch (error) {
+      throw new InvalidStructuredResponseError(
+        error instanceof Error ? error.message : "invalid structured response",
+        output,
+        result.producerLogId,
+      );
     }
-    return {
-      value: unwrapUnionEnvelope(parsed, request.schema),
-      producerLogId: result.producerLogId,
-    };
   }
 }
 
