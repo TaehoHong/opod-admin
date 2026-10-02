@@ -53,6 +53,11 @@ openai-compatible, 이미지 adapter는 openai/fal/opod-flux다.
 PostAgentPromptRepository는 단계 advisory transaction lock과 expectedRevision으로
 첫 저장을 포함한 동시 변경을 막는다. 출력 규격은 실제 LLM 요청에 보내는 schema이며,
 현재 parser 계약과 같아야 저장·복원·실행된다. generation 행의 지침/schema는 NULL이다.
+`PostAgentPromptService.execution`은 이 검증 뒤 post_plan/image_plan의 각 union
+분기에서 status만 첫 속성으로 옮긴 새 전송 스키마를 만든다. JSONB 조회 순서가
+정상/차단 분기 선택에 영향을 주지 않도록 하기 위해서이며, 저장값·이력·다른 속성
+순서와 조건은 보존한다. 순수 변환 owner는 `prompts/strict-schema.ts`이고 회귀는
+`test/post-generation-agents.e2e-spec.ts`의 실제 DB 저장·조회→provider 요청 검사다.
 처음 저장하기 전에는 기존 공통 설정/코드 지침을 사용하며 저장은 모델 참조가 필수다.
 `PostPipelineV3Runner`가 네 LLM 단계에서 저장 지침/schema/모델을 읽는다.
 이미지 프롬프트 단계는 generation 모델로 model policy를 정하고 잡의 `_postAgent`에

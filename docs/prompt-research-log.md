@@ -1071,3 +1071,27 @@ Agent의 입력에서 사라졌고, 캡션 평가 Agent는 만들지 않는다. 
 - ②의 반복 기획도 같이 관측됐다: 서린 V3/V4 초안 5건 중 4건이 "필라테스 후
   핏체크", 한소이 2건이 같은 사건. `recentPosts`가 **게시된 post만** 보고 초안은
   서로를 모른다. 이 축은 프롬프트가 아니라 입력이라 별건으로 분리했다.
+
+
+## planner-schema-order-v1 — DB 조회 후 기획 분기 출력 순서 통일 (2026-10-02)
+
+- 가설: JSONB 조회로 post_plan ready는 intent, image_plan ready는 shots가 첫
+  속성이 되지만 차단 분기는 status로 시작한다. 이 차이가 분기 선택에 영향을 준다.
+  이전 후보 평가는 코드 상 스키마를 사용해 실제 저장·조회 경로를 놓쳤다.
+- 근거: 동일 원본 입력·지침·모델을 고정하고 status만 첫 위치로 옮긴 별도
+  진단에서 실패 단계 6개가 ready가 됐다. 3개 저장 순서 대조는 다시 중단됐고,
+  실제 영상 전용 충돌 1개는 유지됐다. 단회 진단으로 전체 품질을 보장하지 않는다.
+- 변경: PostAgentPromptService.execution에서 기존 계약 검증 뒤 두 기획 union
+  분기의 status만 앞으로 옮긴 새 객체를 전송한다. 지침·스키마 의미·required/anyOf
+  배열·다른 속성 순서·저장 이력·파서는 보존한다. DB 재저장으로 순서 보존을
+  기대하는 안과 코드 정본 전체로 교체하는 안은 제외했다.
+- 회귀: 실제 PostgreSQL 저장·조회 후 StrictJsonAgentClient 요청 본문을 검사한다.
+  수정 전 2개 기획 테스트가 순서 오류로 실패했고, 수정 후 통과했다. image_prompt/
+  caption은 저장된 순서 그대로, generation은 NULL 설정을 유지한다.
+- 결과: lint/build, unit 578개, 전체 E2E 65개 통과. 최초 전체 실행에서는
+  403/404가 발생했지만 기준 커밋 61개와 수정 후 단독 재실행 65개 모두 통과했다.
+  이 일회 실패의 정확한 원인은 확정하지 않았다.
+- 판정: 유지. 실제 개발 DB 설정의 실행·provider wire 및 진짜 차단과 새 초안
+  검증은 배포 뒤 별도 원본 자료로 확인한다. 새 지침 revision을 만들지 않는다.
+- 증거: OPOD 작업 보관함의 planner-root-cause-20261002-01,
+  planner-schema-fix-review-20261002-01, planner-schema-order-fix-20261002-01.

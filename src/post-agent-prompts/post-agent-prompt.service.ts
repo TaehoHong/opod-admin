@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { isDeepStrictEqual } from "node:util";
+import { plannerSchemaWithStatusFirst } from "../../prompts/strict-schema";
 import {
   POST_AGENT_CONTRACTS,
   POST_AGENT_STAGES,
@@ -56,6 +57,14 @@ export class PostAgentPromptService {
     const selected = await this.current(stage);
     if (!selected.id) return null;
     this.validateContent(stage, selected.systemPrompt, selected.outputSchema);
+    if (stage === "post_plan" || stage === "image_plan") {
+      return {
+        ...selected,
+        outputSchema: plannerSchemaWithStatusFirst(
+          selected.outputSchema as Record<string, unknown>,
+        ),
+      };
+    }
     return selected;
   }
   async all() {

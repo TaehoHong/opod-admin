@@ -42,6 +42,34 @@ export function isRootUnionSchema(schema: unknown): boolean {
   );
 }
 
+// 검증된 기획 union 전용: JSONB 조회 후에도 모든 분기가 status부터 출력되게 한다.
+// 저장 객체와 status 외 필드의 순서·조건은 그대로 보존한다.
+export function plannerSchemaWithStatusFirst(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  const properties = schema.properties as Record<
+    string,
+    { anyOf: Record<string, unknown>[] }
+  >;
+  const union = properties[UNION_ENVELOPE_KEY];
+  return {
+    ...schema,
+    properties: {
+      ...properties,
+      [UNION_ENVELOPE_KEY]: {
+        ...union,
+        anyOf: union.anyOf.map((variant) => {
+          const { status, ...remaining } = variant.properties as Record<
+            string,
+            unknown
+          >;
+          return { ...variant, properties: { status, ...remaining } };
+        }),
+      },
+    },
+  };
+}
+
 // 프로바이더가 거부하는 문법을 쓰고 있으면 던진다. 네트워크 호출 전에 배포된
 // 스키마의 호환성을 확인하는 용도 — 실패는 프로바이더 장애가 아니라 우리 버그다.
 export function assertStrictSchemaCompatible(
