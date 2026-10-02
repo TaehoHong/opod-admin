@@ -10,11 +10,16 @@ import {
   TextInput,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { useState } from "react";
+import {
+  Link,
+  useLocation,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useCursorList } from "../../shared/api/useCursorList";
-import { useDetailSelection } from "../../shared/routing/useDetailSelection";
 import { DataPage, LoadMore } from "../../shared/ui/DataPage";
 import { CharacterName, shortId } from "../../shared/ui/EntityName";
+import { LogRow } from "../../shared/ui/LogRow";
 import { LlmLogDetailPanel } from "./LlmLogDetailPanel";
 import { TokenUsagePanel } from "./TokenUsagePanel";
 import { fetchLlmLogs, type LlmLogStatus } from "./api";
@@ -39,6 +44,9 @@ const STATUS_COLOR: Record<LlmLogStatus, string> = {
 };
 
 export function LlmLogsPage() {
+  const { logId } = useParams();
+  const location = useLocation();
+  if (logId) return <LlmLogDetailPanel id={logId} />;
   return (
     <Tabs defaultValue="calls" keepMounted={false}>
       <Tabs.List mb="md">
@@ -46,7 +54,7 @@ export function LlmLogsPage() {
         <Tabs.Tab value="usage">토큰 사용량</Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value="calls">
-        <LlmLogList />
+        <LlmLogList key={location.search} />
       </Tabs.Panel>
       <Tabs.Panel value="usage">
         <TokenUsagePanel />
@@ -56,16 +64,18 @@ export function LlmLogsPage() {
 }
 
 function LlmLogList() {
-  const [status, setStatus] = useState("");
-  const [search, setSearch] = useState({ type: "", provider: "", model: "" });
-  const { selectedId, toggle, close } = useDetailSelection(
-    "logId",
-    "/llm-logs",
-  );
+  const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const status = params.get("status") ?? "";
+  const search = {
+    type: params.get("type") ?? "",
+    provider: params.get("provider") ?? "",
+    model: params.get("model") ?? "",
+  };
 
   const form = useForm({
     mode: "uncontrolled",
-    initialValues: { type: "", provider: "", model: "" },
+    initialValues: search,
   });
 
   const logs = useCursorList(
@@ -90,12 +100,13 @@ function LlmLogList() {
       actions={
         <form
           onSubmit={form.onSubmit((values) => {
-            setSearch({
-              type: values.type.trim(),
-              provider: values.provider.trim(),
-              model: values.model.trim(),
-            });
-            close();
+            const next = new URLSearchParams(params);
+            for (const key of ["type", "provider", "model"] as const) {
+              const value = values[key].trim();
+              if (value) next.set(key, value);
+              else next.delete(key);
+            }
+            setParams(next, { replace: true });
           })}
         >
           <Group gap="xs">
@@ -104,8 +115,10 @@ function LlmLogList() {
               data={STATUS_FILTER}
               value={status}
               onChange={(value) => {
-                setStatus(value ?? "");
-                close();
+                const next = new URLSearchParams(params);
+                if (value) next.set("status", value);
+                else next.delete("status");
+                setParams(next, { replace: true });
               }}
               allowDeselect={false}
               w={120}
@@ -151,12 +164,15 @@ function LlmLogList() {
               <Table.Th>성능</Table.Th>
               <Table.Th>비용</Table.Th>
               <Table.Th>일시</Table.Th>
-              <Table.Th />
+              <Table.Th>상세</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
             {logs.items.map((log) => (
-              <Table.Tr key={log.id}>
+              <LogRow
+                key={log.id}
+                to={`/llm-logs/${encodeURIComponent(log.id)}${location.search}`}
+              >
                 <Table.Td>
                   <Badge color={STATUS_COLOR[log.status]}>
                     {STATUS_LABEL[log.status]}
@@ -205,14 +221,15 @@ function LlmLogList() {
                 </Table.Td>
                 <Table.Td>
                   <Button
+                    component={Link}
+                    to={`/llm-logs/${encodeURIComponent(log.id)}${location.search}`}
                     variant="subtle"
                     size="compact-sm"
-                    onClick={() => toggle(log.id)}
                   >
-                    {selectedId === log.id ? "닫기" : "상세"}
+                    상세
                   </Button>
                 </Table.Td>
-              </Table.Tr>
+              </LogRow>
             ))}
           </Table.Tbody>
         </Table>
@@ -222,7 +239,6 @@ function LlmLogList() {
         isFetching={logs.isFetchingNextPage}
         onLoadMore={() => void logs.fetchNextPage()}
       />
-      {selectedId ? <LlmLogDetailPanel id={selectedId} /> : null}
     </DataPage>
   );
 }

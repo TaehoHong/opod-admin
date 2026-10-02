@@ -54,10 +54,10 @@ const detail: LlmLogDetail = {
   media: [],
 };
 
-function renderPage() {
+function renderPage(path = "/llm-logs") {
   render(
     <AppProviders>
-      <MemoryRouter initialEntries={["/llm-logs"]}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="llm-logs" element={<LlmLogsPage />} />
           <Route path="llm-logs/:logId" element={<LlmLogsPage />} />
@@ -89,16 +89,55 @@ describe("LLM log observability", () => {
     ).toBeInTheDocument();
     expect(within(row!).getByText("0.0012")).toBeInTheDocument();
 
-    await userEvent.click(within(row!).getByRole("button", { name: "상세" }));
+    await userEvent.click(row!);
 
     expect(await screen.findByText("요청 모델")).toBeInTheDocument();
     expect(screen.getAllByText("requested-model").length).toBeGreaterThan(0);
     expect(screen.getByText("응답 모델")).toBeInTheDocument();
-    expect(screen.getAllByText("response-model").length).toBeGreaterThan(1);
+    expect(screen.getAllByText("response-model").length).toBeGreaterThan(0);
     expect(screen.getByText("캐시 (읽기/쓰기)")).toBeInTheDocument();
     expect(screen.getByText("25 / 5")).toBeInTheDocument();
     expect(screen.getByText("생성 속도")).toBeInTheDocument();
     expect(screen.getByText("20.0 tok/s")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "usage" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "목록으로" })).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("loads a direct detail URL without relying on the list and preserves filters on return", async () => {
+    server.use(
+      http.get("/api/admin/v1/llm-logs", () =>
+        HttpResponse.json({ items: [] }),
+      ),
+      http.get("/api/admin/v1/llm-logs/:id", () => HttpResponse.json(detail)),
+    );
+    renderPage("/llm-logs/101?status=failed&model=test-model");
+    expect(await screen.findByText("요청 모델")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "목록으로" })).toHaveAttribute(
+      "href",
+      "/llm-logs?status=failed&model=test-model",
+    );
+    await userEvent.click(screen.getByRole("link", { name: "목록으로" }));
+    expect(
+      await screen.findByText("조건에 맞는 호출이 없습니다."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "model" })).toHaveValue(
+      "test-model",
+    );
+  });
+
+  it("keeps a back path when a detail no longer exists", async () => {
+    server.use(
+      http.get("/api/admin/v1/llm-logs/:id", () =>
+        HttpResponse.json({ message: "LLM log not found" }, { status: 404 }),
+      ),
+    );
+    renderPage("/llm-logs/999");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "LLM log not found",
+    );
+    expect(screen.getByRole("link", { name: "목록으로" })).toHaveAttribute(
+      "href",
+      "/llm-logs",
+    );
   });
 });

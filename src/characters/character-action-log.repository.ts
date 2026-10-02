@@ -24,6 +24,16 @@ export class CharacterActionLogRepository {
       .values(input);
   }
 
+  async findById(id: bigint) {
+    const [log] = await this.transactions
+      .currentOr(this.database.client)
+      .select()
+      .from(characterActionLogs)
+      .where(eq(characterActionLogs.id, id))
+      .limit(1);
+    return log;
+  }
+
   async list(input: { characterId?: string; cursor?: bigint; limit: number }) {
     const client = this.transactions.currentOr(this.database.client);
     const [cursor] =

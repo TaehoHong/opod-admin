@@ -829,6 +829,10 @@ export class AdminService {
     return job;
   }
 
+  getCharacterActionLog(id: string) {
+    return this.actionLogs.get(id);
+  }
+
   // 워커 자동화로 로그량이 커지므로 커서 페이지네이션 + 캐릭터 필터를 지원한다.
   async listCharacterActionLogs(
     input: { characterId?: string } & Partial<PageInput> = {},

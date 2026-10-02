@@ -343,6 +343,11 @@ export class AdminController {
     });
   }
 
+  @Get("character-action-logs/:id")
+  getCharacterActionLog(@Param("id") id: string) {
+    return this.adminService.getCharacterActionLog(id);
+  }
+
   @Get("analytics/hashtags")
   listTopHashtags(@Query("limit") limit?: string) {
     return this.adminService.listTopHashtags({

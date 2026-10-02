@@ -571,3 +571,18 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
 - `post-plan-v4` / `post-planner-v7`은 `productionContext.mediaType`을 conflict의 검증 가능한 입력 출처로 허용한다. `parsePostPlan`은 실제 값과 일치하지 않는 인용을 계속 거부한다. 이전 artifact의 기존 출처는 읽을 수 있다.
 - 시스템 지침은 DB `PostAgentPromptService`가 소유한다. 지침/출력 schema는 원본 버전을 보존한 revision CAS로 교체하고 모델 설정은 유지한다. 역할·사진/캡션 범위·선택 장소·참조 목적·완료 판정은 지침에서 설명하며 parser의 단어 목록으로 의미 판단을 대체하지 않는다.
 - 회귀 검증은 `post-planner.spec.ts`(매체 출처/허구 인용), `post-pipeline-v3.runner.spec.ts`(feed/reel의 실제 입력 및 artifact), `post-generation-agents.e2e-spec.ts`(저장 계약/CAS), `planning-evidence.e2e-spec.ts`(잘못된 응답 원본 보존/재시도 제외)가 담당한다. 원본 실패 사례의 provider 대조는 기존 초안을 수정하지 않는 별도 평가로 수행한다.
+
+## Log detail screens
+
+LLM 로그와 액션 로그의 목록은 `shared/ui/LogRow.tsx`로 행 클릭을 연결하고
+상세 링크로 키보드·새 탭 접근을 제공한다. `app/routes.tsx`의
+`/llm-logs/:logId`, `/logs/:logId`에서 목록과 독립적으로 단건을 조회한다.
+필터는 query string으로 유지하며 상세의 목록 링크도 이를 보존한다.
+`features/llm-logs/LlmLogDetailPanel.tsx`는 상태·시각·오류, 프롬프트·응답·미디어,
+사용량·성능·비용, 접힌 연결 정보·원본 데이터 순서를 소유한다.
+`features/logs/ActionLogDetailPage.tsx`는 액션·캐릭터·시각, 사유 전문, 접힌
+대상·식별 정보 순서를 소유한다. Mantine theme/DataPage를 재사용하며
+`shared/ui/LogField.tsx`와 `LogDetails.module.css`가 KST 시각·긴 텍스트 표시를 담당한다.
+액션 상세 API는 `CharacterActionLogService.get`과 그 Repository만 DB에 접근한다.
+계약은 [액션 로그 API](api/admin-action-logs.md), 회귀는 두 목록의 UI 테스트와
+`test/log-details.e2e-spec.ts`에서 확인한다.

@@ -1,0 +1,25 @@
+.row {
+  cursor: pointer;
+}
+
+.text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.payload {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.field {
+  min-width: 0;
+  margin: 0;
+}
+
+.field dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

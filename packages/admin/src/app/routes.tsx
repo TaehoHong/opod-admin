@@ -144,6 +144,7 @@ const DETAIL_ROUTES: { id: string; paths: string[] }[] = [
   { id: "media", paths: [":mediaId"] },
   { id: "generation", paths: [":jobId"] },
   { id: "llm-logs", paths: [":logId"] },
+  { id: "logs", paths: [":logId"] },
   { id: "post-generation-agents", paths: [":stage"] },
   { id: "users", paths: [":userId"] },
   { id: "payments", paths: [":paymentId"] },

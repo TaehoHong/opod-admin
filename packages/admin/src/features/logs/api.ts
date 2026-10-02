@@ -17,3 +17,9 @@ export function fetchCharacterActionLogs(params: {
 }): Promise<CursorPage<CharacterActionLog>> {
   return apiRequest(`/character-action-logs${toQuery(params)}`);
 }
+
+export function fetchCharacterActionLog(
+  id: string,
+): Promise<CharacterActionLog> {
+  return apiRequest(`/character-action-logs/${encodeURIComponent(id)}`);
+}
