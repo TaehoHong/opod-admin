@@ -113,10 +113,10 @@ function LogContent({
                 ? "진행 중"
                 : "성공"}
           </Badge>
-          <Title order={2} ref={heading} tabIndex={-1}>
+          <Title order={2} ref={heading} tabIndex={-1} className={classes.text}>
             {detail.type}
           </Title>
-          <Text size="sm" c="dimmed">
+          <Text size="sm" c="dimmed" className={classes.text}>
             {detail.provider} · {detail.displayModel}
           </Text>
         </Group>
@@ -213,7 +213,7 @@ function LogContent({
         </SimpleGrid>
 
         {detail.redactedPaths.length > 0 ? (
-          <Text size="xs" c="dimmed">
+          <Text size="xs" c="dimmed" className={classes.text}>
             민감정보로 가려진 경로: {detail.redactedPaths.join(", ")}
           </Text>
         ) : null}
@@ -233,6 +233,7 @@ function LogContent({
                 <Field label="캐릭터">
                   {detail.characterId ? (
                     <Anchor
+                      c="ink.7"
                       component={Link}
                       to={`/characters/${encodeURIComponent(detail.characterId)}`}
                     >
@@ -246,6 +247,7 @@ function LogContent({
                 <Field label="사용자">
                   {detail.userId ? (
                     <Anchor
+                      c="ink.7"
                       component={Link}
                       to={`/users/${encodeURIComponent(detail.userId)}`}
                     >
@@ -259,6 +261,7 @@ function LogContent({
                 <Field label="생성 작업">
                   {detail.generationJobId ? (
                     <Anchor
+                      c="ink.7"
                       component={Link}
                       to={`/generation/${encodeURIComponent(detail.generationJobId)}`}
                     >

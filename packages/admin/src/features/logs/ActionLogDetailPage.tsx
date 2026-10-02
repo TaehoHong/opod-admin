@@ -70,6 +70,7 @@ export function ActionLogDetailPage({ id }: { id: string }) {
               <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
                 <LogField label="캐릭터">
                   <Anchor
+                    c="ink.7"
                     component={Link}
                     to={`/characters/${encodeURIComponent(detail.characterId)}`}
                   >
