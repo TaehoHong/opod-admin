@@ -84,3 +84,18 @@ Sunburst 표시와 저장 시 기존 키 유지를 확인한다. 실제 캐릭�
 `docker compose up -d --no-build --no-deps admin`을 실행한다.
 이미지 공급자를 되돌리기 전에 구버전 이미지만 재시작하면 `openai`를 인식하지
 못하므로 이 순서를 지킨다. DDL은 없다.
+
+## HTTP 오류 진단 기록 — 2026-10-08
+
+HTTP 오류에서 응답을 읽기 전에 예외를 던지던 흐름을 수정했다. 기존
+`LlmLogService.fail`이 Response를 받아 JSON 또는 텍스트 본문, HTTP 상태와
+공급자의 실제 요청 ID를 `llm_logs`에 남긴다. 오류 코드·type·param·message는
+관리 화면의 응답 원본에서 확인한다. 자격 증명 필드·Bearer/Key 토큰과 서명 URL은
+기존 공통 마스킹 owner를 통해 제거하며 마스킹 경로도 보존한다.
+
+이미지 작업은 기존처럼 영구 실패하며 자동 재호출하지 않는다. 성공 응답의 이미지
+바이너리 생략도 유지한다. 기존 실패 응답을 복구하거나 HTTP 400의 원인을 추정하는
+변경은 아니다. 회귀는 `openai-image.provider.spec.ts`에서 실제 provider와
+LlmLogService, 저장 경계 대역을 연결해 JSON 400·텍스트/빈 502와 마스킹·단일 호출을
+검증한다. 외부 OpenAI 호출을 대역으로 대체한 검증이며 실제 실패 이유는 새 호출에서
+확인해야 한다.

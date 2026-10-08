@@ -607,3 +607,11 @@ LLM 로그와 액션 로그의 목록은 `shared/ui/LogRow.tsx`로 행 클릭을
 생성 사건을 자동 Canon에 넣지 않는다. 관련 회귀는 runner/worker/drafts spec과
 `test/natural-post-agent.e2e-spec.ts`, `PostBriefCreatePage.test.tsx`, `NaturalAgentPanel.test.tsx`다.
 운영 설정·단계별 입력/판단/산출물·제한은 [새 Agent 문서](natural-post-agent.md)에 있다.
+
+## OpenAI 이미지 HTTP 오류 기록
+
+`openai-image.provider.ts`는 실패 Response를 `LlmLogService.fail`에 전달한다.
+이 Service가 기존 응답 파서와 마스킹 owner를 사용해 응답 본문·HTTP 상태·실제
+공급자 요청 ID를 보존한다. 원문은 기존 LLM 로그 상세의 응답 원본에서 확인한다.
+`openai-image.provider.spec.ts`가 JSON·텍스트·빈 오류와 비밀값 마스킹, 자동 재호출
+없음을 검증한다. 기록 없이 버려진 과거 응답은 복구되지 않는다.

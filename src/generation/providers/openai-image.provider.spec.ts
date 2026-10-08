@@ -1,5 +1,10 @@
 import { createOpenAiImageProvider } from "./openai-image.provider";
 import { ImageGenerationRequest } from "./image-generation.provider";
+import { LlmLogService } from "../../llm-logs/llm-log.service";
+import {
+  LlmLogRepository,
+  type LlmLogFinishInput,
+} from "../../llm-logs/llm-log.repository";
 
 const request: ImageGenerationRequest = {
   idempotencyKey: "job-attempt-1",
@@ -84,6 +89,95 @@ describe("OpenAI image provider", () => {
       const result = await finish(provider, submitted.requestId);
       expect(result).toMatchObject({ status: "failed", permanent: true });
       expect(JSON.stringify(result)).not.toContain("secret private data");
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("records the HTTP 400 diagnostic and upstream request id with secrets redacted", async () => {
+    const saved: LlmLogFinishInput[] = [];
+    const logs = new LlmLogService({
+      create: async () => 1n,
+      finish: async (_id: bigint, value: LlmLogFinishInput) => {
+        saved.push(value);
+      },
+    } as unknown as LlmLogRepository);
+    const fetchFn = jest.fn().mockResolvedValue(
+      Response.json(
+        {
+          error: {
+            code: "invalid_image_url",
+            type: "invalid_request_error",
+            param: "images[0].image_url",
+            message: "Cannot fetch image. Bearer sk-test-private",
+            api_key: "private-key",
+            url: "https://media.example/ref.png?X-Amz-Signature=private-signature",
+          },
+        },
+        { status: 400, headers: { "x-request-id": "req-image-400" } },
+      ),
+    );
+    const provider = createOpenAiImageProvider(config, fetchFn, logs);
+    const submitted = await provider.submit(request);
+
+    expect(await finish(provider, submitted.requestId)).toMatchObject({
+      status: "failed",
+      permanent: true,
+      errorMessage:
+        "OpenAI image API failed (HTTP 400); automatic resubmission disabled",
+    });
+    expect(saved).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        httpStatus: 400,
+        providerRequestId: "req-image-400",
+        responseJson: {
+          error: {
+            code: "invalid_image_url",
+            type: "invalid_request_error",
+            param: "images[0].image_url",
+            message: "Cannot fetch image. Bearer [REDACTED]",
+            api_key: "[REDACTED]",
+            url: "https://media.example/ref.png",
+          },
+        },
+      }),
+    ]);
+    expect(JSON.stringify(saved)).not.toMatch(
+      /sk-test-private|private-key|private-signature/,
+    );
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+  it.each(["upstream timeout", ""])(
+    "records a non-JSON HTTP failure without replacing it with a parsing failure: %j",
+    async (body) => {
+      const saved: LlmLogFinishInput[] = [];
+      const logs = new LlmLogService({
+        create: async () => 1n,
+        finish: async (_id: bigint, value: LlmLogFinishInput) => {
+          saved.push(value);
+        },
+      } as unknown as LlmLogRepository);
+      const fetchFn = jest.fn().mockResolvedValue(
+        new Response(body, {
+          status: 502,
+          headers: { "x-request-id": "req-image-502" },
+        }),
+      );
+      const provider = createOpenAiImageProvider(config, fetchFn, logs);
+      const submitted = await provider.submit(request);
+
+      expect(await finish(provider, submitted.requestId)).toMatchObject({
+        status: "failed",
+        errorMessage:
+          "OpenAI image API failed (HTTP 502); automatic resubmission disabled",
+      });
+      expect(saved).toEqual([
+        expect.objectContaining({
+          status: "failed",
+          httpStatus: 502,
+          providerRequestId: "req-image-502",
+          responseJson: body || null,
+        }),
+      ]);
       expect(fetchFn).toHaveBeenCalledTimes(1);
     },
   );

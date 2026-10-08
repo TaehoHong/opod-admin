@@ -322,15 +322,16 @@ export class LlmLogService {
     handle: LlmLogHandle,
     error: unknown,
     result: {
+      response?: Response;
       responseJson?: unknown;
       providerRequestId?: string;
       httpStatus?: number;
     } = {},
   ): Promise<void> {
-    const response = redactLlmPayload(
-      result.responseJson ?? null,
-      "$.response",
-    );
+    const responseJson = result.response
+      ? await responsePayload(result.response.clone())
+      : (result.responseJson ?? null);
+    const response = redactLlmPayload(responseJson, "$.response");
     const failure = errorFields(error);
     try {
       await this.logs.finish(handle.id, {
@@ -342,8 +343,13 @@ export class LlmLogService {
           failure.isRedacted ? ["$.errorMessage"] : [],
         ),
         providerRequestId:
-          result.providerRequestId ?? failure.providerRequestId,
-        httpStatus: result.httpStatus ?? failure.httpStatus,
+          result.providerRequestId ??
+          (result.response
+            ? providerRequestId(result.response, responseJson)
+            : undefined) ??
+          failure.providerRequestId,
+        httpStatus:
+          result.httpStatus ?? result.response?.status ?? failure.httpStatus,
         errorType: failure.errorType,
         errorMessage: failure.errorMessage,
         durationMs: Math.max(0, Date.now() - handle.startedAt),
@@ -388,7 +394,10 @@ export function redactLlmPayload(
         redactedPaths.push(path);
         return "[REDACTED]";
       }
-      return redactUrl(value, path, redactedPaths);
+      const urlRedacted = redactUrl(value, path, redactedPaths);
+      const textRedacted = redactErrorMessage(urlRedacted);
+      if (textRedacted !== urlRedacted) redactedPaths.push(path);
+      return textRedacted;
     }
     if (Array.isArray(value)) {
       return value.map((item, index) => visit(item, `${path}[${index}]`));

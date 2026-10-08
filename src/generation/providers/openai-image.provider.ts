@@ -120,6 +120,7 @@ export function createOpenAiImageProvider(
             requestJson: state.body,
             context,
           });
+          let failureResponse: Response | undefined;
           try {
             const response = await fetchFn(endpoint, {
               method: "POST",
@@ -133,10 +134,12 @@ export function createOpenAiImageProvider(
                 AbortSignal.timeout(600_000),
               ]),
             });
-            if (!response.ok)
+            if (!response.ok) {
+              failureResponse = response;
               throw new Error(
                 `OpenAI image API failed (HTTP ${response.status}); automatic resubmission disabled`,
               );
+            }
             const json: unknown = await response.json();
             if (
               !isRecord(json) ||
@@ -171,7 +174,13 @@ export function createOpenAiImageProvider(
             };
           } catch (error) {
             if (handle)
-              await logs?.fail(handle, error, { providerRequestId: requestId });
+              await logs?.fail(
+                handle,
+                error,
+                failureResponse
+                  ? { response: failureResponse }
+                  : { providerRequestId: requestId },
+              );
             throw error;
           }
         })().catch((error) => {
