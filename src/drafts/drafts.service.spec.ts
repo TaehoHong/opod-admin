@@ -1,3 +1,4 @@
+import { naturalAgentBundle } from "../../test/natural-agent-fixture";
 import { DraftsRepository } from "./drafts.repository";
 import { DraftsService } from "./drafts.service";
 
@@ -830,5 +831,110 @@ describe("DraftsService", () => {
       "mono-film",
     );
     expect(repository.markManual).toHaveBeenCalledWith("draft-1");
+  });
+});
+
+describe("natural post creation", () => {
+  it("snapshots the selected natural agent and starts auto even when the legacy pipeline toggle is off", async () => {
+    const bundle = naturalAgentBundle();
+    const repository = repositoryFake({
+      createDraft: jest
+        .fn()
+        .mockImplementation(async (input) => ({ ...draftRow, ...input })),
+    });
+    const service = new DraftsService(repository, {
+      resolvePipelineV3: async () => ({ enabled: false }),
+      requireNaturalAgentBundle: async () => bundle,
+    } as never);
+    const result = await service.createDraft({
+      characterId: "ai-1",
+      postGenerationAgent: "natural-v1",
+      sceneHint: " 코트를 벗는 순간 ",
+    });
+    expect(result.conceptJson).toMatchObject({
+      postGenerationAgent: "natural-v1",
+      mode: "auto",
+      operatorRequest: "코트를 벗는 순간",
+      naturalAgentConfig: bundle,
+      pipelineVersion: "post-pipeline-v4",
+    });
+  });
+  it("does not create a job with an invalid selector or missing saved configuration", async () => {
+    const repository = repositoryFake();
+    const service = new DraftsService(repository, {
+      requireNaturalAgentBundle: async () => {
+        throw new Error("configuration missing");
+      },
+    } as never);
+    await expect(
+      service.createDraft({
+        characterId: "ai-1",
+        postGenerationAgent: "unknown",
+      } as never),
+    ).rejects.toThrow("Invalid post generation agent");
+    await expect(
+      service.createDraft({
+        characterId: "ai-1",
+        postGenerationAgent: "natural-v1",
+      }),
+    ).rejects.toThrow("configuration missing");
+    expect(repository.createDraft).not.toHaveBeenCalled();
+  });
+  it("keeps explicit existing selection in manual mode", async () => {
+    const repository = repositoryFake({
+      createDraft: jest
+        .fn()
+        .mockImplementation(async (input) => ({ ...draftRow, ...input })),
+    });
+    const result = await makeService(repository, true).createDraft({
+      characterId: "ai-1",
+      postGenerationAgent: "existing",
+    });
+    expect(result.conceptJson).toMatchObject({
+      mode: "manual",
+      pipelineVersion: "post-pipeline-v4",
+    });
+    expect(result.conceptJson).not.toHaveProperty("naturalAgentConfig");
+  });
+});
+
+it("records explicit operator selection for new-agent canon without auto-selecting other candidates", async () => {
+  const conceptJson = {
+    pipelineVersion: "post-pipeline-v4",
+    postGenerationAgent: "natural-v1",
+    mode: "manual",
+    postPlanning: { hash: "post-plan" },
+    memoryCandidates: [
+      {
+        key: "first",
+        type: "event",
+        content: "Approved authored event",
+        selected: false,
+        sourcePostPlanHash: "post-plan",
+      },
+      {
+        key: "second",
+        type: "event",
+        content: "Unapproved event",
+        selected: false,
+        sourcePostPlanHash: "post-plan",
+      },
+    ],
+  };
+  const repository = repositoryFake({
+    findDraftConcept: jest.fn().mockResolvedValue({ conceptJson }),
+    findDraft: jest.fn().mockResolvedValue({ ...draftRow, conceptJson }),
+  });
+  await makeService(repository).updateMemoryCandidates({
+    draftId: "draft-1",
+    selectedKeys: ["first"],
+  });
+  expect(repository.updateEditableDraft.mock.calls[0][2]).toMatchObject({
+    conceptJson: {
+      memoryCandidates: [
+        { key: "first", selected: true, selectedByOperator: true },
+        { key: "second", selected: false, selectedByOperator: false },
+      ],
+    },
   });
 });

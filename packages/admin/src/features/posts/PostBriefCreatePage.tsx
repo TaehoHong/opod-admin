@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { fetchNaturalAgent } from "../post-generation-agents/api";
 import {
   Alert,
   Button,
@@ -8,7 +10,7 @@ import {
   Textarea,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CharacterSelect } from "../../shared/ui/CharacterSelect";
 import { DataPage } from "../../shared/ui/DataPage";
@@ -20,6 +22,11 @@ import { createDraft } from "../drafts/api";
 
 export function PostBriefCreatePage() {
   const navigate = useNavigate();
+  const [agent, setAgent] = useState("existing");
+  const natural = useQuery({
+    queryKey: ["natural-post-agent"],
+    queryFn: fetchNaturalAgent,
+  });
   const queryClient = useQueryClient();
   const [params] = useSearchParams();
   const form = useForm({
@@ -27,9 +34,11 @@ export function PostBriefCreatePage() {
     initialValues: {
       characterId: params.get("characterId") ?? "",
       contentType: "feed",
+      postGenerationAgent: "existing",
       sceneHint: "",
       scheduledAt: "",
     },
+    onValuesChange: (values) => setAgent(values.postGenerationAgent),
     validate: {
       characterId: (value) => (value ? null : "캐릭터를 선택해 주세요"),
       sceneHint: (value) =>
@@ -43,6 +52,8 @@ export function PostBriefCreatePage() {
       createDraft({
         characterId: values.characterId,
         contentType: values.contentType as "feed" | "reel",
+        postGenerationAgent: values.postGenerationAgent as
+          "existing" | "natural-v1",
         ...(values.sceneHint.trim()
           ? { sceneHint: values.sceneHint.trim() }
           : {}),
@@ -76,6 +87,35 @@ export function PostBriefCreatePage() {
             key={form.key("contentType")}
             {...form.getInputProps("contentType")}
           />
+          <Select
+            label="게시물 생성 Agent"
+            description={
+              natural.isPending
+                ? "새 Agent 설정을 확인하는 중입니다."
+                : natural.data?.current
+                  ? "새 Agent는 사진 검수 후 자동 게시합니다."
+                  : "새 Agent를 사용하려면 Agent 관리에서 설정을 먼저 저장하세요."
+            }
+            data={[
+              { value: "existing", label: "기존 Agent · 단계별 수동 진행" },
+              {
+                value: "natural-v1",
+                label: "새 Agent · 자연스러운 사진 자동 제작",
+                disabled: !natural.data?.current,
+              },
+            ]}
+            allowDeselect={false}
+            key={form.key("postGenerationAgent")}
+            {...form.getInputProps("postGenerationAgent")}
+          />
+          {natural.error ? (
+            <OperationErrorAlert
+              failure={operationFailure(
+                natural.error,
+                "새 Agent 설정을 확인하지 못했습니다.",
+              )}
+            />
+          ) : null}
           <Textarea
             label="장면·주제 요청"
             description="선택 · Agent가 기획할 때 참고합니다."
@@ -87,14 +127,20 @@ export function PostBriefCreatePage() {
           />
           <TextInput
             label="게시 일정"
-            description="비우면 승인 후 즉시 게시합니다."
+            description={
+              agent === "natural-v1"
+                ? "비우면 사진 검수·캡션 완료 후 자동 게시합니다."
+                : "비우면 승인 후 즉시 게시합니다."
+            }
             type="datetime-local"
             w={280}
             key={form.key("scheduledAt")}
             {...form.getInputProps("scheduledAt")}
           />
           <Alert color="blue">
-            게시물 만들기에서 시작한 작업은 단계마다 직접 확인하고 실행합니다.
+            {agent === "natural-v1"
+              ? "기획부터 사진 검수·캡션·게시까지 자동 진행합니다. 검수 불합격은 보류하며, 자동 워커가 켜져 있어야 실행됩니다."
+              : "기존 Agent 작업은 단계마다 직접 확인하고 실행합니다."}
           </Alert>
           {create.isError ? (
             <OperationErrorAlert
@@ -106,7 +152,7 @@ export function PostBriefCreatePage() {
           ) : null}
           <Group>
             <Button type="submit" loading={create.isPending}>
-              저장하고 기획으로
+              {agent === "natural-v1" ? "자동 제작 시작" : "저장하고 기획으로"}
             </Button>
             <Button
               variant="default"

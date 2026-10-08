@@ -145,6 +145,7 @@ export class ImagePlanningAgent {
   async plan(
     input: ImagePlannerInput,
     context?: LlmLogContext,
+    userContent?: unknown,
   ): Promise<{ output: ImagePlan; producerLogId: string | null }> {
     const settings = requireAgentPromptSettings(this.client.agentSettings);
     let result: { value: unknown; producerLogId: string | null } | undefined;
@@ -155,6 +156,7 @@ export class ImagePlanningAgent {
         schema: settings.outputSchema,
         systemPrompt: settings.systemPrompt,
         input,
+        ...(userContent ? { userContent } : {}),
         context,
       });
       return {

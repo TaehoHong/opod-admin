@@ -218,6 +218,7 @@ function storageEnv(config: S3Config | undefined) {
           undefined,
           async () => (await settings.resolvePipelineV3()).enabled,
           (draftId, options) => v3.runCurrentStage(draftId, options),
+          () => settings.scheduledAgentConcept(),
         ),
       inject: [
         DraftWorkerRepository,

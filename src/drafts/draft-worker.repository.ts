@@ -1,3 +1,4 @@
+import type { JsonValue } from "../shared/utils/json";
 import { Injectable } from "@nestjs/common";
 import {
   and,
@@ -146,6 +147,7 @@ export type CaptionShot = {
   media: { url: string; storageKey: string | null; contentType: string | null };
 };
 export type PublishJob = {
+  id: string;
   sortOrder: number;
   status: string;
   outputMediaId: string | null;
@@ -1212,6 +1214,7 @@ export class DraftWorkerRepository {
     characterId: string,
     scheduledAt: Date,
     pipelineV3Enabled = false,
+    conceptOverride?: JsonValue,
   ): Promise<boolean> {
     return this.database.client.transaction(async (tx) => {
       await tx.execute(
@@ -1236,9 +1239,11 @@ export class DraftWorkerRepository {
       if (pending.length > 0) return false;
       await tx.insert(postDrafts).values({
         characterId,
-        conceptJson: pipelineV3Enabled
-          ? createPostPipelineV3Concept({ source: "scheduler", mode: "auto" })
-          : { source: "scheduler" },
+        conceptJson:
+          conceptOverride ??
+          (pipelineV3Enabled
+            ? createPostPipelineV3Concept({ source: "scheduler", mode: "auto" })
+            : { source: "scheduler" }),
         scheduledAt,
       });
       return true;

@@ -1,3 +1,4 @@
+import { setNaturalAutomation } from "../drafts/api";
 import {
   Accordion,
   Alert,
@@ -235,6 +236,11 @@ function PostWorkHeader({
             </Badge>
             {/* 어느 세대의 파이프라인을 보고 있는지가 화면 어디에도 없어서
                 "이미지 기획 단계가 없다"는 오해가 났다. */}
+            {draft?.conceptJson?.postGenerationAgent === "natural-v1" ? (
+              <Badge variant="outline" color="teal">
+                새 Agent · 자연스러운 사진
+              </Badge>
+            ) : null}
             {item.kind === "draft" ? (
               <Badge variant="outline" color={item.pipelineV3 ? "teal" : "ink"}>
                 {pipelineLabel(item.pipelineV3)}
@@ -1042,6 +1048,23 @@ function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
         <CharacterName id={draft.characterId} />
       </Meta>
       <Meta label="콘텐츠 형식">{draft.contentType}</Meta>
+      <Meta label="생성 Agent">
+        {concept.postGenerationAgent === "natural-v1"
+          ? "새 Agent · 자연스러운 사진 자동 제작"
+          : "기존 Agent"}
+      </Meta>
+      {concept.postGenerationAgent === "natural-v1" ? (
+        <details>
+          <summary>사진 검수 기록</summary>
+          <pre>
+            {JSON.stringify(
+              concept.photoReview ?? "아직 검수하지 않았습니다.",
+              null,
+              2,
+            )}
+          </pre>
+        </details>
+      ) : null}
       {/* V3는 operatorRequest, V2는 sceneHint에 저장한다. */}
       {v3 ? (
         <OperatorRequestForm draft={draft} />
@@ -1051,6 +1074,9 @@ function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
       <Meta label="게시 일정">
         {draft.scheduledAt ? formatDateTime(draft.scheduledAt) : "승인 후 즉시"}
       </Meta>
+      {concept.postGenerationAgent === "natural-v1" ? (
+        <NaturalAutomationControl draft={draft} />
+      ) : null}
       <Meta label="진행 정책">
         {concept.mode === "manual"
           ? "단계별 수동 진행"
@@ -1062,6 +1088,50 @@ function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
         </Button>
       </Group>
     </StagePaper>
+  );
+}
+
+function NaturalAutomationControl({ draft }: { draft: Draft }) {
+  const update = useDraftMutation(draft.id, (enabled: boolean) =>
+    setNaturalAutomation(draft.id, enabled),
+  );
+  const automatic = draft.conceptJson?.mode !== "manual";
+  const blockedResume =
+    !automatic &&
+    (draft.status === "failed" ||
+      !["pending", "ready"].includes(draft.conceptJson?.pipeline?.state ?? ""));
+  return (
+    <Stack gap="xs">
+      <Text size="sm">
+        보류하면 다음 자동 단계와 게시가 멈춥니다. 이미 시작한 사진 생성은
+        완료됩니다.
+      </Text>
+      <Button
+        variant="default"
+        disabled={
+          blockedResume ||
+          !["planned", "generating", "failed"].includes(draft.status)
+        }
+        loading={update.isPending}
+        onClick={() => update.mutate(!automatic)}
+      >
+        {automatic ? "자동 진행 보류" : "자동 진행 재개"}
+      </Button>
+      {blockedResume ? (
+        <Text size="sm">
+          입력·사진 검수를 보완하고 현재 단계를 다시 실행한 뒤 자동 진행을
+          재개하세요.
+        </Text>
+      ) : null}
+      {update.error ? (
+        <OperationErrorAlert
+          failure={operationFailure(
+            update.error,
+            "자동 진행 정책을 변경하지 못했습니다.",
+          )}
+        />
+      ) : null}
+    </Stack>
   );
 }
 
@@ -2127,6 +2197,31 @@ function V3CaptionStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
       description="캡션 Agent가 생성된 이미지를 보고 캡션과 해시태그를 씁니다. 게시되는 것은 아래 게시 캡션입니다."
       status={<StageStateBadge state={stageState} />}
     >
+      {draft.conceptJson?.postGenerationAgent === "natural-v1" ? (
+        <Stack gap="xs">
+          <Text fw={600}>사진 검수·캡션</Text>
+          <Text size="sm">
+            생성 사진만으로 자연스러움을 먼저 검수한 뒤 정체성·요구사항을
+            확인합니다. 불합격 사진은 캡션과 게시를 보류합니다.
+          </Text>
+          {pipeline?.failure ? (
+            <Alert color="red" title={pipeline.failure.problem}>
+              {pipeline.failure.cause}
+            </Alert>
+          ) : null}
+          <details>
+            <summary>사진 검수 기록</summary>
+            <pre>
+              {JSON.stringify(
+                draft.conceptJson.photoReview ?? "아직 검수하지 않았습니다.",
+                null,
+                2,
+              )}
+            </pre>
+          </details>
+          <NaturalAutomationControl draft={draft} />
+        </Stack>
+      ) : null}
       <AgentInputSnapshot input={artifact?.agentInput} />
       {stageState === "running" ? (
         <Group gap="xs" role="status">
@@ -2343,6 +2438,12 @@ function MemoryStage({ item, draft }: { item: PostWorkItem; draft?: Draft }) {
           }
         : {})}
     >
+      {draft?.conceptJson?.postGenerationAgent === "natural-v1" ? (
+        <Alert color="blue">
+          새 Agent는 기억을 자동 저장하지 않습니다. 수동 진행에서 명시적으로
+          선택하고 수동 게시할 때만 저장합니다.
+        </Alert>
+      ) : null}
       {candidates ? (
         draft &&
         item.executionMode === "manual" &&

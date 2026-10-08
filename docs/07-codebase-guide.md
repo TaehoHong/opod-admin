@@ -591,3 +591,19 @@ LLM 로그와 액션 로그의 목록은 `shared/ui/LogRow.tsx`로 행 클릭을
 액션 상세 API는 `CharacterActionLogService.get`과 그 Repository만 DB에 접근한다.
 계약은 [액션 로그 API](api/admin-action-logs.md), 회귀는 두 목록의 UI 테스트와
 `test/log-details.e2e-spec.ts`에서 확인한다.
+
+
+## 선택 가능한 자연스러운 사진 Agent
+
+`postGenerationAgent` 선택은 엔진 버전과 독립이며 `DraftsService.createDraft`와
+`PostBriefCreatePage.tsx`가 기존/새 선택을 연결한다. 새 Agent는 자동 진행하고,
+`GenerationSettingsService`만 `postAgent.natural-v1`의 번들 저장·조회/CAS를 소유한다.
+`PostGenerationAgentsController`와 `NaturalAgentPanel.tsx`가 명시적 지침 설치·독립 편집을 제공한다.
+번들 출력 계약·설치용 초안은 `prompts/natural-post-agent.ts`, runtime 검증은
+`src/post-production/natural-post-agent.ts`, 픽셀 전송·검수 parser 경계는
+`natural-photo-review.ts`다. `PostPipelineV3Runner`는 새 이미지 기획에 실제 참조 픽셀을
+전달하고 캡션 이전에 사진만 보는 자연스러움 검수 후 정체성·요구사항 검수를 실행한다.
+`DraftWorkerService`는 최신 검수·캡션의 집합 hash와 입력 버전이 맞아야 게시하며
+생성 사건을 자동 Canon에 넣지 않는다. 관련 회귀는 runner/worker/drafts spec과
+`test/natural-post-agent.e2e-spec.ts`, `PostBriefCreatePage.test.tsx`, `NaturalAgentPanel.test.tsx`다.
+운영 설정·단계별 입력/판단/산출물·제한은 [새 Agent 문서](natural-post-agent.md)에 있다.

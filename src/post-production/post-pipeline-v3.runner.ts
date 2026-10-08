@@ -1,3 +1,14 @@
+import {
+  isNaturalAgent,
+  validateNaturalBundle,
+  NaturalStage,
+} from "./natural-post-agent";
+import {
+  photoContent,
+  reviewPhotos,
+  LabeledPhoto,
+} from "./natural-photo-review";
+import { plannerSchemaWithStatusFirst } from "../../prompts/strict-schema";
 import { MemoryRetrievalService } from "./memory-retrieval.service";
 import { ReferenceRetrievalService } from "./reference-retrieval.service";
 import { resolveImageGenerationParams } from "../generation/image-generation-params";
@@ -139,13 +150,32 @@ export class PostPipelineV3Runner {
         ]);
         return;
       }
+      const natural = isNaturalAgent(concept)
+        ? validateNaturalBundle(concept.naturalAgentConfig)
+        : null;
       const savedAgent =
-        this.agentPrompts &&
+        natural &&
         ["post_plan", "image_plan", "image_prompt", "caption"].includes(
           String(stage),
         )
-          ? await this.agentPrompts.execution(postAgentStage(String(stage)))
-          : null;
+          ? {
+              id: `natural-v1:${natural.revision}`,
+              revision: natural.revision,
+              aiModelId: natural.planningModel.aiModelId,
+              provider: natural.planningModel.provider,
+              effectiveModel: natural.planningModel.model,
+              systemPrompt: natural.prompts[stage as NaturalStage],
+              outputSchema:
+                stage === "post_plan" || stage === "image_plan"
+                  ? plannerSchemaWithStatusFirst(natural.schemas[stage])
+                  : natural.schemas[stage as NaturalStage],
+            }
+          : this.agentPrompts &&
+              ["post_plan", "image_plan", "image_prompt", "caption"].includes(
+                String(stage),
+              )
+            ? await this.agentPrompts.execution(postAgentStage(String(stage)))
+            : null;
       if (
         ["post_plan", "image_plan", "image_prompt", "caption"].includes(
           String(stage),
@@ -397,7 +427,7 @@ export class PostPipelineV3Runner {
       (candidate) => ({
         key: canonicalJsonHash(candidate),
         ...candidate,
-        selected: concept.mode !== "manual",
+        selected: !isNaturalAgent(concept) && concept.mode !== "manual",
         sourcePostPlanHash: hash,
       }),
     );
@@ -536,15 +566,44 @@ export class PostPipelineV3Runner {
         references: references.locationReferences[location.id] ?? [],
       })),
     };
-    const result = await new ImagePlanningAgent(client).plan(input, {
-      requestId: draft.id,
-      characterId: draft.characterId,
-      metadata: {
-        pipelineVersion: concept.pipelineVersion,
+    let referenceContent: Awaited<ReturnType<typeof photoContent>> | undefined;
+    if (isNaturalAgent(concept)) {
+      if (!this.readMediaBytes) {
+        await this.pause(draft, concept, "needs_configuration", [
+          "media_reader_missing",
+        ]);
+        return;
+      }
+      const ids = [
+        ...input.identityReferences,
+        ...input.locations.flatMap((location) => location.references),
+      ].map((reference) => reference.id);
+      referenceContent = await photoContent(
+        input,
+        await this.referencePhotos(ids),
+        this.readMediaBytes,
+      );
+      concept.referenceInspection = {
         stage: "image_plan",
-        promptVersion: IMAGE_PLANNER_PROMPT_VERSION,
+        inputHash: canonicalJsonHash(input),
+        images: referenceContent.audit,
+        configRevision: validateNaturalBundle(concept.naturalAgentConfig)
+          .revision,
+      };
+    }
+    const result = await new ImagePlanningAgent(client).plan(
+      input,
+      {
+        requestId: draft.id,
+        characterId: draft.characterId,
+        metadata: {
+          pipelineVersion: concept.pipelineVersion,
+          stage: "image_plan",
+          promptVersion: IMAGE_PLANNER_PROMPT_VERSION,
+        },
       },
-    });
+      referenceContent?.blocks,
+    );
     if (result.output.status === "blocked") {
       const onlyInsufficient = result.output.reasons.every(
         (reason) => reason.code === "insufficient_distinct_shots",
@@ -656,9 +715,11 @@ export class PostPipelineV3Runner {
     const imagePlan = imagePlanReady(concept);
     if (!postPlan || !imagePlan)
       throw new Error("Prompt Generation requires ready upstream artifacts");
-    const imageAgent = this.agentPrompts
-      ? await this.agentPrompts.execution("generation")
-      : null;
+    const imageAgent = isNaturalAgent(concept)
+      ? validateNaturalBundle(concept.naturalAgentConfig).generation
+      : this.agentPrompts
+        ? await this.agentPrompts.execution("generation")
+        : null;
     const providers = imageAgent?.id
       ? await this.settings.resolveImageModelSettings(
           imageAgent.provider!,
@@ -905,6 +966,123 @@ export class PostPipelineV3Runner {
         mediaId: shot.mediaId,
       })),
     );
+    if (isNaturalAgent(concept)) {
+      const bundle = validateNaturalBundle(concept.naturalAgentConfig);
+      const planner = await this.settings.resolvePlannerSettings();
+      if (!planner.apiUrl || !planner.apiKey)
+        throw new Error("planner_llm_missing");
+      const reviewClient = (stage: "naturalness" | "requirements") =>
+        new StrictJsonAgentClient(
+          {
+            apiUrl: planner.apiUrl!,
+            apiKey: planner.apiKey!,
+            model: bundle.reviewModel.model,
+          },
+          this.fetchFn,
+          this.llmLogs,
+          {
+            systemPrompt: bundle.prompts[stage],
+            outputSchema: bundle.schemas[stage],
+            metadata: {
+              agent: "natural-v1",
+              configRevision: bundle.revision,
+              stage,
+              ...bundle.reviewModel,
+            },
+          },
+        );
+      const images: LabeledPhoto[] = shots.map((shot) => ({
+        label: `Generated shot ${shot.sortOrder}`,
+        mediaId: shot.mediaId,
+        media: shot.media,
+      }));
+      const orders = shots.map((shot) => shot.sortOrder);
+      // This first request contains only anonymous shot labels and generated pixels.
+      const naturalness = await reviewPhotos(
+        reviewClient("naturalness"),
+        { shots: orders },
+        images,
+        orders,
+        this.readMediaBytes,
+        {
+          requestId: draft.id,
+          characterId: draft.characterId,
+          metadata: { stage: "naturalness" },
+        },
+      );
+      concept.photoReview = {
+        status: "incomplete",
+        generationSetHash: setHash,
+        configRevision: bundle.revision,
+        naturalness,
+      };
+      const rejected = naturalness.output.shots.some(
+        (shot) => shot.verdict === "reject",
+      );
+      const requirementsInput = {
+        appearance: draft.character.visualProfile?.appearancePrompt ?? "",
+        operatorRequest: operatorRequest(concept) ?? null,
+        constraints: profile.constraints,
+        imagePlan,
+        naturalness: naturalness.output,
+      };
+      const referenceIds = imagePlan.shots.flatMap((shot) =>
+        shot.referenceBindings.map((binding) => binding.id),
+      );
+      const requirements = rejected
+        ? null
+        : await reviewPhotos(
+            reviewClient("requirements"),
+            requirementsInput,
+            [...images, ...(await this.referencePhotos(referenceIds))],
+            orders,
+            this.readMediaBytes,
+            {
+              requestId: draft.id,
+              characterId: draft.characterId,
+              metadata: { stage: "requirements" },
+            },
+          );
+      const accepted =
+        !rejected &&
+        requirements !== null &&
+        requirements.output.shots.every((shot) => shot.verdict === "accept");
+      concept.photoReview = {
+        status: accepted ? "accepted" : "rejected",
+        generationSetHash: setHash,
+        configRevision: bundle.revision,
+        imagePlanningHash: artifactHash(concept.imagePlanning),
+        promptBuildHash: artifactHash(concept.promptBuild),
+        operatorRequest: operatorRequest(concept) ?? null,
+        naturalness,
+        requirements,
+      };
+      if (!accepted) {
+        const findings = [
+          ...naturalness.output.shots,
+          ...(requirements?.output.shots ?? []),
+        ]
+          .filter((shot) => shot.verdict === "reject")
+          .flatMap((shot) => shot.observations)
+          .join("; ");
+        concept.pipeline = {
+          ...concept.pipeline,
+          failure: {
+            ...pipelineFailure(new Error(findings), "caption"),
+            code: "photo_quality_rejected",
+            retryable: false,
+            problem: "사진 검수를 통과하지 못해 게시를 보류했습니다.",
+            cause: findings,
+            nextAction:
+              "검수 결과와 사진을 확인한 뒤 컷을 재생성하고 캡션 단계를 다시 실행하세요.",
+          },
+        };
+        await this.pause(draft, concept, "needs_input", [
+          "photo_quality_rejected",
+        ]);
+        return;
+      }
+    }
     const input: CaptionWriterInput = {
       contentProfile: {
         accountConcept: profile.accountConcept,
@@ -992,6 +1170,19 @@ export class PostPipelineV3Runner {
       reason: `CaptionSet revision ${revision} stored`,
     });
     if (!saved) throw new Error("caption revision CAS lost");
+  }
+
+  private async referencePhotos(ids: string[]): Promise<LabeledPhoto[]> {
+    const result: LabeledPhoto[] = [];
+    for (const mediaId of [...new Set(ids)]) {
+      const media = await this.repository.findMediaForFinish(mediaId);
+      if (!media || media.mediaType !== "image")
+        throw new Error(
+          `photo_review_missing: reference ${mediaId} is unavailable`,
+        );
+      result.push({ label: `Reference ${mediaId}`, mediaId, media });
+    }
+    return result;
   }
 
   // 실행할 것이 없을 때 claim을 되돌린다. pause와 달리 운영자에게 물을 것이

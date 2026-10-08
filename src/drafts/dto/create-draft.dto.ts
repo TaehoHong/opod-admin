@@ -1,6 +1,17 @@
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
+import {
+  IsBoolean,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from "class-validator";
 
 export class CreateDraftDto {
+  @IsOptional()
+  @IsIn(["existing", "natural-v1"])
+  postGenerationAgent?: "existing" | "natural-v1";
+
   @IsString()
   @IsNotEmpty()
   characterId!: string;
@@ -17,4 +28,8 @@ export class CreateDraftDto {
   @IsOptional()
   @IsString()
   contentType?: string;
+}
+
+export class NaturalAutomationDto {
+  @IsBoolean() enabled!: boolean;
 }

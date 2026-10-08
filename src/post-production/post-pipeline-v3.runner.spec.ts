@@ -1,3 +1,4 @@
+import { naturalAgentBundle } from "../../test/natural-agent-fixture";
 import { POST_AGENT_CONTRACTS } from "../../prompts/post-agent-contracts";
 import { EMPTY_CONTENT_PROFILE } from "../character-content-profiles/character-content-profile";
 import { UNION_ENVELOPE_KEY } from "../../prompts/strict-schema";
@@ -46,6 +47,7 @@ function setup(
     savedAgent?: boolean;
     missingAgent?: boolean;
     imageAgent?: boolean;
+    identityReferences?: { id: string; description: string }[];
   } = {},
 ) {
   const repository = {
@@ -53,6 +55,11 @@ function setup(
     findAvailableLocations: jest.fn().mockResolvedValue([]),
     findRecentVisualPlanDrafts: jest.fn().mockResolvedValue([]),
     findCaptionShots: jest.fn().mockResolvedValue(options.captionShots ?? []),
+    findMediaForFinish: jest.fn().mockResolvedValue({
+      mediaType: "image",
+      url: "https://cdn.test/reference.png",
+      storageKey: null,
+    }),
     persistV3Paused: jest.fn().mockResolvedValue(true),
     persistV3Artifact: jest.fn().mockResolvedValue(true),
     persistV3PromptJobs: jest.fn().mockResolvedValue(true),
@@ -148,7 +155,7 @@ function setup(
       : undefined,
     {
       retrieve: jest.fn().mockResolvedValue({
-        identityReferences: [],
+        identityReferences: options.identityReferences ?? [],
         locationReferences: {},
         trace: { model: "test" },
       }),
@@ -1801,5 +1808,240 @@ describe("semantic Canon pipeline input", () => {
         reasonCodes: ["memory_retrieval_failed"],
       },
     });
+  });
+});
+
+describe("natural photo quality gate", () => {
+  const shots = [
+    {
+      sortOrder: 0,
+      jobId: "job-a",
+      mediaId: "media-a",
+      media: { url: "https://cdn.test/photo.png" },
+    },
+  ];
+  function naturalDraft() {
+    const current = captionStageDraft();
+    return {
+      ...current,
+      conceptJson: {
+        ...current.conceptJson,
+        postGenerationAgent: "natural-v1",
+        naturalAgentConfig: naturalAgentBundle(),
+        mode: "auto",
+      },
+    };
+  }
+  function response(value: unknown) {
+    return Response.json({
+      choices: [{ message: { content: JSON.stringify(value) } }],
+    });
+  }
+  it("passes real reference bytes to new image planning and preserves reference pixel hashes", async () => {
+    const current = naturalDraft();
+    (current.conceptJson as Record<string, unknown>).pipeline = {
+      stage: "image_plan",
+      state: "running",
+      imageCount: 1,
+      reasonCodes: [],
+    };
+    const output: ImagePlanReady = {
+      status: "ready",
+      locationId: null,
+      continuity: { lockedElements: [] },
+      shots: [
+        {
+          sortOrder: 0,
+          visualPurpose: "ordinary still life",
+          scene: "A cup on the table",
+          captureSetup: "phone photograph from table height",
+          characterPresentation: {
+            mode: "none",
+            visibleParts: [],
+            faceVisible: false,
+            identityPreservationRequired: false,
+          },
+          subjectState: "",
+          motionEvidence: "",
+          notInFrame: [],
+          subjectCameraRelation: "not_applicable",
+          referenceBindings: [],
+        },
+      ],
+    };
+    const { runner, repository, fetchMock } = setup(current, output, {
+      identityReferences: [{ id: "ref-a", description: "Identity reference" }],
+    });
+    await runner.runCurrentStage("draft-1");
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(request.messages[1].content[1]).toEqual({
+      type: "text",
+      text: "Reference ref-a",
+    });
+    expect(request.messages[1].content[2].image_url.url).toBe(
+      "data:image/png;base64,cG5n",
+    );
+    expect(
+      repository.persistV3Artifact.mock.calls[0][0].conceptJson
+        .referenceInspection,
+    ).toMatchObject({
+      stage: "image_plan",
+      images: [
+        {
+          mediaId: "ref-a",
+          contentType: "image/png",
+          bytesHash: expect.stringMatching(/^sha256:/),
+        },
+      ],
+    });
+  });
+  it("reviews generated pixels before exposing the plan, then writes caption only after both reviews accept", async () => {
+    const { runner, repository, fetchMock } = setup(naturalDraft(), undefined, {
+      captionShots: shots,
+      missingAgent: true,
+    });
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(
+        response({
+          shots: [
+            {
+              sortOrder: 0,
+              verdict: "accept",
+              observations: ["Hands and gaze follow the same action."],
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          shots: [
+            {
+              sortOrder: 0,
+              verdict: "accept",
+              observations: [
+                "Identity and constraints match visible evidence.",
+              ],
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          [UNION_ENVELOPE_KEY]: {
+            status: "ready",
+            caption: "잠깐 숨 돌리기",
+            captionLanguages: ["ko"],
+            hashtags: [],
+          },
+        }),
+      );
+    await runner.runCurrentStage("draft-1");
+    const first = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const second = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(first.model).toBe("independent-vision");
+    expect(first.messages[1].content[0]).toEqual({
+      type: "text",
+      text: '{"shots":[0]}',
+    });
+    expect(first.messages[1].content[2].image_url.url).toBe(
+      "data:image/png;base64,cG5n",
+    );
+    expect(
+      JSON.parse(second.messages[1].content[0].text).imagePlan.shots[0].scene,
+    ).toBe("현관 전신거울에 비친 모습");
+    expect(
+      repository.persistV3Artifact.mock.calls[0][0].conceptJson,
+    ).toMatchObject({
+      photoReview: {
+        status: "accepted",
+        configRevision: naturalAgentBundle().revision,
+      },
+      captionBuild: { output: { caption: "잠깐 숨 돌리기" } },
+      pipeline: { stage: "publish", state: "pending" },
+    });
+  });
+  it("holds a visually rejected photo with findings and does not write a caption or automatically retry", async () => {
+    const { runner, repository, fetchMock } = setup(naturalDraft(), undefined, {
+      captionShots: shots,
+    });
+    fetchMock.mockReset().mockResolvedValueOnce(
+      response({
+        shots: [
+          {
+            sortOrder: 0,
+            verdict: "reject",
+            observations: ["The wrist intersects the phone."],
+          },
+        ],
+      }),
+    );
+    await runner.runCurrentStage("draft-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      repository.persistV3Paused.mock.calls[0][0].conceptJson,
+    ).toMatchObject({
+      photoReview: { status: "rejected" },
+      pipeline: {
+        state: "needs_input",
+        failure: {
+          code: "photo_quality_rejected",
+          cause: "The wrist intersects the phone.",
+          retryable: false,
+        },
+      },
+    });
+    expect(repository.persistV3Artifact).not.toHaveBeenCalled();
+    expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
+  });
+  it("holds identity mismatch after independent naturalness acceptance", async () => {
+    const { runner, repository, fetchMock } = setup(naturalDraft(), undefined, {
+      captionShots: shots,
+    });
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(
+        response({
+          shots: [
+            {
+              sortOrder: 0,
+              verdict: "accept",
+              observations: ["Plausible action."],
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          shots: [
+            {
+              sortOrder: 0,
+              verdict: "reject",
+              observations: ["Visible fixed identity differs."],
+            },
+          ],
+        }),
+      );
+    await runner.runCurrentStage("draft-1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      repository.persistV3Paused.mock.calls[0][0].conceptJson.pipeline.failure
+        .cause,
+    ).toBe("Visible fixed identity differs.");
+    expect(repository.persistV3Artifact).not.toHaveBeenCalled();
+  });
+  it("preserves malformed review output and blocks caption when a shot was not reviewed", async () => {
+    const { runner, repository, fetchMock } = setup(naturalDraft(), undefined, {
+      captionShots: shots,
+    });
+    fetchMock.mockReset().mockResolvedValueOnce(response({ shots: [] }));
+    await runner.runCurrentStage("draft-1");
+    expect(
+      repository.persistV3Paused.mock.calls[0][0].conceptJson,
+    ).toMatchObject({
+      rejectedAgentResponse: { output: { shots: [] } },
+      pipeline: { reasonCodes: ["invalid_agent_response"] },
+    });
+    expect(repository.persistV3Artifact).not.toHaveBeenCalled();
   });
 });

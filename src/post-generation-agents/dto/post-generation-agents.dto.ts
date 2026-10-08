@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsString,
@@ -27,4 +28,14 @@ export class SavePostAgentPromptDto extends PromptRevisionDto {
   systemPrompt!: string | null;
   // Shape validation is owned by PostAgentPromptService against the stage schema.
   @ValidateIf(() => false) outputSchema!: unknown;
+}
+
+export class SaveNaturalAgentDto {
+  @IsBoolean() schedulerDefault!: boolean;
+  @ValidateIf((_object, value) => value !== null)
+  @IsString()
+  expectedRevision!: string | null;
+  @IsString() @Matches(/^[1-9][0-9]*$/) planningAiModelId!: string;
+  @IsString() @Matches(/^[1-9][0-9]*$/) reviewAiModelId!: string;
+  @ValidateIf(() => false) prompts!: unknown;
 }

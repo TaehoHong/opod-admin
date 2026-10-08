@@ -1,3 +1,5 @@
+import { naturalAgentBundle } from "../../test/natural-agent-fixture";
+import { generationSetHash } from "../post-production/post-pipeline-v3";
 import {
   DraftWorkerConfig,
   DraftWorkerService,
@@ -1083,5 +1085,134 @@ describe("selectedPublishedMemories", () => {
     ]);
     // V2 draft는 여전히 이 경로를 쓰지 않는다(게시 요약 메모리가 따로 있다).
     expect(selectedPublishedMemories(concept)).toEqual([]);
+  });
+});
+
+describe("natural agent publishing", () => {
+  const job = {
+    id: "job-a",
+    sortOrder: 0,
+    status: "completed",
+    outputMediaId: "media-a",
+    outputs: [],
+  };
+  function acceptedConcept() {
+    const hash = generationSetHash([
+      { sortOrder: 0, jobId: "job-a", mediaId: "media-a" },
+    ]);
+    const output = {
+      shots: [
+        {
+          sortOrder: 0,
+          verdict: "accept",
+          observations: ["Plausible visible action"],
+        },
+      ],
+    };
+    return {
+      postGenerationAgent: "natural-v1",
+      pipelineVersion: "post-pipeline-v4",
+      mode: "auto",
+      naturalAgentConfig: naturalAgentBundle(),
+      imagePlanning: { hash: "image-plan" },
+      promptBuild: { hash: "prompt-build" },
+      photoReview: {
+        status: "accepted",
+        operatorRequest: null,
+        configRevision: naturalAgentBundle().revision,
+        generationSetHash: hash,
+        imagePlanningHash: "image-plan",
+        promptBuildHash: "prompt-build",
+        naturalness: { output },
+        requirements: { output },
+      },
+      captionBuild: { source: { generationSetHash: hash } },
+      postPlanning: { hash: "post-plan" },
+      memoryCandidates: [
+        {
+          selected: true,
+          type: "event",
+          sourcePostPlanHash: "post-plan",
+          content: "Generated event must not become canon",
+        },
+      ],
+    };
+  }
+  it.each(["missing", "rejected", "stale", "caption-stale", "request-changed"])(
+    "prevents manual publishing with %s photo acceptance",
+    async (condition) => {
+      const repository = repositoryFake();
+      const concept = acceptedConcept();
+      if (condition === "missing")
+        delete (concept as Partial<typeof concept>).photoReview;
+      if (condition === "rejected") concept.photoReview.status = "rejected";
+      if (condition === "stale")
+        concept.photoReview.generationSetHash = "older-images";
+      if (condition === "request-changed")
+        (
+          concept as typeof concept & { operatorRequest: string }
+        ).operatorRequest = "new requirement";
+      if (condition === "caption-stale")
+        concept.captionBuild.source.generationSetHash = "older-images";
+      repository.findApprovedDraft.mockResolvedValue({
+        id: "draft-1",
+        characterId: "character-1",
+        contentType: "feed",
+        caption: "photo caption",
+        hashtags: [],
+        conceptJson: concept,
+      });
+      repository.findPublishJobs.mockResolvedValue([job]);
+      const result = await makeService(repository).publishDraftNow("draft-1");
+      expect(result.published).toBe(false);
+      expect(result.reason).toContain("photo_review_required");
+      expect(repository.persistPublishedPost).not.toHaveBeenCalled();
+    },
+  );
+  it("saves canon only after an explicit operator selection and manual publish", async () => {
+    const repository = repositoryFake();
+    const concept = acceptedConcept();
+    concept.mode = "manual";
+    Object.assign(concept.memoryCandidates[0], { selectedByOperator: true });
+    repository.findApprovedDraft.mockResolvedValue({
+      id: "draft-1",
+      characterId: "character-1",
+      contentType: "feed",
+      caption: "photo caption",
+      hashtags: [],
+      conceptJson: concept,
+    });
+    repository.findPublishJobs.mockResolvedValue([job]);
+    expect(await makeService(repository).publishDraftNow("draft-1")).toEqual({
+      published: true,
+    });
+    expect(repository.persistPublishedPost.mock.calls[0][0].memories).toEqual([
+      expect.objectContaining({
+        type: "event",
+        content: "Generated event must not become canon",
+      }),
+    ]);
+  });
+  it("automatically publishes accepted current images without inserting generated canon", async () => {
+    const repository = repositoryFake();
+    repository.findDueDrafts.mockResolvedValue([
+      {
+        id: "draft-1",
+        characterId: "character-1",
+        contentType: "feed",
+        caption: "photo caption",
+        hashtags: [],
+        conceptJson: acceptedConcept(),
+      },
+    ]);
+    repository.findPublishJobs.mockResolvedValue([job]);
+    await makeService(repository).tick();
+    expect(repository.persistPublishedPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memories: [],
+        media: [{ originalMediaId: "media-a", finishedFile: null }],
+      }),
+    );
+    expect(repository.recordPublishFailure).not.toHaveBeenCalled();
   });
 });

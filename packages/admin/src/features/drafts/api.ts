@@ -73,13 +73,16 @@ export type DraftShot = {
 // 기획 LLM이 채우는 부분. 서버가 Json 그대로 돌려주므로 화면이 쓰는 필드만
 // 좁게 선언하고 나머지는 원본 보기(details)로 넘긴다.
 export type DraftConcept = {
+  postGenerationAgent?: "existing" | "natural-v1";
+  naturalAgentConfig?: { revision?: string };
+  photoReview?: unknown;
   mode?: string;
   source?: string;
   sceneHint?: string;
   // V3/V4 파이프라인 판별과 정지 지점. V4(검수 없음)는 stage caption/publish에서
   // 사람이 개입한다.
   pipelineVersion?: string;
-  pipeline?: { stage?: string; state?: string };
+  pipeline?: { stage?: string; state?: string; failure?: { code?: string } };
   // V4 ⑥ 전에는 draft.caption이 비어 있다 — 제목 폴백은 기획 전제(premise)다.
   postPlanning?: { output?: { intent?: { premise?: string } } };
   // V3가 운영자 요청을 저장하는 필드. V2의 sceneHint에 대응한다.
@@ -134,6 +137,7 @@ export function fetchDraft(draftId: string): Promise<Draft> {
 
 export function createDraft(body: {
   characterId: string;
+  postGenerationAgent?: "existing" | "natural-v1";
   sceneHint?: string;
   scheduledAt?: string;
   contentType?: "feed" | "reel";
@@ -240,7 +244,11 @@ export function v4PausedAt(
   return (
     isPipelineV4(draft) &&
     draft.status === "planned" &&
-    pipeline?.state === "pending" &&
+    (pipeline?.state === "pending" ||
+      (draft.conceptJson?.postGenerationAgent === "natural-v1" &&
+        pipeline?.stage === "caption" &&
+        pipeline?.state === "needs_input" &&
+        pipeline?.failure?.code === "photo_quality_rejected")) &&
     stages.includes(pipeline.stage as "caption" | "publish")
   );
 }
@@ -339,3 +347,9 @@ export function outputFinishPreset(
   const draftFinish = draft.conceptJson?.finish;
   return isFinishPreset(draftFinish) ? draftFinish : "none";
 }
+
+export const setNaturalAutomation = (id: string, enabled: boolean) =>
+  apiRequest<Draft>(`/drafts/${encodeURIComponent(id)}/automation`, {
+    method: "POST",
+    body: { enabled },
+  });

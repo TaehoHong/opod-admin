@@ -67,7 +67,30 @@ export function v4PausedAt(stages: ("caption" | "publish")[]): SQL {
       sql<string>`${postDrafts.conceptJson}#>>'{pipeline,stage}'`,
       stages,
     ),
-    eq(sql<string>`${postDrafts.conceptJson}#>>'{pipeline,state}'`, "pending"),
+    or(
+      eq(
+        sql<string>`${postDrafts.conceptJson}#>>'{pipeline,state}'`,
+        "pending",
+      ),
+      and(
+        eq(
+          sql<string>`${postDrafts.conceptJson}->>'postGenerationAgent'`,
+          "natural-v1",
+        ),
+        eq(
+          sql<string>`${postDrafts.conceptJson}#>>'{pipeline,state}'`,
+          "needs_input",
+        ),
+        eq(
+          sql<string>`${postDrafts.conceptJson}#>>'{pipeline,failure,code}'`,
+          "photo_quality_rejected",
+        ),
+        eq(
+          sql<string>`${postDrafts.conceptJson}#>>'{pipeline,stage}'`,
+          "caption",
+        ),
+      ),
+    ),
   )!;
 }
 
@@ -305,6 +328,41 @@ export class DraftsRepository {
     });
   }
 
+  async setNaturalAutomation(
+    draftId: string,
+    enabled: boolean,
+  ): Promise<boolean> {
+    const rows = await this.database.client
+      .update(postDrafts)
+      .set({
+        conceptJson: sql`jsonb_set(${postDrafts.conceptJson}, '{mode}', ${JSON.stringify(enabled ? "auto" : "manual")}::jsonb)`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(postDrafts.id, draftId),
+          inArray(postDrafts.status, ["planned", "generating", "failed"]),
+          ...(enabled
+            ? [
+                inArray(postDrafts.status, ["planned", "generating"]),
+                inArray(
+                  sql<string>`${postDrafts.conceptJson}#>>'{pipeline,state}'`,
+                  ["pending", "ready"],
+                ),
+              ]
+            : []),
+          isNull(postDrafts.leaseExpiresAt),
+          eq(
+            sql<string>`${postDrafts.conceptJson}->>'postGenerationAgent'`,
+            "natural-v1",
+          ),
+          sql`${postDrafts.conceptJson}#>>'{pipeline,state}' is distinct from 'running'`,
+        ),
+      )
+      .returning({ id: postDrafts.id });
+    return rows.length > 0;
+  }
+
   async markManual(draftId: string): Promise<void> {
     const [draft] = await this.database.client
       .select({
@@ -508,6 +566,13 @@ export class DraftsRepository {
         .where(
           and(
             eq(postDrafts.id, input.draftId),
+            or(
+              sql`${postDrafts.conceptJson}->>'postGenerationAgent' is distinct from 'natural-v1'`,
+              and(
+                isNull(postDrafts.leaseExpiresAt),
+                sql`${postDrafts.conceptJson}#>>'{pipeline,state}' is distinct from 'running'`,
+              ),
+            ),
             or(
               inArray(postDrafts.status, [
                 "needs_review",

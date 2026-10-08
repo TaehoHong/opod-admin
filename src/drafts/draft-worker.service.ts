@@ -1,4 +1,8 @@
 import {
+  assertNaturalPublishable,
+  isNaturalAgent,
+} from "../post-production/natural-post-agent";
+import {
   Injectable,
   Logger,
   OnModuleDestroy,
@@ -84,6 +88,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           options?: { operatorNote?: string },
         ) => Promise<void>)
       | null = null,
+    private readonly resolveScheduledAgentConcept: () => Promise<
+      JsonValue | undefined
+    > = async () => undefined,
   ) {}
 
   onModuleInit(): void {
@@ -799,6 +806,19 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     if (mediaByShot.size === 0) {
       throw new Error("draft has no generated media to publish");
     }
+    if (isNaturalAgent(draft.conceptJson)) {
+      const latest = [...mediaByShot.keys()].map((order) =>
+        jobs.find((job) => job.sortOrder === order)!,
+      );
+      assertNaturalPublishable(
+        draft.conceptJson,
+        latest.map((job) => ({
+          sortOrder: job.sortOrder,
+          jobId: job.id,
+          mediaId: job.outputMediaId!,
+        })),
+      );
+    }
     const orderedMedia = [...mediaByShot.entries()]
       .sort(([a], [b]) => a - b)
       .map(([, media]) => media);
@@ -832,7 +852,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       leaseExpiresAt: draft.leaseExpiresAt,
       // 메모리 역반영 — 확정 세계관 캐릭터가 다음 기획에서 모순을 내지 않게 한다.
       ...(isPostPipelineV3(draft.conceptJson)
-        ? { memories: selectedPublishedMemories(draft.conceptJson) }
+        ? {
+            memories: selectedPublishedMemories(draft.conceptJson),
+          }
         : {
             memoryContent: publishedMemoryContent(
               draft.caption,
@@ -896,6 +918,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
   private async createScheduledDrafts(): Promise<void> {
     const policies = await this.repository.findEnabledPostingPolicies();
     const pipelineV3Enabled = await this.resolvePipelineV3Enabled();
+    const scheduledConcept = await this.resolveScheduledAgentConcept();
 
     const now = new Date();
     for (const policy of policies) {
@@ -925,6 +948,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         policy.characterId,
         scheduledAt,
         pipelineV3Enabled,
+        ...(scheduledConcept ? [scheduledConcept] : []),
       );
       if (!created) continue;
       await this.recordActionLog(
@@ -1078,6 +1102,7 @@ export function selectedPublishedMemories(
   // v3·v4 공통 — 버전을 직접 비교하면 v4 초안이 게시돼도 기억이 하나도
   // 저장되지 않는다(⑧ 단계가 조용히 빈손).
   if (!isRecord(conceptJson) || !isPostPipelineV3(conceptJson)) return [];
+  if (isNaturalAgent(conceptJson) && conceptJson.mode !== "manual") return [];
   const postPlanning = isRecord(conceptJson.postPlanning)
     ? conceptJson.postPlanning
     : {};
@@ -1090,6 +1115,7 @@ export function selectedPublishedMemories(
     if (
       !isRecord(candidate) ||
       candidate.selected !== true ||
+      (isNaturalAgent(conceptJson) && candidate.selectedByOperator !== true) ||
       candidate.sourcePostPlanHash !== currentHash ||
       typeof candidate.type !== "string" ||
       typeof candidate.content !== "string" ||

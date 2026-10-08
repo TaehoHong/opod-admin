@@ -70,3 +70,17 @@ revision=0, aiModelId=NULL로 표시하지만 실제 저장 행은 필수 FK를 
 
 정본 DDL은 opod-service-backend의
 `drizzle/20260928080853_post_agent_prompts/migration.sql`이다.
+
+
+## 새 Agent 번들
+
+- `GET /api/admin/v1/post-generation-agents/natural/config`: `current` 저장 번들 또는 null,
+  명시적 설치용 `starters`를 반환한다. 초안 지침은 런타임 fallback이 아니다.
+- `POST /api/admin/v1/post-generation-agents/natural/config`: `expectedRevision`(첫 저장 null),
+  `planningAiModelId`, `reviewAiModelId`, `schedulerDefault`와 여섯 단계 `prompts`를 저장한다.
+  기획·검수 모델은 LLM이어야 하며 이미지 생성 단계의 저장 모델 버전이 필요하다.
+  단계별 출력 schema는 서버 계약으로 고정한다. 저장 결과의 content hash가 revision이다.
+  동시에 변경된 revision은 409다. 저장 번들은 기존 단계 지침을 변경하지 않는다.
+
+새 초안은 선택 시 전체 번들을 복사한다. 이전 초안은 이후 설정 저장의 영향을 받지 않는다.
+[동작과 단계별 계약](../natural-post-agent.md)에 픽셀 검수·게시 차단·복구 범위를 기록한다.

@@ -14,7 +14,7 @@ import { DraftWorkerService } from "./draft-worker.service";
 import { GenerationWorkerService } from "../generation/generation-worker.service";
 import { AdminJwtGuard } from "../auth/admin-jwt.guard";
 import { DraftsService } from "./drafts.service";
-import { CreateDraftDto } from "./dto/create-draft.dto";
+import { CreateDraftDto, NaturalAutomationDto } from "./dto/create-draft.dto";
 import { GenerateShotDto } from "./dto/generate-shot.dto";
 import { RegenerateShotDto } from "./dto/regenerate-shot.dto";
 import { RejectDraftDto } from "./dto/reject-draft.dto";
@@ -59,6 +59,14 @@ export class DraftsController {
   @Post()
   createDraft(@Body() body: CreateDraftDto) {
     return this.draftsService.createDraft(body);
+  }
+
+  @Post(":id/automation")
+  setAutomation(
+    @Param("id") draftId: string,
+    @Body() body: NaturalAutomationDto,
+  ) {
+    return this.draftsService.setNaturalAutomation(draftId, body.enabled);
   }
 
   // 수동 진행 컷 생성 실행 — draft 상태 컷의 프롬프트/후보 수를 (선택) 수정하고

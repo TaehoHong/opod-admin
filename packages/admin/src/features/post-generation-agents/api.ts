@@ -72,3 +72,34 @@ export const restoreAgent = (
     `/post-generation-agents/${stage}/versions/${id}/restore`,
     { method: "POST", body: { expectedRevision } },
   );
+
+export type NaturalStage =
+  | "post_plan"
+  | "image_plan"
+  | "image_prompt"
+  | "caption"
+  | "naturalness"
+  | "requirements";
+export type NaturalConfig = {
+  schedulerDefault: boolean;
+  revision: string;
+  planningModel: { aiModelId: string; provider: string; model: string };
+  reviewModel: { aiModelId: string; provider: string; model: string };
+  prompts: Record<NaturalStage, string>;
+};
+export const fetchNaturalAgent = () =>
+  apiRequest<{
+    current: NaturalConfig | null;
+    starters: Record<NaturalStage, string>;
+  }>("/post-generation-agents/natural/config");
+export const saveNaturalAgent = (body: {
+  schedulerDefault: boolean;
+  expectedRevision: string | null;
+  planningAiModelId: string;
+  reviewAiModelId: string;
+  prompts: Record<NaturalStage, string>;
+}) =>
+  apiRequest<NaturalConfig>("/post-generation-agents/natural/config", {
+    method: "POST",
+    body,
+  });

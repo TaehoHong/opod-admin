@@ -1,3 +1,4 @@
+import { NaturalAgentPanel } from "./NaturalAgentPanel";
 import {
   Alert,
   Badge,
@@ -26,7 +27,9 @@ export function PostAgentsPage() {
   const agents = useQuery({ queryKey: ["post-agents"], queryFn: fetchAgents });
   const models = useCursorList(["post-agent-models"], fetchModels);
   const [modelManager, setModelManager] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [legacyDirty, setLegacyDirty] = useState(false);
+  const [naturalDirty, setNaturalDirty] = useState(false);
+  const dirty = legacyDirty || naturalDirty;
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   useBeforeUnload((event) => {
     if (dirty) {
@@ -99,6 +102,10 @@ export function PostAgentsPage() {
             </Button>
           </Alert>
         ) : null}
+        <NaturalAgentPanel
+          models={models.items}
+          onDirtyChange={setNaturalDirty}
+        />
         <div className={classes.layout}>
           <Paper p="md" className={classes.stageList}>
             <Stack gap="xs" role="navigation" aria-label="게시물 생성 단계">
@@ -132,7 +139,7 @@ export function PostAgentsPage() {
                 key={stage}
                 config={selected}
                 models={models.items}
-                onDirtyChange={setDirty}
+                onDirtyChange={setLegacyDirty}
               />
             ) : null}
             <LoadMore
@@ -169,7 +176,8 @@ export function PostAgentsPage() {
             </Button>
             <Button
               onClick={() => {
-                setDirty(false);
+                setLegacyDirty(false);
+                setNaturalDirty(false);
                 navigate(pendingPath!);
                 setPendingPath(null);
               }}

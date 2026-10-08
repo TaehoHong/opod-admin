@@ -79,6 +79,9 @@ function LocationProbe() {
 
 function registerListHandlers(onRequest?: (filter: string | null) => void) {
   server.use(
+    http.get("/api/admin/v1/post-generation-agents/natural/config", () =>
+      HttpResponse.json({ current: null, starters: {} }),
+    ),
     http.get("/api/admin/v1/post-work-items", ({ request }) => {
       onRequest?.(new URL(request.url).searchParams.get("filter"));
       return HttpResponse.json({ items: [item] });
@@ -325,6 +328,7 @@ describe("post operations workspace", () => {
       expect(body).toEqual({
         characterId: "character-1",
         contentType: "feed",
+        postGenerationAgent: "existing",
         sceneHint: "비 오는 날 창가",
       }),
     );

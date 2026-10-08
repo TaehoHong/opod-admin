@@ -1,3 +1,7 @@
+import {
+  NATURAL_AGENT,
+  isNaturalAgent,
+} from "../post-production/natural-post-agent";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import type { JsonValue } from "../shared/utils/json";
 import {
@@ -444,10 +448,10 @@ export class DraftsService {
     return { ...this.toDraft(draft), shots };
   }
 
-  // 운영자의 게시물 만들기 진입점은 항상 수동이다. 자동 draft는 스케줄러가
-  // 별도로 만들며, 같은 상태 머신을 쓰되 conceptJson.source만 다르다.
+  // 기존 선택/미지정은 수동 진행을 유지하고 새 Agent는 자동으로 시작한다.
   async createDraft(input: {
     characterId: string;
+    postGenerationAgent?: "existing" | "natural-v1";
     sceneHint?: string;
     scheduledAt?: string;
     contentType?: string;
@@ -466,12 +470,28 @@ export class DraftsService {
         `Scene hint must be at most ${OPERATOR_REQUEST_MAX_LENGTH} characters`,
       );
     }
+    if (
+      input.postGenerationAgent !== undefined &&
+      !["existing", NATURAL_AGENT].includes(input.postGenerationAgent)
+    )
+      throw new BadRequestException("Invalid post generation agent");
+    const natural =
+      input.postGenerationAgent === NATURAL_AGENT
+        ? await this.settings.requireNaturalAgentBundle()
+        : null;
     const pipelineV3 = await this.settings.resolvePipelineV3();
 
-    const draft = await this.repository.createDraft({
-      characterId: input.characterId,
-      contentType,
-      conceptJson: pipelineV3.enabled
+    const conceptJson = natural
+      ? {
+          ...createPostPipelineV3Concept({
+            source: "manual",
+            mode: "auto",
+            ...(sceneHint ? { operatorRequest: sceneHint } : {}),
+          }),
+          postGenerationAgent: NATURAL_AGENT,
+          naturalAgentConfig: natural,
+        }
+      : pipelineV3.enabled
         ? createPostPipelineV3Concept({
             source: "manual",
             mode: "manual",
@@ -481,7 +501,16 @@ export class DraftsService {
             source: "manual",
             mode: "manual",
             ...(sceneHint ? { sceneHint } : {}),
-          },
+          };
+    const draft = await this.repository.createDraft({
+      characterId: input.characterId,
+      contentType,
+      conceptJson: {
+        ...conceptJson,
+        ...(input.postGenerationAgent
+          ? { postGenerationAgent: input.postGenerationAgent }
+          : {}),
+      },
       ...(scheduledAt ? { scheduledAt } : {}),
     });
     await this.recordActionLog(
@@ -491,6 +520,19 @@ export class DraftsService {
       `manual draft created${sceneHint ? ` (hint: ${sceneHint.slice(0, 100)})` : ""}`,
     );
     return this.toDraft(draft);
+  }
+
+  async setNaturalAutomation(
+    draftId: string,
+    enabled: boolean,
+  ): Promise<AdminDraft> {
+    if (!(await this.repository.setNaturalAutomation(draftId, enabled)))
+      throw new BadRequestException(
+        enabled
+          ? "실행 중이거나 입력·검수 보류 상태입니다. 사진을 보완하고 현재 단계를 실행한 뒤 자동 진행을 재개하세요."
+          : "새 Agent가 현재 단계를 실행하거나 게시 중입니다. 완료 후 다시 시도하세요.",
+      );
+    return this.getDraft(draftId);
   }
 
   async updatePlan(input: {
@@ -793,7 +835,13 @@ export class DraftsService {
     const nextCandidates = candidates.map((value) => {
       const candidate = this.record(value);
       return typeof candidate.key === "string" && currentKeys.has(candidate.key)
-        ? { ...candidate, selected: selected.has(candidate.key) }
+        ? {
+            ...candidate,
+            selected: selected.has(candidate.key),
+            ...(isNaturalAgent(concept)
+              ? { selectedByOperator: selected.has(candidate.key) }
+              : {}),
+          }
         : candidate;
     });
     const transitioned = await this.repository.updateEditableDraft(

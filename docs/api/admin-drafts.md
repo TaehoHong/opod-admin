@@ -308,3 +308,19 @@ When enabled and the character is active, the worker scheduler creates a
 have passed since the last one, with `scheduledAt` at a random time inside the
 KST hour window. Defaults: disabled, 3/week, 18–22 KST. `weeklyCadence` is
 1–21 and `hourStartKst < hourEndKst`.
+
+
+## 생성 Agent 선택·자동 진행 정책
+
+생성 요청의 선택적 `postGenerationAgent`는 `existing` 또는 `natural-v1`이다.
+미지정·기존 선택은 기존 생성 정책을 유지하며, 새 선택은 저장된 새 Agent 번들을 복사하고
+`mode=auto`로 생성한다. 새 Agent가 미설정이거나 선택값이 잘못되면 400이다.
+
+`POST /api/admin/v1/drafts/:id/automation`의 `{ enabled: boolean }`은 새 Agent의
+다음 자동 진행·게시를 보류하거나 재개한다. 실행·게시 lease가 없을 때만 변경할 수 있다.
+재개는 pending/ready의 planned/generating 상태만 허용한다. 실패·검수 불합격은 먼저
+보완·단계 재실행이 필요하다. 생성 중 사진의 실행을 취소하지 않는다.
+
+새 Agent의 `caption/needs_input/photo_quality_rejected`는 사진 재생성을 허용한다.
+검수·캡션의 현재 이미지 집합 일치 여부를 수동·자동 게시 모두 검사한다.
+[새 Agent 문서](../natural-post-agent.md)에 저장·실행·복구 조건을 기록한다.

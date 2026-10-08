@@ -1,4 +1,15 @@
-import { Injectable, Optional } from "@nestjs/common";
+import { createPostPipelineV3Concept } from "../post-production/post-pipeline-v3";
+import { JsonValue } from "../shared/utils/json";
+import {
+  NaturalAgentBundle,
+  validateNaturalBundle,
+} from "../post-production/natural-post-agent";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Optional,
+} from "@nestjs/common";
 import { IMAGE_PLAN_JSON_SCHEMA } from "../../prompts/image-planner";
 import { PROMPT_SET_JSON_SCHEMA } from "../../prompts/image-prompt-generator";
 import { POST_PLAN_JSON_SCHEMA } from "../../prompts/post-planner";
@@ -188,6 +199,53 @@ export class GenerationSettingsService {
     private readonly repository: GenerationSettingsRepository,
     @Optional() private readonly llmLogs?: LlmLogService,
   ) {}
+
+  async getNaturalAgentBundle(): Promise<NaturalAgentBundle | null> {
+    const [row] = await this.repository.findByKeys(["postAgent.natural-v1"]);
+    return row ? validateNaturalBundle(JSON.parse(row.value)) : null;
+  }
+
+  async saveNaturalAgentBundle(
+    bundle: NaturalAgentBundle,
+    expectedRevision: string | null,
+  ): Promise<NaturalAgentBundle> {
+    validateNaturalBundle(bundle);
+    const [row] = await this.repository.findByKeys(["postAgent.natural-v1"]);
+    const current = row ? validateNaturalBundle(JSON.parse(row.value)) : null;
+    if ((current?.revision ?? null) !== expectedRevision)
+      throw new ConflictException(
+        "새 Agent 설정이 변경되었습니다. 최신 설정을 불러온 후 다시 저장하세요.",
+      );
+    if (
+      !(await this.repository.compareAndSetValue(
+        "postAgent.natural-v1",
+        row?.value ?? null,
+        JSON.stringify(bundle),
+      ))
+    )
+      throw new ConflictException(
+        "새 Agent 설정이 변경되었습니다. 최신 설정을 불러온 후 다시 저장하세요.",
+      );
+    return bundle;
+  }
+
+  async scheduledAgentConcept(): Promise<JsonValue | undefined> {
+    const bundle = await this.getNaturalAgentBundle();
+    return bundle?.schedulerDefault
+      ? ({
+          ...createPostPipelineV3Concept({ source: "scheduler", mode: "auto" }),
+          postGenerationAgent: "natural-v1",
+          naturalAgentConfig: bundle,
+        } as unknown as JsonValue)
+      : undefined;
+  }
+
+  async requireNaturalAgentBundle(): Promise<NaturalAgentBundle> {
+    const bundle = await this.getNaturalAgentBundle();
+    if (!bundle)
+      throw new BadRequestException("새 Agent 설정을 먼저 저장해 주세요.");
+    return bundle;
+  }
 
   async getSettings(): Promise<GenerationSettings> {
     const rows = await this.repository.findByKeys(

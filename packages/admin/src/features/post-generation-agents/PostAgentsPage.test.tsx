@@ -44,6 +44,9 @@ function fixture() {
   let current = config("post_plan");
   const versions = [current];
   server.use(
+    http.get(`${endpoint}/natural/config`, () =>
+      HttpResponse.json({ current: null, starters: {} }),
+    ),
     http.get(endpoint, () =>
       HttpResponse.json({
         items: STAGES.map((stage) =>
