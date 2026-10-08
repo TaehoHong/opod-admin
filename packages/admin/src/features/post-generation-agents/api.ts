@@ -81,6 +81,7 @@ export type NaturalStage =
   | "naturalness"
   | "requirements";
 export type NaturalConfig = {
+  generation?: { provider: string; effectiveModel: string; revision: number };
   schedulerDefault: boolean;
   revision: string;
   planningModel: { aiModelId: string; provider: string; model: string };

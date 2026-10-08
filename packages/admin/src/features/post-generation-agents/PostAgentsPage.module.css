@@ -18,3 +18,27 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.saveBar {
+  padding: var(--mantine-spacing-md);
+  background: var(--mantine-color-body);
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.summaryAction {
+  height: auto;
+  min-height: 2.75rem;
+}
+.summaryLabel {
+  white-space: normal;
+  text-align: left;
+}
+.modelSummary {
+  min-width: 0;
+}
+.fieldDescription {
+  color: var(--mantine-color-ink-6);
+}
+.naturalForm :is(input, textarea, button) {
+  scroll-margin-block-end: 8rem;
+}

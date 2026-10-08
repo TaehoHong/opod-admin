@@ -12,6 +12,7 @@ import {
   generationJobs,
   postDrafts,
 } from "../src/core/database/schema";
+import { PostAgentPromptService } from "../src/post-agent-prompts/post-agent-prompt.service";
 import { GenerationSettingsService } from "../src/settings/generation-settings.service";
 import { DraftWorkerRepository } from "../src/drafts/draft-worker.repository";
 import { adminHeaders } from "./admin-auth";
@@ -128,6 +129,44 @@ describe("natural post agent durable settings and recovery", () => {
     } finally {
       await app.close();
     }
+  });
+
+  it("identifies the missing saved image version and wrong LLM fields separately", async () => {
+    const body = {
+      expectedRevision: null,
+      schedulerDefault: false,
+      planningAiModelId: llmId,
+      reviewAiModelId: llmId,
+      prompts: starters,
+    };
+    const execution = jest
+      .spyOn(app.get(PostAgentPromptService), "execution")
+      .mockResolvedValueOnce(null);
+    try {
+      const missing = await request(app.getHttpServer())
+        .post(`${base}/natural/config`)
+        .set(headers)
+        .send(body)
+        .expect(400);
+      expect(missing.body.message).toBe("이미지 생성 모델을 먼저 저장하세요.");
+    } finally {
+      execution.mockRestore();
+    }
+    const planning = await request(app.getHttpServer())
+      .post(`${base}/natural/config`)
+      .set(headers)
+      .send({ ...body, planningAiModelId: imageId })
+      .expect(400);
+    expect(planning.body.message).toBe("기획·캡션 모델은 LLM을 선택하세요.");
+    const review = await request(app.getHttpServer())
+      .post(`${base}/natural/config`)
+      .set(headers)
+      .send({ ...body, reviewAiModelId: imageId })
+      .expect(400);
+    expect(review.body.message).toBe("사진 검수 모델은 LLM을 선택하세요.");
+    expect(
+      await app.get(GenerationSettingsService).getNaturalAgentBundle(),
+    ).toBeNull();
   });
 
   it("requires saved configuration, rejects competing settings writes and freezes selected draft settings", async () => {

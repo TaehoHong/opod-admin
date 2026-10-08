@@ -1,4 +1,5 @@
-import { Alert, Spoiler, Stack, Text } from "@mantine/core";
+import { Alert, Stack, Text } from "@mantine/core";
+import classes from "./OperationErrorAlert.module.css";
 
 export type OperationFailure = {
   code?: string;
@@ -27,26 +28,30 @@ export function OperationErrorAlert({
   failure: OperationFailure;
   mt?: string | number;
 }) {
+  const detail =
+    failure.technicalDetail &&
+    failure.technicalDetail.trim() !== failure.cause.trim()
+      ? failure.technicalDetail
+      : undefined;
   return (
     <Alert color="red" role="alert" title={failure.problem} mt={mt}>
       <Stack gap={6}>
         <Text size="sm">
-          <b>발생 이유</b> · {failure.cause}
+          <b>발생 이유</b> · <span>{failure.cause}</span>
         </Text>
         <Text size="sm">
           <b>다음 행동</b> · {failure.nextAction}
         </Text>
-        {failure.technicalDetail ? (
-          <Spoiler
-            maxHeight={0}
-            showLabel="기술 상세 보기"
-            hideLabel="기술 상세 닫기"
-          >
-            <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
+        {failure.code || detail ? (
+          <details>
+            <summary className={classes.summary} tabIndex={0}>
+              기술 상세 보기
+            </summary>
+            <Text size="xs" c="ink.6" className={classes.detail}>
               {failure.code ? `오류 코드 · ${failure.code}\n` : ""}
-              {failure.technicalDetail}
+              {detail}
             </Text>
-          </Spoiler>
+          </details>
         ) : null}
       </Stack>
     </Alert>

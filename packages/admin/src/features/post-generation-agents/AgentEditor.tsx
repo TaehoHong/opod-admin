@@ -65,10 +65,12 @@ export function AgentEditor({
   config,
   models,
   onDirtyChange,
+  onSaved,
 }: {
   config: AgentConfig;
   models: AiModel[];
   onDirtyChange: (dirty: boolean) => void;
+  onSaved?: () => void;
 }) {
   const cache = useQueryClient();
   const [initial] = useState(() => readDraft(config));
@@ -144,6 +146,7 @@ export function AgentEditor({
     });
     setConfirmation(null);
     setPreview(null);
+    onSaved?.();
   };
   const save = useMutation({
     mutationFn: (values: Values) =>

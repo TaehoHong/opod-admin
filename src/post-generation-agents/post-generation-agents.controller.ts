@@ -78,10 +78,12 @@ export class PostGenerationAgentsController {
       this.models.get(body.reviewAiModelId),
       this.prompts.execution("generation"),
     ]);
-    if (planning.type !== "llm" || review.type !== "llm" || !generation?.id)
-      throw new BadRequestException(
-        "기획·검수 LLM과 이미지 생성 모델을 먼저 설정하세요.",
-      );
+    if (!generation?.id)
+      throw new BadRequestException("이미지 생성 모델을 먼저 저장하세요.");
+    if (planning.type !== "llm")
+      throw new BadRequestException("기획·캡션 모델은 LLM을 선택하세요.");
+    if (review.type !== "llm")
+      throw new BadRequestException("사진 검수 모델은 LLM을 선택하세요.");
     const content = {
       version: 1 as const,
       schedulerDefault: body.schedulerDefault,

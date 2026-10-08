@@ -1,0 +1,10 @@
+.summary {
+  color: var(--mantine-color-text);
+  cursor: pointer;
+  padding-block: var(--mantine-spacing-xs);
+  min-height: 2.75rem;
+}
+.detail {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
