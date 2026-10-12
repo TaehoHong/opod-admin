@@ -91,6 +91,31 @@ describe("reference retrieval", () => {
       "Query:Scene\npurpose",
     );
   });
+  it("uses the planned location query and leaves unindexed optional place references unused", async () => {
+    const { service, input, locations, fetchFn } = fixture();
+    locations.listReferenceEmbeddingSources.mockResolvedValue([
+      {
+        ownerId: "cafe",
+        mediaId: "cafe-photo",
+        description: "window",
+        indexed: false,
+        embeddingModel: null,
+      },
+    ]);
+    const result = await service.retrieve({
+      ...input,
+      locationDescription: "카페 창가",
+      locationIds: ["cafe"],
+    });
+    expect(result.locationReferences).toEqual({ cafe: [] });
+    expect(result.trace.locationReferencesUnavailable).toEqual([
+      { locationId: "cafe", mediaId: "cafe-photo" },
+    ]);
+    expect(JSON.parse(fetchFn.mock.calls[0][1].body).input[0]).toContain(
+      "Query:카페 창가\nScene\npurpose",
+    );
+    expect(locations.searchReferenceEmbeddings).not.toHaveBeenCalled();
+  });
   it("requires current index coverage before any provider or planner call", async () => {
     const { service, input, sources, fetchFn } = fixture();
     sources[0].indexed = false;

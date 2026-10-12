@@ -11,6 +11,7 @@ import { InvalidPlanningResponseError } from "./pipeline-error";
 import type { PostProduction } from "./post-planner";
 
 export type ImagePlannerInput = {
+  locationResolution?: "match_planned";
   contentProfile?: Pick<
     CharacterContentProfile,
     "accountConcept" | "imageStyle" | "constraints"
@@ -249,7 +250,11 @@ export function parseImagePlan(
   if (locationId !== null && !locationIds.has(locationId))
     throw new Error("image plan selected an unknown location");
   const production = input.postPlan.production;
-  if (production && locationId !== production.location.id)
+  if (
+    production &&
+    input.locationResolution !== "match_planned" &&
+    locationId !== production.location.id
+  )
     throw new Error("image plan changed the approved location");
   if (production && input.imageCount !== production.shots.length)
     throw new Error("image plan changed the approved shot count");

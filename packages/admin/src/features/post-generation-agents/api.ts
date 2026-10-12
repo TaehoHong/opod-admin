@@ -81,7 +81,7 @@ export type NaturalStage =
   | "naturalness"
   | "requirements";
 export type NaturalConfig = {
-  planningContract?: "structured-v1";
+  planningContract?: "structured-v1" | "structured-v2";
   generation?: { provider: string; effectiveModel: string; revision: number };
   schedulerDefault: boolean;
   revision: string;
@@ -99,7 +99,7 @@ export const fetchNaturalAgent = () =>
     >;
   }>("/post-generation-agents/natural/config");
 export const saveNaturalAgent = (body: {
-  planningContract?: "structured-v1";
+  planningContract?: "structured-v1" | "structured-v2";
   schedulerDefault: boolean;
   expectedRevision: string | null;
   planningAiModelId: string;

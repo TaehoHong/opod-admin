@@ -17,6 +17,7 @@ export type ReferenceRetrievalInput = {
   purpose: string;
   operatorRequest?: string;
   locationIds: string[];
+  locationDescription?: string;
 };
 
 @Injectable()
@@ -104,7 +105,15 @@ export class ReferenceRetrievalService {
       const locationSources = allLocations.filter((source) =>
         input.locationIds.includes(source.ownerId),
       );
-      const sources = [...identitySources, ...locationSources];
+      // Optional place matching must not depend on every catalogue image being indexed.
+      const usableLocations = (items: typeof locationSources) =>
+        input.locationDescription === undefined
+          ? items
+          : items.filter(
+              (source) => source.indexed && source.embeddingModel === model,
+            );
+      const usableLocationSources = usableLocations(locationSources);
+      const sources = [...identitySources, ...usableLocationSources];
       if (
         sources.some(
           (source) => !source.indexed || source.embeddingModel !== model,
@@ -114,7 +123,12 @@ export class ReferenceRetrievalService {
       const queries = [
         {
           purpose: "scene",
-          query: [input.premise, input.purpose, input.operatorRequest]
+          query: [
+            input.locationDescription,
+            input.premise,
+            input.purpose,
+            input.operatorRequest,
+          ]
             .filter(Boolean)
             .join("\n"),
         },
@@ -169,7 +183,7 @@ export class ReferenceRetrievalService {
       }
       const locationRanks: Record<string, RankedReference[]> = {};
       for (const locationId of input.locationIds) {
-        locationRanks[locationId] = locationSources.some(
+        locationRanks[locationId] = usableLocationSources.some(
           (source) => source.ownerId === locationId,
         )
           ? await this.locations.searchReferenceEmbeddings(
@@ -188,10 +202,12 @@ export class ReferenceRetrievalService {
       if (
         JSON.stringify(identityAfter) !== JSON.stringify(identitySources) ||
         JSON.stringify(
-          locationsAfter.filter((source) =>
-            input.locationIds.includes(source.ownerId),
+          usableLocations(
+            locationsAfter.filter((source) =>
+              input.locationIds.includes(source.ownerId),
+            ),
           ),
-        ) !== JSON.stringify(locationSources)
+        ) !== JSON.stringify(usableLocationSources)
       )
         throw new ReferenceRetrievalError("reference_embedding_index_changed");
       return {
@@ -211,6 +227,19 @@ export class ReferenceRetrievalService {
           identityCandidates: identityRanks,
           identitySelected: [...selected.values()],
           locationSelected: locationRanks,
+          ...(input.locationDescription !== undefined
+            ? {
+                locationReferencesUnavailable: locationSources
+                  .filter(
+                    (source) =>
+                      !source.indexed || source.embeddingModel !== model,
+                  )
+                  .map(({ ownerId, mediaId }) => ({
+                    locationId: ownerId,
+                    mediaId,
+                  })),
+              }
+            : {}),
         },
       };
     } catch (error) {

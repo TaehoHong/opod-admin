@@ -260,78 +260,82 @@ describe("natural post agent durable settings and recovery", () => {
     });
   });
 
-  it("saves the structured contract explicitly and keeps older draft snapshots readable", async () => {
-    await request(app.getHttpServer())
-      .post(`${base}/natural/config`)
-      .set(headers)
-      .send({
-        expectedRevision: null,
-        schedulerDefault: false,
-        planningAiModelId: llmId,
-        reviewAiModelId: llmId,
-        prompts: starters,
-      })
-      .expect(201);
-    const config = (
-      await request(app.getHttpServer())
-        .get(`${base}/natural/config`)
-        .set(headers)
-        .expect(200)
-    ).body;
-    const oldDraft = (
-      await request(app.getHttpServer())
-        .post("/api/admin/v1/drafts")
-        .set(headers)
-        .send({ characterId, postGenerationAgent: "natural-v1" })
-        .expect(201)
-    ).body;
-    const saved = (
+  it.each(["structured-v1", "structured-v2"])(
+    "saves %s explicitly and keeps older draft snapshots readable",
+    async (planningContract) => {
       await request(app.getHttpServer())
         .post(`${base}/natural/config`)
         .set(headers)
         .send({
-          expectedRevision: config.current.revision,
+          expectedRevision: null,
+          planningContract: "structured-v1",
           schedulerDefault: false,
           planningAiModelId: llmId,
           reviewAiModelId: llmId,
-          planningContract: "structured-v1",
-          prompts: {
-            ...config.current.prompts,
-            ...config.structuredPlanningPrompts,
-          },
+          prompts: starters,
         })
-        .expect(201)
-    ).body;
-    expect(saved.planningContract).toBe("structured-v1");
-    const created = (
-      await request(app.getHttpServer())
-        .post("/api/admin/v1/drafts")
-        .set(headers)
-        .send({ characterId, postGenerationAgent: "natural-v1" })
-        .expect(201)
-    ).body;
-    expect(created.conceptJson.naturalAgentConfig).toEqual(saved);
-    expect(
-      (
+        .expect(201);
+      const config = (
         await request(app.getHttpServer())
-          .get(`/api/admin/v1/drafts/${oldDraft.id}`)
+          .get(`${base}/natural/config`)
           .set(headers)
           .expect(200)
-      ).body.conceptJson.naturalAgentConfig,
-    ).toEqual(config.current);
-    await request(app.getHttpServer())
-      .post(`${base}/natural/config`)
-      .set(headers)
-      .send({
-        expectedRevision: saved.revision,
-        schedulerDefault: false,
-        planningAiModelId: llmId,
-        reviewAiModelId: llmId,
-        planningContract: "unsupported",
-        prompts: saved.prompts,
-      })
-      .expect(400);
-  });
+      ).body;
+      const oldDraft = (
+        await request(app.getHttpServer())
+          .post("/api/admin/v1/drafts")
+          .set(headers)
+          .send({ characterId, postGenerationAgent: "natural-v1" })
+          .expect(201)
+      ).body;
+      const saved = (
+        await request(app.getHttpServer())
+          .post(`${base}/natural/config`)
+          .set(headers)
+          .send({
+            expectedRevision: config.current.revision,
+            schedulerDefault: false,
+            planningAiModelId: llmId,
+            reviewAiModelId: llmId,
+            planningContract,
+            prompts: {
+              ...config.current.prompts,
+              ...config.structuredPlanningPrompts,
+            },
+          })
+          .expect(201)
+      ).body;
+      expect(saved.planningContract).toBe(planningContract);
+      const created = (
+        await request(app.getHttpServer())
+          .post("/api/admin/v1/drafts")
+          .set(headers)
+          .send({ characterId, postGenerationAgent: "natural-v1" })
+          .expect(201)
+      ).body;
+      expect(created.conceptJson.naturalAgentConfig).toEqual(saved);
+      expect(
+        (
+          await request(app.getHttpServer())
+            .get(`/api/admin/v1/drafts/${oldDraft.id}`)
+            .set(headers)
+            .expect(200)
+        ).body.conceptJson.naturalAgentConfig,
+      ).toEqual(config.current);
+      await request(app.getHttpServer())
+        .post(`${base}/natural/config`)
+        .set(headers)
+        .send({
+          expectedRevision: saved.revision,
+          schedulerDefault: false,
+          planningAiModelId: llmId,
+          reviewAiModelId: llmId,
+          planningContract: "unsupported",
+          prompts: saved.prompts,
+        })
+        .expect(400);
+    },
+  );
 
   it("offers only shared and own non-deleted locations to planning", async () => {
     const other = (

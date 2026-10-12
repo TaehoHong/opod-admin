@@ -306,13 +306,14 @@ function NaturalEditor({
             <Stack gap="sm">
               <Text size="sm">
                 장소와 사진 구성을 게시물 기획에서 정하고, 이미지 기획을 항목별
-                촬영 명세로 작성합니다. 영상 생성은 지원하지 않습니다.
+                촬영 명세로 작성합니다. 등록 장소는 컨셉 결정 후 일치하는
+                경우에만 연결합니다. 영상 생성은 지원하지 않습니다.
               </Text>
               <Button
                 variant="default"
                 disabled={save.isPending}
                 onClick={() => {
-                  form.setFieldValue("planningContract", "structured-v1");
+                  form.setFieldValue("planningContract", "structured-v2");
                   for (const stage of [
                     "post_plan",
                     "image_plan",

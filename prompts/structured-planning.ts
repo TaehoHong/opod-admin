@@ -2,6 +2,9 @@ import { POST_PLAN_JSON_SCHEMA } from "./post-planner";
 import { IMAGE_PLAN_JSON_SCHEMA } from "./image-planner";
 
 export const STRUCTURED_PLANNING = "structured-v1" as const;
+export const LOCATION_AFTER_CONCEPT = "structured-v2" as const;
+export type StructuredPlanningContract =
+  typeof STRUCTURED_PLANNING | typeof LOCATION_AFTER_CONCEPT;
 const text = (maxLength = 500) => ({ type: "string", minLength: 1, maxLength });
 const nullable = { anyOf: [text(), { type: "null" }] };
 const object = (properties: Record<string, unknown>) => ({
@@ -44,14 +47,22 @@ export const VISUAL_DETAILS_SCHEMA = object({
 });
 
 // New contracts are opt-in. Saved legacy bundles and artifacts retain their schema.
-export function structuredPlanningSchemas() {
+export function structuredPlanningSchemas(
+  contract: StructuredPlanningContract = STRUCTURED_PLANNING,
+) {
   const post = structuredClone(POST_PLAN_JSON_SCHEMA);
   const image = structuredClone(IMAGE_PLAN_JSON_SCHEMA);
   type Variant = { properties: Record<string, unknown>; required: string[] };
   const variants = (schema: Record<string, unknown>) =>
     (schema.properties as { result: { anyOf: Variant[] } }).result.anyOf;
   const postReady = variants(post)[0];
-  postReady.properties.production = PRODUCTION_SCHEMA;
+  postReady.properties.production =
+    contract === LOCATION_AFTER_CONCEPT
+      ? object({
+          ...PRODUCTION_SCHEMA.properties,
+          location: object({ id: { type: "null" }, description: text() }),
+        })
+      : PRODUCTION_SCHEMA;
   postReady.required.push("production");
   const conflict = variants(post)[1].properties.conflicts as {
     items: {
@@ -89,7 +100,7 @@ export const STRUCTURED_PLANNING_PROMPTS = {
 Choose a concrete post concept, location, supported format and ordered content from this character's account concept, visual style, relevant persona and memories, recent posts and operator request. Preserve intended fashion or sexual appeal and the account's room for ordinary life.
 
 Decisions
-State what this post shows, not a broad theme. Select a supplied location ID or a new scene location with id=null and a short physical description. A new setting is not an established home layout, past event or new canon. Choose single_image or carousel using productionCapabilities; a reel placement does not provide video generation. Return a grounded conflict when an explicit video-only request cannot be produced. Choose the necessary number of shots within maxImages, with zero-based consecutive sortOrder values and one distinct content description per shot. Do not pad the count.
+State what this post shows, not a broad theme. Choose the setting from the concept and authored facts, without a registered-location menu. Always set location.id=null and describe the intended place briefly in location.description; registration is resolved downstream. Preserve established place facts from persona or memories in contextFacts when needed. Do not invent changes to an established place. A new setting is not an established home layout, past event or new canon. Choose single_image or carousel using productionCapabilities; a reel placement does not provide video generation. Return a grounded conflict when an explicit video-only request cannot be produced. Choose the necessary number of shots within maxImages, with zero-based consecutive sortOrder values and one distinct content description per shot. Do not pad the count.
 Fix clothing, activities or other elements here only when central to the concept or required by authored instructions. Put those decisions in requirements. Leave poses, camera geometry and scene detail to image planning. Select only facts needed downstream into contextFacts as exact quotes and paths from persona or memories; these are evidence, not extra scenes to illustrate. Never convert conversation examples into events.
 
 Output
@@ -101,8 +112,11 @@ Visual decisions
 Write visualDetails as short factual phrases: subject, wardrobe, setting, poseAction, expressionGaze, props, framing, camera and lighting. Write each decision once. Use null or an empty props array when a field is inapplicable or needs no decision; do not invent gestures, props, expressions or lighting effects to fill fields. For animals and objects, describe only their relevant state. An intentional portrait, a pause and an activity are all valid.
 Describe visible content and rendering, not motives, prior events or explanations of what a pose proves. Preserve important spatial, support, contact and camera relationships. Incidental details may remain open, cropped or occluded. Do not require all features to be visible at once or impose a universal photographic look.
 
+Location matching
+The post has already chosen its setting. Supplied locations are optional supporting records, not a menu for changing that choice. Set locationId to a supplied ID only when its description and authored context support the planned place and its requirements. A shared category or attractive reference is not enough to identify a specific place. Otherwise use locationId=null and realize the planned setting without an environment reference. For an established place, preserve supported facts; leave unspecified details open. Do not change the concept, named place, required setting or shots to fit an available record. Unselected locations' exclusions and references do not apply.
+
 References and output
-Inspect reference pixels and IDs. Preserve only the assigned identity, clothing or environment attributes; distinguish current pose, expression, framing and light from reference identity. Record continuity only for shared elements and applicable shots; text alone does not supply a shared visual reference. Use only justified exclusions. Keep locationId equal to production.location.id and sortOrder equal to the approved shot order, starting at 0. Return a grounded blocked result when the plan cannot be realized. Output only the supplied schema.`,
+Inspect reference pixels and IDs. Preserve only the assigned identity, clothing or environment attributes; distinguish current pose, expression, framing and light from reference identity. Record continuity only for shared elements and applicable shots; text alone does not supply a shared visual reference. Use only justified exclusions. Keep sortOrder equal to the approved shot order, starting at 0. Return a grounded blocked result when the plan cannot be realized. Output only the supplied schema.`,
   image_prompt: `Role
 Translate the approved visualDetails into a concise English image-generation prompt using the supplied schema and model policy. Retain required in-image text in its specified language. Do not re-plan.
 

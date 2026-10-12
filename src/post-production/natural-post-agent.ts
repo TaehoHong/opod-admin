@@ -11,7 +11,11 @@ export {
 } from "../../prompts/natural-post-agent";
 import { canonicalJsonHash, generationSetHash } from "./post-pipeline-v3";
 import { isRecord } from "../shared/utils/value-utils";
-import { STRUCTURED_PLANNING } from "../../prompts/structured-planning";
+import {
+  STRUCTURED_PLANNING,
+  LOCATION_AFTER_CONCEPT,
+  StructuredPlanningContract,
+} from "../../prompts/structured-planning";
 
 export const NATURAL_AGENT = "natural-v1" as const;
 export type NaturalModel = {
@@ -20,7 +24,7 @@ export type NaturalModel = {
   model: string;
 };
 export type NaturalAgentBundle = {
-  planningContract?: typeof STRUCTURED_PLANNING;
+  planningContract?: StructuredPlanningContract;
   version: 1;
   schedulerDefault: boolean;
   revision: string;
@@ -52,7 +56,8 @@ export function validateNaturalBundle(value: unknown): NaturalAgentBundle {
     !isRecord(value.reviewModel) ||
     !isRecord(value.generation) ||
     (value.planningContract !== undefined &&
-      value.planningContract !== STRUCTURED_PLANNING)
+      value.planningContract !== STRUCTURED_PLANNING &&
+      value.planningContract !== LOCATION_AFTER_CONCEPT)
   )
     throw new BadRequestException("새 Agent 설정을 먼저 저장해 주세요.");
   for (const stage of NATURAL_STAGES) {

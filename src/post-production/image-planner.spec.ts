@@ -92,6 +92,30 @@ describe("Image Planning Agent contract", () => {
       shots: [{ visualDetails, motionEvidence: "", subjectState: "" }],
     });
   });
+  it.each(["cafe", null])(
+    "resolves the planned setting to %s without requiring a registered place",
+    (locationId) => {
+      const matchingInput = {
+        ...input,
+        locationResolution: "match_planned" as const,
+        locations: [
+          {
+            id: "cafe",
+            name: "카페",
+            description: "카페 창가",
+            references: [],
+          },
+        ],
+        postPlan: { ...input.postPlan, production },
+      };
+      expect(
+        parseImagePlan(
+          { ...ready, locationId, shots: [structuredShot] },
+          matchingInput,
+        ),
+      ).toMatchObject({ locationId });
+    },
+  );
   it("rejects a different valid location instead of silently replanning", () => {
     expect(() =>
       parseImagePlan(

@@ -240,13 +240,15 @@ function readyPostPlan() {
 }
 
 describe("PostPipelineV3Runner", () => {
-  function structuredBundle() {
+  function structuredBundle(
+    contract: "structured-v1" | "structured-v2" = "structured-v1",
+  ) {
     const { revision: _revision, ...old } = naturalAgentBundle();
     void _revision;
     const content = {
       ...old,
-      planningContract: "structured-v1" as const,
-      schemas: naturalSchemas("structured-v1"),
+      planningContract: contract,
+      schemas: naturalSchemas(contract),
     };
     return { ...content, revision: canonicalJsonHash(content) };
   }
@@ -300,6 +302,114 @@ describe("PostPipelineV3Runner", () => {
       pipeline: { imageCount: 1 },
     });
   });
+  it("plans a new setting without exposing or querying the location catalogue", async () => {
+    const planned = {
+      ...production,
+      location: { id: null, description: "해변 산책로" },
+    };
+    const current = draft({
+      pipelineVersion: "post-pipeline-v4",
+      postGenerationAgent: "natural-v1",
+      naturalAgentConfig: structuredBundle("structured-v2"),
+      pipeline: { stage: "post_plan", state: "running" },
+    });
+    const { runner, repository, fetchMock } = setup(current, {
+      ...readyPostPlan(),
+      production: planned,
+    });
+    repository.findAvailableLocations.mockRejectedValue(
+      new Error("Catalogue must not be read before the concept"),
+    );
+    await runner.runCurrentStage("draft-1");
+    const input = JSON.parse(
+      JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+    );
+    expect(input).not.toHaveProperty("locations");
+    expect(repository.findAvailableLocations).not.toHaveBeenCalled();
+    expect(
+      repository.persistV3Artifact.mock.calls[0][0].conceptJson,
+    ).toMatchObject({
+      postPlanning: {
+        contractVersion: "post-plan-v6",
+        output: { production: planned },
+      },
+      pipeline: { imageCount: 1 },
+    });
+  });
+  it.each(["cafe", null])(
+    "matches an optional registered location (%s) only after the concept is fixed",
+    async (locationId) => {
+      const planned = {
+        ...production,
+        location: { id: null, description: "카페 창가" },
+      };
+      const current = draft({
+        pipelineVersion: "post-pipeline-v4",
+        postGenerationAgent: "natural-v1",
+        naturalAgentConfig: structuredBundle("structured-v2"),
+        pipeline: { stage: "image_plan", state: "running", imageCount: 1 },
+        postPlanning: { output: { ...readyPostPlan(), production: planned } },
+      });
+      const output = {
+        status: "ready",
+        locationId,
+        continuity: { lockedElements: [] },
+        shots: [
+          {
+            sortOrder: 0,
+            visualDetails: {
+              subject: "커피잔",
+              wardrobe: null,
+              setting: "카페 창가",
+              poseAction: null,
+              expressionGaze: null,
+              props: [],
+              framing: "테이블",
+              camera: "앉은 눈높이",
+              lighting: null,
+            },
+            characterPresentation: {
+              mode: "none",
+              visibleParts: [],
+              faceVisible: false,
+              identityPreservationRequired: false,
+            },
+            subjectCameraRelation: "not_applicable",
+            notInFrame: [],
+            referenceBindings: [],
+          },
+        ],
+      };
+      const { runner, repository } = setup(current, output);
+      repository.findAvailableLocations.mockResolvedValue([
+        {
+          id: "cafe",
+          displayName: "카페",
+          description: "카페 창가",
+          negativePrompt: "",
+          referenceMedia: [],
+        },
+      ]);
+      await runner.runCurrentStage("draft-1");
+      expect(
+        repository.persistV3Artifact.mock.calls[0][0].conceptJson,
+      ).toMatchObject({
+        postPlanning: { output: { production: planned } },
+        imagePlanning: {
+          contractVersion: "image-plan-v6",
+          input: {
+            locationResolution: "match_planned",
+            locations: [{ id: "cafe" }],
+            postPlan: { production: planned },
+          },
+          output: {
+            locationId,
+            shots: [{ visualDetails: { setting: "카페 창가" } }],
+          },
+        },
+      });
+    },
+  );
   it("preserves approved facts and style in structured image planning", async () => {
     const planned = {
       ...production,

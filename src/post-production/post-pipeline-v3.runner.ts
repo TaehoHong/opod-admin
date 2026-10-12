@@ -71,7 +71,10 @@ import {
 } from "./post-planner";
 import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
-import { STRUCTURED_PLANNING } from "../../prompts/structured-planning";
+import {
+  STRUCTURED_PLANNING,
+  LOCATION_AFTER_CONCEPT,
+} from "../../prompts/structured-planning";
 import { LocationsService } from "../locations/locations.service";
 import {
   InvalidPlanningResponseError,
@@ -381,16 +384,18 @@ export class PostPipelineV3Runner {
         maxImages,
       };
       input.contentProfile.imageStyle = profile.imageStyle;
-      if (!this.locations)
-        throw new Error("Location service is not configured");
-      input.locations = (
-        await this.locations.listForPlanning(draft.characterId)
-      ).map((location) => ({
-        id: location.id,
-        name: location.displayName,
-        description: location.description,
-        exclusions: [location.negativePrompt.trim()].filter(Boolean),
-      }));
+      if (!locationAfterConcept(concept)) {
+        if (!this.locations)
+          throw new Error("Location service is not configured");
+        input.locations = (
+          await this.locations.listForPlanning(draft.characterId)
+        ).map((location) => ({
+          id: location.id,
+          name: location.displayName,
+          description: location.description,
+          exclusions: [location.negativePrompt.trim()].filter(Boolean),
+        }));
+      }
       input.persona.writingProfile = { voice: [], contentStyle: [] };
       input.persona.additionalContext = input.persona.additionalContext.filter(
         (entry) =>
@@ -441,7 +446,9 @@ export class PostPipelineV3Runner {
       producerLogId: result.producerLogId,
       agentConfig: client.agentSettings?.metadata ?? null,
       contractVersion: structuredPlanning(concept)
-        ? "post-plan-v5"
+        ? locationAfterConcept(concept)
+          ? "post-plan-v6"
+          : "post-plan-v5"
         : POST_PLAN_CONTRACT_VERSION,
       promptVersion: POST_PLANNER_PROMPT_VERSION,
       input,
@@ -541,11 +548,12 @@ export class PostPipelineV3Runner {
       ]);
       return;
     }
-    const planningLocations = production
-      ? availableLocations.filter(
-          (location) => location.id === production.location.id,
-        )
-      : availableLocations;
+    const planningLocations =
+      production && !locationAfterConcept(concept)
+        ? availableLocations.filter(
+            (location) => location.id === production.location.id,
+          )
+        : availableLocations;
     if (!this.referenceRetrieval) {
       await this.pause(draft, concept, "needs_configuration", [
         "reference_retrieval_not_configured",
@@ -562,6 +570,9 @@ export class PostPipelineV3Runner {
         purpose: postPlan.intent.primaryPurpose,
         operatorRequest: operatorRequest(concept),
         locationIds: planningLocations.map((location) => location.id),
+        ...(locationAfterConcept(concept)
+          ? { locationDescription: production?.location.description }
+          : {}),
       });
     } catch (error) {
       concept.referenceRetrieval = {
@@ -592,6 +603,9 @@ export class PostPipelineV3Runner {
           "",
         constraints: profile.constraints,
       },
+      ...(locationAfterConcept(concept)
+        ? { locationResolution: "match_planned" as const }
+        : {}),
       postPlan: {
         intent: postPlan.intent,
         ...(production ? { production } : {}),
@@ -1334,7 +1348,16 @@ function structuredPlanning(concept: V3Concept): boolean {
   return (
     isNaturalAgent(concept) &&
     isRecord(concept.naturalAgentConfig) &&
-    concept.naturalAgentConfig.planningContract === STRUCTURED_PLANNING
+    (concept.naturalAgentConfig.planningContract === STRUCTURED_PLANNING ||
+      concept.naturalAgentConfig.planningContract === LOCATION_AFTER_CONCEPT)
+  );
+}
+
+function locationAfterConcept(concept: V3Concept): boolean {
+  return (
+    isNaturalAgent(concept) &&
+    isRecord(concept.naturalAgentConfig) &&
+    concept.naturalAgentConfig.planningContract === LOCATION_AFTER_CONCEPT
   );
 }
 
@@ -1478,7 +1501,9 @@ function imageArtifact(
     },
     producerLogId,
     contractVersion: input.postPlan.production
-      ? "image-plan-v5"
+      ? input.locationResolution === "match_planned"
+        ? "image-plan-v6"
+        : "image-plan-v5"
       : IMAGE_PLAN_CONTRACT_VERSION,
     promptVersion: IMAGE_PLANNER_PROMPT_VERSION,
     input,

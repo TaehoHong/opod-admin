@@ -46,6 +46,13 @@ describe("Post Planning Agent contract (v3)", () => {
       parsePostPlan({ ...ready, production }, structuredInput),
     ).toMatchObject({ production });
   });
+  it("rejects a registered location ID when planning received no location catalogue", () => {
+    const { locations: _locations, ...withoutLocations } = structuredInput;
+    void _locations;
+    expect(() =>
+      parsePostPlan({ ...ready, production }, withoutLocations),
+    ).toThrow("unavailable location");
+  });
   it.each([
     [
       { location: { id: "missing", description: "카페" } },

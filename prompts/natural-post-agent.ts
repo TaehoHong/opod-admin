@@ -1,6 +1,6 @@
 import { POST_AGENT_CONTRACTS } from "./post-agent-contracts";
 import {
-  STRUCTURED_PLANNING,
+  StructuredPlanningContract,
   structuredPlanningSchemas,
 } from "./structured-planning";
 
@@ -41,7 +41,7 @@ export const PHOTO_REVIEW_SCHEMA = {
   additionalProperties: false,
 };
 export function naturalSchemas(
-  planningContract?: typeof STRUCTURED_PLANNING,
+  planningContract?: StructuredPlanningContract,
 ): Record<NaturalStage, Record<string, unknown>> {
   const schemas = Object.fromEntries(
     NATURAL_STAGES.map((stage) => [
@@ -51,8 +51,8 @@ export function naturalSchemas(
         : POST_AGENT_CONTRACTS[stage].outputSchema,
     ]),
   ) as Record<NaturalStage, Record<string, unknown>>;
-  return planningContract === STRUCTURED_PLANNING
-    ? { ...schemas, ...structuredPlanningSchemas() }
+  return planningContract !== undefined
+    ? { ...schemas, ...structuredPlanningSchemas(planningContract) }
     : schemas;
 }
 
