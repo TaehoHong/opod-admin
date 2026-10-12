@@ -110,6 +110,57 @@ const publishConcept = {
   pipeline: { stage: "publish", state: "pending" },
 };
 
+it.each(["existing", "natural-v1"])(
+  "offers mode switching for %s at the current manual stage",
+  async (agent) => {
+    let submitted: unknown;
+    registerHandlers(
+      { ...publishConcept, postGenerationAgent: agent },
+      {
+        ...v3Item,
+        currentStage: "publish",
+        pipelineV3: {
+          ...v3Item.pipelineV3,
+          version: "post-pipeline-v4",
+          stage: "publish",
+        },
+      },
+      { status: "planned" },
+    );
+    server.use(
+      http.post(
+        "/api/admin/v1/drafts/draft-1/automation",
+        async ({ request }) => {
+          submitted = await request.json();
+          return HttpResponse.json({
+            id: "draft-1",
+            characterId: "character-1",
+            contentType: "feed",
+            status: "planned",
+            caption: "",
+            hashtags: [],
+            conceptJson: {
+              ...publishConcept,
+              postGenerationAgent: agent,
+              mode: "auto",
+            },
+            shots: [],
+          });
+        },
+      ),
+    );
+    renderPage(<PostWorkPage workId="draft-1" stage="publish" />, {
+      path: "/posts/draft-1/publish",
+    });
+    const button = await screen.findByRole("button", {
+      name: "자동 진행 시작",
+    });
+    expect(submitted).toBeUndefined();
+    await userEvent.setup().click(button);
+    await waitFor(() => expect(submitted).toEqual({ enabled: true }));
+  },
+);
+
 function publishShot(sortOrder: number) {
   return {
     sortOrder,

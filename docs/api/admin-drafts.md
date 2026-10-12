@@ -130,19 +130,20 @@ not record an execution snapshot.
 draft approval eligibility; approval continues to require `needs_review` and
 one selected image for every cut.
 
-## Create a draft (manual planning trigger)
+## Create a draft
 
 ```http
 POST /api/drafts
 Content-Type: application/json
 
-{ "characterId": "<uuid>", "sceneHint": "골목 카페", "scheduledAt": "2026-07-13T10:00:00Z", "contentType": "feed" }
+{ "characterId": "<uuid>", "postGenerationAgent": "existing", "mode": "manual", "sceneHint": "골목 카페", "scheduledAt": "2026-07-13T10:00:00Z", "contentType": "feed" }
 ```
 
-Only `characterId` is required. Creates a `planned` draft; the worker plans it
-on the next tick. `sceneHint` is passed to the planner as a mandatory hint.
-`mode: "manual"` opts out of the automatic pipeline — the operator drives each
-step with the endpoints below.
+Only `characterId` is required. Creates a `planned` draft with an independent
+Agent and execution mode choice. `auto` lets the worker continue on the next
+tick; `manual` waits for the operator to run each step with the endpoints below.
+Both modes are supported by both Agents. Optional `sceneHint` becomes the
+operator request. See the [selection and compatibility rules](#생성-agent-선택진행-방식).
 
 ## Operator request (post-pipeline-v3/v4 only)
 
@@ -310,16 +311,26 @@ KST hour window. Defaults: disabled, 3/week, 18–22 KST. `weeklyCadence` is
 1–21 and `hourStartKst < hourEndKst`.
 
 
-## 생성 Agent 선택·자동 진행 정책
+## 생성 Agent 선택·진행 방식
 
 생성 요청의 선택적 `postGenerationAgent`는 `existing` 또는 `natural-v1`이다.
-미지정·기존 선택은 기존 생성 정책을 유지하며, 새 선택은 저장된 새 Agent 번들을 복사하고
-`mode=auto`로 생성한다. 새 Agent가 미설정이거나 선택값이 잘못되면 400이다.
+선택적 `mode`는 `manual` 또는 `auto`이며 Agent와 독립이다. 기존·새 Agent 모두
+두 방식으로 생성할 수 있다. 새 게시물 화면은 두 Agent 모두 수동을 기본값으로 두고
+선택한 mode를 명시적으로 전송한다. mode가 없는 이전 API 요청은 기존 Agent 수동,
+새 Agent 자동의 기본값을 유지한다. 새 선택은 저장된 새 Agent 번들을 복사하며,
+미설정·잘못된 Agent 선택·잘못된 mode는 400이다.
 
-`POST /api/admin/v1/drafts/:id/automation`의 `{ enabled: boolean }`은 새 Agent의
-다음 자동 진행·게시를 보류하거나 재개한다. 실행·게시 lease가 없을 때만 변경할 수 있다.
-재개는 pending/ready의 planned/generating 상태만 허용한다. 실패·검수 불합격은 먼저
-보완·단계 재실행이 필요하다. 생성 중 사진의 실행을 취소하지 않는다.
+수동 작업은 각 단계가 끝난 뒤 대기한다. 자동 워커는 수동 작업의 기획 단계·이미지
+집계·게시를 claim하지 않는다. 이미지 프롬프트 작성으로 만든 잡도 draft 상태로 남아
+운영자가 생성 실행을 요청해야 한다. 사진 검수는 새 Agent의 캡션 실행 안에서 수행하며
+실행 후 다음 게시 단계는 다시 대기한다.
+
+`POST /api/admin/v1/drafts/:id/automation`의 `{ enabled: boolean }`은 두 Agent에
+공통으로 적용한다. false는 수동, true는 자동으로 전환하며 작업 화면의 공통 헤더에서
+제어한다. 실행·게시 lease가 없을 때만 변경할 수 있다. 재개는 실패가 아닌 진행 가능한
+상태이며 V3/V4 단계가 pending/ready일 때 허용한다. 실패·입력 보완·검수 불합격은
+먼저 보완·단계 재실행이 필요하다. 준비된 수동 이미지 잡은 GenerationService의
+기존 확인 동작으로 queued가 되어 자동 워커가 실행한다. 생성 중 사진의 실행은 취소하지 않는다.
 
 새 Agent의 `caption/needs_input/photo_quality_rejected`는 사진 재생성을 허용한다.
 검수·캡션의 현재 이미지 집합 일치 여부를 수동·자동 게시 모두 검사한다.

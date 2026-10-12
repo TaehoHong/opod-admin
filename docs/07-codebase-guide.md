@@ -616,7 +616,12 @@ v1 번들과 초안은 이전 장소 결정·검증 경로를 보존한다.
 `test/natural-post-agent.e2e-spec.ts`다. 자세한 운영 경계는 `docs/natural-post-agent.md` 참고.
 
 `postGenerationAgent` 선택은 엔진 버전과 독립이며 `DraftsService.createDraft`와
-`PostBriefCreatePage.tsx`가 기존/새 선택을 연결한다. 새 Agent는 자동 진행하고,
+`PostBriefCreatePage.tsx`가 기존/새 선택과 독립적인 `mode=manual|auto` 선택을 연결한다.
+두 Agent 모두 화면 기본값은 수동이며 각 단계의 명시적 실행 전까지 대기한다.
+mode 없는 API 요청은 이전 기본값을 유지한다. `DraftsService.setAutomation`과
+`DraftsRepository.setAutomation`이 공통 전환을 소유하며 PostWorkPage 헤더에서 제어한다.
+자동 전환 시 준비된 최신 수동 이미지 잡은 기존 `GenerationService.confirmImageDraft`를
+통해 큐에 넣는다. 수동 제외는 기존 DraftWorkerRepository의 단계·집계·게시 claim이 담당한다.
 `GenerationSettingsService`만 `postAgent.natural-v1`의 번들 저장·조회/CAS를 소유한다.
 `PostGenerationAgentsController`와 `NaturalAgentPanel.tsx`가 명시적 지침 설치·독립 편집을 제공한다.
 번들 출력 계약·설치용 초안은 `prompts/natural-post-agent.ts`, runtime 검증은

@@ -22,7 +22,7 @@ import { createDraft } from "../drafts/api";
 
 export function PostBriefCreatePage() {
   const navigate = useNavigate();
-  const [agent, setAgent] = useState("existing");
+  const [mode, setMode] = useState("manual");
   const natural = useQuery({
     queryKey: ["natural-post-agent"],
     queryFn: fetchNaturalAgent,
@@ -35,10 +35,11 @@ export function PostBriefCreatePage() {
       characterId: params.get("characterId") ?? "",
       contentType: "feed",
       postGenerationAgent: "existing",
+      mode: "manual",
       sceneHint: "",
       scheduledAt: "",
     },
-    onValuesChange: (values) => setAgent(values.postGenerationAgent),
+    onValuesChange: (values) => setMode(values.mode),
     validate: {
       characterId: (value) => (value ? null : "캐릭터를 선택해 주세요"),
       sceneHint: (value) =>
@@ -54,6 +55,7 @@ export function PostBriefCreatePage() {
         contentType: values.contentType as "feed" | "reel",
         postGenerationAgent: values.postGenerationAgent as
           "existing" | "natural-v1",
+        mode: values.mode as "manual" | "auto",
         ...(values.sceneHint.trim()
           ? { sceneHint: values.sceneHint.trim() }
           : {}),
@@ -93,20 +95,31 @@ export function PostBriefCreatePage() {
               natural.isPending
                 ? "새 Agent 설정을 확인하는 중입니다."
                 : natural.data?.current
-                  ? "새 Agent는 사진 검수 후 자동 게시합니다."
+                  ? "Agent와 진행 방식을 각각 선택하세요."
                   : "새 Agent를 사용하려면 Agent 관리에서 설정을 먼저 저장하세요."
             }
             data={[
-              { value: "existing", label: "기존 Agent · 단계별 수동 진행" },
+              { value: "existing", label: "기존 Agent" },
               {
                 value: "natural-v1",
-                label: "새 Agent · 자연스러운 사진 자동 제작",
+                label: "새 Agent · 자연스러운 사진",
                 disabled: !natural.data?.current,
               },
             ]}
             allowDeselect={false}
             key={form.key("postGenerationAgent")}
             {...form.getInputProps("postGenerationAgent")}
+          />
+          <Select
+            label="진행 방식"
+            description="두 Agent 모두 자동·수동으로 진행할 수 있습니다."
+            data={[
+              { value: "manual", label: "수동 · 단계별 실행" },
+              { value: "auto", label: "자동 · 연속 진행" },
+            ]}
+            allowDeselect={false}
+            key={form.key("mode")}
+            {...form.getInputProps("mode")}
           />
           {natural.error ? (
             <OperationErrorAlert
@@ -128,9 +141,9 @@ export function PostBriefCreatePage() {
           <TextInput
             label="게시 일정"
             description={
-              agent === "natural-v1"
-                ? "비우면 사진 검수·캡션 완료 후 자동 게시합니다."
-                : "비우면 승인 후 즉시 게시합니다."
+              mode === "auto"
+                ? "비우면 제작 완료 후 자동 게시합니다."
+                : "단계별로 실행하고 마지막에 직접 게시합니다."
             }
             type="datetime-local"
             w={280}
@@ -138,9 +151,9 @@ export function PostBriefCreatePage() {
             {...form.getInputProps("scheduledAt")}
           />
           <Alert color="blue">
-            {agent === "natural-v1"
-              ? "기획부터 사진 검수·캡션·게시까지 자동 진행합니다. 검수 불합격은 보류하며, 자동 워커가 켜져 있어야 실행됩니다."
-              : "기존 Agent 작업은 단계마다 직접 확인하고 실행합니다."}
+            {mode === "auto"
+              ? "기획부터 게시까지 자동 진행합니다. 입력 보완·검수 불합격은 보류하며, 자동 워커가 켜져 있어야 실행됩니다."
+              : "각 단계가 끝나면 대기합니다. 다음 단계는 직접 실행할 때만 진행합니다."}
           </Alert>
           {create.isError ? (
             <OperationErrorAlert
@@ -152,7 +165,7 @@ export function PostBriefCreatePage() {
           ) : null}
           <Group>
             <Button type="submit" loading={create.isPending}>
-              {agent === "natural-v1" ? "자동 제작 시작" : "저장하고 기획으로"}
+              {mode === "auto" ? "자동 제작 시작" : "저장하고 기획으로"}
             </Button>
             <Button
               variant="default"

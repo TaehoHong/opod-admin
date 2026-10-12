@@ -12,6 +12,7 @@ import {
 } from "../shared/utils/page";
 import { parseFinishPreset } from "../media/film-finish";
 import type { ImageGenerationProgress } from "../generation/providers/image-generation.provider";
+import { GenerationService } from "../generation/generation.service";
 import { GenerationSettingsService } from "../settings/generation-settings.service";
 import {
   createPostPipelineV3Concept,
@@ -333,6 +334,7 @@ export class DraftsService {
   constructor(
     private readonly repository: DraftsRepository,
     private readonly settings: GenerationSettingsService,
+    private readonly generation: GenerationService,
   ) {}
 
   async listDrafts(
@@ -448,10 +450,11 @@ export class DraftsService {
     return { ...this.toDraft(draft), shots };
   }
 
-  // 기존 선택/미지정은 수동 진행을 유지하고 새 Agent는 자동으로 시작한다.
+  // Agent와 진행 방식은 독립이다. mode가 없는 이전 요청의 기본값은 유지한다.
   async createDraft(input: {
     characterId: string;
     postGenerationAgent?: "existing" | "natural-v1";
+    mode?: "manual" | "auto";
     sceneHint?: string;
     scheduledAt?: string;
     contentType?: string;
@@ -475,17 +478,20 @@ export class DraftsService {
       !["existing", NATURAL_AGENT].includes(input.postGenerationAgent)
     )
       throw new BadRequestException("Invalid post generation agent");
+    if (input.mode !== undefined && !["manual", "auto"].includes(input.mode))
+      throw new BadRequestException("Invalid draft execution mode");
     const natural =
       input.postGenerationAgent === NATURAL_AGENT
         ? await this.settings.requireNaturalAgentBundle()
         : null;
     const pipelineV3 = await this.settings.resolvePipelineV3();
+    const mode = input.mode ?? (natural ? "auto" : "manual");
 
     const conceptJson = natural
       ? {
           ...createPostPipelineV3Concept({
             source: "manual",
-            mode: "auto",
+            mode,
             ...(sceneHint ? { operatorRequest: sceneHint } : {}),
           }),
           postGenerationAgent: NATURAL_AGENT,
@@ -494,12 +500,12 @@ export class DraftsService {
       : pipelineV3.enabled
         ? createPostPipelineV3Concept({
             source: "manual",
-            mode: "manual",
+            mode,
             ...(sceneHint ? { operatorRequest: sceneHint } : {}),
           })
         : {
             source: "manual",
-            mode: "manual",
+            mode,
             ...(sceneHint ? { sceneHint } : {}),
           };
     const draft = await this.repository.createDraft({
@@ -522,16 +528,20 @@ export class DraftsService {
     return this.toDraft(draft);
   }
 
-  async setNaturalAutomation(
-    draftId: string,
-    enabled: boolean,
-  ): Promise<AdminDraft> {
-    if (!(await this.repository.setNaturalAutomation(draftId, enabled)))
+  async setAutomation(draftId: string, enabled: boolean): Promise<AdminDraft> {
+    if (!(await this.repository.setAutomation(draftId, enabled)))
       throw new BadRequestException(
         enabled
           ? "실행 중이거나 입력·검수 보류 상태입니다. 사진을 보완하고 현재 단계를 실행한 뒤 자동 진행을 재개하세요."
-          : "새 Agent가 현재 단계를 실행하거나 게시 중입니다. 완료 후 다시 시도하세요.",
+          : "현재 단계를 실행하거나 게시 중입니다. 완료 후 다시 시도하세요.",
       );
+    if (enabled) {
+      const draft = await this.getDraft(draftId);
+      for (const shot of draft.shots ?? []) {
+        if (shot.status === "draft" && shot.prompt.trim())
+          await this.generation.confirmImageDraft(shot.jobId);
+      }
+    }
     return this.getDraft(draftId);
   }
 

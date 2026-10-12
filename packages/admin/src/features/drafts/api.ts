@@ -138,6 +138,7 @@ export function fetchDraft(draftId: string): Promise<Draft> {
 export function createDraft(body: {
   characterId: string;
   postGenerationAgent?: "existing" | "natural-v1";
+  mode?: "manual" | "auto";
   sceneHint?: string;
   scheduledAt?: string;
   contentType?: "feed" | "reel";
@@ -348,7 +349,7 @@ export function outputFinishPreset(
   return isFinishPreset(draftFinish) ? draftFinish : "none";
 }
 
-export const setNaturalAutomation = (id: string, enabled: boolean) =>
+export const setDraftAutomation = (id: string, enabled: boolean) =>
   apiRequest<Draft>(`/drafts/${encodeURIComponent(id)}/automation`, {
     method: "POST",
     body: { enabled },

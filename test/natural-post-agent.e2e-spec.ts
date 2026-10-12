@@ -26,6 +26,7 @@ describe("natural post agent durable settings and recovery", () => {
   let llmId: string;
   let starters: Record<string, string>;
   let originalNaturalValue: string | undefined;
+  let originalPipelineValue: string | undefined;
   let generationVersionId: string;
   let imageId: string;
   beforeAll(async () => {
@@ -47,6 +48,12 @@ describe("natural post agent durable settings and recovery", () => {
       .from(adminSettings)
       .where(eq(adminSettings.key, "postAgent.natural-v1"));
     originalNaturalValue = original?.value;
+    const [pipeline] = await app
+      .get(DatabaseService)
+      .client.select()
+      .from(adminSettings)
+      .where(eq(adminSettings.key, "pipeline.v3Enabled"));
+    originalPipelineValue = pipeline?.value;
     characterId = (
       await request(app.getHttpServer())
         .post("/api/admin/v1/characters")
@@ -105,6 +112,18 @@ describe("natural post agent durable settings and recovery", () => {
     ).body.starters;
   });
   beforeEach(async () => {
+    const db = app.get(DatabaseService).client;
+    await db
+      .delete(generationJobs)
+      .where(eq(generationJobs.characterId, characterId));
+    await db.delete(postDrafts).where(eq(postDrafts.characterId, characterId));
+    await db
+      .insert(adminSettings)
+      .values({ key: "pipeline.v3Enabled", value: "true" })
+      .onConflictDoUpdate({
+        target: adminSettings.key,
+        set: { value: "true" },
+      });
     await app
       .get(DatabaseService)
       .client.delete(adminSettings)
@@ -127,6 +146,13 @@ describe("natural post agent durable settings and recovery", () => {
         await db
           .insert(adminSettings)
           .values({ key: "postAgent.natural-v1", value: originalNaturalValue });
+      await db
+        .delete(adminSettings)
+        .where(eq(adminSettings.key, "pipeline.v3Enabled"));
+      if (originalPipelineValue !== undefined)
+        await db
+          .insert(adminSettings)
+          .values({ key: "pipeline.v3Enabled", value: originalPipelineValue });
     } finally {
       await app.close();
     }
@@ -169,6 +195,274 @@ describe("natural post agent durable settings and recovery", () => {
       await app.get(GenerationSettingsService).getNaturalAgentBundle(),
     ).toBeNull();
   });
+
+  it.each([
+    ["existing", "manual"],
+    ["existing", "auto"],
+    ["natural-v1", "manual"],
+    ["natural-v1", "auto"],
+  ])(
+    "persists %s with the requested %s mode through the creation API",
+    async (agent, mode) => {
+      await request(app.getHttpServer())
+        .post(`${base}/natural/config`)
+        .set(headers)
+        .send({
+          expectedRevision: null,
+          schedulerDefault: false,
+          planningAiModelId: llmId,
+          reviewAiModelId: llmId,
+          prompts: starters,
+        })
+        .expect(201);
+      const created = (
+        await request(app.getHttpServer())
+          .post("/api/admin/v1/drafts")
+          .set(headers)
+          .send({
+            characterId,
+            postGenerationAgent: agent,
+            mode,
+          })
+          .expect(201)
+      ).body;
+      expect(created.conceptJson).toMatchObject({
+        postGenerationAgent: agent,
+        mode,
+        pipelineVersion: "post-pipeline-v4",
+      });
+      await request(app.getHttpServer())
+        .post("/api/admin/v1/drafts")
+        .set(headers)
+        .send({
+          characterId,
+          postGenerationAgent: agent,
+          mode: "invalid",
+        })
+        .expect(400);
+    },
+  );
+
+  it.each(["existing", "natural-v1"])(
+    "switches %s between manual and auto without bypassing a running or blocked stage",
+    async (agent) => {
+      await request(app.getHttpServer())
+        .post(`${base}/natural/config`)
+        .set(headers)
+        .send({
+          expectedRevision: null,
+          schedulerDefault: false,
+          planningAiModelId: llmId,
+          reviewAiModelId: llmId,
+          prompts: starters,
+        })
+        .expect(201);
+      const created = (
+        await request(app.getHttpServer())
+          .post("/api/admin/v1/drafts")
+          .set(headers)
+          .send({
+            characterId,
+            postGenerationAgent: agent,
+            mode: "manual",
+          })
+          .expect(201)
+      ).body;
+      const repo = app.get(DraftWorkerRepository);
+      expect(await repo.claimV3Draft(120)).toBeUndefined();
+      const resumed = (
+        await request(app.getHttpServer())
+          .post(`/api/admin/v1/drafts/${created.id}/automation`)
+          .set(headers)
+          .send({ enabled: true })
+          .expect(201)
+      ).body;
+      expect(resumed.conceptJson.mode).toBe("auto");
+      expect(await repo.claimV3Draft(120)).toBe(created.id);
+      await request(app.getHttpServer())
+        .post(`/api/admin/v1/drafts/${created.id}/automation`)
+        .set(headers)
+        .send({ enabled: false })
+        .expect(400);
+      const db = app.get(DatabaseService).client;
+      await db
+        .update(postDrafts)
+        .set({
+          status: "planned",
+          leaseExpiresAt: null,
+          conceptJson: resumed.conceptJson,
+        })
+        .where(eq(postDrafts.id, created.id));
+      const held = (
+        await request(app.getHttpServer())
+          .post(`/api/admin/v1/drafts/${created.id}/automation`)
+          .set(headers)
+          .send({ enabled: false })
+          .expect(201)
+      ).body;
+      expect(held.conceptJson.mode).toBe("manual");
+      expect(await repo.claimV3Draft(120)).toBeUndefined();
+      await db
+        .update(postDrafts)
+        .set({
+          conceptJson: {
+            ...held.conceptJson,
+            pipeline: { stage: "caption", state: "needs_input" },
+          },
+        })
+        .where(eq(postDrafts.id, created.id));
+      await request(app.getHttpServer())
+        .post(`/api/admin/v1/drafts/${created.id}/automation`)
+        .set(headers)
+        .send({ enabled: true })
+        .expect(400);
+      const blocked = (
+        await request(app.getHttpServer())
+          .get(`/api/admin/v1/drafts/${created.id}`)
+          .set(headers)
+          .expect(200)
+      ).body;
+      expect(blocked.conceptJson.mode).toBe("manual");
+      expect(blocked.conceptJson.pipeline.state).toBe("needs_input");
+    },
+  );
+
+  it.each([
+    ["existing", "post_plan"],
+    ["natural-v1", "post_plan"],
+    ["existing", "image_plan"],
+    ["natural-v1", "image_plan"],
+    ["existing", "image_prompt"],
+    ["natural-v1", "image_prompt"],
+    ["existing", "caption"],
+    ["natural-v1", "caption"],
+  ])(
+    "waits for explicit execution of %s at %s while automatic polling is available",
+    async (agent, stage) => {
+      const db = app.get(DatabaseService).client;
+      const [draft] = await db
+        .insert(postDrafts)
+        .values({
+          characterId,
+          draftType: "post",
+          contentType: "feed",
+          status: "planned",
+          conceptJson: {
+            pipelineVersion: "post-pipeline-v4",
+            postGenerationAgent: agent,
+            mode: "manual",
+            pipeline: { stage, state: "pending" },
+          },
+        })
+        .returning();
+      const repo = app.get(DraftWorkerRepository);
+      expect(await repo.claimV3Draft(120)).toBeUndefined();
+      const waiting = (
+        await request(app.getHttpServer())
+          .get(`/api/admin/v1/drafts/${draft.id}`)
+          .set(headers)
+          .expect(200)
+      ).body;
+      expect(waiting.status).toBe("planned");
+      expect(waiting.conceptJson.pipeline).toEqual({ stage, state: "pending" });
+      expect(await repo.claimV3DraftNow(draft.id, 120)).toBe(true);
+      const running = (
+        await request(app.getHttpServer())
+          .get(`/api/admin/v1/drafts/${draft.id}`)
+          .set(headers)
+          .expect(200)
+      ).body;
+      expect(running.conceptJson).toMatchObject({
+        mode: "manual",
+        pipeline: { stage, state: "running" },
+      });
+    },
+  );
+
+  it.each(["existing", "natural-v1"])(
+    "keeps %s manual generation and publishing out of automatic worker claims",
+    async (agent) => {
+      const db = app.get(DatabaseService).client;
+      const [draft] = await db
+        .insert(postDrafts)
+        .values({
+          characterId,
+          draftType: "post",
+          contentType: "feed",
+          status: "generating",
+          conceptJson: {
+            pipelineVersion: "post-pipeline-v4",
+            postGenerationAgent: agent,
+            mode: "manual",
+            pipeline: { stage: "generation", state: "pending" },
+          },
+        })
+        .returning();
+      const repo = app.get(DraftWorkerRepository);
+      expect(await repo.findGeneratingDrafts(10)).toEqual([]);
+      await db
+        .update(postDrafts)
+        .set({
+          status: "planned",
+          conceptJson: {
+            ...(draft.conceptJson as object),
+            pipeline: { stage: "publish", state: "pending" },
+          },
+        })
+        .where(eq(postDrafts.id, draft.id));
+      expect(await repo.findDueDrafts(new Date(), 10, 120, new Date())).toEqual(
+        [],
+      );
+      expect(await repo.findApprovedDraft(draft.id, 120)).toMatchObject({
+        id: draft.id,
+        conceptJson: { mode: "manual" },
+      });
+    },
+  );
+
+  it.each(["existing", "natural-v1"])(
+    "queues %s prepared manual images when switching to automatic generation",
+    async (agent) => {
+      const db = app.get(DatabaseService).client;
+      const [draft] = await db
+        .insert(postDrafts)
+        .values({
+          characterId,
+          draftType: "post",
+          contentType: "feed",
+          status: "generating",
+          conceptJson: {
+            pipelineVersion: "post-pipeline-v4",
+            postGenerationAgent: agent,
+            mode: "manual",
+            pipeline: { stage: "generation", state: "pending" },
+          },
+        })
+        .returning();
+      const [job] = await db
+        .insert(generationJobs)
+        .values({
+          characterId,
+          draftId: draft.id,
+          mediaType: "image",
+          sortOrder: 0,
+          status: "draft",
+          prompt: "Prepared photograph",
+        })
+        .returning();
+      const resumed = (
+        await request(app.getHttpServer())
+          .post(`/api/admin/v1/drafts/${draft.id}/automation`)
+          .set(headers)
+          .send({ enabled: true })
+          .expect(201)
+      ).body;
+      expect(resumed.conceptJson.mode).toBe("auto");
+      expect(resumed.shots).toMatchObject([
+        { jobId: job.id, status: "queued", prompt: "Prepared photograph" },
+      ]);
+    },
+  );
 
   it("requires saved configuration, rejects competing settings writes and freezes selected draft settings", async () => {
     await request(app.getHttpServer())

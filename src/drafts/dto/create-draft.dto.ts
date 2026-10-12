@@ -12,6 +12,10 @@ export class CreateDraftDto {
   @IsIn(["existing", "natural-v1"])
   postGenerationAgent?: "existing" | "natural-v1";
 
+  @IsOptional()
+  @IsIn(["manual", "auto"])
+  mode?: "manual" | "auto";
+
   @IsString()
   @IsNotEmpty()
   characterId!: string;
@@ -30,6 +34,6 @@ export class CreateDraftDto {
   contentType?: string;
 }
 
-export class NaturalAutomationDto {
+export class DraftAutomationDto {
   @IsBoolean() enabled!: boolean;
 }

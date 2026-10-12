@@ -294,7 +294,7 @@ describe("post operations workspace", () => {
     await waitFor(() => expect(queueRequests).toBeGreaterThan(1));
   });
 
-  it("creates a manual workflow without exposing a mode choice", async () => {
+  it("defaults to a manual workflow and exposes the independent mode choice", async () => {
     let body: unknown;
     registerListHandlers();
     server.use(
@@ -315,7 +315,9 @@ describe("post operations workspace", () => {
       },
     );
 
-    expect(screen.queryByLabelText("진행 방식")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "진행 방식" })).toHaveValue(
+      "수동 · 단계별 실행",
+    );
     await userEvent.type(
       screen.getByLabelText("장면·주제 요청"),
       "비 오는 날 창가",
@@ -329,6 +331,7 @@ describe("post operations workspace", () => {
         characterId: "character-1",
         contentType: "feed",
         postGenerationAgent: "existing",
+        mode: "manual",
         sceneHint: "비 오는 날 창가",
       }),
     );

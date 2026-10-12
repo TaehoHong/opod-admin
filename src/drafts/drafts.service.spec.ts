@@ -37,12 +37,16 @@ function repositoryFake(overrides: Partial<DraftsRepository> = {}) {
 }
 
 function makeService(repository: RepositoryFake, pipelineV3Enabled = false) {
-  return new DraftsService(repository, {
-    resolvePipelineV3: jest.fn().mockResolvedValue({
-      enabled: pipelineV3Enabled,
-      source: pipelineV3Enabled ? "db" : "none",
-    }),
-  } as never);
+  return new DraftsService(
+    repository,
+    {
+      resolvePipelineV3: jest.fn().mockResolvedValue({
+        enabled: pipelineV3Enabled,
+        source: pipelineV3Enabled ? "db" : "none",
+      }),
+    } as never,
+    {} as never,
+  );
 }
 
 const draftRow = {
@@ -542,7 +546,7 @@ describe("DraftsService", () => {
     });
   });
 
-  it("does not let a legacy request turn the operator entry point automatic", async () => {
+  it("honors automatic mode even for the legacy pipeline", async () => {
     const repository = repositoryFake({
       createDraft: jest.fn().mockResolvedValue({
         ...draftRow,
@@ -556,7 +560,7 @@ describe("DraftsService", () => {
 
     expect(repository.createDraft).toHaveBeenCalledWith(
       expect.objectContaining({
-        conceptJson: { source: "manual", mode: "manual" },
+        conceptJson: { source: "manual", mode: "auto" },
       }),
     );
   });
@@ -842,10 +846,14 @@ describe("natural post creation", () => {
         .fn()
         .mockImplementation(async (input) => ({ ...draftRow, ...input })),
     });
-    const service = new DraftsService(repository, {
-      resolvePipelineV3: async () => ({ enabled: false }),
-      requireNaturalAgentBundle: async () => bundle,
-    } as never);
+    const service = new DraftsService(
+      repository,
+      {
+        resolvePipelineV3: async () => ({ enabled: false }),
+        requireNaturalAgentBundle: async () => bundle,
+      } as never,
+      {} as never,
+    );
     const result = await service.createDraft({
       characterId: "ai-1",
       postGenerationAgent: "natural-v1",
@@ -861,11 +869,15 @@ describe("natural post creation", () => {
   });
   it("does not create a job with an invalid selector or missing saved configuration", async () => {
     const repository = repositoryFake();
-    const service = new DraftsService(repository, {
-      requireNaturalAgentBundle: async () => {
-        throw new Error("configuration missing");
-      },
-    } as never);
+    const service = new DraftsService(
+      repository,
+      {
+        requireNaturalAgentBundle: async () => {
+          throw new Error("configuration missing");
+        },
+      } as never,
+      {} as never,
+    );
     await expect(
       service.createDraft({
         characterId: "ai-1",

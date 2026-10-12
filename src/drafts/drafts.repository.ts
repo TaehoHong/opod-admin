@@ -328,34 +328,38 @@ export class DraftsRepository {
     });
   }
 
-  async setNaturalAutomation(
-    draftId: string,
-    enabled: boolean,
-  ): Promise<boolean> {
+  async setAutomation(draftId: string, enabled: boolean): Promise<boolean> {
     const rows = await this.database.client
       .update(postDrafts)
       .set({
-        conceptJson: sql`jsonb_set(${postDrafts.conceptJson}, '{mode}', ${JSON.stringify(enabled ? "auto" : "manual")}::jsonb)`,
+        conceptJson: sql`jsonb_set(coalesce(${postDrafts.conceptJson}, '{}'::jsonb), '{mode}', ${JSON.stringify(enabled ? "auto" : "manual")}::jsonb)`,
         updatedAt: new Date(),
       })
       .where(
         and(
           eq(postDrafts.id, draftId),
-          inArray(postDrafts.status, ["planned", "generating", "failed"]),
+          eq(postDrafts.draftType, "post"),
+          inArray(postDrafts.status, [
+            "planned",
+            "generating",
+            "regenerating",
+            "needs_review",
+            "approved",
+            "failed",
+          ]),
           ...(enabled
             ? [
-                inArray(postDrafts.status, ["planned", "generating"]),
-                inArray(
-                  sql<string>`${postDrafts.conceptJson}#>>'{pipeline,state}'`,
-                  ["pending", "ready"],
+                sql`${postDrafts.status} <> 'failed'`,
+                or(
+                  isNull(sql`${postDrafts.conceptJson}#>>'{pipeline,state}'`),
+                  inArray(
+                    sql<string>`${postDrafts.conceptJson}#>>'{pipeline,state}'`,
+                    ["pending", "ready"],
+                  ),
                 ),
               ]
             : []),
           isNull(postDrafts.leaseExpiresAt),
-          eq(
-            sql<string>`${postDrafts.conceptJson}->>'postGenerationAgent'`,
-            "natural-v1",
-          ),
           sql`${postDrafts.conceptJson}#>>'{pipeline,state}' is distinct from 'running'`,
         ),
       )

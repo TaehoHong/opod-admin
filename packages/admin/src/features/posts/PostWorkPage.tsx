@@ -1,4 +1,4 @@
-import { setNaturalAutomation } from "../drafts/api";
+import { setDraftAutomation } from "../drafts/api";
 import {
   Accordion,
   Alert,
@@ -264,6 +264,9 @@ function PostWorkHeader({
           </Text>
         </Stack>
       </Group>
+      {draft && !["published", "rejected"].includes(draft.status) ? (
+        <DraftAutomationControl draft={draft} />
+      ) : null}
       {item.executionMode === "auto" ? (
         <Alert color="blue" mt="sm">
           자동 작업입니다. 내용을 수정하거나 후보를 교체하면 이 게시물만 수동
@@ -1105,7 +1108,7 @@ function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
       <Meta label="콘텐츠 형식">{draft.contentType}</Meta>
       <Meta label="생성 Agent">
         {concept.postGenerationAgent === "natural-v1"
-          ? "새 Agent · 자연스러운 사진 자동 제작"
+          ? "새 Agent · 자연스러운 사진"
           : "기존 Agent"}
       </Meta>
       {concept.postGenerationAgent === "natural-v1" ? (
@@ -1129,9 +1132,6 @@ function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
       <Meta label="게시 일정">
         {draft.scheduledAt ? formatDateTime(draft.scheduledAt) : "승인 후 즉시"}
       </Meta>
-      {concept.postGenerationAgent === "natural-v1" ? (
-        <NaturalAutomationControl draft={draft} />
-      ) : null}
       <Meta label="진행 정책">
         {concept.mode === "manual"
           ? "단계별 수동 진행"
@@ -1146,31 +1146,40 @@ function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
   );
 }
 
-function NaturalAutomationControl({ draft }: { draft: Draft }) {
+function DraftAutomationControl({ draft }: { draft: Draft }) {
   const update = useDraftMutation(draft.id, (enabled: boolean) =>
-    setNaturalAutomation(draft.id, enabled),
+    setDraftAutomation(draft.id, enabled),
   );
   const automatic = draft.conceptJson?.mode !== "manual";
   const blockedResume =
     !automatic &&
     (draft.status === "failed" ||
-      !["pending", "ready"].includes(draft.conceptJson?.pipeline?.state ?? ""));
+      (draft.conceptJson?.pipeline?.state !== undefined &&
+        !["pending", "ready"].includes(draft.conceptJson.pipeline.state)));
   return (
     <Stack gap="xs">
       <Text size="sm">
-        보류하면 다음 자동 단계와 게시가 멈춥니다. 이미 시작한 사진 생성은
-        완료됩니다.
+        수동 진행에서는 각 단계가 끝나면 대기합니다. 자동 진행으로 전환하면 다음
+        단계부터 이어서 실행합니다. 이미 시작한 사진 생성은 완료됩니다.
       </Text>
       <Button
         variant="default"
         disabled={
           blockedResume ||
-          !["planned", "generating", "failed"].includes(draft.status)
+          draft.conceptJson?.pipeline?.state === "running" ||
+          ![
+            "planned",
+            "generating",
+            "regenerating",
+            "needs_review",
+            "approved",
+            "failed",
+          ].includes(draft.status)
         }
         loading={update.isPending}
         onClick={() => update.mutate(!automatic)}
       >
-        {automatic ? "자동 진행 보류" : "자동 진행 재개"}
+        {automatic ? "수동 진행으로 전환" : "자동 진행 시작"}
       </Button>
       {blockedResume ? (
         <Text size="sm">
@@ -2274,7 +2283,6 @@ function V3CaptionStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
               )}
             </pre>
           </details>
-          <NaturalAutomationControl draft={draft} />
         </Stack>
       ) : null}
       <AgentInputSnapshot input={artifact?.agentInput} />
