@@ -7,7 +7,7 @@ import {
 } from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
 import type { PostMemoryEntry, PostPersonaEntry } from "./post-persona-context";
-import { inputValue, matchesInputQuote } from "./planning-evidence";
+import { InputQuote, inputValue, matchesInputQuote } from "./planning-evidence";
 import { InvalidPlanningResponseError } from "./pipeline-error";
 
 const SOURCES = new Set([
@@ -16,6 +16,7 @@ const SOURCES = new Set([
   "contentDirection", // Old artifact conflict sources remain readable.
   "contentProfile.accountConcept",
   "contentProfile.constraints",
+  "contentProfile.imageStyle",
   "persona.boundaries",
   "persona.characterContext",
   "memories",
@@ -37,7 +38,17 @@ export type PostPlannerInput = {
   contentProfile: Pick<
     CharacterContentProfile,
     "accountConcept" | "constraints"
-  >;
+  > & { imageStyle?: string };
+  productionCapabilities?: {
+    formats: ("single_image" | "carousel")[];
+    maxImages: number;
+  };
+  locations?: {
+    id: string;
+    name: string;
+    description: string;
+    exclusions: string[];
+  }[];
   character: {
     name: string;
     bio: string;
@@ -68,6 +79,14 @@ export type PostPlanReady = {
     secondaryPurpose: string | null;
   };
   newMemoryCandidates: { type: string; content: string }[];
+  production?: PostProduction;
+};
+export type PostProduction = {
+  format: "single_image" | "carousel";
+  location: { id: string | null; description: string };
+  shots: { sortOrder: number; content: string }[];
+  requirements: string[];
+  contextFacts: InputQuote[];
 };
 export type PostPlanConflict = {
   status: "conflict";
@@ -160,7 +179,13 @@ export function parsePostPlan(
   }
   exactKeys(
     value,
-    ["status", "intent", "accountFit", "newMemoryCandidates"],
+    [
+      "status",
+      "intent",
+      "accountFit",
+      "newMemoryCandidates",
+      ...(input?.productionCapabilities ? ["production"] : []),
+    ],
     "post plan ready",
   );
   if (!isRecord(value.intent)) throw new Error("post plan intent is invalid");
@@ -202,6 +227,9 @@ export function parsePostPlan(
   );
   return {
     status: "ready",
+    ...(input?.productionCapabilities
+      ? { production: parseProduction(value.production, input) }
+      : {}),
     accountFit: requiredText(value.accountFit, 2_000, "accountFit"),
     intent: {
       premise: requiredText(value.intent.premise, 2_000, "premise"),
@@ -213,6 +241,84 @@ export function parsePostPlan(
       secondaryPurpose,
     },
     newMemoryCandidates,
+  };
+}
+
+function parseProduction(
+  value: unknown,
+  input: PostPlannerInput,
+): PostProduction {
+  if (!isRecord(value)) throw new Error("production is required");
+  exactKeys(
+    value,
+    ["format", "location", "shots", "requirements", "contextFacts"],
+    "production",
+  );
+  if (
+    !input.productionCapabilities?.formats.includes(
+      value.format as PostProduction["format"],
+    )
+  )
+    throw new Error("unsupported production format");
+  if (!isRecord(value.location))
+    throw new Error("production location is required");
+  exactKeys(value.location, ["id", "description"], "production location");
+  const id =
+    value.location.id === null
+      ? null
+      : requiredText(value.location.id, 200, "location id");
+  if (id !== null && !input.locations?.some((location) => location.id === id))
+    throw new Error("production selected an unavailable location");
+  if (
+    !Array.isArray(value.shots) ||
+    !value.shots.length ||
+    value.shots.length > input.productionCapabilities.maxImages ||
+    (value.format === "single_image"
+      ? value.shots.length !== 1
+      : value.shots.length < 2)
+  )
+    throw new Error("production format and shot count disagree");
+  const shots = value.shots.map((shot, index) => {
+    if (!isRecord(shot)) throw new Error("invalid production shot");
+    exactKeys(shot, ["sortOrder", "content"], "production shot");
+    if (shot.sortOrder !== index)
+      throw new Error("production sortOrder must start at zero");
+    return {
+      sortOrder: index,
+      content: requiredText(shot.content, 500, "shot content"),
+    };
+  });
+  if (!Array.isArray(value.requirements) || value.requirements.length > 10)
+    throw new Error("invalid production requirements");
+  if (!Array.isArray(value.contextFacts) || value.contextFacts.length > 8)
+    throw new Error("invalid context facts");
+  const contextFacts = value.contextFacts.map((fact) => {
+    if (!isRecord(fact)) throw new Error("invalid context fact");
+    exactKeys(fact, ["path", "quote"], "context fact");
+    const path = requiredText(fact.path, 300, "fact path");
+    const quote = requiredText(fact.quote, 2000, "fact quote");
+    if (
+      !/^(persona|memories)\./.test(path) ||
+      !matchesInputQuote(inputValue(input, path), quote)
+    )
+      throw new Error("context fact is not grounded in the planning input");
+    return { path, quote };
+  });
+  return {
+    format: value.format as PostProduction["format"],
+    location: {
+      id,
+      description: requiredText(
+        value.location.description,
+        500,
+        "location description",
+      ),
+    },
+    shots,
+    requirements: value.requirements.map((item) =>
+      requiredText(item, 500, "requirement"),
+    ),
+    contextFacts,
   };
 }
 

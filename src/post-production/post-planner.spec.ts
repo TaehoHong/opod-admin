@@ -19,6 +19,52 @@ const ready = {
 };
 
 describe("Post Planning Agent contract (v3)", () => {
+  const structuredInput = {
+    productionCapabilities: {
+      formats: ["single_image", "carousel"],
+      maxImages: 3,
+    },
+    locations: [
+      { id: "cafe-1", name: "카페", description: "창가", exclusions: [] },
+    ],
+    memories: [{ type: "fact", content: "반려묘는 회색 코숏이다." }],
+  } as unknown as PostPlannerInput;
+  const production = {
+    format: "carousel",
+    location: { id: "cafe-1", description: "등록된 카페" },
+    shots: [
+      { sortOrder: 0, content: "창가 전경" },
+      { sortOrder: 1, content: "테이블" },
+    ],
+    requirements: [],
+    contextFacts: [
+      { path: "memories.0.content", quote: "반려묘는 회색 코숏이다." },
+    ],
+  };
+  it("preserves the selected place, ordered content and grounded facts", () => {
+    expect(
+      parsePostPlan({ ...ready, production }, structuredInput),
+    ).toMatchObject({ production });
+  });
+  it.each([
+    [
+      { location: { id: "missing", description: "카페" } },
+      "unavailable location",
+    ],
+    [{ format: "video" }, "unsupported production format"],
+    [{ format: "single_image" }, "shot count disagree"],
+    [
+      { contextFacts: [{ path: "memories.0.content", quote: "검은 고양이" }] },
+      "not grounded",
+    ],
+  ])("rejects invalid production data: %j", (patch, error) => {
+    expect(() =>
+      parsePostPlan(
+        { ...ready, production: { ...production, ...patch } },
+        structuredInput,
+      ),
+    ).toThrow(error as string);
+  });
   it("accepts an image-only production conflict only with a truthful medium quote", () => {
     const input = {
       productionContext: { contentType: "feed", mediaType: "image" },

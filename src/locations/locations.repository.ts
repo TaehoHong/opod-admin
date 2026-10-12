@@ -47,6 +47,30 @@ export class DuplicateLocationKeyError extends Error {}
 export class LocationsRepository {
   constructor(private readonly database: DatabaseService) {}
 
+  async findForPlanning(characterId: string) {
+    return this.database.client
+      .select({
+        id: characterLocations.id,
+        displayName: characterLocations.displayName,
+        description: characterLocations.description,
+        negativePrompt: characterLocations.negativePrompt,
+      })
+      .from(characterLocations)
+      .where(
+        and(
+          isNull(characterLocations.deletedAt),
+          or(
+            isNull(characterLocations.characterId),
+            eq(characterLocations.characterId, characterId),
+          ),
+        ),
+      )
+      .orderBy(
+        desc(characterLocations.characterId),
+        asc(characterLocations.createdAt),
+      );
+  }
+
   async listReferenceEmbeddingSources(
     characterId?: string,
   ): Promise<ReferenceEmbeddingSource[]> {

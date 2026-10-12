@@ -4,6 +4,8 @@ import { EMPTY_CONTENT_PROFILE } from "../character-content-profiles/character-c
 import { UNION_ENVELOPE_KEY } from "../../prompts/strict-schema";
 import { PostPipelineV3Runner } from "./post-pipeline-v3.runner";
 import { ImagePlanReady } from "./image-planner";
+import { naturalSchemas } from "./natural-post-agent";
+import { canonicalJsonHash } from "./post-pipeline-v3";
 
 function draft(
   conceptJson: Record<string, unknown>,
@@ -166,6 +168,7 @@ function setup(
         trace: { model: "fixture-memory" },
       }),
     } as never,
+    { listForPlanning: repository.findAvailableLocations } as never,
   );
   return { runner, repository, settings, fetchMock, readMedia };
 }
@@ -237,6 +240,135 @@ function readyPostPlan() {
 }
 
 describe("PostPipelineV3Runner", () => {
+  function structuredBundle() {
+    const { revision: _revision, ...old } = naturalAgentBundle();
+    void _revision;
+    const content = {
+      ...old,
+      planningContract: "structured-v1" as const,
+      schemas: naturalSchemas("structured-v1"),
+    };
+    return { ...content, revision: canonicalJsonHash(content) };
+  }
+  const production = {
+    format: "single_image",
+    location: { id: "cafe", description: "창가 카페" },
+    shots: [{ sortOrder: 0, content: "커피잔" }],
+    requirements: ["인물 없이"],
+    contextFacts: [],
+  };
+  it("uses planned composition instead of random count and exposes style and places without chat examples", async () => {
+    const current = draft({
+      pipelineVersion: "post-pipeline-v4",
+      postGenerationAgent: "natural-v1",
+      naturalAgentConfig: structuredBundle(),
+      pipeline: { stage: "post_plan", state: "running" },
+    });
+    current.character.personas.push({
+      title: "example",
+      content: "대화 예시 전용 문장",
+    });
+    const { runner, repository, fetchMock } = setup(
+      current,
+      { ...readyPostPlan(), production },
+      { profile: { ...EMPTY_CONTENT_PROFILE, imageStyle: "film photographs" } },
+    );
+    repository.findAvailableLocations.mockResolvedValue([
+      {
+        id: "cafe",
+        displayName: "카페",
+        description: "창가",
+        negativePrompt: "no signage",
+        referenceMedia: [],
+      },
+    ]);
+    await runner.runCurrentStage("draft-1");
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body).messages[1]
+      .content;
+    const input = JSON.parse(sent);
+    expect(input.contentProfile.imageStyle).toBe("film photographs");
+    expect(input.locations[0]).toMatchObject({
+      id: "cafe",
+      exclusions: ["no signage"],
+    });
+    expect(sent).not.toContain("대화 예시 전용 문장");
+    expect(sent).not.toContain("짧은 반말 한 문장");
+    expect(
+      repository.persistV3Artifact.mock.calls[0][0].conceptJson,
+    ).toMatchObject({
+      postPlanning: { output: { production } },
+      pipeline: { imageCount: 1 },
+    });
+  });
+  it("preserves approved facts and style in structured image planning", async () => {
+    const planned = {
+      ...production,
+      location: { id: null, description: "창가" },
+      contextFacts: [{ path: "memories.0.content", quote: "회색 반려묘" }],
+    };
+    const visualDetails = {
+      subject: "회색 반려묘",
+      wardrobe: null,
+      setting: "창가",
+      poseAction: "잠든 상태",
+      expressionGaze: null,
+      props: [],
+      framing: "전신",
+      camera: "침대 옆",
+      lighting: "창빛",
+    };
+    const current = draft({
+      pipelineVersion: "post-pipeline-v4",
+      postGenerationAgent: "natural-v1",
+      naturalAgentConfig: structuredBundle(),
+      pipeline: { stage: "image_plan", state: "running", imageCount: 1 },
+      postPlanning: {
+        input: {
+          contentProfile: {
+            accountConcept: "생활 사진",
+            imageStyle: "필름",
+            constraints: "광고 없음",
+          },
+        },
+        output: { ...readyPostPlan(), production: planned },
+      },
+    });
+    const output = {
+      status: "ready",
+      locationId: null,
+      continuity: { lockedElements: [] },
+      shots: [
+        {
+          sortOrder: 0,
+          visualDetails,
+          characterPresentation: {
+            mode: "none",
+            visibleParts: [],
+            faceVisible: false,
+            identityPreservationRequired: false,
+          },
+          subjectCameraRelation: "not_applicable",
+          notInFrame: [],
+          referenceBindings: [],
+        },
+      ],
+    };
+    const { runner, repository } = setup(current, output, {
+      profile: { ...EMPTY_CONTENT_PROFILE, imageStyle: "changed style" },
+    });
+    await runner.runCurrentStage("draft-1");
+    expect(
+      repository.persistV3Artifact.mock.calls[0][0].conceptJson.imagePlanning,
+    ).toMatchObject({
+      contractVersion: "image-plan-v5",
+      input: {
+        contentProfile: { imageStyle: "필름" },
+        postPlan: { production: planned },
+        characterVisualContext: { personaContext: [] },
+      },
+      output: { shots: [{ visualDetails }] },
+    });
+  });
   it("preserves an ungrounded conflict and pauses without requeueing", async () => {
     const output = {
       status: "conflict",

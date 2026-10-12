@@ -62,6 +62,12 @@ export type PostWorkItem = {
     memoryCandidates?: V3MemoryCandidate[];
     artifacts: {
       postPlan?: V3Lineage & {
+        production?: {
+          format: "single_image" | "carousel";
+          location: { id: string | null; description: string };
+          shots: { sortOrder: number; content: string }[];
+          requirements: string[];
+        };
         status: string;
         premise?: string;
         primaryPurpose?: string;
@@ -178,6 +184,17 @@ export type V3AgentInput = {
 };
 
 export type V3ImagePlanShot = {
+  visualDetails?: {
+    subject: string;
+    wardrobe: string | null;
+    setting: string;
+    poseAction: string | null;
+    expressionGaze: string | null;
+    props: string[];
+    framing: string;
+    camera: string;
+    lighting: string | null;
+  };
   sortOrder: number;
   visualPurpose?: string;
   scene?: string;

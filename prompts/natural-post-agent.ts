@@ -1,4 +1,8 @@
 import { POST_AGENT_CONTRACTS } from "./post-agent-contracts";
+import {
+  STRUCTURED_PLANNING,
+  structuredPlanningSchemas,
+} from "./structured-planning";
 
 export const NATURAL_STAGES = [
   "post_plan",
@@ -36,11 +40,10 @@ export const PHOTO_REVIEW_SCHEMA = {
   required: ["shots"],
   additionalProperties: false,
 };
-export function naturalSchemas(): Record<
-  NaturalStage,
-  Record<string, unknown>
-> {
-  return Object.fromEntries(
+export function naturalSchemas(
+  planningContract?: typeof STRUCTURED_PLANNING,
+): Record<NaturalStage, Record<string, unknown>> {
+  const schemas = Object.fromEntries(
     NATURAL_STAGES.map((stage) => [
       stage,
       stage === "naturalness" || stage === "requirements"
@@ -48,6 +51,9 @@ export function naturalSchemas(): Record<
         : POST_AGENT_CONTRACTS[stage].outputSchema,
     ]),
   ) as Record<NaturalStage, Record<string, unknown>>;
+  return planningContract === STRUCTURED_PLANNING
+    ? { ...schemas, ...structuredPlanningSchemas() }
+    : schemas;
 }
 
 // Starters are offered for explicit installation only. Runtime reads the saved bundle.

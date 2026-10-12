@@ -22,6 +22,10 @@ const REFERENCE_MAX_COUNT = 20;
 export class LocationsService {
   constructor(private readonly locations: LocationsRepository) {}
 
+  listForPlanning(characterId: string) {
+    return this.locations.findForPlanning(characterId);
+  }
+
   listReferenceEmbeddingSources(characterId?: string) {
     return this.locations.listReferenceEmbeddingSources(characterId);
   }

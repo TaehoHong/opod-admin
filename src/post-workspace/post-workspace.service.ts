@@ -71,6 +71,7 @@ export type PostPipelineV3ReadModel = {
   memoryCandidates?: V3MemoryCandidate[];
   artifacts: {
     postPlan?: {
+      production?: PostProduction;
       revision: number;
       status: string;
       contractVersion?: string;
@@ -176,6 +177,7 @@ export type V3AgentInput = {
 };
 
 export type V3ImagePlanShot = {
+  visualDetails?: VisualDetails;
   sortOrder: number;
   visualPurpose?: string;
   scene?: string;
@@ -675,6 +677,12 @@ function v3ReadModel(
                   ? postOutput.status
                   : "unknown",
               ...lineage(postPlanning),
+              ...(isRecord(postOutput.production)
+                ? {
+                    production:
+                      postOutput.production as unknown as PostProduction,
+                  }
+                : {}),
               ...(includeAgentInput
                 ? { agentInput: v3AgentInput(postPlanning.input) }
                 : {}),
@@ -1025,6 +1033,9 @@ function v3ImagePlanShot(raw: unknown): V3ImagePlanShot {
   const shot = record(raw);
   const presentation = record(shot.characterPresentation);
   return {
+    ...(isRecord(shot.visualDetails)
+      ? { visualDetails: shot.visualDetails as unknown as VisualDetails }
+      : {}),
     sortOrder: Number.isInteger(shot.sortOrder)
       ? (shot.sortOrder as number)
       : 0,
@@ -1197,3 +1208,5 @@ function parseCursor(value?: string): WorkCursor | undefined {
     throw new BadRequestException("Invalid post work cursor");
   }
 }
+import type { PostProduction } from "../post-production/post-planner";
+import type { VisualDetails } from "../post-production/image-planner";

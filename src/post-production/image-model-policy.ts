@@ -112,17 +112,31 @@ export function buildPromptPackage(input: {
 // referenceBindings는 referenceSlots와 중복이고 모델 정책은 system에 있다.
 export function buildPromptGenerationInput(input: PromptBuildPackage) {
   const { exclusions, ...subjectContract } = input.subjectContract;
+  const identityCoveredByPlan = input.imagePlan.shots.every(
+    (shot) =>
+      shot.visualDetails &&
+      (shot.characterPresentation.mode === "none" ||
+        shot.referenceBindings.some(
+          (binding) =>
+            binding.source === "identity" &&
+            binding.semanticPurposes.includes("identity"),
+        )),
+  );
   return {
     ...(input.canvas ? { canvas: input.canvas } : {}),
     imagePlan: {
       continuity: input.imagePlan.continuity,
       shots: input.imagePlan.shots.map((shot) => ({
         sortOrder: shot.sortOrder,
-        scene: shot.scene,
-        captureSetup: shot.captureSetup,
+        ...(shot.visualDetails
+          ? { visualDetails: shot.visualDetails }
+          : {
+              scene: shot.scene,
+              captureSetup: shot.captureSetup,
+              subjectState: shot.subjectState,
+              motionEvidence: shot.motionEvidence,
+            }),
         characterPresentation: shot.characterPresentation,
-        subjectState: shot.subjectState,
-        motionEvidence: shot.motionEvidence,
         notInFrame: shot.notInFrame,
         subjectCameraRelation: shot.subjectCameraRelation,
       })),
@@ -130,11 +144,13 @@ export function buildPromptGenerationInput(input: PromptBuildPackage) {
     subjectContract: {
       ...subjectContract,
       ...(subjectContract.exclusionSources ? {} : { exclusions }),
-      appearance: input.imagePlan.shots.some(
-        (shot) => shot.characterPresentation.mode !== "none",
-      )
-        ? input.subjectContract.appearance
-        : "",
+      appearance:
+        !identityCoveredByPlan &&
+        input.imagePlan.shots.some(
+          (shot) => shot.characterPresentation.mode !== "none",
+        )
+          ? input.subjectContract.appearance
+          : "",
     },
     referenceSlots: input.referenceSlots.map((reference) => ({
       shotSortOrder: reference.shotSortOrder,

@@ -613,6 +613,31 @@ function PostPlanArtifact({
             </Stack>
           )
         ) : null}
+        {artifact.production ? (
+          <Stack gap="xs">
+            <Meta label="형식">
+              {artifact.production.format === "single_image"
+                ? "사진 1장"
+                : `사진 캐러셀 ${artifact.production.shots.length}장`}
+            </Meta>
+            <Meta label="장소">
+              {artifact.production.location.description} ·{" "}
+              {artifact.production.location.id ? "등록 장소" : "신규 장면"}
+            </Meta>
+            <Meta label="구성">
+              {artifact.production.shots.map((shot) => (
+                <Text key={shot.sortOrder} size="sm">
+                  {shot.sortOrder + 1}. {shot.content}
+                </Text>
+              ))}
+            </Meta>
+            {artifact.production.requirements.length ? (
+              <Meta label="유지할 조건">
+                {artifact.production.requirements.join(" · ")}
+              </Meta>
+            ) : null}
+          </Stack>
+        ) : null}
         {artifact.primaryPurpose ? (
           <Meta label="주 목적">{artifact.primaryPurpose}</Meta>
         ) : null}
@@ -766,25 +791,55 @@ function ImagePlanArtifact({
                 </>
               ) : null}
             </Group>
-            {shot.visualPurpose ? (
-              <Text size="xs" c="dimmed">
-                {shot.visualPurpose}
-              </Text>
-            ) : null}
-            {/* scene(프레임 안)과 captureSetup(프레임 밖)의 혼입이 기존 품질
+            {shot.visualDetails ? (
+              <Stack gap="xs">
+                <Meta label="대상">{shot.visualDetails.subject}</Meta>
+                {shot.visualDetails.wardrobe ? (
+                  <Meta label="의상">{shot.visualDetails.wardrobe}</Meta>
+                ) : null}
+                <Meta label="위치·배경">{shot.visualDetails.setting}</Meta>
+                {shot.visualDetails.poseAction ? (
+                  <Meta label="자세·행동">{shot.visualDetails.poseAction}</Meta>
+                ) : null}
+                {shot.visualDetails.expressionGaze ? (
+                  <Meta label="표정·시선">
+                    {shot.visualDetails.expressionGaze}
+                  </Meta>
+                ) : null}
+                {shot.visualDetails.props.length ? (
+                  <Meta label="주변 요소">
+                    {shot.visualDetails.props.join(" · ")}
+                  </Meta>
+                ) : null}
+                <Meta label="구도">{shot.visualDetails.framing}</Meta>
+                <Meta label="촬영">{shot.visualDetails.camera}</Meta>
+                {shot.visualDetails.lighting ? (
+                  <Meta label="빛">{shot.visualDetails.lighting}</Meta>
+                ) : null}
+              </Stack>
+            ) : (
+              <>
+                {shot.visualPurpose ? (
+                  <Text size="xs" c="dimmed">
+                    {shot.visualPurpose}
+                  </Text>
+                ) : null}
+                {/* scene(프레임 안)과 captureSetup(프레임 밖)의 혼입이 기존 품질
                 결함의 핵심이라 화면에서도 갈라 놓는다. */}
-            {shot.scene ? <Meta label="장면">{shot.scene}</Meta> : null}
-            {shot.captureSetup ? (
-              <Meta label="촬영">{shot.captureSetup}</Meta>
-            ) : null}
-            {/* 계약 image-plan-v2/v3. 비어 있으면 렌더가 정적 기본값으로
+                {shot.scene ? <Meta label="장면">{shot.scene}</Meta> : null}
+                {shot.captureSetup ? (
+                  <Meta label="촬영">{shot.captureSetup}</Meta>
+                ) : null}
+                {/* 계약 image-plan-v2/v3. 비어 있으면 렌더가 정적 기본값으로
                 채워질 수 있어 화면에 그대로 노출해 눈으로 잡게 한다. */}
-            {shot.subjectState ? (
-              <Meta label="인물 상태">{shot.subjectState}</Meta>
-            ) : null}
-            {shot.motionEvidence ? (
-              <Meta label="동작 증거">{shot.motionEvidence}</Meta>
-            ) : null}
+                {shot.subjectState ? (
+                  <Meta label="인물 상태">{shot.subjectState}</Meta>
+                ) : null}
+                {shot.motionEvidence ? (
+                  <Meta label="동작 증거">{shot.motionEvidence}</Meta>
+                ) : null}
+              </>
+            )}
             {shot.notInFrame?.length ? (
               <Meta label="프레임에 없어야">{shot.notInFrame.join(", ")}</Meta>
             ) : null}

@@ -595,6 +595,21 @@ LLM 로그와 액션 로그의 목록은 `shared/ui/LogRow.tsx`로 행 클릭을
 
 ## 선택 가능한 자연스러운 사진 Agent
 
+항목별 기획은 `planningContract=structured-v1`로 명시적으로 설치한다.
+`prompts/structured-planning.ts`가 새 스키마와 설치용 지침을 소유하고,
+`naturalSchemas`/`validateNaturalBundle`이 이전 번들과 새 번들의 계약을 구분한다.
+`post-planner.ts`가 장소·사진 형식·순서·관련 사실 인용을 검증하며 runner는 장소 후보와
+imageStyle을 게시물 기획부터 전달하고 기획한 장수를 실행한다. `image-planner.ts`는
+확정 장소/장수와 visualDetails를 검증하고 기존 reader용 문자열만 결정적으로 투영한다.
+`image-model-policy.ts`는 새 명세를 한 번만 LLM에 전달한다. PostWorkPage는 항목별
+기획을 표시하고 NaturalAgentPanel은 지침 3개를 불러온 뒤 명시적으로 저장한다.
+새 경로의 장소 후보 조회는 `LocationsService.listForPlanning`과
+`LocationsRepository.findForPlanning`이 소유한다. 공용 또는 해당 캐릭터의 미삭제
+장소만 제공하며 runner의 새로운 DB 접근을 만들지 않는다.
+기존 초안은 이전 계약을 보존하며 영상 생성은 추가하지 않는다.
+회귀 owner는 planner/runner/model-policy spec, NaturalAgentPanel 테스트,
+`test/natural-post-agent.e2e-spec.ts`다. 자세한 운영 경계는 `docs/natural-post-agent.md` 참고.
+
 `postGenerationAgent` 선택은 엔진 버전과 독립이며 `DraftsService.createDraft`와
 `PostBriefCreatePage.tsx`가 기존/새 선택을 연결한다. 새 Agent는 자동 진행하고,
 `GenerationSettingsService`만 `postAgent.natural-v1`의 번들 저장·조회/CAS를 소유한다.

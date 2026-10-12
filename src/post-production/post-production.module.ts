@@ -92,6 +92,7 @@ function storageEnv(config: S3Config | undefined) {
         agentPrompts: PostAgentPromptService,
         references: ReferenceRetrievalService,
         memories: MemoryRetrievalService,
+        locations: LocationsService,
       ) =>
         new PostPipelineV3Runner(
           drafts,
@@ -105,6 +106,7 @@ function storageEnv(config: S3Config | undefined) {
           agentPrompts,
           references,
           memories,
+          locations,
         ),
       inject: [
         DraftWorkerRepository,
@@ -115,6 +117,7 @@ function storageEnv(config: S3Config | undefined) {
         PostAgentPromptService,
         ReferenceRetrievalService,
         MemoryRetrievalService,
+        LocationsService,
       ],
     },
     {

@@ -11,6 +11,7 @@ export {
 } from "../../prompts/natural-post-agent";
 import { canonicalJsonHash, generationSetHash } from "./post-pipeline-v3";
 import { isRecord } from "../shared/utils/value-utils";
+import { STRUCTURED_PLANNING } from "../../prompts/structured-planning";
 
 export const NATURAL_AGENT = "natural-v1" as const;
 export type NaturalModel = {
@@ -19,6 +20,7 @@ export type NaturalModel = {
   model: string;
 };
 export type NaturalAgentBundle = {
+  planningContract?: typeof STRUCTURED_PLANNING;
   version: 1;
   schedulerDefault: boolean;
   revision: string;
@@ -48,7 +50,9 @@ export function validateNaturalBundle(value: unknown): NaturalAgentBundle {
     !isRecord(value.schemas) ||
     !isRecord(value.planningModel) ||
     !isRecord(value.reviewModel) ||
-    !isRecord(value.generation)
+    !isRecord(value.generation) ||
+    (value.planningContract !== undefined &&
+      value.planningContract !== STRUCTURED_PLANNING)
   )
     throw new BadRequestException("새 Agent 설정을 먼저 저장해 주세요.");
   for (const stage of NATURAL_STAGES) {
@@ -76,7 +80,12 @@ export function validateNaturalBundle(value: unknown): NaturalAgentBundle {
   const { revision, ...content } = value;
   if (
     canonicalJsonHash(content) !== revision ||
-    canonicalJsonHash(value.schemas) !== canonicalJsonHash(naturalSchemas())
+    canonicalJsonHash(value.schemas) !==
+      canonicalJsonHash(
+        naturalSchemas(
+          value.planningContract as NaturalAgentBundle["planningContract"],
+        ),
+      )
   )
     throw new BadRequestException(
       "새 Agent 설정 버전 또는 출력 계약이 유효하지 않습니다. 설정을 다시 저장하세요.",

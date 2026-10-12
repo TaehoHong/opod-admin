@@ -71,6 +71,8 @@ import {
 } from "./post-planner";
 import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
+import { STRUCTURED_PLANNING } from "../../prompts/structured-planning";
+import { LocationsService } from "../locations/locations.service";
 import {
   InvalidPlanningResponseError,
   pipelineFailure,
@@ -104,6 +106,7 @@ export class PostPipelineV3Runner {
     private readonly agentPrompts?: PostAgentPromptService,
     private readonly referenceRetrieval?: ReferenceRetrievalService,
     private readonly memoryRetrieval?: MemoryRetrievalService,
+    private readonly locations?: LocationsService,
   ) {}
 
   async runCurrentStage(
@@ -367,6 +370,47 @@ export class PostPipelineV3Runner {
     profile: CharacterContentProfile,
   ): Promise<void> {
     const input = postPlannerInput(draft, concept, profile);
+    if (structuredPlanning(concept)) {
+      const maxImages = Math.max(
+        1,
+        Math.min(this.config.draftWorker.maxShots, 3),
+      );
+      input.productionCapabilities = {
+        formats:
+          maxImages > 1 ? ["single_image", "carousel"] : ["single_image"],
+        maxImages,
+      };
+      input.contentProfile.imageStyle = profile.imageStyle;
+      if (!this.locations)
+        throw new Error("Location service is not configured");
+      input.locations = (
+        await this.locations.listForPlanning(draft.characterId)
+      ).map((location) => ({
+        id: location.id,
+        name: location.displayName,
+        description: location.description,
+        exclusions: [location.negativePrompt.trim()].filter(Boolean),
+      }));
+      input.persona.writingProfile = { voice: [], contentStyle: [] };
+      input.persona.additionalContext = input.persona.additionalContext.filter(
+        (entry) =>
+          entry.kind !== "example" && postPersonaRole(entry) !== "example",
+      );
+      input.persona.characterContext =
+        input.persona.characterContext.map(compactPersona);
+      input.persona.additionalContext =
+        input.persona.additionalContext.map(compactPersona);
+      input.persona.boundaries = input.persona.boundaries.map(compactPersona);
+      input.memories = input.memories.map(
+        ({ type, content, occurredAt, occurredLabel, occurredPrecision }) => ({
+          type,
+          content,
+          ...(occurredAt ? { occurredAt } : {}),
+          ...(occurredLabel ? { occurredLabel } : {}),
+          ...(occurredPrecision ? { occurredPrecision } : {}),
+        }),
+      );
+    }
     const missing =
       input.character.bio.trim() || input.persona.characterContext.length
         ? []
@@ -396,7 +440,9 @@ export class PostPipelineV3Runner {
       hash,
       producerLogId: result.producerLogId,
       agentConfig: client.agentSettings?.metadata ?? null,
-      contractVersion: POST_PLAN_CONTRACT_VERSION,
+      contractVersion: structuredPlanning(concept)
+        ? "post-plan-v5"
+        : POST_PLAN_CONTRACT_VERSION,
       promptVersion: POST_PLANNER_PROMPT_VERSION,
       input,
       output: result.output,
@@ -421,6 +467,7 @@ export class PostPipelineV3Runner {
     }
     const max = Math.max(1, Math.min(this.config.draftWorker.maxShots, 3));
     const imageCount =
+      result.output.production?.shots.length ??
       existingImageCount(concept) ??
       Math.min(max, Math.floor(this.random() * max) + 1);
     const memoryCandidates = result.output.newMemoryCandidates.map(
@@ -470,14 +517,35 @@ export class PostPipelineV3Runner {
       throw new Error(
         "Image Planning requires a ready PostPlan and imageCount",
       );
+    if (structuredPlanning(concept) && !this.locations)
+      throw new Error("Location service is not configured");
     const [availableLocations, recentDrafts] = await Promise.all([
-      this.repository.findAvailableLocations(draft.characterId),
+      structuredPlanning(concept)
+        ? this.locations!.listForPlanning(draft.characterId)
+        : this.repository.findAvailableLocations(draft.characterId),
       this.repository.findRecentVisualPlanDrafts(
         draft.characterId,
         draft.id,
         8,
       ),
     ]);
+    const production = postPlan.production;
+    if (
+      production?.location.id &&
+      !availableLocations.some(
+        (location) => location.id === production.location.id,
+      )
+    ) {
+      await this.pause(draft, concept, "needs_input", [
+        "planned_location_unavailable",
+      ]);
+      return;
+    }
+    const planningLocations = production
+      ? availableLocations.filter(
+          (location) => location.id === production.location.id,
+        )
+      : availableLocations;
     if (!this.referenceRetrieval) {
       await this.pause(draft, concept, "needs_configuration", [
         "reference_retrieval_not_configured",
@@ -493,7 +561,7 @@ export class PostPipelineV3Runner {
         premise: postPlan.intent.premise,
         purpose: postPlan.intent.primaryPurpose,
         operatorRequest: operatorRequest(concept),
-        locationIds: availableLocations.map((location) => location.id),
+        locationIds: planningLocations.map((location) => location.id),
       });
     } catch (error) {
       concept.referenceRetrieval = {
@@ -524,7 +592,10 @@ export class PostPipelineV3Runner {
           "",
         constraints: profile.constraints,
       },
-      postPlan: { intent: postPlan.intent },
+      postPlan: {
+        intent: postPlan.intent,
+        ...(production ? { production } : {}),
+      },
       imageCount,
       canvas: { aspectRatio: requestedImageAspectRatio(generationParams) },
       characterVisualContext: {
@@ -535,30 +606,48 @@ export class PostPipelineV3Runner {
         ].filter(Boolean),
         boundaries: personaContents(draft, "boundaries"),
         capturePreferences: personaContents(draft, "capture_style"),
-        personaContext: draft.character.personas
-          .filter(
-            (entry) =>
-              entry.content.trim() &&
-              ![
-                "voice",
-                "capture_style",
-                "boundaries",
-                "greeting",
-                "examples",
-              ].includes(postPersonaRole(entry)) &&
-              entry.kind !== "example",
-          )
-          .map((entry) => ({ ...entry })),
+        personaContext: production
+          ? []
+          : draft.character.personas
+              .filter(
+                (entry) =>
+                  entry.content.trim() &&
+                  ![
+                    "voice",
+                    "capture_style",
+                    "boundaries",
+                    "greeting",
+                    "examples",
+                  ].includes(postPersonaRole(entry)) &&
+                  entry.kind !== "example",
+              )
+              .map((entry) => ({ ...entry })),
       },
-      memories: draft.character.memories.filter((memory) =>
-        memory.content.trim(),
-      ),
-      recentVisualHistory: recentVisualHistory(recentDrafts),
+      memories: production
+        ? draft.character.memories
+            .filter(
+              (memory) =>
+                memory.type === "fact" || memory.type === "preference",
+            )
+            .map(({ type, content }) => ({ type, content }))
+        : draft.character.memories.filter((memory) => memory.content.trim()),
+      recentVisualHistory: production
+        ? recentVisualHistory(recentDrafts).map((history) => ({
+            ...history,
+            premise: null,
+            shots: history.shots.map((shot) => ({
+              ...shot,
+              visualPurpose: "",
+              scene: boundedHistoryText(shot.scene, 240),
+              captureSetup: boundedHistoryText(shot.captureSetup, 180),
+            })),
+          }))
+        : recentVisualHistory(recentDrafts),
       ...(operatorRequest(concept)
         ? { operatorRequest: operatorRequest(concept) }
         : {}),
       identityReferences: references.identityReferences,
-      locations: availableLocations.map((location) => ({
+      locations: planningLocations.map((location) => ({
         id: location.id,
         name: location.displayName,
         description: location.description,
@@ -566,6 +655,24 @@ export class PostPipelineV3Runner {
         references: references.locationReferences[location.id] ?? [],
       })),
     };
+    if (
+      production &&
+      isRecord(concept.postPlanning) &&
+      isRecord(concept.postPlanning.input)
+    ) {
+      const saved = concept.postPlanning.input.contentProfile;
+      if (
+        isRecord(saved) &&
+        typeof saved.imageStyle === "string" &&
+        typeof saved.accountConcept === "string" &&
+        typeof saved.constraints === "string"
+      )
+        input.contentProfile = {
+          accountConcept: saved.accountConcept,
+          imageStyle: saved.imageStyle,
+          constraints: saved.constraints,
+        };
+    }
     let referenceContent: Awaited<ReturnType<typeof photoContent>> | undefined;
     if (isNaturalAgent(concept)) {
       if (!this.readMediaBytes) {
@@ -608,7 +715,7 @@ export class PostPipelineV3Runner {
       const onlyInsufficient = result.output.reasons.every(
         (reason) => reason.code === "insufficient_distinct_shots",
       );
-      if (onlyInsufficient && imageCount > 1) {
+      if (onlyInsufficient && imageCount > 1 && !production) {
         const adjusted = {
           ...concept,
           pipeline: {
@@ -1223,6 +1330,18 @@ export class PostPipelineV3Runner {
   }
 }
 
+function structuredPlanning(concept: V3Concept): boolean {
+  return (
+    isNaturalAgent(concept) &&
+    isRecord(concept.naturalAgentConfig) &&
+    concept.naturalAgentConfig.planningContract === STRUCTURED_PLANNING
+  );
+}
+
+function compactPersona(entry: { title: string; content: string }) {
+  return { title: entry.title, content: entry.content };
+}
+
 function postPlannerInput(
   draft: PlannedDraft,
   concept: V3Concept,
@@ -1358,7 +1477,9 @@ function imageArtifact(
       postPlanningHash: artifactHash(concept.postPlanning),
     },
     producerLogId,
-    contractVersion: IMAGE_PLAN_CONTRACT_VERSION,
+    contractVersion: input.postPlan.production
+      ? "image-plan-v5"
+      : IMAGE_PLAN_CONTRACT_VERSION,
     promptVersion: IMAGE_PLANNER_PROMPT_VERSION,
     input,
     output,

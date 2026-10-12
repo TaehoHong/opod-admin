@@ -31,6 +31,9 @@ export class SavePostAgentPromptDto extends PromptRevisionDto {
 }
 
 export class SaveNaturalAgentDto {
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn(["structured-v1"])
+  planningContract?: "structured-v1";
   @IsBoolean() schedulerDefault!: boolean;
   @ValidateIf((_object, value) => value !== null)
   @IsString()

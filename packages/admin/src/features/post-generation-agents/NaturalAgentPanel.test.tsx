@@ -8,6 +8,84 @@ import { NaturalAgentPanel } from "./NaturalAgentPanel";
 import type { AgentConfig, NaturalConfig } from "./api";
 
 beforeEach(() => sessionStorage.clear());
+it("loads structured planning explicitly and saves it without replacing review or caption instructions", async () => {
+  const user = userEvent.setup();
+  const prompts = {
+    post_plan: "old post",
+    image_plan: "old image",
+    image_prompt: "old prompt",
+    caption: "custom caption",
+    naturalness: "custom naturalness",
+    requirements: "custom requirements",
+  };
+  const structuredPlanningPrompts = {
+    post_plan: "new post",
+    image_plan: "new image",
+    image_prompt: "new prompt",
+  };
+  const current: NaturalConfig = {
+    revision: "r1",
+    schedulerDefault: false,
+    planningModel: {
+      aiModelId: "1",
+      provider: "openai-compatible",
+      model: "vision",
+    },
+    reviewModel: {
+      aiModelId: "1",
+      provider: "openai-compatible",
+      model: "vision",
+    },
+    prompts,
+  };
+  const saves: Record<string, unknown>[] = [];
+  server.use(
+    http.get("/api/admin/v1/post-generation-agents/natural/config", () =>
+      HttpResponse.json({
+        current,
+        starters: prompts,
+        structuredPlanningPrompts,
+      }),
+    ),
+    http.post(
+      "/api/admin/v1/post-generation-agents/natural/config",
+      async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        saves.push(body);
+        return HttpResponse.json({ ...current, ...body, revision: "r2" });
+      },
+    ),
+  );
+  renderPage(
+    <NaturalAgentPanel
+      models={[
+        {
+          id: "1",
+          type: "llm",
+          provider: "openai-compatible",
+          model: "vision",
+          createdAt: "2026-10-12",
+        },
+      ]}
+      generation={{ id: "2" } as AgentConfig}
+    />,
+  );
+  await user.click(
+    await screen.findByRole("button", { name: "항목별 기획 지침 불러오기" }),
+  );
+  expect(saves).toHaveLength(0);
+  expect(screen.getByLabelText("이미지 기획 · 레퍼런스 검토 지침")).toHaveValue(
+    "new image",
+  );
+  await user.click(screen.getByRole("button", { name: "새 Agent 설정 저장" }));
+  await waitFor(() => expect(saves).toHaveLength(1));
+  expect(saves[0]).toMatchObject({
+    planningContract: "structured-v1",
+    expectedRevision: "r1",
+    prompts: { ...prompts, ...structuredPlanningPrompts },
+  });
+});
+
 it("preserves edited instructions on a conflict and resaves against the deliberately refreshed revision", async () => {
   const user = userEvent.setup();
   const endpoint = "/api/admin/v1/post-generation-agents/natural/config";

@@ -57,6 +57,55 @@ const ready: ImagePlanReady = {
 };
 
 describe("Image Planning Agent contract", () => {
+  const production = {
+    format: "single_image" as const,
+    location: { id: null, description: "카페 창가" },
+    shots: [{ sortOrder: 0, content: "커피와 창문" }],
+    requirements: [],
+    contextFacts: [],
+  };
+  const visualDetails = {
+    subject: "커피잔",
+    wardrobe: null,
+    setting: "창가 테이블",
+    poseAction: null,
+    expressionGaze: null,
+    props: [],
+    framing: "테이블 일부",
+    camera: "앉은 위치에서 내려다봄",
+    lighting: "창빛",
+  };
+  const structuredShot = {
+    sortOrder: 0,
+    visualDetails,
+    characterPresentation: ready.shots[0].characterPresentation,
+    notInFrame: [],
+    subjectCameraRelation: "not_applicable",
+    referenceBindings: [],
+  };
+  it("accepts sparse visual specifications without inventing action or wardrobe", () => {
+    const result = parseImagePlan(
+      { ...ready, shots: [structuredShot] },
+      { ...input, postPlan: { ...input.postPlan, production } },
+    );
+    expect(result).toMatchObject({
+      shots: [{ visualDetails, motionEvidence: "", subjectState: "" }],
+    });
+  });
+  it("rejects a different valid location instead of silently replanning", () => {
+    expect(() =>
+      parseImagePlan(
+        { ...ready, locationId: "other", shots: [structuredShot] },
+        {
+          ...input,
+          locations: [
+            { id: "other", name: "다른 카페", description: "", references: [] },
+          ],
+          postPlan: { ...input.postPlan, production },
+        },
+      ),
+    ).toThrow("changed the approved location");
+  });
   it("accepts exactly imageCount model-independent shots", () => {
     expect(parseImagePlan(ready, input)).toEqual(ready);
   });

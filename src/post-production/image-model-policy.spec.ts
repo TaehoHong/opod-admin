@@ -41,6 +41,44 @@ const imagePlan: ImagePlanReady = {
 };
 
 describe("image model policy", () => {
+  it("passes structured visual decisions once, without legacy rationale projections", () => {
+    const visualDetails = {
+      subject: "person",
+      wardrobe: "white shirt",
+      setting: "cafe",
+      poseAction: null,
+      expressionGaze: null,
+      props: [],
+      framing: "waist up",
+      camera: "opposite seat",
+      lighting: null,
+    };
+    const input = buildPromptGenerationInput(
+      buildPromptPackage({
+        targetModelId: "gpt-image-2.5-sunburst",
+        appearance: "adult",
+        imagePlan: {
+          ...imagePlan,
+          shots: [
+            {
+              ...imagePlan.shots[0],
+              visualDetails,
+              scene: "planning history",
+              subjectState: "a rationale",
+              motionEvidence: "more rationale",
+            },
+          ],
+        },
+      }),
+    );
+    expect(input.imagePlan.shots[0]).toMatchObject({ visualDetails });
+    expect(input.imagePlan.shots[0]).not.toHaveProperty("scene");
+    expect(input.imagePlan.shots[0]).not.toHaveProperty("subjectState");
+    expect(input.imagePlan.shots[0]).not.toHaveProperty("motionEvidence");
+    expect(JSON.stringify(input)).not.toContain("rationale");
+    expect(input.subjectContract.appearance).toBe("");
+    expect(input.referenceSlots[0].preserve).toEqual(["facial identity"]);
+  });
   it("keeps mixed-shot visibility, continuity, visible text and motion when compacting input", () => {
     const mixedPlan: ImagePlanReady = {
       ...imagePlan,

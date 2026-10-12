@@ -8,6 +8,7 @@ import {
 import { isRecord } from "../shared/utils/value-utils";
 import { InputQuote, inputValue, matchesInputQuote } from "./planning-evidence";
 import { InvalidPlanningResponseError } from "./pipeline-error";
+import type { PostProduction } from "./post-planner";
 
 export type ImagePlannerInput = {
   contentProfile?: Pick<
@@ -15,6 +16,7 @@ export type ImagePlannerInput = {
     "accountConcept" | "imageStyle" | "constraints"
   >;
   postPlan: {
+    production?: PostProduction;
     intent: {
       premise: string;
       primaryPurpose: string;
@@ -79,6 +81,7 @@ export type ImagePlanReady = {
     }[];
   };
   shots: {
+    visualDetails?: VisualDetails;
     sortOrder: number;
     visualPurpose: string;
     scene: string;
@@ -97,6 +100,17 @@ export type ImagePlanReady = {
     subjectCameraRelation: SubjectCameraRelation;
     referenceBindings: ReferenceBinding[];
   }[];
+};
+export type VisualDetails = {
+  subject: string;
+  wardrobe: string | null;
+  setting: string;
+  poseAction: string | null;
+  expressionGaze: string | null;
+  props: string[];
+  framing: string;
+  camera: string;
+  lighting: string | null;
 };
 export type ImagePlanBlocked = {
   status: "blocked";
@@ -234,6 +248,11 @@ export function parseImagePlan(
       : text(value.locationId, 200, "locationId");
   if (locationId !== null && !locationIds.has(locationId))
     throw new Error("image plan selected an unknown location");
+  const production = input.postPlan.production;
+  if (production && locationId !== production.location.id)
+    throw new Error("image plan changed the approved location");
+  if (production && input.imageCount !== production.shots.length)
+    throw new Error("image plan changed the approved shot count");
   if (!Array.isArray(value.shots) || value.shots.length !== input.imageCount)
     throw new Error("image plan shot count does not match imageCount");
   const identityIds = new Set(
@@ -247,6 +266,47 @@ export function parseImagePlan(
   const bindingIds = new Set<string>();
   const shots = value.shots.map((raw, index) => {
     if (!isRecord(raw)) throw new Error(`image plan shot ${index} is invalid`);
+    const visualDetails = production
+      ? parseVisualDetails(raw.visualDetails)
+      : undefined;
+    if (visualDetails) {
+      exactKeys(
+        raw,
+        [
+          "sortOrder",
+          "visualDetails",
+          "characterPresentation",
+          "notInFrame",
+          "subjectCameraRelation",
+          "referenceBindings",
+        ],
+        `image plan shot ${index}`,
+      );
+      // Deterministic legacy read projection; never passed alongside visualDetails to the LLM.
+      raw = {
+        ...raw,
+        visualPurpose: production!.shots[index].content,
+        scene: [
+          visualDetails.subject,
+          visualDetails.wardrobe,
+          visualDetails.setting,
+          ...visualDetails.props,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        captureSetup: [
+          visualDetails.camera,
+          visualDetails.framing,
+          visualDetails.lighting,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        subjectState: [visualDetails.poseAction, visualDetails.expressionGaze]
+          .filter(Boolean)
+          .join(" · "),
+        motionEvidence: "",
+      };
+    }
     exactKeys(
       raw,
       [
@@ -260,6 +320,7 @@ export function parseImagePlan(
         "notInFrame",
         "subjectCameraRelation",
         "referenceBindings",
+        ...(visualDetails ? ["visualDetails"] : []),
       ],
       `image plan shot ${index}`,
     );
@@ -314,7 +375,7 @@ export function parseImagePlan(
     )
       throw new Error(`image plan shot ${index} bindings are invalid`);
     const referenceBindings = raw.referenceBindings.map(
-      (binding, bindingIndex) =>
+      (binding: unknown, bindingIndex: number) =>
         parseBinding(
           binding,
           index,
@@ -327,13 +388,14 @@ export function parseImagePlan(
     if (
       cp.identityPreservationRequired &&
       !referenceBindings.some(
-        (binding) =>
+        (binding: ReferenceBinding) =>
           binding.source === "identity" &&
           binding.semanticPurposes.includes("identity"),
       )
     )
       throw new Error(`image plan shot ${index} lacks an identity binding`);
     return {
+      ...(visualDetails ? { visualDetails } : {}),
       sortOrder: index,
       visualPurpose: text(
         raw.visualPurpose,
@@ -400,6 +462,38 @@ export function parseImagePlan(
     };
   });
   return { status: "ready", locationId, continuity: { lockedElements }, shots };
+}
+
+function parseVisualDetails(value: unknown): VisualDetails {
+  if (!isRecord(value)) throw new Error("visualDetails is required");
+  exactKeys(
+    value,
+    [
+      "subject",
+      "wardrobe",
+      "setting",
+      "poseAction",
+      "expressionGaze",
+      "props",
+      "framing",
+      "camera",
+      "lighting",
+    ],
+    "visualDetails",
+  );
+  const nullable = (key: string) =>
+    value[key] === null ? null : text(value[key], 500, key);
+  return {
+    subject: text(value.subject, 500, "subject"),
+    wardrobe: nullable("wardrobe"),
+    setting: text(value.setting, 500, "setting"),
+    poseAction: nullable("poseAction"),
+    expressionGaze: nullable("expressionGaze"),
+    props: textArray(value.props, 0, 8, 300, "props"),
+    framing: text(value.framing, 500, "framing"),
+    camera: text(value.camera, 500, "camera"),
+    lighting: nullable("lighting"),
+  };
 }
 
 function parseBlockEvidence(

@@ -83,12 +83,14 @@ export function NaturalAgentPanel(props: Props) {
       {...props}
       current={config.data.current}
       starters={config.data.starters}
+      structuredPlanningPrompts={config.data.structuredPlanningPrompts}
     />
   );
 }
 function NaturalEditor({
   current,
   starters,
+  structuredPlanningPrompts,
   models,
   generation,
   modelsPending,
@@ -100,9 +102,14 @@ function NaturalEditor({
 }: Props & {
   current: NaturalConfig | null;
   starters: Record<NaturalStage, string>;
+  structuredPlanningPrompts?: Pick<
+    Record<NaturalStage, string>,
+    "post_plan" | "image_plan" | "image_prompt"
+  >;
 }) {
   const cache = useQueryClient();
   const clean = {
+    planningContract: current?.planningContract,
     schedulerDefault: current?.schedulerDefault ?? false,
     planningAiModelId: current?.planningModel.aiModelId ?? "",
     reviewAiModelId: current?.reviewModel.aiModelId ?? "",
@@ -223,7 +230,11 @@ function NaturalEditor({
       } catch {
         /* Saved settings remain available. */
       }
-      cache.setQueryData(["natural-post-agent"], { current: saved, starters });
+      cache.setQueryData(["natural-post-agent"], {
+        current: saved,
+        starters,
+        structuredPlanningPrompts,
+      });
     },
   });
   const options = models
@@ -290,6 +301,42 @@ function NaturalEditor({
             {current ? "설정 저장됨" : "초기 설정 필요"}
           </Badge>
         </Group>
+        {structuredPlanningPrompts ? (
+          <Paper withBorder p="md">
+            <Stack gap="sm">
+              <Text size="sm">
+                장소와 사진 구성을 게시물 기획에서 정하고, 이미지 기획을 항목별
+                촬영 명세로 작성합니다. 영상 생성은 지원하지 않습니다.
+              </Text>
+              <Button
+                variant="default"
+                disabled={save.isPending}
+                onClick={() => {
+                  form.setFieldValue("planningContract", "structured-v1");
+                  for (const stage of [
+                    "post_plan",
+                    "image_plan",
+                    "image_prompt",
+                  ] as const)
+                    form.setFieldValue(
+                      `prompts.${stage}`,
+                      structuredPlanningPrompts[stage],
+                    );
+                  setExpanded(["post_plan", "image_plan", "image_prompt"]);
+                }}
+              >
+                항목별 기획 지침 불러오기
+              </Button>
+              <Text size="xs" c="dimmed">
+                기획·이미지 기획·프롬프트 지침 3개를 교체합니다. 내용을 검토하고
+                저장하면 새 초안부터 적용됩니다.
+              </Text>
+              {form.getValues().planningContract ? (
+                <Badge variant="light">항목별 기획 선택됨</Badge>
+              ) : null}
+            </Stack>
+          </Paper>
+        ) : null}
         {Object.keys(summary).length ? (
           <Alert
             color="red"

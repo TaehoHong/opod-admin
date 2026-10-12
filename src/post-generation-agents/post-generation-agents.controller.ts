@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import { NATURAL_AGENT_STARTERS } from "../../prompts/natural-post-agent";
+import { STRUCTURED_PLANNING_PROMPTS } from "../../prompts/structured-planning";
 import {
   NATURAL_STAGES,
   naturalSchemas,
@@ -59,6 +60,7 @@ export class PostGenerationAgentsController {
     return {
       current: await this.settings.getNaturalAgentBundle(),
       starters: NATURAL_AGENT_STARTERS,
+      structuredPlanningPrompts: STRUCTURED_PLANNING_PROMPTS,
     };
   }
   @Post("natural/config") async saveNaturalConfig(
@@ -86,6 +88,9 @@ export class PostGenerationAgentsController {
       throw new BadRequestException("사진 검수 모델은 LLM을 선택하세요.");
     const content = {
       version: 1 as const,
+      ...(body.planningContract
+        ? { planningContract: body.planningContract }
+        : {}),
       schedulerDefault: body.schedulerDefault,
       planningModel: {
         aiModelId: planning.id,
@@ -105,7 +110,7 @@ export class PostGenerationAgentsController {
         effectiveModel: generation.effectiveModel!,
       },
       prompts: body.prompts as NaturalAgentBundle["prompts"],
-      schemas: naturalSchemas(),
+      schemas: naturalSchemas(body.planningContract),
     };
     return this.settings.saveNaturalAgentBundle(
       { ...content, revision: canonicalJsonHash(content) },
