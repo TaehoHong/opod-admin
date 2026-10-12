@@ -1,3 +1,4 @@
+import { assignContextFactIds } from "./planning-evidence";
 import {
   isNaturalAgent,
   validateNaturalBundle,
@@ -74,6 +75,7 @@ import { isRecord } from "../shared/utils/value-utils";
 import {
   STRUCTURED_PLANNING,
   LOCATION_AFTER_CONCEPT,
+  CONTEXT_FACT_SELECTION,
 } from "../../prompts/structured-planning";
 import { LocationsService } from "../locations/locations.service";
 import {
@@ -382,6 +384,9 @@ export class PostPipelineV3Runner {
         formats:
           maxImages > 1 ? ["single_image", "carousel"] : ["single_image"],
         maxImages,
+        ...(contextFactSelection(concept)
+          ? { contextFactSelection: "ids" as const }
+          : {}),
       };
       input.contentProfile.imageStyle = profile.imageStyle;
       if (!locationAfterConcept(concept)) {
@@ -416,6 +421,7 @@ export class PostPipelineV3Runner {
         }),
       );
     }
+    if (contextFactSelection(concept)) assignContextFactIds(input);
     const missing =
       input.character.bio.trim() || input.persona.characterContext.length
         ? []
@@ -445,11 +451,13 @@ export class PostPipelineV3Runner {
       hash,
       producerLogId: result.producerLogId,
       agentConfig: client.agentSettings?.metadata ?? null,
-      contractVersion: structuredPlanning(concept)
-        ? locationAfterConcept(concept)
-          ? "post-plan-v6"
-          : "post-plan-v5"
-        : POST_PLAN_CONTRACT_VERSION,
+      contractVersion: contextFactSelection(concept)
+        ? "post-plan-v7"
+        : structuredPlanning(concept)
+          ? locationAfterConcept(concept)
+            ? "post-plan-v6"
+            : "post-plan-v5"
+          : POST_PLAN_CONTRACT_VERSION,
       promptVersion: POST_PLANNER_PROMPT_VERSION,
       input,
       output: result.output,
@@ -1349,7 +1357,8 @@ function structuredPlanning(concept: V3Concept): boolean {
     isNaturalAgent(concept) &&
     isRecord(concept.naturalAgentConfig) &&
     (concept.naturalAgentConfig.planningContract === STRUCTURED_PLANNING ||
-      concept.naturalAgentConfig.planningContract === LOCATION_AFTER_CONCEPT)
+      concept.naturalAgentConfig.planningContract === LOCATION_AFTER_CONCEPT ||
+      concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION)
   );
 }
 
@@ -1357,7 +1366,16 @@ function locationAfterConcept(concept: V3Concept): boolean {
   return (
     isNaturalAgent(concept) &&
     isRecord(concept.naturalAgentConfig) &&
-    concept.naturalAgentConfig.planningContract === LOCATION_AFTER_CONCEPT
+    (concept.naturalAgentConfig.planningContract === LOCATION_AFTER_CONCEPT ||
+      concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION)
+  );
+}
+
+function contextFactSelection(concept: V3Concept): boolean {
+  return (
+    isNaturalAgent(concept) &&
+    isRecord(concept.naturalAgentConfig) &&
+    concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION
   );
 }
 

@@ -28,3 +28,71 @@ export function matchesInputQuote(value: unknown, quote: string): boolean {
     );
   return false;
 }
+
+export type ContextFactEntry = { content: string; contextFactId?: string };
+type ContextFactInput = {
+  persona: {
+    characterContext: ContextFactEntry[];
+    boundaries: ContextFactEntry[];
+    additionalContext: ContextFactEntry[];
+  };
+  memories: ContextFactEntry[];
+};
+
+// Only authored persona content and memories are eligible; metadata, writing
+// examples, content profiles and recent posts are not selection sources.
+function contextFactEntries(input: ContextFactInput) {
+  return [
+    ...(
+      ["characterContext", "boundaries", "additionalContext"] as const
+    ).flatMap((group) =>
+      input.persona[group].map((entry, index) => ({
+        entry,
+        path: `persona.${group}.${index}.content`,
+      })),
+    ),
+    ...input.memories.map((entry, index) => ({
+      entry,
+      path: `memories.${index}.content`,
+    })),
+  ].filter(({ entry }) => entry.content.trim());
+}
+
+// IDs belong to this planning input, not to a DB row or a later retrieval.
+export function assignContextFactIds(input: ContextFactInput): void {
+  contextFactEntries(input).forEach(({ entry }, index) => {
+    entry.contextFactId = `F${index + 1}`;
+  });
+}
+
+export function resolveContextFactIds(
+  input: ContextFactInput,
+  ids: unknown,
+): {
+  contextFactIds: string[];
+  contextFacts: InputQuote[];
+} {
+  if (
+    !Array.isArray(ids) ||
+    ids.length > 8 ||
+    ids.some((id) => typeof id !== "string") ||
+    new Set(ids).size !== ids.length
+  )
+    throw new Error("invalid context fact IDs");
+  const available = new Map(
+    contextFactEntries(input)
+      .filter(({ entry }) => entry.contextFactId)
+      .map(({ entry, path }) => [
+        entry.contextFactId,
+        { path, quote: entry.content },
+      ]),
+  );
+  return {
+    contextFactIds: ids as string[],
+    contextFacts: ids.map((id) => {
+      const fact = available.get(id);
+      if (!fact) throw new Error("unknown context fact ID");
+      return fact;
+    }),
+  };
+}

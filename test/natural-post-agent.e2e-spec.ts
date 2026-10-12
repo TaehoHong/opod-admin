@@ -554,7 +554,7 @@ describe("natural post agent durable settings and recovery", () => {
     });
   });
 
-  it.each(["structured-v1", "structured-v2"])(
+  it.each(["structured-v1", "structured-v2", "structured-v3"])(
     "saves %s explicitly and keeps older draft snapshots readable",
     async (planningContract) => {
       await request(app.getHttpServer())
@@ -600,6 +600,19 @@ describe("natural post agent durable settings and recovery", () => {
           .expect(201)
       ).body;
       expect(saved.planningContract).toBe(planningContract);
+      const productionSchema =
+        saved.schemas.post_plan.properties.result.anyOf[0].properties
+          .production;
+      expect(productionSchema.required).toContain(
+        planningContract === "structured-v3"
+          ? "contextFactIds"
+          : "contextFacts",
+      );
+      expect(productionSchema.properties).not.toHaveProperty(
+        planningContract === "structured-v3"
+          ? "contextFacts"
+          : "contextFactIds",
+      );
       const created = (
         await request(app.getHttpServer())
           .post("/api/admin/v1/drafts")

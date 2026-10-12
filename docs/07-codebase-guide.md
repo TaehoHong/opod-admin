@@ -595,11 +595,14 @@ LLM 로그와 액션 로그의 목록은 `shared/ui/LogRow.tsx`로 행 클릭을
 
 ## 선택 가능한 자연스러운 사진 Agent
 
-항목별 기획은 `planningContract=structured-v2`로 명시적으로 설치한다.
+항목별 기획은 `planningContract=structured-v3`로 명시적으로 설치한다.
 `prompts/structured-planning.ts`가 새 스키마와 설치용 지침을 소유하고,
 `naturalSchemas`/`validateNaturalBundle`이 이전 번들과 새 번들의 계약을 구분한다.
-`post-planner.ts`가 장소·사진 형식·순서·관련 사실 인용을 검증하며 runner는 imageStyle을
-게시물 기획부터 전달하고 기획한 장수를 실행한다. v2는 게시물 기획에 등록 장소 목록을
+`post-planner.ts`가 장소·사진 형식·순서·사실 선택을 검증한다.
+`planning-evidence.ts`가 실행 입력 항목의 ID 부여와 원문 연결을 소유한다. v3의 LLM은
+`contextFactIds`만 출력하고 서버가 저장된 입력에서 `contextFacts`를 구성한다. v1/v2의
+인용 계약은 유지한다. runner는 imageStyle을
+게시물 기획부터 전달하고 기획한 장수를 실행한다. v2/v3는 게시물 기획에 등록 장소 목록을
 조회·전달하지 않는다. 이미지 기획에서 확정 장소 설명과 이용 가능한 등록 장소를
 대조해 선택 ID 또는 null을 출력한다. `image-planner.ts`는 선택 ID의 후보 소속·장수와
 visualDetails를 검증하고 기존 reader용 문자열만 결정적으로 투영한다.

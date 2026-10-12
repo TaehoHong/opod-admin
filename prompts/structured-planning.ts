@@ -3,8 +3,11 @@ import { IMAGE_PLAN_JSON_SCHEMA } from "./image-planner";
 
 export const STRUCTURED_PLANNING = "structured-v1" as const;
 export const LOCATION_AFTER_CONCEPT = "structured-v2" as const;
+export const CONTEXT_FACT_SELECTION = "structured-v3" as const;
 export type StructuredPlanningContract =
-  typeof STRUCTURED_PLANNING | typeof LOCATION_AFTER_CONCEPT;
+  | typeof STRUCTURED_PLANNING
+  | typeof LOCATION_AFTER_CONCEPT
+  | typeof CONTEXT_FACT_SELECTION;
 const text = (maxLength = 500) => ({ type: "string", minLength: 1, maxLength });
 const nullable = { anyOf: [text(), { type: "null" }] };
 const object = (properties: Record<string, unknown>) => ({
@@ -57,12 +60,25 @@ export function structuredPlanningSchemas(
     (schema.properties as { result: { anyOf: Variant[] } }).result.anyOf;
   const postReady = variants(post)[0];
   postReady.properties.production =
-    contract === LOCATION_AFTER_CONCEPT
+    contract !== STRUCTURED_PLANNING
       ? object({
           ...PRODUCTION_SCHEMA.properties,
           location: object({ id: { type: "null" }, description: text() }),
         })
       : PRODUCTION_SCHEMA;
+  if (contract === CONTEXT_FACT_SELECTION) {
+    const production = postReady.properties.production as Variant;
+    delete production.properties.contextFacts;
+    production.properties.contextFactIds = {
+      type: "array",
+      maxItems: 8,
+      items: text(100),
+    };
+    production.required = production.required.filter(
+      (key) => key !== "contextFacts",
+    );
+    production.required.push("contextFactIds");
+  }
   postReady.required.push("production");
   const conflict = variants(post)[1].properties.conflicts as {
     items: {
@@ -100,8 +116,8 @@ export const STRUCTURED_PLANNING_PROMPTS = {
 Choose a concrete post concept, location, supported format and ordered content from this character's account concept, visual style, relevant persona and memories, recent posts and operator request. Preserve intended fashion or sexual appeal and the account's room for ordinary life.
 
 Decisions
-State what this post shows, not a broad theme. Choose the setting from the concept and authored facts, without a registered-location menu. Always set location.id=null and describe the intended place briefly in location.description; registration is resolved downstream. Preserve established place facts from persona or memories in contextFacts when needed. Do not invent changes to an established place. A new setting is not an established home layout, past event or new canon. Choose single_image or carousel using productionCapabilities; a reel placement does not provide video generation. Return a grounded conflict when an explicit video-only request cannot be produced. Choose the necessary number of shots within maxImages, with zero-based consecutive sortOrder values and one distinct content description per shot. Do not pad the count.
-Fix clothing, activities or other elements here only when central to the concept or required by authored instructions. Put those decisions in requirements. Leave poses, camera geometry and scene detail to image planning. Select only facts needed downstream into contextFacts as exact quotes and paths from persona or memories; these are evidence, not extra scenes to illustrate. Never convert conversation examples into events.
+State what this post shows, not a broad theme. Choose the setting from the concept and authored facts, without a registered-location menu. Always set location.id=null and describe the intended place briefly in location.description; registration is resolved downstream. Preserve needed established place facts by selecting their contextFactId. Do not invent changes to an established place. A new setting is not an established home layout, past event or new canon. Choose single_image or carousel using productionCapabilities; a reel placement does not provide video generation. Return a grounded conflict when an explicit video-only request cannot be produced. Choose the necessary number of shots within maxImages, with zero-based consecutive sortOrder values and one distinct content description per shot. Do not pad the count.
+Fix clothing, activities or other elements here only when central to the concept or required by authored instructions. Put those decisions in requirements. Leave poses, camera geometry and scene detail to image planning. Select the contextFactId values of persona or memory entries needed for image planning into contextFactIds (at most 8, no duplicates; [] when none are needed). Use only IDs supplied in this input; the server forwards their original content. Return no paths or quotes in contextFactIds. Selected entries provide context, not extra scenes to illustrate. Account concept, image style and constraints are forwarded separately and need no selection. Never convert conversation examples into events.
 
 Output
 Use the supplied schema. Keep premise, purpose, accountFit and shot descriptions brief; rationale stays in accountFit, not the visual content. Do not invent actions or props to prove personality or a backstory. Keep newMemoryCandidates empty. Conflict operands must quote actual inputs.`,

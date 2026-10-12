@@ -7,7 +7,13 @@ import {
 } from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
 import type { PostMemoryEntry, PostPersonaEntry } from "./post-persona-context";
-import { InputQuote, inputValue, matchesInputQuote } from "./planning-evidence";
+import {
+  ContextFactEntry,
+  InputQuote,
+  inputValue,
+  matchesInputQuote,
+  resolveContextFactIds,
+} from "./planning-evidence";
 import { InvalidPlanningResponseError } from "./pipeline-error";
 
 const SOURCES = new Set([
@@ -32,7 +38,7 @@ const MEMORY_TYPES = new Set([
   "goal",
 ]);
 
-export type PersonaEntry = PostPersonaEntry;
+export type PersonaEntry = PostPersonaEntry & ContextFactEntry;
 export type PostPlannerInput = {
   productionContext?: { contentType: string; mediaType: "image" };
   contentProfile: Pick<
@@ -42,6 +48,7 @@ export type PostPlannerInput = {
   productionCapabilities?: {
     formats: ("single_image" | "carousel")[];
     maxImages: number;
+    contextFactSelection?: "ids";
   };
   locations?: {
     id: string;
@@ -61,7 +68,7 @@ export type PostPlannerInput = {
     boundaries: PersonaEntry[];
     additionalContext: PersonaEntry[];
   };
-  memories: PostMemoryEntry[];
+  memories: (PostMemoryEntry & ContextFactEntry)[];
   recentPosts: {
     premise: string | null;
     caption: string;
@@ -87,6 +94,7 @@ export type PostProduction = {
   shots: { sortOrder: number; content: string }[];
   requirements: string[];
   contextFacts: InputQuote[];
+  contextFactIds?: string[];
 };
 export type PostPlanConflict = {
   status: "conflict";
@@ -249,9 +257,17 @@ function parseProduction(
   input: PostPlannerInput,
 ): PostProduction {
   if (!isRecord(value)) throw new Error("production is required");
+  const selectIds =
+    input.productionCapabilities?.contextFactSelection === "ids";
   exactKeys(
     value,
-    ["format", "location", "shots", "requirements", "contextFacts"],
+    [
+      "format",
+      "location",
+      "shots",
+      "requirements",
+      selectIds ? "contextFactIds" : "contextFacts",
+    ],
     "production",
   );
   if (
@@ -290,20 +306,9 @@ function parseProduction(
   });
   if (!Array.isArray(value.requirements) || value.requirements.length > 10)
     throw new Error("invalid production requirements");
-  if (!Array.isArray(value.contextFacts) || value.contextFacts.length > 8)
-    throw new Error("invalid context facts");
-  const contextFacts = value.contextFacts.map((fact) => {
-    if (!isRecord(fact)) throw new Error("invalid context fact");
-    exactKeys(fact, ["path", "quote"], "context fact");
-    const path = requiredText(fact.path, 300, "fact path");
-    const quote = requiredText(fact.quote, 2000, "fact quote");
-    if (
-      !/^(persona|memories)\./.test(path) ||
-      !matchesInputQuote(inputValue(input, path), quote)
-    )
-      throw new Error("context fact is not grounded in the planning input");
-    return { path, quote };
-  });
+  const facts = selectIds
+    ? resolveContextFactIds(input, value.contextFactIds)
+    : { contextFacts: parseLegacyContextFacts(value.contextFacts, input) };
   return {
     format: value.format as PostProduction["format"],
     location: {
@@ -318,8 +323,28 @@ function parseProduction(
     requirements: value.requirements.map((item) =>
       requiredText(item, 500, "requirement"),
     ),
-    contextFacts,
+    ...facts,
   };
+}
+
+function parseLegacyContextFacts(
+  value: unknown,
+  input: PostPlannerInput,
+): InputQuote[] {
+  if (!Array.isArray(value) || value.length > 8)
+    throw new Error("invalid context facts");
+  return value.map((fact) => {
+    if (!isRecord(fact)) throw new Error("invalid context fact");
+    exactKeys(fact, ["path", "quote"], "context fact");
+    const path = requiredText(fact.path, 300, "fact path");
+    const quote = requiredText(fact.quote, 2000, "fact quote");
+    if (
+      !/^(persona|memories)\./.test(path) ||
+      !matchesInputQuote(inputValue(input, path), quote)
+    )
+      throw new Error("context fact is not grounded in the planning input");
+    return { path, quote };
+  });
 }
 
 function operand(

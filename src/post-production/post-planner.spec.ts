@@ -4,6 +4,7 @@ import {
   PostPlannerInput,
 } from "./post-planner";
 import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
+import { assignContextFactIds } from "./planning-evidence";
 import { POST_PLAN_JSON_SCHEMA } from "../../prompts/post-planner";
 
 const ready = {
@@ -71,6 +72,87 @@ describe("Post Planning Agent contract (v3)", () => {
         structuredInput,
       ),
     ).toThrow(error as string);
+  });
+  describe("ID-selected context", () => {
+    const selectedInput = (): PostPlannerInput => {
+      const input = {
+        ...structuredInput,
+        productionCapabilities: {
+          ...structuredInput.productionCapabilities!,
+          contextFactSelection: "ids" as const,
+        },
+        persona: {
+          characterContext: [
+            { title: "identity", content: "  원문 전체\n둘째 줄  " },
+          ],
+          boundaries: [],
+          additionalContext: [],
+          writingProfile: {
+            voice: [{ title: "voice", content: "말투" }],
+            contentStyle: [],
+          },
+        },
+        memories: [{ type: "event", content: "친구와 이사한 날의 기억" }],
+      };
+      assignContextFactIds(input);
+      return input;
+    };
+    const selectedProduction = (contextFactIds: unknown) => {
+      const { contextFacts: _facts, ...rest } = production;
+      void _facts;
+      return { ...rest, contextFactIds };
+    };
+    it("resolves only selected entries to exact input content, including event memories", () => {
+      const input = selectedInput();
+      expect(input.persona.writingProfile.voice[0]).not.toHaveProperty(
+        "contextFactId",
+      );
+      expect(
+        parsePostPlan(
+          { ...ready, production: selectedProduction(["F2", "F1"]) },
+          input,
+        ),
+      ).toMatchObject({
+        production: {
+          contextFactIds: ["F2", "F1"],
+          contextFacts: [
+            { path: "memories.0.content", quote: "친구와 이사한 날의 기억" },
+            {
+              path: "persona.characterContext.0.content",
+              quote: "  원문 전체\n둘째 줄  ",
+            },
+          ],
+        },
+      });
+    });
+    it("allows no selection without inventing or automatically forwarding facts", () => {
+      expect(
+        parsePostPlan(
+          { ...ready, production: selectedProduction([]) },
+          selectedInput(),
+        ),
+      ).toMatchObject({ production: { contextFactIds: [], contextFacts: [] } });
+    });
+    it.each([
+      ["F3"],
+      ["F1", "F1"],
+      ["memories.0.content"],
+      ["contentProfile.imageStyle"],
+      [" F1 "],
+      [1],
+    ])("rejects unknown, repeated or non-ID selections: %j", (...ids) => {
+      expect(() =>
+        parsePostPlan(
+          { ...ready, production: selectedProduction(ids) },
+          selectedInput(),
+        ),
+      ).toThrow("context fact");
+    });
+    it("rejects legacy quotes under the new contract rather than guessing a selection", () => {
+      expect(() =>
+        parsePostPlan({ ...ready, production }, selectedInput()),
+      ).toThrow("invalid fields");
+    });
   });
   it("accepts an image-only production conflict only with a truthful medium quote", () => {
     const input = {
