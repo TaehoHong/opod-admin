@@ -242,7 +242,10 @@ function readyPostPlan() {
 describe("PostPipelineV3Runner", () => {
   function structuredBundle(
     contract:
-      "structured-v1" | "structured-v2" | "structured-v3" = "structured-v1",
+      | "structured-v1"
+      | "structured-v2"
+      | "structured-v3"
+      | "structured-v4" = "structured-v1",
   ) {
     const { revision: _revision, ...old } = naturalAgentBundle();
     void _revision;
@@ -337,58 +340,61 @@ describe("PostPipelineV3Runner", () => {
       pipeline: { imageCount: 1 },
     });
   });
-  it("hands off only selected original context from the exact v3 planning input", async () => {
-    const current = draft({
-      pipelineVersion: "post-pipeline-v4",
-      postGenerationAgent: "natural-v1",
-      naturalAgentConfig: structuredBundle("structured-v3"),
-      pipeline: { stage: "post_plan", state: "running" },
-    });
-    current.character.personas.push(
-      { title: "identity", content: "  원문 전체\n둘째 줄  " },
-      { title: "example", content: "가상의 대화 사건" },
-      { title: "background", content: "선택하지 않은 배경" },
-    );
-    const { contextFacts: _facts, ...rest } = production;
-    void _facts;
-    const { runner, repository, fetchMock } = setup(current, {
-      ...readyPostPlan(),
-      production: {
-        ...rest,
-        location: { id: null, description: "창가" },
-        contextFactIds: ["F1"],
-      },
-    });
-    await runner.runCurrentStage("draft-1");
-    const input = JSON.parse(
-      JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
-    );
-    expect(input.persona.characterContext).toEqual([
-      {
-        title: "identity",
-        content: "  원문 전체\n둘째 줄  ",
-        contextFactId: "F1",
-      },
-      {
-        title: "background",
-        content: "선택하지 않은 배경",
-        contextFactId: "F2",
-      },
-    ]);
-    expect(JSON.stringify(input)).not.toContain("가상의 대화 사건");
-    expect(input).not.toHaveProperty("locations");
-    const saved =
-      repository.persistV3Artifact.mock.calls[0][0].conceptJson.postPlanning;
-    expect(saved.contractVersion).toBe("post-plan-v7");
-    expect(saved.input).toEqual(input);
-    expect(saved.output.production.contextFactIds).toEqual(["F1"]);
-    expect(saved.output.production.contextFacts).toEqual([
-      {
-        path: "persona.characterContext.0.content",
-        quote: "  원문 전체\n둘째 줄  ",
-      },
-    ]);
-  });
+  it.each(["structured-v3", "structured-v4"] as const)(
+    "hands off only selected original context from the exact %s planning input",
+    async (contract) => {
+      const current = draft({
+        pipelineVersion: "post-pipeline-v4",
+        postGenerationAgent: "natural-v1",
+        naturalAgentConfig: structuredBundle(contract),
+        pipeline: { stage: "post_plan", state: "running" },
+      });
+      current.character.personas.push(
+        { title: "identity", content: "  원문 전체\n둘째 줄  " },
+        { title: "example", content: "가상의 대화 사건" },
+        { title: "background", content: "선택하지 않은 배경" },
+      );
+      const { contextFacts: _facts, ...rest } = production;
+      void _facts;
+      const { runner, repository, fetchMock } = setup(current, {
+        ...readyPostPlan(),
+        production: {
+          ...rest,
+          location: { id: null, description: "창가" },
+          contextFactIds: ["F1"],
+        },
+      });
+      await runner.runCurrentStage("draft-1");
+      const input = JSON.parse(
+        JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+      );
+      expect(input.persona.characterContext).toEqual([
+        {
+          title: "identity",
+          content: "  원문 전체\n둘째 줄  ",
+          contextFactId: "F1",
+        },
+        {
+          title: "background",
+          content: "선택하지 않은 배경",
+          contextFactId: "F2",
+        },
+      ]);
+      expect(JSON.stringify(input)).not.toContain("가상의 대화 사건");
+      expect(input).not.toHaveProperty("locations");
+      const saved =
+        repository.persistV3Artifact.mock.calls[0][0].conceptJson.postPlanning;
+      expect(saved.contractVersion).toBe("post-plan-v7");
+      expect(saved.input).toEqual(input);
+      expect(saved.output.production.contextFactIds).toEqual(["F1"]);
+      expect(saved.output.production.contextFacts).toEqual([
+        {
+          path: "persona.characterContext.0.content",
+          quote: "  원문 전체\n둘째 줄  ",
+        },
+      ]);
+    },
+  );
   it.each(["cafe", null])(
     "matches an optional registered location (%s) only after the concept is fixed",
     async (locationId) => {
@@ -463,13 +469,13 @@ describe("PostPipelineV3Runner", () => {
       });
     },
   );
-  it.each(["structured-v1", "structured-v3"] as const)(
+  it.each(["structured-v1", "structured-v3", "structured-v4"] as const)(
     "preserves approved facts and style in %s image planning",
     async (contract) => {
       const planned = {
         ...production,
         location: { id: null, description: "창가" },
-        ...(contract === "structured-v3" ? { contextFactIds: ["F1"] } : {}),
+        ...(contract !== "structured-v1" ? { contextFactIds: ["F1"] } : {}),
         contextFacts: [{ path: "memories.0.content", quote: "회색 반려묘" }],
       };
       const visualDetails = {
@@ -515,19 +521,35 @@ describe("PostPipelineV3Runner", () => {
             },
             subjectCameraRelation: "not_applicable",
             notInFrame: [],
-            referenceBindings: [],
+            ...(contract === "structured-v4"
+              ? { references: [] }
+              : { referenceBindings: [] }),
           },
         ],
       };
-      const { runner, repository } = setup(current, output, {
+      const { runner, repository, fetchMock } = setup(current, output, {
         profile: { ...EMPTY_CONTENT_PROFILE, imageStyle: "changed style" },
       });
       await runner.runCurrentStage("draft-1");
+      const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+      const properties =
+        request.response_format.json_schema.schema.properties.result.anyOf[0]
+          .properties.shots.items.properties;
+      expect(properties).toHaveProperty(
+        contract === "structured-v4" ? "references" : "referenceBindings",
+      );
+      expect(properties).not.toHaveProperty(
+        contract === "structured-v4" ? "referenceBindings" : "references",
+      );
       expect(
         repository.persistV3Artifact.mock.calls[0][0].conceptJson.imagePlanning,
       ).toMatchObject({
         contractVersion:
-          contract === "structured-v3" ? "image-plan-v6" : "image-plan-v5",
+          contract === "structured-v4"
+            ? "image-plan-v7"
+            : contract === "structured-v3"
+              ? "image-plan-v6"
+              : "image-plan-v5",
         input: {
           contentProfile: { imageStyle: "필름" },
           postPlan: { production: planned },

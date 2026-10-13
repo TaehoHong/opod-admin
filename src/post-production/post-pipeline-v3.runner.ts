@@ -76,6 +76,7 @@ import {
   STRUCTURED_PLANNING,
   LOCATION_AFTER_CONCEPT,
   CONTEXT_FACT_SELECTION,
+  IMAGE_REFERENCE_SELECTION,
 } from "../../prompts/structured-planning";
 import { LocationsService } from "../locations/locations.service";
 import {
@@ -603,6 +604,9 @@ export class PostPipelineV3Runner {
       draft.character.visualProfile?.providerConfig,
     );
     const input: ImagePlannerInput = {
+      ...(serverReferenceSelection(concept)
+        ? { referenceSelection: "server_ids" as const }
+        : {}),
       contentProfile: {
         accountConcept: profile.accountConcept,
         imageStyle:
@@ -1358,7 +1362,8 @@ function structuredPlanning(concept: V3Concept): boolean {
     isRecord(concept.naturalAgentConfig) &&
     (concept.naturalAgentConfig.planningContract === STRUCTURED_PLANNING ||
       concept.naturalAgentConfig.planningContract === LOCATION_AFTER_CONCEPT ||
-      concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION)
+      concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION ||
+      concept.naturalAgentConfig.planningContract === IMAGE_REFERENCE_SELECTION)
   );
 }
 
@@ -1367,7 +1372,8 @@ function locationAfterConcept(concept: V3Concept): boolean {
     isNaturalAgent(concept) &&
     isRecord(concept.naturalAgentConfig) &&
     (concept.naturalAgentConfig.planningContract === LOCATION_AFTER_CONCEPT ||
-      concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION)
+      concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION ||
+      concept.naturalAgentConfig.planningContract === IMAGE_REFERENCE_SELECTION)
   );
 }
 
@@ -1375,7 +1381,16 @@ function contextFactSelection(concept: V3Concept): boolean {
   return (
     isNaturalAgent(concept) &&
     isRecord(concept.naturalAgentConfig) &&
-    concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION
+    (concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION ||
+      concept.naturalAgentConfig.planningContract === IMAGE_REFERENCE_SELECTION)
+  );
+}
+
+function serverReferenceSelection(concept: V3Concept): boolean {
+  return (
+    isNaturalAgent(concept) &&
+    isRecord(concept.naturalAgentConfig) &&
+    concept.naturalAgentConfig.planningContract === IMAGE_REFERENCE_SELECTION
   );
 }
 
@@ -1518,11 +1533,14 @@ function imageArtifact(
       postPlanningHash: artifactHash(concept.postPlanning),
     },
     producerLogId,
-    contractVersion: input.postPlan.production
-      ? input.locationResolution === "match_planned"
-        ? "image-plan-v6"
-        : "image-plan-v5"
-      : IMAGE_PLAN_CONTRACT_VERSION,
+    contractVersion:
+      input.referenceSelection === "server_ids"
+        ? "image-plan-v7"
+        : input.postPlan.production
+          ? input.locationResolution === "match_planned"
+            ? "image-plan-v6"
+            : "image-plan-v5"
+          : IMAGE_PLAN_CONTRACT_VERSION,
     promptVersion: IMAGE_PLANNER_PROMPT_VERSION,
     input,
     output,

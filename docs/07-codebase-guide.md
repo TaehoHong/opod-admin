@@ -643,3 +643,23 @@ mode 없는 API 요청은 이전 기본값을 유지한다. `DraftsService.setAu
 공급자 요청 ID를 보존한다. 원문은 기존 LLM 로그 상세의 응답 원본에서 확인한다.
 `openai-image.provider.spec.ts`가 JSON·텍스트·빈 오류와 비밀값 마스킹, 자동 재호출
 없음을 검증한다. 기록 없이 버려진 과거 응답은 복구되지 않는다.
+
+
+## Image planning reference contract
+
+`structured-v4` keeps v3 post planning (contextFactIds and location matching) and
+changes only the image planner raw reference contract to
+`references[{referenceId, source, purposes, preserve, avoidCopying}]`.
+`parseImagePlan` owns validation and assigns internal binding IDs by shot and
+reference order; it preserves the canonical `referenceBindings` shape used by
+history, prompt slots, jobs and workspace UI. Old contracts are not auto-detected
+from output field names or rewritten. The runner passes the snapshotted contract
+explicitly and records image-plan-v7 for the new input contract.
+`source`, character presentation and visible parts remain meaningful inputs.
+The parser accepts exact production requirements, shot content, location description
+and selected context fact quotes as blocked evidence, excluding metadata paths.
+DB image-plan instructions and schema must be activated together through
+GenerationSettingsService after compatible code is deployed. Existing drafts keep
+their frozen bundle; no prompt fallback or automatic retry is introduced.
+Regression owners: image-planner.spec.ts, post-pipeline-v3.runner.spec.ts,
+test/natural-post-agent.e2e-spec.ts and NaturalAgentPanel.test.tsx.

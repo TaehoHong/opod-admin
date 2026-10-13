@@ -11,6 +11,7 @@ import { InvalidPlanningResponseError } from "./pipeline-error";
 import type { PostProduction } from "./post-planner";
 
 export type ImagePlannerInput = {
+  referenceSelection?: "server_ids";
   locationResolution?: "match_planned";
   contentProfile?: Pick<
     CharacterContentProfile,
@@ -269,6 +270,8 @@ export function parseImagePlan(
       ?.references.map((reference) => reference.id) ?? [],
   );
   const bindingIds = new Set<string>();
+  const serverReferenceIds = input.referenceSelection === "server_ids";
+  const referencesKey = serverReferenceIds ? "references" : "referenceBindings";
   const shots = value.shots.map((raw, index) => {
     if (!isRecord(raw)) throw new Error(`image plan shot ${index} is invalid`);
     const visualDetails = production
@@ -283,7 +286,7 @@ export function parseImagePlan(
           "characterPresentation",
           "notInFrame",
           "subjectCameraRelation",
-          "referenceBindings",
+          referencesKey,
         ],
         `image plan shot ${index}`,
       );
@@ -324,7 +327,7 @@ export function parseImagePlan(
         "motionEvidence",
         "notInFrame",
         "subjectCameraRelation",
-        "referenceBindings",
+        referencesKey,
         ...(visualDetails ? ["visualDetails"] : []),
       ],
       `image plan shot ${index}`,
@@ -375,11 +378,11 @@ export function parseImagePlan(
         `image plan shot ${index} subjectCameraRelation is invalid`,
       );
     if (
-      !Array.isArray(raw.referenceBindings) ||
-      raw.referenceBindings.length > 5
+      !Array.isArray(raw[referencesKey]) ||
+      (raw[referencesKey] as unknown[]).length > 5
     )
       throw new Error(`image plan shot ${index} bindings are invalid`);
-    const referenceBindings = raw.referenceBindings.map(
+    const referenceBindings = (raw[referencesKey] as unknown[]).map(
       (binding: unknown, bindingIndex: number) =>
         parseBinding(
           binding,
@@ -388,6 +391,7 @@ export function parseImagePlan(
           identityIds,
           environmentIds,
           bindingIds,
+          serverReferenceIds,
         ),
     );
     if (
@@ -523,7 +527,7 @@ function parseBlockEvidence(
     const path = text(item.path, 300, "requirement path");
     const quote = text(item.quote, 2_000, "requirement quote");
     const requirementPath =
-      /^(operatorRequest|imageCount|canvas\.aspectRatio|postPlan\.intent\.(premise|primaryPurpose|secondaryPurpose)|contentProfile\.(accountConcept|imageStyle|constraints)|characterVisualContext\.(name|appearance|(exclusions|boundaries|capturePreferences)\.\d+|personaContext\.\d+\.content)|memories\.\d+\.content|locations\.\d+\.(name|description|exclusions\.\d+))$/;
+      /^(operatorRequest|imageCount|canvas\.aspectRatio|postPlan\.intent\.(premise|primaryPurpose|secondaryPurpose)|postPlan\.production\.(requirements\.\d+|shots\.\d+\.content|location\.description|contextFacts\.\d+\.quote)|contentProfile\.(accountConcept|imageStyle|constraints)|characterVisualContext\.(name|appearance|(exclusions|boundaries|capturePreferences)\.\d+|personaContext\.\d+\.content)|memories\.\d+\.content|locations\.\d+\.(name|description|exclusions\.\d+))$/;
     if (
       !requirementPath.test(path) ||
       !matchesInputQuote(inputValue(input, path), quote)
@@ -599,34 +603,43 @@ function parseBinding(
   identityIds: Set<string>,
   environmentIds: Set<string>,
   bindingIds: Set<string>,
+  serverIds = false,
 ): ReferenceBinding {
   if (!isRecord(value))
     throw new Error(`shot ${shot} binding ${index} is invalid`);
   exactKeys(
     value,
-    [
-      "bindingId",
-      "id",
-      "source",
-      "semanticPurposes",
-      "preserve",
-      "avoidCopying",
-    ],
+    serverIds
+      ? ["referenceId", "source", "purposes", "preserve", "avoidCopying"]
+      : [
+          "bindingId",
+          "id",
+          "source",
+          "semanticPurposes",
+          "preserve",
+          "avoidCopying",
+        ],
     `shot ${shot} binding ${index}`,
   );
-  const bindingId = text(value.bindingId, 200, `shot ${shot} bindingId`);
+  const bindingId = serverIds
+    ? `shot-${shot}-ref-${index}`
+    : text(value.bindingId, 200, `shot ${shot} bindingId`);
   if (bindingIds.has(bindingId))
     throw new Error(`duplicate bindingId ${bindingId}`);
   bindingIds.add(bindingId);
   if (value.source !== "identity" && value.source !== "environment")
     throw new Error(`shot ${shot} binding ${index} has invalid source`);
-  const id = text(value.id, 200, `shot ${shot} binding id`);
+  const id = text(
+    value[serverIds ? "referenceId" : "id"],
+    200,
+    `shot ${shot} binding id`,
+  );
   if (!(value.source === "identity" ? identityIds : environmentIds).has(id))
     throw new Error(
       `shot ${shot} binding ${index} selected an unavailable reference`,
     );
   const semanticPurposes = textArray(
-    value.semanticPurposes,
+    value[serverIds ? "purposes" : "semanticPurposes"],
     1,
     4,
     30,

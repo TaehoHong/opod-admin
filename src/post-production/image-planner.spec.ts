@@ -1,3 +1,4 @@
+import { buildPromptPackage } from "./image-model-policy";
 import {
   ImagePlannerInput,
   ImagePlanReady,
@@ -83,6 +84,207 @@ describe("Image Planning Agent contract", () => {
     subjectCameraRelation: "not_applicable",
     referenceBindings: [],
   };
+  const referenceInput = {
+    ...input,
+    referenceSelection: "server_ids",
+    imageCount: 2,
+    postPlan: {
+      ...input.postPlan,
+      production: {
+        ...production,
+        format: "carousel",
+        shots: [
+          { sortOrder: 0, content: "전신" },
+          { sortOrder: 1, content: "얼굴" },
+        ],
+      },
+    },
+  } as ImagePlannerInput;
+  const referenceOutput = {
+    ...ready,
+    shots: [0, 1].map((sortOrder) => ({
+      sortOrder,
+      visualDetails,
+      characterPresentation: {
+        mode: "partial",
+        visibleParts: ["face"],
+        faceVisible: true,
+        identityPreservationRequired: true,
+      },
+      subjectCameraRelation: "deliberately_posed",
+      notInFrame: [],
+      references: [
+        {
+          referenceId: "person-1",
+          source: "identity",
+          purposes: ["identity"],
+          preserve: [sortOrder === 0 ? "body proportions" : "facial identity"],
+          avoidCopying: ["lighting"],
+        },
+      ],
+    })),
+  };
+  it("assigns internal IDs while preserving per-shot use of the same reference", () => {
+    const result = parseImagePlan(
+      referenceOutput,
+      referenceInput,
+    ) as ImagePlanReady;
+    const packageInput = buildPromptPackage({
+      imagePlan: result,
+      appearance: "face",
+      targetModelId: "gpt-image-2.5-sunburst",
+    });
+    expect(packageInput.referenceSlots).toMatchObject([
+      {
+        shotSortOrder: 0,
+        referenceId: "person-1",
+        slot: "Image 1",
+        preserve: ["body proportions"],
+      },
+      {
+        shotSortOrder: 1,
+        referenceId: "person-1",
+        slot: "Image 1",
+        preserve: ["facial identity"],
+      },
+    ]);
+    expect(result.shots.map((shot) => shot.referenceBindings)).toEqual([
+      [
+        {
+          bindingId: "shot-0-ref-0",
+          id: "person-1",
+          source: "identity",
+          semanticPurposes: ["identity"],
+          preserve: ["body proportions"],
+          avoidCopying: ["lighting"],
+        },
+      ],
+      [
+        {
+          bindingId: "shot-1-ref-0",
+          id: "person-1",
+          source: "identity",
+          semanticPurposes: ["identity"],
+          preserve: ["facial identity"],
+          avoidCopying: ["lighting"],
+        },
+      ],
+    ]);
+  });
+  it.each([
+    ["bindingId", "llm-name"],
+    ["id", "person-1"],
+    ["semanticPurposes", ["identity"]],
+  ])(
+    "rejects legacy reference field %s in the new raw contract",
+    (key, value) => {
+      const output = structuredClone(referenceOutput);
+      Object.assign(output.shots[0].references[0], { [key as string]: value });
+      expect(() => parseImagePlan(output, referenceInput)).toThrow();
+    },
+  );
+  it("keeps source validation when the same asset belongs to both reference lists", () => {
+    const output = structuredClone(referenceOutput);
+    const locatedOutput = { ...output, locationId: "cafe" };
+    output.shots[0].references[0].source = "environment";
+    expect(() =>
+      parseImagePlan(locatedOutput, {
+        ...referenceInput,
+        locationResolution: "match_planned",
+        locations: [
+          {
+            id: "cafe",
+            name: "cafe",
+            description: "cafe",
+            references: [{ id: "person-1", description: "room" }],
+          },
+        ],
+      }),
+    ).toThrow("environment binding has character purpose");
+  });
+  it.each([
+    [0, 0],
+    [0, 1],
+  ])("rejects invalid single-shot continuity [%s, %s]", (...scope) => {
+    expect(() =>
+      parseImagePlan(
+        {
+          ...ready,
+          continuity: {
+            lockedElements: [
+              {
+                category: "wardrobe",
+                description: "black shirt",
+                appliesToShots: scope,
+              },
+            ],
+          },
+        },
+        input,
+      ),
+    ).toThrow();
+  });
+  it("preserves continuity limited to two of three shots", () => {
+    const output = {
+      ...ready,
+      shots: [0, 1, 2].map((sortOrder) => ({ ...ready.shots[0], sortOrder })),
+      continuity: {
+        lockedElements: [
+          {
+            category: "prop",
+            description: "same blue cup",
+            appliesToShots: [0, 2],
+          },
+        ],
+      },
+    };
+    expect(parseImagePlan(output, { ...input, imageCount: 3 })).toEqual(output);
+  });
+  it.each([
+    ["postPlan.production.requirements.0", "얼굴 비공개"],
+    ["postPlan.production.shots.0.content", "얼굴이 보이는 사진"],
+    ["postPlan.production.location.description", "카페 창가"],
+    ["postPlan.production.contextFacts.0.quote", "얼굴 공개를 원하지 않는다"],
+  ])("accepts exact approved production evidence at %s", (path, quote) => {
+    const blocked = {
+      status: "blocked",
+      reasons: [
+        {
+          code: "visual_constraint_conflict",
+          detail: "필수 얼굴 노출과 비공개가 충돌한다",
+          evidence: {
+            requirements: [{ path, quote }],
+            referenceChecks: [],
+            alternatives: [
+              {
+                description: "얼굴을 가리면 필수 노출 조건을 충족하지 못한다",
+                satisfiesRequirements: false,
+              },
+            ],
+          },
+        },
+      ],
+    };
+    const productionInput = {
+      ...input,
+      postPlan: {
+        ...input.postPlan,
+        production: {
+          ...production,
+          requirements: ["얼굴 비공개"],
+          shots: [{ sortOrder: 0, content: "얼굴이 보이는 사진" }],
+          contextFacts: [
+            { path: "memories.0.content", quote: "얼굴 공개를 원하지 않는다" },
+          ],
+        },
+      },
+    };
+    expect(parseImagePlan(blocked, productionInput)).toEqual(blocked);
+    blocked.reasons[0].evidence.requirements[0].quote = "입력에 없는 조건";
+    expect(() => parseImagePlan(blocked, productionInput)).toThrow(
+      "does not match input",
+    );
+  });
   it("accepts sparse visual specifications without inventing action or wardrobe", () => {
     const result = parseImagePlan(
       { ...ready, shots: [structuredShot] },
