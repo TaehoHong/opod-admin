@@ -5,11 +5,13 @@ export const STRUCTURED_PLANNING = "structured-v1" as const;
 export const LOCATION_AFTER_CONCEPT = "structured-v2" as const;
 export const CONTEXT_FACT_SELECTION = "structured-v3" as const;
 export const IMAGE_REFERENCE_SELECTION = "structured-v4" as const;
+export const COHERENT_VISUAL_DECISIONS = "structured-v5" as const;
 export type StructuredPlanningContract =
   | typeof STRUCTURED_PLANNING
   | typeof LOCATION_AFTER_CONCEPT
   | typeof CONTEXT_FACT_SELECTION
-  | typeof IMAGE_REFERENCE_SELECTION;
+  | typeof IMAGE_REFERENCE_SELECTION
+  | typeof COHERENT_VISUAL_DECISIONS;
 const text = (maxLength = 500) => ({ type: "string", minLength: 1, maxLength });
 const nullable = { anyOf: [text(), { type: "null" }] };
 const object = (properties: Record<string, unknown>) => ({
@@ -70,7 +72,8 @@ export function structuredPlanningSchemas(
       : PRODUCTION_SCHEMA;
   if (
     contract === CONTEXT_FACT_SELECTION ||
-    contract === IMAGE_REFERENCE_SELECTION
+    contract === IMAGE_REFERENCE_SELECTION ||
+    contract === COHERENT_VISUAL_DECISIONS
   ) {
     const production = postReady.properties.production as Variant;
     delete production.properties.contextFacts;
@@ -112,7 +115,10 @@ export function structuredPlanningSchemas(
   }
   shot.properties.visualDetails = VISUAL_DETAILS_SCHEMA;
   shot.required.push("visualDetails");
-  if (contract === IMAGE_REFERENCE_SELECTION) {
+  if (
+    contract === IMAGE_REFERENCE_SELECTION ||
+    contract === COHERENT_VISUAL_DECISIONS
+  ) {
     const references = shot.properties.referenceBindings as { items: Variant };
     delete shot.properties.referenceBindings;
     shot.properties.references = references;
@@ -133,6 +139,50 @@ export function structuredPlanningSchemas(
       "avoidCopying",
     ];
   }
+  if (contract === COHERENT_VISUAL_DECISIONS) {
+    const descriptions = {
+      subject: "Main subject visible in this photograph.",
+      wardrobe: "Clothing worn in this shot; null when irrelevant.",
+      setting:
+        "Visible space and relevant layout, consistent with the approved place.",
+      poseAction:
+        "Body position, support and contact at the captured instant, including any ongoing action; consistent with the camera position.",
+      expressionGaze:
+        "Expression and gaze target at that same instant; null when not visible or unnecessary.",
+      props:
+        "Objects needed in the chosen scene, without a story explaining their presence.",
+      framing:
+        "Visible extent, cropping and subject placement from the chosen camera position.",
+      camera:
+        "Capture method and physical camera position and direction relative to the subject; compatible with pose and framing.",
+      lighting:
+        "Relevant light sources and their effect in this scene; null when no specific decision is needed.",
+    };
+    shot.properties.visualDetails = object(
+      Object.fromEntries(
+        Object.entries(VISUAL_DETAILS_SCHEMA.properties).map(
+          ([key, schema]) => [
+            key,
+            {
+              ...(structuredClone(schema) as object),
+              description: descriptions[key as keyof typeof descriptions],
+            },
+          ],
+        ),
+      ),
+    );
+    shot.properties.notInFrame = {
+      ...(shot.properties.notInFrame as object),
+      description:
+        "Exclusions supported by an applicable input restriction or by the chosen crop or occlusion. Preserve their original target and scope; [] if none apply.",
+    };
+    const production = postReady.properties.production as Variant;
+    production.properties.requirements = {
+      ...(PRODUCTION_SCHEMA.properties.requirements as object),
+      description:
+        "Required visible outcomes of this post, stated so image planning can realize them; no rationale or optional preferences converted into mandates.",
+    };
+  }
   return { post_plan: post, image_plan: image };
 }
 
@@ -143,27 +193,29 @@ Choose a concrete post concept, location, supported format and ordered content f
 
 Decisions
 State what this post shows, not a broad theme. Choose the setting from the concept and authored facts, without a registered-location menu. Always set location.id=null and describe the intended place briefly in location.description; registration is resolved downstream. Preserve needed established place facts by selecting their contextFactId. Do not invent changes to an established place. A new setting is not an established home layout, past event or new canon. Choose single_image or carousel using productionCapabilities; a reel placement does not provide video generation. Return a grounded conflict when an explicit video-only request cannot be produced. Choose the necessary number of shots within maxImages, with zero-based consecutive sortOrder values and one distinct content description per shot. Do not pad the count.
-Fix clothing, activities or other elements here only when central to the concept or required by authored instructions. Put those decisions in requirements. Leave poses, camera geometry and scene detail to image planning. Select the contextFactId values of persona or memory entries needed for image planning into contextFactIds (at most 8, no duplicates; [] when none are needed). Use only IDs supplied in this input; the server forwards their original content. Return no paths or quotes in contextFactIds. Selected entries provide context, not extra scenes to illustrate. Account concept, image style and constraints are forwarded separately and need no selection. Never convert conversation examples into events.
+Fix clothing, activities or other elements here only when central to the concept or required by authored instructions. Put those decisions in requirements as required visible outcomes. Distinguish what must be recognizable in the photo from the reason for choosing it; keep optional preferences optional. Leave poses, camera geometry and scene detail to image planning. Select the contextFactId values of persona or memory entries needed for image planning into contextFactIds (at most 8, no duplicates; [] when none are needed). Use only IDs supplied in this input; the server forwards their original content. Return no paths or quotes in contextFactIds. Selected entries provide context, not extra scenes to illustrate. Account concept, image style and constraints are forwarded separately and need no selection. Never convert conversation examples into events.
 
 Output
 Use the supplied schema. Keep premise, purpose, accountFit and shot descriptions brief; rationale stays in accountFit, not the visual content. Do not invent actions or props to prove personality or a backstory. Keep newMemoryCandidates empty. Conflict operands must quote actual inputs.`,
   image_plan: `Role
-Turn the approved production concept, location, ordered shots and requirements into concise photographic specifications. Preserve authored identity, boundaries, image style and intended appeal. Choose a realization that satisfies these together; do not silently replace the approved concept, setting, format or shots. Preferences, recent visual history and optional references guide compatible choices, not new requirements.
+Realize the approved post as photographic specifications. Preserve its concept, place, shot count, identity, boundaries, style and intended appeal. Make necessary visual choices without adding a story or imposing a universal photographic look.
 
-Visual decisions
-Write visualDetails in short factual phrases. subject identifies the main subject; wardrobe specifies current clothing; setting describes the space; poseAction describes posture, action and contact; expressionGaze specifies expression and gaze target; props lists needed objects; framing defines visible extent and placement; camera defines capture method, viewpoint and direction; lighting defines relevant illumination. Avoid retelling identity attributes already assigned to a reference. Keep necessary relationships even when the same object appears in multiple fields.
-Decide what is necessary to realize each shot: pose, gaze, support, contact, framing and camera must form one feasible photograph. Leave incidental details open; use null or [] for inapplicable or unnecessary decisions. Describe visible content and rendering, not motives or past events. Do not invent props or gestures to prove a story. An intentional portrait, a pause and an activity are all valid. Do not impose a universal photographic look. Avoid redundant prose within fields; repeat shared attributes consistently where each shot needs them to stand alone.
+1. Establish the requirements
+Identify the required visible outcome of each shot. Distinguish it from background context, optional preferences and recent history. Apply input restrictions to their stated subjects and scope, including qualifications. A restriction on one element does not prohibit a broader category. Preserve genuinely broad restrictions; do not silently narrow them to make a plan work.
+Supplied locations are optional supporting records. Select locationId only when the record supports the already planned place and requirements, not merely its category. Otherwise use null while preserving established place facts. Only a selected location's references and restrictions apply.
 
-Location matching
-Supplied locations are optional supporting records, not a menu. Select locationId only when the record and authored context support the already planned place and requirements; a shared category is insufficient. Otherwise use null. Preserve established place facts and leave unknown details open. Unselected locations' references and exclusions do not apply.
+2. Decide one photograph
+Choose the captured instant, subject state and physical camera position together. An activity, pause or intentional pose is equally valid. Determine expression and gaze at that instant, body support and contact, then what the chosen viewpoint includes or hides. Camera position, device placement, pose and visible extent must agree. A sequence may inform the scene, but each shot specifies its own captured state.
+Use references for needed identity or environment attributes, separating these from current clothing, expression, pose and light. Describe referenced identity in its reference scope rather than repeating an appearance catalogue. Decide only details needed for the shot; leave incidental choices open. Do not create props or gestures to explain a motive or past event.
 
-References and visibility
-Inspect reference pixels and supplied IDs. In references, select referenceId and source, specify purposes, and assign only needed preserve and avoidCopying attributes. Separate stable identity from current clothing, pose, expression, framing and light. The same reference may serve multiple shots with different scopes. Internal binding IDs are assigned by the server.
-Use characterPresentation.mode to describe presentation: reflection for a reflected character, silhouette for a silhouette, otherwise full or partial for visible extent, or none for no character. visibleParts records relevant visible body regions; keep it consistent with framing and occlusion. A visible face requires identityPreservationRequired=true and an identity-purpose reference. With mode=none, visibleParts=[], faceVisible=false, identityPreservationRequired=false and subjectCameraRelation=not_applicable. Otherwise choose the camera relationship from the planned behavior. notInFrame contains only exclusions justified by input constraints or the chosen capture.
+3. Record that decision
+Populate visualDetails according to the field descriptions using concise factual phrases. Fields describe the same photograph, not independent alternatives. Repeat necessary relationships consistently rather than redefining them. Preserve mood or medium when it changes rendering; omit explanations. Use null or [] where applicable.
+Inspect reference pixels and select references by supplied referenceId and source, with needed purposes, preserve and avoidCopying scopes. The server assigns internal binding IDs.
+Derive characterPresentation and subjectCameraRelation from the chosen shot. Use reflection or silhouette when applicable, otherwise full or partial for visible extent, or none for no character. visibleParts and faceVisible must match cropping and occlusion. A visible face requires identityPreservationRequired=true and an identity-purpose reference. With none, use visibleParts=[], both booleans=false and subjectCameraRelation=not_applicable.
+Record continuity only for attributes shared by at least two distinct existing shots. Use concrete details and unique sortOrder values. A single shot has lockedElements=[]. Continuity describes a relationship, not an available visual reference.
 
-Continuity and completion
-Record only attributes that must remain consistent across two or more distinct existing shots, with concrete identifying details when needed. appliesToShots uses their sortOrder values without duplicates. For one shot, or no shared requirements, lockedElements=[]. A continuity instruction states the intended relationship; it is not itself a visual reference, and optional reference absence alone does not make a plan impossible.
-Keep the approved shot count and zero-based order. Return ready when the required visual decisions are compatible. Return blocked only when required conditions cannot be satisfied together, citing exact input conditions and alternatives considered; unspecified incidental details alone are not blockers. Output only the supplied schema.`,
+4. Check the whole plan
+Compare the finished shots with required outcomes and applicable restrictions. Resolve omissions or contradictions in your own visual choices before returning ready. If required input conditions cannot coexist, return blocked with exact input evidence and alternatives considered; do not silently weaken them. Missing incidental detail or optional references alone is not a blocker. Keep zero-based shot order and return only the supplied schema, without planning commentary.`,
   image_prompt: `Role
 Translate the approved visualDetails into a concise English image-generation prompt using the supplied schema and model policy. Retain required in-image text in its specified language. Do not re-plan.
 

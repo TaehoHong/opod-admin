@@ -313,7 +313,7 @@ function NaturalEditor({
                 variant="default"
                 disabled={save.isPending}
                 onClick={() => {
-                  form.setFieldValue("planningContract", "structured-v4");
+                  form.setFieldValue("planningContract", "structured-v5");
                   for (const stage of [
                     "post_plan",
                     "image_plan",

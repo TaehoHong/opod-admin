@@ -16,6 +16,7 @@ import {
   LOCATION_AFTER_CONCEPT,
   CONTEXT_FACT_SELECTION,
   IMAGE_REFERENCE_SELECTION,
+  COHERENT_VISUAL_DECISIONS,
   StructuredPlanningContract,
 } from "../../prompts/structured-planning";
 
@@ -61,7 +62,8 @@ export function validateNaturalBundle(value: unknown): NaturalAgentBundle {
       value.planningContract !== STRUCTURED_PLANNING &&
       value.planningContract !== LOCATION_AFTER_CONCEPT &&
       value.planningContract !== CONTEXT_FACT_SELECTION &&
-      value.planningContract !== IMAGE_REFERENCE_SELECTION)
+      value.planningContract !== IMAGE_REFERENCE_SELECTION &&
+      value.planningContract !== COHERENT_VISUAL_DECISIONS)
   )
     throw new BadRequestException("새 Agent 설정을 먼저 저장해 주세요.");
   for (const stage of NATURAL_STAGES) {

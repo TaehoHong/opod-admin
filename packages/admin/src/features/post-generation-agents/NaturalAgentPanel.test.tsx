@@ -80,7 +80,7 @@ it("loads structured planning explicitly and saves it without replacing review o
   await user.click(screen.getByRole("button", { name: "새 Agent 설정 저장" }));
   await waitFor(() => expect(saves).toHaveLength(1));
   expect(saves[0]).toMatchObject({
-    planningContract: "structured-v4",
+    planningContract: "structured-v5",
     expectedRevision: "r1",
     prompts: { ...prompts, ...structuredPlanningPrompts },
   });

@@ -663,3 +663,12 @@ GenerationSettingsService after compatible code is deployed. Existing drafts kee
 their frozen bundle; no prompt fallback or automatic retry is introduced.
 Regression owners: image-planner.spec.ts, post-pipeline-v3.runner.spec.ts,
 test/natural-post-agent.e2e-spec.ts and NaturalAgentPanel.test.tsx.
+
+
+`structured-v5` preserves v4 output fields and validation while adding schema field
+descriptions for one coherent captured instant and scoped exclusions. The image
+planner instructions follow requirements → photograph → fields → consistency check;
+post planning states required visible outcomes. Older schemas remain byte-identical
+so frozen drafts continue to validate. This is guidance, not a new semantic checker
+or an automatic retry. Regression coverage extends the runner contract tests and
+the natural-agent E2E save/read test from a frozen v4 draft to v5.

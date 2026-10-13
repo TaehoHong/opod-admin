@@ -77,6 +77,7 @@ import {
   LOCATION_AFTER_CONCEPT,
   CONTEXT_FACT_SELECTION,
   IMAGE_REFERENCE_SELECTION,
+  COHERENT_VISUAL_DECISIONS,
 } from "../../prompts/structured-planning";
 import { LocationsService } from "../locations/locations.service";
 import {
@@ -1363,7 +1364,9 @@ function structuredPlanning(concept: V3Concept): boolean {
     (concept.naturalAgentConfig.planningContract === STRUCTURED_PLANNING ||
       concept.naturalAgentConfig.planningContract === LOCATION_AFTER_CONCEPT ||
       concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION ||
-      concept.naturalAgentConfig.planningContract === IMAGE_REFERENCE_SELECTION)
+      concept.naturalAgentConfig.planningContract ===
+        IMAGE_REFERENCE_SELECTION ||
+      concept.naturalAgentConfig.planningContract === COHERENT_VISUAL_DECISIONS)
   );
 }
 
@@ -1373,7 +1376,9 @@ function locationAfterConcept(concept: V3Concept): boolean {
     isRecord(concept.naturalAgentConfig) &&
     (concept.naturalAgentConfig.planningContract === LOCATION_AFTER_CONCEPT ||
       concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION ||
-      concept.naturalAgentConfig.planningContract === IMAGE_REFERENCE_SELECTION)
+      concept.naturalAgentConfig.planningContract ===
+        IMAGE_REFERENCE_SELECTION ||
+      concept.naturalAgentConfig.planningContract === COHERENT_VISUAL_DECISIONS)
   );
 }
 
@@ -1382,7 +1387,9 @@ function contextFactSelection(concept: V3Concept): boolean {
     isNaturalAgent(concept) &&
     isRecord(concept.naturalAgentConfig) &&
     (concept.naturalAgentConfig.planningContract === CONTEXT_FACT_SELECTION ||
-      concept.naturalAgentConfig.planningContract === IMAGE_REFERENCE_SELECTION)
+      concept.naturalAgentConfig.planningContract ===
+        IMAGE_REFERENCE_SELECTION ||
+      concept.naturalAgentConfig.planningContract === COHERENT_VISUAL_DECISIONS)
   );
 }
 
@@ -1390,7 +1397,9 @@ function serverReferenceSelection(concept: V3Concept): boolean {
   return (
     isNaturalAgent(concept) &&
     isRecord(concept.naturalAgentConfig) &&
-    concept.naturalAgentConfig.planningContract === IMAGE_REFERENCE_SELECTION
+    (concept.naturalAgentConfig.planningContract ===
+      IMAGE_REFERENCE_SELECTION ||
+      concept.naturalAgentConfig.planningContract === COHERENT_VISUAL_DECISIONS)
   );
 }
 

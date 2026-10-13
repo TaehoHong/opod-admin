@@ -245,7 +245,8 @@ describe("PostPipelineV3Runner", () => {
       | "structured-v1"
       | "structured-v2"
       | "structured-v3"
-      | "structured-v4" = "structured-v1",
+      | "structured-v4"
+      | "structured-v5" = "structured-v1",
   ) {
     const { revision: _revision, ...old } = naturalAgentBundle();
     void _revision;
@@ -340,7 +341,7 @@ describe("PostPipelineV3Runner", () => {
       pipeline: { imageCount: 1 },
     });
   });
-  it.each(["structured-v3", "structured-v4"] as const)(
+  it.each(["structured-v3", "structured-v4", "structured-v5"] as const)(
     "hands off only selected original context from the exact %s planning input",
     async (contract) => {
       const current = draft({
@@ -469,7 +470,12 @@ describe("PostPipelineV3Runner", () => {
       });
     },
   );
-  it.each(["structured-v1", "structured-v3", "structured-v4"] as const)(
+  it.each([
+    "structured-v1",
+    "structured-v3",
+    "structured-v4",
+    "structured-v5",
+  ] as const)(
     "preserves approved facts and style in %s image planning",
     async (contract) => {
       const planned = {
@@ -521,7 +527,7 @@ describe("PostPipelineV3Runner", () => {
             },
             subjectCameraRelation: "not_applicable",
             notInFrame: [],
-            ...(contract === "structured-v4"
+            ...(contract === "structured-v4" || contract === "structured-v5"
               ? { references: [] }
               : { referenceBindings: [] }),
           },
@@ -536,16 +542,20 @@ describe("PostPipelineV3Runner", () => {
         request.response_format.json_schema.schema.properties.result.anyOf[0]
           .properties.shots.items.properties;
       expect(properties).toHaveProperty(
-        contract === "structured-v4" ? "references" : "referenceBindings",
+        contract === "structured-v4" || contract === "structured-v5"
+          ? "references"
+          : "referenceBindings",
       );
       expect(properties).not.toHaveProperty(
-        contract === "structured-v4" ? "referenceBindings" : "references",
+        contract === "structured-v4" || contract === "structured-v5"
+          ? "referenceBindings"
+          : "references",
       );
       expect(
         repository.persistV3Artifact.mock.calls[0][0].conceptJson.imagePlanning,
       ).toMatchObject({
         contractVersion:
-          contract === "structured-v4"
+          contract === "structured-v4" || contract === "structured-v5"
             ? "image-plan-v7"
             : contract === "structured-v3"
               ? "image-plan-v6"

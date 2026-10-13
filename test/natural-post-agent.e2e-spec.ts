@@ -554,7 +554,13 @@ describe("natural post agent durable settings and recovery", () => {
     });
   });
 
-  it.each(["structured-v1", "structured-v2", "structured-v3", "structured-v4"])(
+  it.each([
+    "structured-v1",
+    "structured-v2",
+    "structured-v3",
+    "structured-v4",
+    "structured-v5",
+  ])(
     "saves %s explicitly and keeps older draft snapshots readable",
     async (planningContract) => {
       await request(app.getHttpServer())
@@ -562,7 +568,10 @@ describe("natural post agent durable settings and recovery", () => {
         .set(headers)
         .send({
           expectedRevision: null,
-          planningContract: "structured-v1",
+          planningContract:
+            planningContract === "structured-v5"
+              ? "structured-v4"
+              : "structured-v1",
           schedulerDefault: false,
           planningAiModelId: llmId,
           reviewAiModelId: llmId,
@@ -605,13 +614,15 @@ describe("natural post agent durable settings and recovery", () => {
           .production;
       expect(productionSchema.required).toContain(
         planningContract === "structured-v3" ||
-          planningContract === "structured-v4"
+          planningContract === "structured-v4" ||
+          planningContract === "structured-v5"
           ? "contextFactIds"
           : "contextFacts",
       );
       expect(productionSchema.properties).not.toHaveProperty(
         planningContract === "structured-v3" ||
-          planningContract === "structured-v4"
+          planningContract === "structured-v4" ||
+          planningContract === "structured-v5"
           ? "contextFacts"
           : "contextFactIds",
       );
