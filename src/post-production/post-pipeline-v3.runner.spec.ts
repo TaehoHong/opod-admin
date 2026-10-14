@@ -2293,6 +2293,139 @@ describe("natural photo quality gate", () => {
       pipeline: { stage: "publish", state: "pending" },
     });
   });
+  it.each([
+    {
+      name: "post planning snapshot precedes later image and current profiles",
+      postInput: {
+        contentProfile: {
+          accountConcept: "authored account",
+          imageStyle: "authored style",
+        },
+      },
+      imageInput: {
+        contentProfile: {
+          accountConcept: "later account",
+          imageStyle: "later style",
+        },
+      },
+      expected: {
+        accountConcept: "authored account",
+        imageStyle: "authored style",
+      },
+    },
+    {
+      name: "empty authored fields remain intentionally empty",
+      postInput: { contentProfile: { accountConcept: "", imageStyle: "" } },
+      imageInput: {
+        contentProfile: {
+          accountConcept: "later account",
+          imageStyle: "later style",
+        },
+      },
+      expected: { accountConcept: "", imageStyle: "" },
+    },
+    {
+      name: "missing post fields use the image planning snapshot",
+      postInput: {},
+      imageInput: {
+        contentProfile: {
+          accountConcept: "image account",
+          imageStyle: "image style",
+        },
+      },
+      expected: { accountConcept: "image account", imageStyle: "image style" },
+    },
+    {
+      name: "fallback applies per field rather than replacing the whole profile",
+      postInput: { contentProfile: { accountConcept: "authored account" } },
+      imageInput: {
+        contentProfile: {
+          accountConcept: "later account",
+          imageStyle: "image style",
+        },
+      },
+      expected: {
+        accountConcept: "authored account",
+        imageStyle: "image style",
+      },
+    },
+    {
+      name: "legacy image style remains available without inventing an account concept",
+      postInput: {},
+      imageInput: { characterVisualContext: { visualStyle: "legacy style" } },
+      expected: { accountConcept: null, imageStyle: "legacy style" },
+    },
+    {
+      name: "missing snapshots remain null despite a configured current profile",
+      postInput: {},
+      imageInput: {},
+      expected: { accountConcept: null, imageStyle: null },
+    },
+  ])(
+    "sends authored review context only to requirements: $name",
+    async ({ postInput, imageInput, expected }) => {
+      const current = naturalDraft();
+      const concept = current.conceptJson as Record<string, unknown>;
+      concept.postPlanning = {
+        ...(concept.postPlanning as Record<string, unknown>),
+        input: postInput,
+      };
+      concept.imagePlanning = {
+        ...(concept.imagePlanning as Record<string, unknown>),
+        input: imageInput,
+      };
+      const { runner, repository, fetchMock } = setup(current, undefined, {
+        captionShots: shots,
+        profile: {
+          ...EMPTY_CONTENT_PROFILE,
+          accountConcept: "current changed account",
+          imageStyle: "current changed style",
+        },
+      });
+      const accepted = {
+        shots: [
+          {
+            sortOrder: 0,
+            verdict: "accept",
+            observations: ["Visible evidence supports acceptance."],
+          },
+        ],
+      };
+      fetchMock
+        .mockReset()
+        .mockResolvedValueOnce(response(accepted))
+        .mockResolvedValueOnce(response(accepted))
+        .mockResolvedValueOnce(
+          response({
+            [UNION_ENVELOPE_KEY]: {
+              status: "ready",
+              caption: "잠깐 쉬기",
+              captionLanguages: ["ko"],
+              hashtags: [],
+            },
+          }),
+        );
+      await runner.runCurrentStage("draft-1");
+      const first = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      const second = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+      const input = JSON.parse(second.messages[1].content[0].text);
+      expect(JSON.parse(first.messages[1].content[0].text)).toEqual({
+        shots: [0],
+      });
+      expect(input.contentProfile).toEqual(expected);
+      expect(input.postPlan).toEqual({
+        intent: {
+          premise: "필라테스 다녀와 현관 거울 앞에 섰다.",
+          primaryPurpose: "운동 후 기록",
+          secondaryPurpose: null,
+        },
+      });
+      expect(
+        repository.persistV3Artifact.mock.calls[0][0].conceptJson.photoReview
+          .requirements.input,
+      ).toEqual(input);
+    },
+  );
   it("holds a visually rejected photo with findings and does not write a caption or automatically retry", async () => {
     const { runner, repository, fetchMock } = setup(naturalDraft(), undefined, {
       captionShots: shots,

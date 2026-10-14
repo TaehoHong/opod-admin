@@ -1153,7 +1153,36 @@ export class PostPipelineV3Runner {
       const rejected = naturalness.output.shots.some(
         (shot) => shot.verdict === "reject",
       );
+      const postInput =
+        isRecord(concept.postPlanning) && isRecord(concept.postPlanning.input)
+          ? concept.postPlanning.input
+          : {};
+      const imageInput =
+        isRecord(concept.imagePlanning) && isRecord(concept.imagePlanning.input)
+          ? concept.imagePlanning.input
+          : {};
+      const postProfile = isRecord(postInput.contentProfile)
+        ? postInput.contentProfile
+        : {};
+      const imageProfile = isRecord(imageInput.contentProfile)
+        ? imageInput.contentProfile
+        : {};
       const requirementsInput = {
+        contentProfile: {
+          accountConcept:
+            typeof postProfile.accountConcept === "string"
+              ? postProfile.accountConcept
+              : typeof imageProfile.accountConcept === "string"
+                ? imageProfile.accountConcept
+                : null,
+          imageStyle:
+            typeof postProfile.imageStyle === "string"
+              ? postProfile.imageStyle
+              : typeof imageProfile.imageStyle === "string"
+                ? imageProfile.imageStyle
+                : (imagePlanningStyle(concept.imagePlanning) ?? null),
+        },
+        postPlan: { intent: postPlan.intent },
         appearance: draft.character.visualProfile?.appearancePrompt ?? "",
         operatorRequest: operatorRequest(concept) ?? null,
         constraints: profile.constraints,
