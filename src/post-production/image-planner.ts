@@ -1,3 +1,4 @@
+import type { PhotoReviewResult } from "./natural-post-agent";
 import type { CharacterContentProfile } from "../character-content-profiles/character-content-profile";
 import { LLM_LOG_TYPE, LlmLogContext } from "../llm-logs/llm-log.service";
 import {
@@ -42,12 +43,21 @@ export type ImagePlannerInput = {
   recentVisualHistory: {
     publicationState: "published" | "unpublished";
     premise: string | null;
+    photoReview?: {
+      naturalness: PhotoReviewResult["shots"];
+      requirements: PhotoReviewResult["shots"];
+    };
     shots: {
+      sortOrder: number;
       visualPurpose: string;
       scene: string;
       captureSetup: string;
       characterPresentation: string;
       subjectCameraRelation?: SubjectCameraRelation;
+      visualDetails?: Pick<
+        VisualDetails,
+        "expressionGaze" | "poseAction" | "framing" | "camera"
+      >;
     }[];
   }[];
   operatorRequest?: string;

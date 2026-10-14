@@ -3,6 +3,7 @@ import {
   isNaturalAgent,
   validateNaturalBundle,
   NaturalStage,
+  PhotoReviewResult,
 } from "./natural-post-agent";
 import {
   photoContent,
@@ -1237,7 +1238,7 @@ export class PostPipelineV3Runner {
             problem: "사진 검수를 통과하지 못해 게시를 보류했습니다.",
             cause: findings,
             nextAction:
-              "검수 결과와 사진을 확인한 뒤 컷을 재생성하고 캡션 단계를 다시 실행하세요.",
+              "사진·검수 근거를 의도, 이미지 기획, 최종 프롬프트와 비교하세요. 의도·장면·프롬프트를 고쳐야 하면 보완 요청을 담아 새 초안을 만드세요. 완료한 이전 단계를 현재 초안에서 다시 실행하는 기능은 제공하지 않습니다. 기획과 프롬프트가 맞고 사진만 실패했으면 같은 장면의 컷을 재생성한 뒤 캡션 단계를 다시 실행하세요. 검수만으로 실패 원인은 확정할 수 없습니다.",
           },
         };
         await this.pause(draft, concept, "needs_input", [
@@ -1613,7 +1614,7 @@ function recentVisualHistory(
       artifact && isRecord(artifact.output) ? artifact.output : null;
     if (output?.status !== "ready" || !Array.isArray(output.shots)) continue;
     const shots = output.shots
-      .flatMap((value) => {
+      .flatMap((value, index) => {
         if (!isRecord(value)) return [];
         const presentation = isRecord(value.characterPresentation)
           ? value.characterPresentation
@@ -1629,12 +1630,39 @@ function recentVisualHistory(
         )
           return [];
         const relation = value.subjectCameraRelation;
+        const details = isRecord(value.visualDetails)
+          ? value.visualDetails
+          : null;
         return [
           {
+            sortOrder:
+              typeof value.sortOrder === "number" ? value.sortOrder : index,
             visualPurpose: boundedHistoryText(value.visualPurpose, 500),
             scene: boundedHistoryText(value.scene, 1_500),
             captureSetup: boundedHistoryText(value.captureSetup, 750),
             characterPresentation: presentation.mode,
+            ...(details &&
+            (typeof details.expressionGaze === "string" ||
+              details.expressionGaze === null) &&
+            (typeof details.poseAction === "string" ||
+              details.poseAction === null) &&
+            typeof details.framing === "string" &&
+            typeof details.camera === "string"
+              ? {
+                  visualDetails: {
+                    expressionGaze:
+                      typeof details.expressionGaze === "string"
+                        ? boundedHistoryText(details.expressionGaze, 500)
+                        : null,
+                    poseAction:
+                      typeof details.poseAction === "string"
+                        ? boundedHistoryText(details.poseAction, 500)
+                        : null,
+                    framing: boundedHistoryText(details.framing, 500),
+                    camera: boundedHistoryText(details.camera, 500),
+                  },
+                }
+              : {}),
             ...(relation === "unaware" ||
             relation === "aware_unposed" ||
             relation === "deliberately_posed" ||
@@ -1650,13 +1678,75 @@ function recentVisualHistory(
     if (shots.length === 0) continue;
     remainingShots -= shots.length;
     const premise = recentPremise(draft.conceptJson);
+    const candidateReview = isRecord(draft.conceptJson.photoReview)
+      ? draft.conceptJson.photoReview
+      : null;
+    const planHash = artifactHash(artifact);
+    const promptHash = artifactHash(draft.conceptJson.promptBuild);
+    const review =
+      planHash &&
+      promptHash &&
+      candidateReview?.imagePlanningHash === planHash &&
+      candidateReview.promptBuildHash === promptHash
+        ? candidateReview
+        : null;
     history.push({
       publicationState: draft.publishedPostId ? "published" : "unpublished",
       premise: premise ? boundedHistoryText(premise, 500) : null,
       shots,
+      ...(review
+        ? {
+            photoReview: {
+              naturalness: reviewHistoryObservations(
+                review.naturalness,
+                shots.map((shot) => shot.sortOrder),
+              ),
+              requirements: reviewHistoryObservations(
+                review.requirements,
+                shots.map((shot) => shot.sortOrder),
+              ),
+            },
+          }
+        : {}),
     });
   }
   return history;
+}
+// These are recorded reviewer observations, not facts inferred from the plan.
+function reviewHistoryObservations(
+  value: unknown,
+  shotOrders: number[],
+): PhotoReviewResult["shots"] {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.output) ||
+    !Array.isArray(value.output.shots)
+  )
+    return [];
+  let remaining = 6;
+  return value.output.shots.flatMap<PhotoReviewResult["shots"][number]>(
+    (shot) => {
+      if (
+        !remaining ||
+        !isRecord(shot) ||
+        typeof shot.sortOrder !== "number" ||
+        !shotOrders.includes(shot.sortOrder) ||
+        (shot.verdict !== "accept" && shot.verdict !== "reject") ||
+        !Array.isArray(shot.observations)
+      )
+        return [];
+      const observations = shot.observations
+        .filter(
+          (item): item is string => typeof item === "string" && !!item.trim(),
+        )
+        .slice(0, remaining)
+        .map((item) => boundedHistoryText(item, 500));
+      remaining -= observations.length;
+      return observations.length
+        ? [{ sortOrder: shot.sortOrder, verdict: shot.verdict, observations }]
+        : [];
+    },
+  );
 }
 function boundedHistoryText(value: string, max: number): string {
   return value.trim().slice(0, max);

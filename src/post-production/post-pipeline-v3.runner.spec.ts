@@ -536,6 +536,74 @@ describe("PostPipelineV3Runner", () => {
       const { runner, repository, fetchMock } = setup(current, output, {
         profile: { ...EMPTY_CONTENT_PROFILE, imageStyle: "changed style" },
       });
+      repository.findRecentVisualPlanDrafts.mockResolvedValue([
+        {
+          id: "previous-structured-photo",
+          publishedPostId: null,
+          conceptJson: {
+            promptBuild: { hash: "reviewed-prompt" },
+            imagePlanning: {
+              hash: "reviewed-plan",
+              output: {
+                status: "ready",
+                shots: [
+                  {
+                    visualPurpose: "earlier plan",
+                    scene: "planned cat by window",
+                    captureSetup: "planned bedside camera",
+                    characterPresentation: { mode: "none" },
+                    visualDetails,
+                  },
+                ],
+              },
+            },
+            photoReview: {
+              imagePlanningHash: "reviewed-plan",
+              promptBuildHash: "reviewed-prompt",
+              naturalness: {
+                output: {
+                  shots: [
+                    {
+                      sortOrder: 0,
+                      verdict: "reject",
+                      observations: ["The paw floats above the bed.", 42],
+                    },
+                  ],
+                },
+              },
+              requirements: null,
+            },
+          },
+        },
+        {
+          id: "replanned-photo-with-old-review",
+          publishedPostId: null,
+          conceptJson: {
+            promptBuild: { hash: "reviewed-prompt" },
+            imagePlanning: {
+              hash: "new-plan",
+              output: {
+                status: "ready",
+                shots: [
+                  {
+                    visualPurpose: "new plan",
+                    scene: "new planned scene",
+                    captureSetup: "new planned camera",
+                    characterPresentation: { mode: "none" },
+                  },
+                ],
+              },
+            },
+            photoReview: {
+              imagePlanningHash: "old-plan",
+              promptBuildHash: "reviewed-prompt",
+              naturalness: {
+                output: { shots: [{ observations: ["Stale photo finding."] }] },
+              },
+            },
+          },
+        },
+      ]);
       await runner.runCurrentStage("draft-1");
       const request = JSON.parse(fetchMock.mock.calls[0][1].body);
       const properties =
@@ -564,9 +632,39 @@ describe("PostPipelineV3Runner", () => {
           contentProfile: { imageStyle: "필름" },
           postPlan: { production: planned },
           characterVisualContext: { personaContext: [] },
+          recentVisualHistory: [
+            {
+              premise: null,
+              shots: [
+                {
+                  visualDetails: {
+                    expressionGaze: null,
+                    poseAction: "잠든 상태",
+                    framing: "전신",
+                    camera: "침대 옆",
+                  },
+                },
+              ],
+              photoReview: {
+                naturalness: [
+                  {
+                    sortOrder: 0,
+                    verdict: "reject",
+                    observations: ["The paw floats above the bed."],
+                  },
+                ],
+                requirements: [],
+              },
+            },
+            { shots: [{ scene: "new planned scene" }] },
+          ],
         },
         output: { shots: [{ visualDetails }] },
       });
+      expect(
+        repository.persistV3Artifact.mock.calls[0][0].conceptJson.imagePlanning
+          .input.recentVisualHistory[1],
+      ).not.toHaveProperty("photoReview");
     },
   );
   it("preserves an ungrounded conflict and pauses without requeueing", async () => {
@@ -1602,6 +1700,12 @@ describe("PostPipelineV3Runner", () => {
                   visualPurpose: "젖은 날의 여운",
                   scene: "창가에 기대 우산을 내려다본다",
                   captureSetup: "맞은편 허리 높이",
+                  visualDetails: {
+                    expressionGaze: "우산을 내려다보는 무표정",
+                    poseAction: "창틀에 기대 서 있다",
+                    framing: "허벅지 위 크롭",
+                    camera: "맞은편 허리 높이",
+                  },
                   characterPresentation: { mode: "partial" },
                   subjectCameraRelation: "unaware",
                 },
@@ -1651,9 +1755,16 @@ describe("PostPipelineV3Runner", () => {
       premise: "창가에서 우산을 말린다",
       shots: expect.arrayContaining([
         {
+          sortOrder: 0,
           visualPurpose: "젖은 날의 여운",
           scene: "창가에 기대 우산을 내려다본다",
           captureSetup: "맞은편 허리 높이",
+          visualDetails: {
+            expressionGaze: "우산을 내려다보는 무표정",
+            poseAction: "창틀에 기대 서 있다",
+            framing: "허벅지 위 크롭",
+            camera: "맞은편 허리 높이",
+          },
           characterPresentation: "partial",
           subjectCameraRelation: "unaware",
         },
