@@ -44,6 +44,7 @@ function setup(
   fetchResult?: unknown,
   options: {
     captionShots?: unknown[];
+    naturalPhotoReviewEnabled?: boolean;
     readMedia?: boolean;
     profile?: typeof EMPTY_CONTENT_PROFILE;
     savedAgent?: boolean;
@@ -115,7 +116,13 @@ function setup(
     repository as never,
     settings as never,
     llmLogs as never,
-    { draftWorker: { maxShots: 3, maxAttempts: 3 } } as never,
+    {
+      draftWorker: {
+        maxShots: 3,
+        maxAttempts: 3,
+        naturalPhotoReviewEnabled: options.naturalPhotoReviewEnabled,
+      },
+    } as never,
     {
       get: jest
         .fn()
@@ -2280,6 +2287,34 @@ describe("natural photo quality gate", () => {
       choices: [{ message: { content: JSON.stringify(value) } }],
     });
   }
+  it("skips both photo review requests and records the current images for caption publication when disabled", async () => {
+    const { runner, repository, fetchMock } = setup(
+      naturalDraft(),
+      {
+        status: "ready",
+        caption: "A quiet morning",
+        captionLanguages: ["en"],
+        hashtags: [],
+      },
+      { captionShots: shots, naturalPhotoReviewEnabled: false },
+    );
+    await runner.runCurrentStage("draft-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const saved = repository.persistV3Artifact.mock.calls[0][0].conceptJson;
+    expect(saved.photoReview).toMatchObject({
+      status: "skipped",
+      reason: "disabled",
+      configRevision: naturalAgentBundle().revision,
+      generationSetHash: saved.captionBuild.source.generationSetHash,
+    });
+    expect(saved.photoReview.naturalness).toBeUndefined();
+    expect(saved.photoReview.requirements).toBeUndefined();
+    expect(saved.pipeline).toMatchObject({
+      stage: "publish",
+      state: "pending",
+    });
+    expect(repository.persistV3Paused).not.toHaveBeenCalled();
+  });
   it("passes real reference bytes to new image planning and preserves reference pixel hashes", async () => {
     const current = naturalDraft();
     (current.conceptJson as Record<string, unknown>).pipeline = {

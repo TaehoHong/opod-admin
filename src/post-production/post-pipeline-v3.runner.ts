@@ -1101,7 +1101,10 @@ export class PostPipelineV3Runner {
         mediaId: shot.mediaId,
       })),
     );
-    if (isNaturalAgent(concept)) {
+    if (
+      isNaturalAgent(concept) &&
+      this.config.draftWorker.naturalPhotoReviewEnabled !== false
+    ) {
       const bundle = validateNaturalBundle(concept.naturalAgentConfig);
       const planner = await this.settings.resolvePlannerSettings();
       if (!planner.apiUrl || !planner.apiKey)
@@ -1246,6 +1249,17 @@ export class PostPipelineV3Runner {
         ]);
         return;
       }
+    } else if (isNaturalAgent(concept)) {
+      concept.photoReview = {
+        status: "skipped",
+        reason: "disabled",
+        generationSetHash: setHash,
+        configRevision: validateNaturalBundle(concept.naturalAgentConfig)
+          .revision,
+        imagePlanningHash: artifactHash(concept.imagePlanning),
+        promptBuildHash: artifactHash(concept.promptBuild),
+        operatorRequest: operatorRequest(concept) ?? null,
+      };
     }
     const input: CaptionWriterInput = {
       contentProfile: {

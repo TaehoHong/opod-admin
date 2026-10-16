@@ -15,6 +15,7 @@ const baseConfig: DraftWorkerConfig = {
   maxAttempts: 3,
   maxShots: 2,
   schedulerEnabled: false,
+  naturalPhotoReviewEnabled: true,
 };
 
 type RepositoryFake = ReturnType<typeof repositoryFake>;
@@ -1167,6 +1168,40 @@ describe("natural agent publishing", () => {
       expect(result.published).toBe(false);
       expect(result.reason).toContain("photo_review_required");
       expect(repository.persistPublishedPost).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["current", "caption-stale", "images-stale", "reenabled"])(
+    "honors skipped reviews while preserving image and caption freshness: %s",
+    async (condition) => {
+      const repository = repositoryFake();
+      const concept = acceptedConcept();
+      concept.photoReview.status = "skipped";
+      Object.assign(concept.photoReview, { reason: "disabled" });
+      delete (concept.photoReview as Partial<typeof concept.photoReview>)
+        .naturalness;
+      delete (concept.photoReview as Partial<typeof concept.photoReview>)
+        .requirements;
+      if (condition === "caption-stale")
+        concept.captionBuild.source.generationSetHash = "older-images";
+      if (condition === "images-stale")
+        concept.photoReview.generationSetHash = "older-images";
+      repository.findApprovedDraft.mockResolvedValue({
+        id: "draft-1",
+        characterId: "character-1",
+        contentType: "feed",
+        caption: "photo caption",
+        hashtags: [],
+        conceptJson: concept,
+      });
+      repository.findPublishJobs.mockResolvedValue([job]);
+      const result = await makeService(repository, undefined, {
+        naturalPhotoReviewEnabled: condition === "reenabled",
+      }).publishDraftNow("draft-1");
+      expect(result.published).toBe(condition === "current");
+      if (condition !== "current") {
+        expect(result.reason).toContain("photo_review_required");
+        expect(repository.persistPublishedPost).not.toHaveBeenCalled();
+      }
     },
   );
   it("saves canon only after an explicit operator selection and manual publish", async () => {

@@ -150,6 +150,7 @@ export function parsePhotoReview(
 export function assertNaturalPublishable(
   concept: unknown,
   images: { sortOrder: number; jobId: string; mediaId: string }[],
+  photoReviewEnabled = true,
 ): void {
   if (!isNaturalAgent(concept)) return;
   const bundle = validateNaturalBundle(concept.naturalAgentConfig);
@@ -159,7 +160,12 @@ export function assertNaturalPublishable(
     !isRecord(review) ||
     !isRecord(caption) ||
     !isRecord(caption.source) ||
-    review.status !== "accepted" ||
+    !(
+      review.status === "accepted" ||
+      (!photoReviewEnabled &&
+        review.status === "skipped" &&
+        review.reason === "disabled")
+    ) ||
     review.configRevision !== bundle.revision ||
     review.operatorRequest !==
       (typeof concept.operatorRequest === "string"
@@ -177,6 +183,7 @@ export function assertNaturalPublishable(
     throw new Error(
       "photo_review_required: 현재 이미지에 대한 검수와 캡션을 다시 실행하세요.",
     );
+  if (!photoReviewEnabled) return;
   for (const pass of [review.naturalness, review.requirements]) {
     if (
       !isRecord(pass) ||

@@ -21,6 +21,7 @@ describe("loadAppConfig", () => {
       maxAttempts: 3,
       maxShots: 2,
       schedulerEnabled: false,
+      naturalPhotoReviewEnabled: true,
     });
 
     const configured = loadAppConfig({
@@ -32,6 +33,7 @@ describe("loadAppConfig", () => {
       DRAFT_MAX_ATTEMPTS: "6",
       DRAFT_MAX_SHOTS: "3",
       DRAFT_SCHEDULER_ENABLED: "1",
+      NATURAL_PHOTO_REVIEW_ENABLED: "false",
     });
     expect(configured.worker).toMatchObject({
       pollIntervalMs: 1000,
@@ -44,6 +46,7 @@ describe("loadAppConfig", () => {
       maxAttempts: 6,
       maxShots: 3,
       schedulerEnabled: true,
+      naturalPhotoReviewEnabled: false,
     });
   });
 

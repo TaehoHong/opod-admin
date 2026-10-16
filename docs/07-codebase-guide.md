@@ -631,6 +631,10 @@ mode 없는 API 요청은 이전 기본값을 유지한다. `DraftsService.setAu
 `src/post-production/natural-post-agent.ts`, 픽셀 전송·검수 parser 경계는
 `natural-photo-review.ts`다. `PostPipelineV3Runner`는 새 이미지 기획에 실제 참조 픽셀을
 전달하고 캡션 이전에 사진만 보는 자연스러움 검수 후 정체성·요구사항 검수를 실행한다.
+`AppConfigService.draftWorker.naturalPhotoReviewEnabled`가 두 검수의 실행을 함께 제어한다.
+환경변수 `NATURAL_PHOTO_REVIEW_ENABLED=false`이면 runner는 `skipped/disabled`와
+현재 산출물 식별값을 저장하고 캡션으로 진행한다. 게시 guard는 비활성화 때만 이 기록을
+허용하되 이미지·캡션·입력 버전 일치 조건은 유지한다. 미설정 기본값은 true다.
 `DraftWorkerService`는 최신 검수·캡션의 집합 hash와 입력 버전이 맞아야 게시하며
 생성 사건을 자동 Canon에 넣지 않는다. 관련 회귀는 runner/worker/drafts spec과
 `test/natural-post-agent.e2e-spec.ts`, `PostBriefCreatePage.test.tsx`, `NaturalAgentPanel.test.tsx`다.

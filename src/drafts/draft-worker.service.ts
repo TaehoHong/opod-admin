@@ -817,6 +817,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
           jobId: job.id,
           mediaId: job.outputMediaId!,
         })),
+        this.config.naturalPhotoReviewEnabled !== false,
       );
     }
     const orderedMedia = [...mediaByShot.entries()]

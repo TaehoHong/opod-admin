@@ -38,6 +38,7 @@ export type DraftWorkerConfig = {
   maxAttempts: number;
   maxShots: number;
   schedulerEnabled: boolean;
+  naturalPhotoReviewEnabled: boolean;
 };
 
 export type AppConfig = {
@@ -171,6 +172,10 @@ function parseDraftWorker(env: ConfigEnv): DraftWorkerConfig {
     maxAttempts: parsePositiveNumber(env.DRAFT_MAX_ATTEMPTS) ?? 3,
     maxShots: parsePositiveNumber(env.DRAFT_MAX_SHOTS) ?? 2,
     schedulerEnabled: enabled(env.DRAFT_SCHEDULER_ENABLED),
+    naturalPhotoReviewEnabled:
+      env.NATURAL_PHOTO_REVIEW_ENABLED === undefined
+        ? true
+        : enabled(env.NATURAL_PHOTO_REVIEW_ENABLED),
   };
 }
 
