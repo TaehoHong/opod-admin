@@ -14,6 +14,7 @@ export type GenerationSettingsView = {
   openaiImageModel?: string | null;
   spicyApiKey?: SecretStatus;
   spicyImageModel?: string | null;
+  qwenImageNegativePrompt?: string | null;
   falApiKey: SecretStatus;
   falImageModel: string | null;
   falImageT2iModel: string | null;
@@ -101,6 +102,7 @@ export type GenerationSettingsUpdate = {
   openaiImageModel?: string | null;
   spicyApiKey?: string | null;
   spicyImageModel?: string | null;
+  qwenImageNegativePrompt?: string | null;
   falApiKey?: string | null;
   falImageModel?: string | null;
   falImageT2iModel?: string | null;

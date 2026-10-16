@@ -71,6 +71,54 @@ const fluxPromptPackage = buildPromptPackage({
 });
 
 describe("Image Prompt Generation Agent contract", () => {
+  it.each([null, "overhead view"])(
+    "accepts optional Qwen shot exclusions (%s) without requiring a generic negative list",
+    (negativePrompt) => {
+      const input = buildPromptPackage({
+        targetModelId: "alibaba/qwen-image-3.0-pro/edit",
+        imagePlan,
+        appearance: "black bob hair",
+      });
+      expect(
+        parsePromptSet(
+          {
+            shots: [
+              {
+                sortOrder: 0,
+                prompt:
+                  "Image 1 supplies identity. A person sits by the window.",
+                negativePrompt,
+              },
+            ],
+          },
+          input,
+        ).shots[0].negativePrompt,
+      ).toBe(negativePrompt);
+    },
+  );
+
+  it("rejects Qwen shot exclusions beyond the provider's 2,000-character limit", () => {
+    const input = buildPromptPackage({
+      targetModelId: "alibaba/qwen-image-3.0-pro/edit",
+      imagePlan,
+      appearance: "black bob hair",
+    });
+    expect(() =>
+      parsePromptSet(
+        {
+          shots: [
+            {
+              sortOrder: 0,
+              prompt: "Image 1 supplies identity.",
+              negativePrompt: "x".repeat(2_001),
+            },
+          ],
+        },
+        input,
+      ),
+    ).toThrow("negativePrompt exceeds 2,000 characters");
+  });
+
   it("sends visual decisions and reference roles once without internal bookkeeping", async () => {
     const run = jest.fn().mockResolvedValue({
       value: {

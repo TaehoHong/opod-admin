@@ -152,6 +152,7 @@ export type GenerationProviderSettings = {
   spicyApiKey?: string;
   // SpicyAPI 모델 계열의 edit ID. t2i는 같은 계열의 text-to-image로 정한다.
   spicyImageModel?: string;
+  qwenImageNegativePrompt?: string;
   apiKey?: string;
   editModel?: string;
   t2iModel?: string;
@@ -186,6 +187,7 @@ export function resolveImageGenerationProviders(
       {
         apiKey: settings.spicyApiKey ?? "",
         model: settings.spicyImageModel ?? "",
+        qwenImageNegativePrompt: settings.qwenImageNegativePrompt,
       },
       fetchFn,
       llmLogs,

@@ -46,8 +46,7 @@ const fluxKontextPolicy: ImageModelPolicy = {
 };
 
 // SpicyAPI Qwen Image 3.0 계열. edit는 순서대로 1~3장을 "Image N"으로 받는다.
-// 별도 negative_prompt 필드가 있지만 프롬프트 생성 계약이 모든 컷에 비어 있지
-// 않은 값을 강제하므로(4,000자 허용, API는 2,000자) 다른 정책처럼 본문에 둔다.
+// 공통 네거티브는 생성 시 DB 설정에서 별도로 붙인다. Agent는 컷별 조건만 작성한다.
 function qwenImagePolicy(
   modelId: string,
   label: string,
@@ -55,9 +54,9 @@ function qwenImagePolicy(
 ): ImageModelPolicy {
   return {
     id: "qwen-image-3-natural-language",
-    version: "qwen-image-3-policy-v1",
+    version: "qwen-image-3-policy-v2",
     modelId,
-    usesNegativePrompt: false,
+    usesNegativePrompt: true,
     supportsReferences,
     maxReferencesPerShot: supportsReferences ? 3 : 0,
     referenceSlotPrefix: "Image",
@@ -67,7 +66,8 @@ function qwenImagePolicy(
       ...(supportsReferences
         ? ['- Use the assigned reference labels exactly, such as "Image 1".']
         : []),
-      "- Set negativePrompt to null and express applicable exclusions in the main prompt.",
+      "- Put only shot-specific exclusions in negativePrompt, in English, at most 2,000 characters. Use null when none are needed; do not invent exclusions to fill the field.",
+      "- A DB-managed common negative prompt is added separately at generation time; do not repeat general quality or anatomy exclusions.",
     ].join("\n"),
   };
 }

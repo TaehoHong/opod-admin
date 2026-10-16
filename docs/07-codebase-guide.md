@@ -672,3 +672,14 @@ post planning states required visible outcomes. Older schemas remain byte-identi
 so frozen drafts continue to validate. This is guidance, not a new semantic checker
 or an automatic retry. Regression coverage extends the runner contract tests and
 the natural-agent E2E save/read test from a frozen v4 draft to v5.
+
+## Qwen 공통 네거티브 프롬프트
+
+Qwen 공통 네거티브의 저장 owner는 `GenerationSettingsService`이며
+`admin_settings`의 `generation.qwenImageNegativePrompt`를 사용한다. Admin 생성
+설정에서 편집하고 env/코드 fallback 없이 삭제할 수 있다. `spicyapi-image.provider.ts`가
+Qwen edit/t2i 요청에서 공통값과 컷별 제외를 쉼표 단위로 병합·중복 제거한다.
+합산 2,000자를 넘으면 외부 호출 전에 실패하며 Seedream에는 공통값을 붙이지 않는다.
+`image-model-policies.ts`의 Qwen v2와 `image-prompt-generator.ts`는 컷별 조건을
+문자열 또는 null로 받고 일반 제외를 강제하지 않는다. 회귀 owner는 provider/프롬프트
+parser spec, `SettingsPage.test.tsx`, `test/qwen-negative-settings.e2e-spec.ts`다.

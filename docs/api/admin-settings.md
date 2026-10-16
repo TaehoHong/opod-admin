@@ -191,3 +191,14 @@ immediately.
 The evaluation worker has the equivalent manual trigger at
 `POST /api/admin/v1/evaluations/worker/run` — see
 `docs/api/admin-evaluations.md`.
+
+## Qwen 공통 네거티브 프롬프트
+
+- `qwenImageNegativePrompt`는 `admin_settings`의
+  `generation.qwenImageNegativePrompt`에 저장하는 공통 제외 문구다. 조회 시
+  미설정이면 `null`이고, PUT은 문자열(최대 2,000자) 저장, 누락 유지,
+  빈 값/null 삭제다. env나 코드 기본값은 없다. Admin 이미지 생성 설정에서
+  편집하며 Qwen Image 3.0·Pro의 edit/t2i 요청에서만 게시물별 `negativePrompt`와
+  합친다. 쉼표 단위 공백·빈 항목과 대소문자 차이의 중복을 정리하고, 합산
+  2,000자 초과는 외부 생성 요청 전에 실패시킨다. 문구를 자동으로 자르지 않는다.
+  저장 후 다음 제출부터 적용하고 이미 접수된 작업은 바꾸지 않는다.

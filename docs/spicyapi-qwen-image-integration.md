@@ -206,6 +206,28 @@ sequenceDiagram
 
 증거는 `content-work/spicyapi-pilot-20261015/compare/`에 있다(생성 이미지, 영수증, `compare-all.jpg`, `faces-all.jpg`). 스크립트는 세션 scratchpad의 `compare.cjs`, `compare2.cjs`, `probe.cjs`다.
 
+## DB 공통 네거티브 프롬프트 (2026-10-16)
+
+- Admin의 설정 → 생성 및 AI 연결 → 이미지 생성에서 `Qwen 공통 네거티브
+  프롬프트`를 편집한다. 저장 키는 `generation.qwenImageNegativePrompt`이고
+  기존 `admin_settings`를 사용하므로 스키마 변경은 없다.
+- runtime은 DB 값만 사용한다. 미설정/삭제 시 공통값을 붙이지 않고, env나
+  코드에 작성된 문구로 복원하지 않는다. 다른 provider와 Seedream에는 적용하지 않는다.
+- Qwen 정책 v2는 컷별 `negativePrompt`에 해당 장면의 제외만 작성하도록 한다.
+  컷별 조건이 없으면 `null`도 허용하고, 이전 `null` 산출물도 그대로 실행한다.
+  공통값은 생성 provider에서 합치므로 기획 Agent가 일반 품질 제외를 반복하지 않는다.
+- 공통값과 컷별 조건을 쉼표 단위로 정리해 대소문자 차이까지 중복을 제거한다.
+  합산 최대 2,000자를 넘으면 과금 요청 전에 실패하고 자동 절단하지 않는다.
+  적용된 최종 `negative_prompt`는 기존 이미지 생성 요청 로그에 남는다.
+- 초기 인물 사진용 후보는 `watermark, signature, text overlay, distorted limbs,
+  malformed hands, extra fingers, fused fingers, waxy skin, excessive skin smoothing`이다.
+  생성 품질 개선은 검증된 보장이 아니며 운영자가 DB에서 조정한다. 운영 환경의
+  초기값은 Admin에서 저장하며, 코드를 배포해도 DB 값이 자동으로 생성되지는 않는다.
+- 회귀: `test/qwen-negative-settings.e2e-spec.ts`는 실제 DB·관리자 HTTP
+  저장/조회/삭제/길이 제한/감사 이력과 설정 해석→Qwen 요청의 연결을 검증한다.
+  외부 유료 API는 테스트 응답으로 대체한다. provider spec은 edit/t2i 병합과
+  Seedream 분리를, Admin component test는 문구 불러오기·수정·삭제를 검증한다.
+
 ## 출처
 
 - 모델 페이지·스키마: https://spicyapi.ai/models/qwen-image-3-0-pro ,

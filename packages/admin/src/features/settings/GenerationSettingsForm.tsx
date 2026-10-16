@@ -10,6 +10,7 @@ import {
   Stack,
   Text,
   TextInput,
+  Textarea,
   Title,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
@@ -77,6 +78,7 @@ export function GenerationSettingsForm({
       spicyApiKey: "",
       spicyImageModel:
         settings.spicyImageModel ?? "alibaba/qwen-image-3.0-pro/edit",
+      qwenImageNegativePrompt: settings.qwenImageNegativePrompt ?? "",
       falApiKey: "",
       falImageModel: settings.falImageModel ?? "",
       falImageT2iModel: settings.falImageT2iModel ?? "",
@@ -96,6 +98,10 @@ export function GenerationSettingsForm({
       aspectRatioReel: settings.aspectRatios.overrides.reel ?? "",
     },
     validate: {
+      qwenImageNegativePrompt: (value) =>
+        (value?.trim().length ?? 0) > 2000
+          ? "2,000자 이내로 입력해 주세요"
+          : null,
       opodFluxApiBaseUrl: httpsUrlOrEmpty,
       llmApiUrl: httpUrlOrEmpty,
       agentLlmApiUrl: httpUrlOrEmpty,
@@ -373,6 +379,17 @@ export function GenerationSettingsForm({
                       />
                     </>
                   )}
+                  {imageProvider === "spicyapi" ? (
+                    <Textarea
+                      label="Qwen 공통 네거티브 프롬프트"
+                      description="Qwen Image 3.0·Pro의 모든 사진에 적용합니다. 게시물별 제외 조건과 합쳐 최대 2,000자이며, 비우고 저장하면 공통값을 적용하지 않습니다. Seedream에는 적용하지 않습니다."
+                      autosize
+                      minRows={3}
+                      maxRows={8}
+                      key={form.key("qwenImageNegativePrompt")}
+                      {...form.getInputProps("qwenImageNegativePrompt")}
+                    />
+                  ) : null}
                 </Stack>
               </Accordion.Panel>
             </Accordion.Item>

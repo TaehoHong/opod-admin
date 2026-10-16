@@ -92,7 +92,11 @@ function spicyApiFamily(model: string): SpicyApiFamily {
 }
 
 export function createSpicyApiImageProviders(
-  config: { apiKey: string; model: string },
+  config: {
+    apiKey: string;
+    model: string;
+    qwenImageNegativePrompt?: string;
+  },
   fetchFn: typeof fetch = fetch,
   logs?: LlmLogService,
   options: { retryDelayMs?: number } = {},
@@ -108,6 +112,7 @@ export function createSpicyApiImageProviders(
     apiKey,
     fetchFn,
     logs,
+    qwenImageNegativePrompt: config.qwenImageNegativePrompt,
     retryDelayMs: options.retryDelayMs ?? IDEMPOTENCY_CONFLICT_RETRY_MS,
   };
   return {
@@ -124,6 +129,7 @@ function createSpicyApiImageProvider(
     model: string;
     fetchFn: typeof fetch;
     logs?: LlmLogService;
+    qwenImageNegativePrompt?: string;
     retryDelayMs: number;
   },
   edit: boolean,
@@ -220,7 +226,12 @@ function createSpicyApiImageProvider(
     },
 
     async submit(request) {
-      const body = spicyApiRequestBody(request, model, edit);
+      const body = spicyApiRequestBody(
+        request,
+        model,
+        edit,
+        config.qwenImageNegativePrompt,
+      );
       const handle = logs
         ? await logs.start({
             type: LLM_LOG_TYPE.imageGenerate,
@@ -435,20 +446,39 @@ function spicyApiRequestBody(
   request: ImageGenerationRequest,
   model: string,
   edit: boolean,
+  commonNegativePrompt?: string,
 ): SpicyApiRequestBody {
   const invalid = (message: string): never => {
     throw new ImageGenerationRequestError(message, true);
   };
   const family = spicyApiFamily(model);
   const prompt = request.prompt.trim();
-  const negativePrompt = request.negativePrompt?.trim();
+  // 공통 문구는 DB 설정에서만 받는다. 지원하지 않는 Seedream에는 붙이지 않는다.
+  const negativeEntries = [
+    ...(family.kind === "qwen" ? [commonNegativePrompt] : []),
+    request.negativePrompt,
+  ].flatMap((value) =>
+    (value ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  );
+  const seen = new Set<string>();
+  const negativePrompt = negativeEntries
+    .filter((entry) => {
+      const key = entry.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(", ");
   const params = request.extraParams ?? {};
   const resolution = params.resolution ?? DEFAULT_RESOLUTION;
   // Seedream에는 seed 입력이 없다. 재현용 힌트라 다른 provider 파라미터처럼 버린다.
   const seed = family.kind === "qwen" ? params.seed : undefined;
   if (!prompt || prompt.length > PROMPT_MAX_LENGTH)
     invalid("SpicyAPI prompt must be 1 to 5,000 characters");
-  // 제외 조건을 몰래 버리지 않는다. 지금 정책은 negativePrompt를 만들지 않는다.
+  // 제외 조건을 몰래 버리거나 자르지 않는다. 합산 길이도 과금 전에 검사한다.
   if (negativePrompt && family.kind === "seedream")
     invalid("SpicyAPI Seedream accepts no negative prompt");
   if (negativePrompt && negativePrompt.length > NEGATIVE_PROMPT_MAX_LENGTH)

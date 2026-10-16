@@ -73,9 +73,16 @@ export function parsePromptSet(
             : undefined;
       if (negativePrompt === undefined)
         throw new Error(`prompt set shot ${index} has invalid negativePrompt`);
-      if (input.modelPolicy.usesNegativePrompt !== (negativePrompt !== null))
+      if (!input.modelPolicy.usesNegativePrompt && negativePrompt !== null)
         throw new Error(
           `prompt set shot ${index} violates negative prompt policy`,
+        );
+      if (
+        input.modelPolicy.usesNegativePrompt &&
+        (negativePrompt?.length ?? 0) > 2_000
+      )
+        throw new Error(
+          `prompt set shot ${index} negativePrompt exceeds 2,000 characters`,
         );
       const slots = input.referenceSlots.filter(
         (slot) => slot.shotSortOrder === index,

@@ -75,6 +75,9 @@ export class AdminSettingsController {
       ...("spicyImageModel" in body
         ? { spicyImageModel: body.spicyImageModel ?? null }
         : {}),
+      ...("qwenImageNegativePrompt" in body
+        ? { qwenImageNegativePrompt: body.qwenImageNegativePrompt ?? null }
+        : {}),
       ...("imageProvider" in body
         ? { imageProvider: body.imageProvider ?? null }
         : {}),
@@ -177,6 +180,7 @@ export class AdminSettingsController {
         : { set: false },
       spicyImageModel:
         resolved.spicyImageModel ?? saved.spicyImageModel ?? null,
+      qwenImageNegativePrompt: saved.qwenImageNegativePrompt ?? null,
       falApiKey: saved.falApiKey
         ? { set: true, last4: saved.falApiKey.slice(-4) }
         : { set: false },

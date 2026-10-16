@@ -97,6 +97,51 @@ function stubReads(view: () => GenerationSettingsView) {
   ];
 }
 
+it("loads, edits and clears the DB Qwen common negative through the settings form", async () => {
+  const user = userEvent.setup();
+  let view = {
+    ...settingsView(),
+    imageProvider: "spicyapi" as const,
+    qwenImageNegativePrompt: "watermark, waxy skin" as string | null,
+  };
+  const saved: Record<string, unknown>[] = [];
+  server.use(
+    ...stubReads(() => view),
+    http.put("/api/admin/v1/settings/generation", async ({ request }) => {
+      const body = (await request.json()) as Record<string, unknown>;
+      saved.push(body);
+      view = {
+        ...view,
+        qwenImageNegativePrompt: body.qwenImageNegativePrompt as string | null,
+      };
+      return HttpResponse.json(view);
+    }),
+  );
+  render(
+    <AppProviders>
+      <SettingsPage />
+    </AppProviders>,
+  );
+  const input = await screen.findByRole("textbox", {
+    name: "Qwen 공통 네거티브 프롬프트",
+  });
+  expect(input).toHaveValue("watermark, waxy skin");
+  await user.clear(input);
+  await user.type(input, "watermark, malformed hands");
+  await user.click(screen.getByRole("button", { name: "변경사항 저장" }));
+  await waitFor(() =>
+    expect(saved[0]?.qwenImageNegativePrompt).toBe(
+      "watermark, malformed hands",
+    ),
+  );
+  await screen.findByText("설정을 저장했습니다.");
+  await user.clear(
+    screen.getByRole("textbox", { name: "Qwen 공통 네거티브 프롬프트" }),
+  );
+  await user.click(screen.getByRole("button", { name: "변경사항 저장" }));
+  await waitFor(() => expect(saved[1]?.qwenImageNegativePrompt).toBeNull());
+});
+
 describe("settings worker card", () => {
   it("activates V3 only through the settings endpoint and reflects the pinned rollout state", async () => {
     let view = settingsView();

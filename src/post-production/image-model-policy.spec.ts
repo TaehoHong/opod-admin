@@ -311,8 +311,8 @@ it.each(["alibaba/qwen-image-3.0-pro/edit", "alibaba/qwen-image-3.0/edit"])(
       "Image 3",
     ]);
     expect(result.modelPolicy).toMatchObject({
-      version: "qwen-image-3-policy-v1",
-      usesNegativePrompt: false,
+      version: "qwen-image-3-policy-v2",
+      usesNegativePrompt: true,
     });
     expect(() =>
       buildPromptPackage({

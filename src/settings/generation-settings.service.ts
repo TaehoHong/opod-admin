@@ -44,6 +44,7 @@ export const GENERATION_SETTING_KEYS = {
   openaiImageModel: "generation.openaiImageModel",
   spicyApiKey: "generation.spicyApiKey",
   spicyImageModel: "generation.spicyImageModel",
+  qwenImageNegativePrompt: "generation.qwenImageNegativePrompt",
   falApiKey: "generation.falApiKey",
   falImageModel: "generation.falImageModel",
   falImageT2iModel: "generation.falImageT2iModel",
@@ -338,6 +339,7 @@ export class GenerationSettingsService {
         ? {
             spicyApiKey: spicyApiKey.value,
             spicyImageModel: spicyModels?.edit ?? spicyImageModel.value,
+            qwenImageNegativePrompt: db.qwenImageNegativePrompt,
           }
         : {}),
       apiKey: apiKey.value,
@@ -979,9 +981,11 @@ export function settingsChangeEntries(
     if (next === undefined) {
       const summary = ENV_KEYS[field]
         ? "삭제 (env 폴백 복귀)"
-        : field.startsWith("agentEmbedding")
-          ? "삭제 (미설정)"
-          : "삭제 (기획 LLM 상속)";
+        : field === "qwenImageNegativePrompt"
+          ? "삭제 (공통 네거티브 미적용)"
+          : field.startsWith("agentEmbedding")
+            ? "삭제 (미설정)"
+            : "삭제 (기획 LLM 상속)";
       entries.push({
         target,
         actionType: "SETTINGS_CLEAR",

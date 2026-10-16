@@ -35,6 +35,11 @@ export class UpdateGenerationSettingsDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
+  qwenImageNegativePrompt?: string | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(500)
   falApiKey?: string | null;
 

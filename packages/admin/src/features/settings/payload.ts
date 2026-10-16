@@ -10,6 +10,7 @@ export type SettingsFormValues = {
   openaiImageModel?: string;
   spicyApiKey?: string;
   spicyImageModel?: string;
+  qwenImageNegativePrompt?: string;
   falApiKey: string;
   falImageModel: string;
   falImageT2iModel: string;
@@ -46,6 +47,12 @@ export function toSettingsUpdate(
     ...secret("spicyApiKey", values.spicyApiKey ?? ""),
     ...(values.spicyImageModel !== undefined
       ? { spicyImageModel: values.spicyImageModel.trim() || null }
+      : {}),
+    ...(values.qwenImageNegativePrompt !== undefined
+      ? {
+          qwenImageNegativePrompt:
+            values.qwenImageNegativePrompt.trim() || null,
+        }
       : {}),
     ...secret("falApiKey", values.falApiKey),
     falImageModel: values.falImageModel.trim() || null,

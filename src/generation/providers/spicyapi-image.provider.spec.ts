@@ -117,6 +117,66 @@ function imageBytes(result: unknown): Buffer {
 }
 
 describe("SpicyAPI image provider", () => {
+  it.each(["edit", "t2i"] as const)(
+    "combines the saved Qwen common negative with shot exclusions on %s without duplicates",
+    async (route) => {
+      const fetchFn = jest.fn().mockResolvedValue(accepted());
+      const savedConfig = {
+        ...config,
+        qwenImageNegativePrompt: " watermark, waxy skin, watermark ",
+      };
+      const provider = createSpicyApiImageProviders(savedConfig, fetchFn)[
+        route
+      ];
+
+      await provider.submit(
+        request({
+          references: route === "edit" ? [reference("face")] : [],
+          negativePrompt: " Waxy skin, overhead view ",
+        }),
+      );
+
+      expect(
+        JSON.parse(fetchFn.mock.calls[0][1].body).input.negative_prompt,
+      ).toBe("watermark, waxy skin, overhead view");
+    },
+  );
+
+  it("applies a DB common negative when the shot has no custom exclusions", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(accepted());
+    const savedConfig = { ...config, qwenImageNegativePrompt: "watermark" };
+    await createSpicyApiImageProviders(savedConfig, fetchFn).edit.submit(
+      request(),
+    );
+    expect(
+      JSON.parse(fetchFn.mock.calls[0][1].body).input.negative_prompt,
+    ).toBe("watermark");
+  });
+
+  it("does not apply Qwen common exclusions to Seedream", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(accepted());
+    const savedConfig = { ...seedream, qwenImageNegativePrompt: "watermark" };
+    await createSpicyApiImageProviders(savedConfig, fetchFn).edit.submit(
+      request(),
+    );
+    expect(JSON.parse(fetchFn.mock.calls[0][1].body).input).not.toHaveProperty(
+      "negative_prompt",
+    );
+  });
+
+  it("rejects combined negatives over 2,000 characters before creating a paid task", async () => {
+    const fetchFn = jest.fn();
+    const savedConfig = {
+      ...config,
+      qwenImageNegativePrompt: "a".repeat(1_000),
+    };
+    const provider = createSpicyApiImageProviders(savedConfig, fetchFn).edit;
+    await expect(
+      provider.submit(request({ negativePrompt: "b".repeat(999) })),
+    ).rejects.toThrow("negative prompt must be at most 2,000 characters");
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["edit", 2, "alibaba/qwen-image-3.0-pro/edit"],
     ["t2i", 0, "alibaba/qwen-image-3.0-pro/text-to-image"],
