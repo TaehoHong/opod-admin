@@ -756,6 +756,93 @@ describe("OpenAI image settings", () => {
   });
 });
 
+describe("SpicyAPI image settings", () => {
+  it("uses the dedicated key and runs the selected model family on both routes", async () => {
+    const service = makeService(
+      repositoryMock([
+        { key: "generation.imageProvider", value: "spicyapi" },
+        { key: "generation.spicyApiKey", value: "image-key" },
+        {
+          key: "generation.spicyImageModel",
+          value: "alibaba/qwen-image-3.0/edit",
+        },
+        { key: "generation.falImageModel", value: "legacy-model" },
+      ]),
+    );
+    expect(await service.resolveProviderSettings({})).toMatchObject({
+      provider: "spicyapi",
+      spicyApiKey: "image-key",
+      editModel: "alibaba/qwen-image-3.0/edit",
+      t2iModel: "alibaba/qwen-image-3.0/text-to-image",
+      sources: { apiKey: "db", editModel: "db" },
+    });
+    expect(await service.resolveProviderNames({})).toMatchObject({
+      t2i: "spicyapi:alibaba/qwen-image-3.0/text-to-image",
+      edit: "spicyapi:alibaba/qwen-image-3.0/edit",
+    });
+  });
+  it("resolves an Agent-selected SpicyAPI model while another provider is global", async () => {
+    const service = makeService(
+      repositoryMock([
+        { key: "generation.imageProvider", value: "openai" },
+        { key: "generation.spicyApiKey", value: "image-key" },
+      ]),
+    );
+    await expect(
+      service.resolveImageModelSettings(
+        "spicyapi",
+        "alibaba/qwen-image-3.0-pro/edit",
+      ),
+    ).resolves.toMatchObject({
+      provider: "spicyapi",
+      spicyApiKey: "image-key",
+      spicyImageModel: "alibaba/qwen-image-3.0-pro/edit",
+      editModel: "alibaba/qwen-image-3.0-pro/edit",
+      t2iModel: "alibaba/qwen-image-3.0-pro/text-to-image",
+    });
+  });
+  it("masks the key in change history", () => {
+    expect(
+      JSON.stringify(
+        settingsChangeEntries(
+          {},
+          { spicyApiKey: "private-key-1234" },
+          { spicyApiKey: "private-key-1234" },
+        ),
+      ),
+    ).not.toContain("private-key");
+  });
+  it("tests the unsaved key with a model lookup instead of a paid task", async () => {
+    const service = makeService(repositoryMock());
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ code: 200, data: { available: true } }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ code: 401, msg: "invalid key" }, { status: 401 }),
+      );
+    const input = {
+      target: "image" as const,
+      imageProvider: "spicyapi" as const,
+      spicyApiKey: "key",
+      spicyImageModel: "alibaba/qwen-image-3.0-pro/edit",
+    };
+    expect(await service.testConnection(input, {}, fetchFn)).toMatchObject({
+      ok: true,
+    });
+    expect(await service.testConnection(input, {}, fetchFn)).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("401"),
+    });
+    expect(fetchFn).toHaveBeenCalledWith(
+      "https://api.spicyapi.ai/api/v1/models/alibaba/qwen-image-3.0-pro/edit",
+      expect.objectContaining({ headers: { authorization: "Bearer key" } }),
+    );
+    expect(fetchFn.mock.calls[0][1]).not.toHaveProperty("method");
+  });
+});
+
 it("keeps settings readable when the selected OpenAI image key is missing", async () => {
   const service = makeService(
     repositoryMock([

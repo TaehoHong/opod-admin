@@ -1,4 +1,5 @@
 import { createOpenAiImageProvider } from "./openai-image.provider";
+import { createSpicyApiImageProviders } from "./spicyapi-image.provider";
 import {
   LLM_LOG_TYPE,
   LlmLogContext,
@@ -55,6 +56,13 @@ export type GenerationPollResult =
   // permanent: 입력 검증 실패(422 등) — 같은 입력으로 재시도해도 항상 실패한다.
   | { status: "failed"; errorMessage: string; permanent?: boolean };
 
+// 워커가 제출 당시 snapshot(_shot.execution)에서 읽어 poll마다 전달한다.
+// 재시작 뒤에도 같은 값이므로, 지원 비율로 생성한 뒤 요청 비율로 중앙 크롭하는
+// provider(SpicyAPI)가 이 값을 기준으로 결과를 맞춘다. 다른 provider는 무시한다.
+export type ImageGenerationPollOptions = {
+  outputAspectRatio?: number | null;
+};
+
 // 제출과 결과 수령이 분리된 비동기 프로바이더 계약.
 // submit 직후 requestId를 DB에 기록해야 재시작 후 poll로 이어받을 수 있다.
 export type ImageGenerationProvider = {
@@ -66,7 +74,10 @@ export type ImageGenerationProvider = {
   submit(
     request: ImageGenerationRequest,
   ): Promise<{ requestId: string; sentPrompt: string }>;
-  poll(requestId: string): Promise<GenerationPollResult>;
+  poll(
+    requestId: string,
+    options?: ImageGenerationPollOptions,
+  ): Promise<GenerationPollResult>;
   // SSE처럼 provider가 push 진행률을 제공할 때만 구현한다. 구독 직후 현재
   // 최신값을 한 번 재생하므로 submit/DB 기록 사이에 온 이벤트도 유실되지 않는다.
   subscribeProgress?(
@@ -135,9 +146,12 @@ type ProviderEnv = Record<string, string | undefined>;
 // 프로바이더 구성 값 — 출처는 env 또는 admin_settings(DB)이며 이 계층은
 // 출처를 모른다. 병합/우선순위는 GenerationSettingsService가 담당한다.
 export type GenerationProviderSettings = {
-  provider?: "fal" | "opod-flux" | "openai";
+  provider?: "fal" | "opod-flux" | "openai" | "spicyapi";
   openaiApiKey?: string;
   openaiImageModel?: string;
+  spicyApiKey?: string;
+  // SpicyAPI 모델 계열의 edit ID. t2i는 같은 계열의 text-to-image로 정한다.
+  spicyImageModel?: string;
   apiKey?: string;
   editModel?: string;
   t2iModel?: string;
@@ -166,6 +180,16 @@ export function resolveImageGenerationProviders(
       llmLogs,
     );
     return { t2i: provider, edit: provider };
+  }
+  if (settings.provider === "spicyapi") {
+    return createSpicyApiImageProviders(
+      {
+        apiKey: settings.spicyApiKey ?? "",
+        model: settings.spicyImageModel ?? "",
+      },
+      fetchFn,
+      llmLogs,
+    );
   }
   if (settings.provider === "opod-flux") {
     const provider = createOpodFluxImageGenerationProvider(
@@ -218,9 +242,13 @@ export function createImageGenerationProviders(
           ? "openai"
           : env.IMAGE_GENERATION_PROVIDER === "opod-flux"
             ? "opod-flux"
-            : "fal",
+            : env.IMAGE_GENERATION_PROVIDER === "spicyapi"
+              ? "spicyapi"
+              : "fal",
       openaiApiKey: env.OPENAI_IMAGE_API_KEY,
       openaiImageModel: env.OPENAI_IMAGE_MODEL,
+      spicyApiKey: env.SPICY_API_KEY,
+      spicyImageModel: env.SPICY_IMAGE_MODEL,
       apiKey: env.FAL_API_KEY,
       editModel: env.FAL_IMAGE_MODEL,
       t2iModel: env.FAL_IMAGE_T2I_MODEL,

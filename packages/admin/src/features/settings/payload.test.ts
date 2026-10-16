@@ -162,3 +162,28 @@ it("saves and tests OpenAI image settings without sending fal credentials to the
     "openaiApiKey",
   );
 });
+
+it("saves and tests SpicyAPI settings without sending other provider credentials", () => {
+  const values = {
+    ...empty,
+    imageProvider: "spicyapi" as const,
+    spicyApiKey: " spicy-key ",
+    spicyImageModel: "alibaba/qwen-image-3.0-pro/edit",
+    falApiKey: "fal-key",
+  };
+  expect(toConnectionTestBody("image", values)).toEqual({
+    target: "image",
+    imageProvider: "spicyapi",
+    spicyApiKey: "spicy-key",
+    spicyImageModel: "alibaba/qwen-image-3.0-pro/edit",
+  });
+  expect(toSettingsUpdate(values)).toMatchObject({
+    imageProvider: "spicyapi",
+    spicyApiKey: "spicy-key",
+    spicyImageModel: "alibaba/qwen-image-3.0-pro/edit",
+  });
+  // 빈 키 입력은 저장된 키를 지우지 않는다.
+  expect(toSettingsUpdate({ ...values, spicyApiKey: "" })).not.toHaveProperty(
+    "spicyApiKey",
+  );
+});

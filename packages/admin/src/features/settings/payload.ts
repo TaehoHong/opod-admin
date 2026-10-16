@@ -1,9 +1,15 @@
-import type { ConnectionTestTarget, GenerationSettingsUpdate } from "./api";
+import type {
+  ConnectionTestTarget,
+  GenerationSettingsUpdate,
+  ImageProvider,
+} from "./api";
 
 export type SettingsFormValues = {
-  imageProvider: "fal" | "opod-flux" | "openai";
+  imageProvider: ImageProvider;
   openaiApiKey?: string;
   openaiImageModel?: string;
+  spicyApiKey?: string;
+  spicyImageModel?: string;
   falApiKey: string;
   falImageModel: string;
   falImageT2iModel: string;
@@ -37,6 +43,10 @@ export function toSettingsUpdate(
     ...(values.openaiImageModel !== undefined
       ? { openaiImageModel: values.openaiImageModel.trim() || null }
       : {}),
+    ...secret("spicyApiKey", values.spicyApiKey ?? ""),
+    ...(values.spicyImageModel !== undefined
+      ? { spicyImageModel: values.spicyImageModel.trim() || null }
+      : {}),
     ...secret("falApiKey", values.falApiKey),
     falImageModel: values.falImageModel.trim() || null,
     falImageT2iModel: values.falImageT2iModel.trim() || null,
@@ -64,9 +74,11 @@ export function toConnectionTestBody(
   values: SettingsFormValues,
 ): {
   target: ConnectionTestTarget;
-  imageProvider?: "fal" | "opod-flux" | "openai";
+  imageProvider?: ImageProvider;
   openaiApiKey?: string;
   openaiImageModel?: string;
+  spicyApiKey?: string;
+  spicyImageModel?: string;
   falApiKey?: string;
   opodFluxApiBaseUrl?: string;
   opodFluxApiKey?: string;
@@ -84,6 +96,18 @@ export function toConnectionTestBody(
           : {}),
         ...(values.openaiImageModel?.trim()
           ? { openaiImageModel: values.openaiImageModel.trim() }
+          : {}),
+      };
+    }
+    if (values.imageProvider === "spicyapi") {
+      return {
+        target,
+        imageProvider: "spicyapi",
+        ...(values.spicyApiKey?.trim()
+          ? { spicyApiKey: values.spicyApiKey.trim() }
+          : {}),
+        ...(values.spicyImageModel?.trim()
+          ? { spicyImageModel: values.spicyImageModel.trim() }
           : {}),
       };
     }

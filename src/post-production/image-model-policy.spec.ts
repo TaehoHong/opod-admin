@@ -282,3 +282,76 @@ it("accepts Sunburst with ordered identity references in the prompt pipeline", (
     }),
   ).toMatchObject({ modelPolicy: { usesNegativePrompt: false } });
 });
+
+it.each(["alibaba/qwen-image-3.0-pro/edit", "alibaba/qwen-image-3.0/edit"])(
+  "maps SpicyAPI %s references to ordered Image slots and stops a fourth before generation",
+  (targetModelId) => {
+    const binding = imagePlan.shots[0].referenceBindings[0];
+    const withReferences = (count: number): ImagePlanReady => ({
+      ...imagePlan,
+      shots: [
+        {
+          ...imagePlan.shots[0],
+          referenceBindings: Array.from({ length: count }, (_, index) => ({
+            ...binding,
+            bindingId: `identity-${index + 1}`,
+            id: `media-${index + 1}`,
+          })),
+        },
+      ],
+    });
+    const result = buildPromptPackage({
+      targetModelId,
+      imagePlan: withReferences(3),
+      appearance: "black bob hair",
+    });
+    expect(result.referenceSlots.map((slot) => slot.slot)).toEqual([
+      "Image 1",
+      "Image 2",
+      "Image 3",
+    ]);
+    expect(result.modelPolicy).toMatchObject({
+      version: "qwen-image-3-policy-v1",
+      usesNegativePrompt: false,
+    });
+    expect(() =>
+      buildPromptPackage({
+        targetModelId,
+        imagePlan: withReferences(4),
+        appearance: "black bob hair",
+      }),
+    ).toThrow("too_many_references");
+  },
+);
+
+it("maps Seedream 5.0 Pro references to ordered Image slots beyond the Qwen cap", () => {
+  const binding = imagePlan.shots[0].referenceBindings[0];
+  const result = buildPromptPackage({
+    targetModelId: "bytedance/seedream-5.0-pro/edit",
+    imagePlan: {
+      ...imagePlan,
+      shots: [
+        {
+          ...imagePlan.shots[0],
+          referenceBindings: Array.from({ length: 5 }, (_, index) => ({
+            ...binding,
+            bindingId: `identity-${index + 1}`,
+            id: `media-${index + 1}`,
+          })),
+        },
+      ],
+    },
+    appearance: "black bob hair",
+  });
+  expect(result.referenceSlots.map((slot) => slot.slot)).toEqual([
+    "Image 1",
+    "Image 2",
+    "Image 3",
+    "Image 4",
+    "Image 5",
+  ]);
+  expect(result.modelPolicy).toMatchObject({
+    version: "seedream-5-policy-v1",
+    usesNegativePrompt: false,
+  });
+});

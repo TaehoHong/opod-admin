@@ -159,3 +159,37 @@ it("shows the configured Sunburst model and keeps the saved image key on save", 
   });
   expect(saved[0]).not.toHaveProperty("openaiApiKey");
 });
+
+it("defaults SpicyAPI to Qwen Image 3.0 Pro and keeps the saved key on save", async () => {
+  const view = {
+    ...settingsView(),
+    imageProvider: "spicyapi" as const,
+    spicyImageModel: null,
+    spicyApiKey: { set: true, last4: "9876" },
+  };
+  const saved: unknown[] = [];
+  server.use(
+    ...stubReads(() => view),
+    http.put("/api/admin/v1/settings/generation", async ({ request }) => {
+      saved.push(await request.json());
+      return HttpResponse.json(view);
+    }),
+  );
+  render(
+    <AppProviders>
+      <SettingsPage />
+    </AppProviders>,
+  );
+  expect(
+    await screen.findByRole("combobox", { name: "이미지 모델" }),
+  ).toHaveValue("Qwen Image 3.0 Pro");
+  expect(screen.getByLabelText("SpicyAPI 키")).toBeInTheDocument();
+  expect(screen.queryByLabelText("fal.ai API 키")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "변경사항 저장" }));
+  await waitFor(() => expect(saved).toHaveLength(1));
+  expect(saved[0]).toMatchObject({
+    imageProvider: "spicyapi",
+    spicyImageModel: "alibaba/qwen-image-3.0-pro/edit",
+  });
+  expect(saved[0]).not.toHaveProperty("spicyApiKey");
+});

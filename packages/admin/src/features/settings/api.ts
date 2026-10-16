@@ -6,10 +6,14 @@ export type SettingSource = "db" | "env" | "none";
 
 export type SecretStatus = { set: boolean; last4?: string };
 
+export type ImageProvider = "fal" | "opod-flux" | "openai" | "spicyapi";
+
 export type GenerationSettingsView = {
-  imageProvider: "fal" | "opod-flux" | "openai";
+  imageProvider: ImageProvider;
   openaiApiKey?: SecretStatus;
   openaiImageModel?: string | null;
+  spicyApiKey?: SecretStatus;
+  spicyImageModel?: string | null;
   falApiKey: SecretStatus;
   falImageModel: string | null;
   falImageT2iModel: string | null;
@@ -92,9 +96,11 @@ export type GenerationSettingsView = {
 // 누락 = 유지, null = 삭제(상위 값 복귀), 값 = 저장.
 // UpdateGenerationSettingsDto의 시맨틱을 그대로 따른다.
 export type GenerationSettingsUpdate = {
-  imageProvider?: "fal" | "opod-flux" | "openai" | null;
+  imageProvider?: ImageProvider | null;
   openaiApiKey?: string | null;
   openaiImageModel?: string | null;
+  spicyApiKey?: string | null;
+  spicyImageModel?: string | null;
   falApiKey?: string | null;
   falImageModel?: string | null;
   falImageT2iModel?: string | null;
@@ -143,9 +149,11 @@ export function updateGenerationSettings(
 
 export function testGenerationSettings(body: {
   target: ConnectionTestTarget;
-  imageProvider?: "fal" | "opod-flux" | "openai";
+  imageProvider?: ImageProvider;
   openaiApiKey?: string;
   openaiImageModel?: string;
+  spicyApiKey?: string;
+  spicyImageModel?: string;
   falApiKey?: string;
   opodFluxApiBaseUrl?: string;
   opodFluxApiKey?: string;

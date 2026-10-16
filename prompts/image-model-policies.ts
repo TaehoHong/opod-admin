@@ -45,8 +45,88 @@ const fluxKontextPolicy: ImageModelPolicy = {
   instructions: fluxKontextInstructions,
 };
 
+// SpicyAPI Qwen Image 3.0 계열. edit는 순서대로 1~3장을 "Image N"으로 받는다.
+// 별도 negative_prompt 필드가 있지만 프롬프트 생성 계약이 모든 컷에 비어 있지
+// 않은 값을 강제하므로(4,000자 허용, API는 2,000자) 다른 정책처럼 본문에 둔다.
+function qwenImagePolicy(
+  modelId: string,
+  label: string,
+  supportsReferences: boolean,
+): ImageModelPolicy {
+  return {
+    id: "qwen-image-3-natural-language",
+    version: "qwen-image-3-policy-v1",
+    modelId,
+    usesNegativePrompt: false,
+    supportsReferences,
+    maxReferencesPerShot: supportsReferences ? 3 : 0,
+    referenceSlotPrefix: "Image",
+    instructions: [
+      `Active target model: ${label}.`,
+      "- Write in English natural language and keep each prompt under 4,500 characters.",
+      ...(supportsReferences
+        ? ['- Use the assigned reference labels exactly, such as "Image 1".']
+        : []),
+      "- Set negativePrompt to null and express applicable exclusions in the main prompt.",
+    ].join("\n"),
+  };
+}
+
+// SpicyAPI Seedream 5.0 Pro. Qwen과 사진 결을 비교하려고 같은 형식 규칙만 둔다.
+// edit는 레퍼런스를 10장까지 받고 별도 negative 입력이 없다.
+function seedreamPolicy(
+  modelId: string,
+  supportsReferences: boolean,
+): ImageModelPolicy {
+  return {
+    id: "seedream-5-natural-language",
+    version: "seedream-5-policy-v1",
+    modelId,
+    usesNegativePrompt: false,
+    supportsReferences,
+    maxReferencesPerShot: supportsReferences ? 10 : 0,
+    referenceSlotPrefix: "Image",
+    instructions: [
+      "Active target model: Seedream 5.0 Pro.",
+      "- Write in English natural language and keep each prompt under 4,500 characters.",
+      ...(supportsReferences
+        ? ['- Use the assigned reference labels exactly, such as "Image 1".']
+        : []),
+      "- Set negativePrompt to null and express applicable exclusions in the main prompt.",
+    ].join("\n"),
+  };
+}
+
 export const IMAGE_MODEL_POLICIES: Readonly<Record<string, ImageModelPolicy>> =
   {
+    "bytedance/seedream-5.0-pro/edit": seedreamPolicy(
+      "bytedance/seedream-5.0-pro/edit",
+      true,
+    ),
+    "bytedance/seedream-5.0-pro/text-to-image": seedreamPolicy(
+      "bytedance/seedream-5.0-pro/text-to-image",
+      false,
+    ),
+    "alibaba/qwen-image-3.0-pro/edit": qwenImagePolicy(
+      "alibaba/qwen-image-3.0-pro/edit",
+      "Qwen Image 3.0 Pro",
+      true,
+    ),
+    "alibaba/qwen-image-3.0-pro/text-to-image": qwenImagePolicy(
+      "alibaba/qwen-image-3.0-pro/text-to-image",
+      "Qwen Image 3.0 Pro",
+      false,
+    ),
+    "alibaba/qwen-image-3.0/edit": qwenImagePolicy(
+      "alibaba/qwen-image-3.0/edit",
+      "Qwen Image 3.0",
+      true,
+    ),
+    "alibaba/qwen-image-3.0/text-to-image": qwenImagePolicy(
+      "alibaba/qwen-image-3.0/text-to-image",
+      "Qwen Image 3.0",
+      false,
+    ),
     "fal-ai/nano-banana": policy("fal-ai/nano-banana", false),
     "fal-ai/nano-banana/edit": policy("fal-ai/nano-banana/edit", true),
     "fal-ai/nano-banana-pro": policy("fal-ai/nano-banana-pro", false),

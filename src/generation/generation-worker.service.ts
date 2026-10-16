@@ -85,6 +85,19 @@ type ShotExecution = {
   outputAspectRatio: number | null;
 };
 
+// 제출 당시 기록한 최종 저장 비율. 예전 제출에는 snapshot이 없다.
+function shotOutputAspectRatio(paramsJson: unknown): number | null {
+  const shot =
+    isRecord(paramsJson) && isRecord(paramsJson._shot)
+      ? paramsJson._shot
+      : null;
+  const ratio =
+    shot && isRecord(shot.execution) ? shot.execution.outputAspectRatio : null;
+  return typeof ratio === "number" && Number.isFinite(ratio) && ratio > 0
+    ? ratio
+    : null;
+}
+
 function withShotExecution(
   paramsJson: unknown,
   execution: ShotExecution,
@@ -440,7 +453,9 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     let deadline = Date.now() + this.config.providerTimeoutMs;
     try {
       for (;;) {
-        const result = await provider.poll(requestId);
+        const result = await provider.poll(requestId, {
+          outputAspectRatio: shotOutputAspectRatio(job.paramsJson),
+        });
         if (result.status === "completed") {
           return result;
         }
@@ -656,19 +671,8 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     if (result.images.length === 0) {
       throw new GeneratedImageValidationError("provider returned no images");
     }
-    const shot =
-      isRecord(job.paramsJson) && isRecord(job.paramsJson._shot)
-        ? job.paramsJson._shot
-        : null;
-    const ratio =
-      shot && isRecord(shot.execution)
-        ? shot.execution.outputAspectRatio
-        : null;
     // 예전 제출에는 snapshot이 없다. 바뀔 수 있는 현재 설정으로 검사하지 않는다.
-    const expectedRatio =
-      typeof ratio === "number" && Number.isFinite(ratio) && ratio > 0
-        ? ratio
-        : null;
+    const expectedRatio = shotOutputAspectRatio(job.paramsJson);
     const validated: {
       image: GeneratedImage;
       bytes: Buffer;

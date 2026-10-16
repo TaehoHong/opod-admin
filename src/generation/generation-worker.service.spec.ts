@@ -552,11 +552,23 @@ describe("GenerationWorkerService", () => {
     );
   });
 
-  it("resumes polling with a stored provider request id instead of resubmitting", async () => {
+  it("resumes polling with a stored provider request id and its submission ratio instead of resubmitting", async () => {
     const repository = repositoryFake();
     repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");
     repository.findForProcessing.mockResolvedValue(
-      claimedJob({ provider: "test-provider", providerRequestId: "req-old" }),
+      claimedJob({
+        provider: "test-provider",
+        providerRequestId: "req-old",
+        paramsJson: {
+          _shot: {
+            execution: {
+              route: "t2i",
+              referenceMediaIds: [],
+              outputAspectRatio: 0.8,
+            },
+          },
+        },
+      }),
     );
     const provider = providerMock([
       {
@@ -569,7 +581,10 @@ describe("GenerationWorkerService", () => {
     await service.tick();
 
     expect(provider.submit).not.toHaveBeenCalled();
-    expect(provider.poll).toHaveBeenCalledWith("req-old");
+    // 재시작 뒤에도 제출 당시 비율로 결과를 맞추도록 snapshot 값을 전달한다.
+    expect(provider.poll).toHaveBeenCalledWith("req-old", {
+      outputAspectRatio: 0.8,
+    });
   });
 
   it("requeues a transient failure keeping the provider request id", async () => {

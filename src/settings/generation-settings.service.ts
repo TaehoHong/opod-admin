@@ -1,5 +1,6 @@
 import { createPostPipelineV3Concept } from "../post-production/post-pipeline-v3";
 import { JsonValue } from "../shared/utils/json";
+import { isRecord } from "../shared/utils/value-utils";
 import {
   NaturalAgentBundle,
   validateNaturalBundle,
@@ -30,6 +31,10 @@ import {
   ImageGenerationConfigError,
   resolveImageGenerationProviders,
 } from "../generation/providers/image-generation.provider";
+import {
+  SPICYAPI_API_BASE,
+  spicyApiImageModels,
+} from "../generation/providers/spicyapi-image.provider";
 
 // admin_settings 키. 프로바이더 설정이 늘면 네임스페이스만 추가한다.
 // generation.* = 이미지 생성(fal), planner.* = 기획 LLM(OpenAI-compatible).
@@ -37,6 +42,8 @@ export const GENERATION_SETTING_KEYS = {
   imageProvider: "generation.imageProvider",
   openaiApiKey: "generation.openaiApiKey",
   openaiImageModel: "generation.openaiImageModel",
+  spicyApiKey: "generation.spicyApiKey",
+  spicyImageModel: "generation.spicyImageModel",
   falApiKey: "generation.falApiKey",
   falImageModel: "generation.falImageModel",
   falImageT2iModel: "generation.falImageT2iModel",
@@ -130,9 +137,11 @@ type SettingsEnv = Record<string, string | undefined>;
 // 연결 테스트 — 폼의 미저장 입력을 실효 설정 위에 덮어 검증한다.
 export type ConnectionTestInput = {
   target: "image" | "planner" | "chat" | "embedding";
-  imageProvider?: "fal" | "opod-flux" | "openai";
+  imageProvider?: "fal" | "opod-flux" | "openai" | "spicyapi";
   openaiApiKey?: string;
   openaiImageModel?: string;
+  spicyApiKey?: string;
+  spicyImageModel?: string;
   falApiKey?: string;
   opodFluxApiBaseUrl?: string;
   opodFluxApiKey?: string;
@@ -153,6 +162,8 @@ const ENV_KEYS: Partial<Record<GenerationSettingField, string>> = {
   imageProvider: "IMAGE_GENERATION_PROVIDER",
   openaiApiKey: "OPENAI_IMAGE_API_KEY",
   openaiImageModel: "OPENAI_IMAGE_MODEL",
+  spicyApiKey: "SPICY_API_KEY",
+  spicyImageModel: "SPICY_IMAGE_MODEL",
   falApiKey: "FAL_API_KEY",
   falImageModel: "FAL_IMAGE_MODEL",
   falImageT2iModel: "FAL_IMAGE_T2I_MODEL",
@@ -303,38 +314,67 @@ export class GenerationSettingsService {
     const t2iModel = pick(db, env, "falImageT2iModel");
     const opodFluxApiBaseUrl = pick(db, env, "opodFluxApiBaseUrl");
     const opodFluxApiKey = pick(db, env, "opodFluxApiKey");
+    // SpicyAPI는 edit ID 하나를 저장하고 같은 계열의 text-to-image를 t2i로 쓴다.
+    const spicyApiKey = pick(db, env, "spicyApiKey");
+    const spicyImageModel = pick(db, env, "spicyImageModel");
+    const spicyModels = spicyApiImageModels(spicyImageModel.value);
+    const spicy = provider.value === "spicyapi";
     return {
       provider:
         provider.value === "openai"
           ? "openai"
           : provider.value === "opod-flux"
             ? "opod-flux"
-            : "fal",
+            : spicy
+              ? "spicyapi"
+              : "fal",
       ...(provider.value === "openai"
         ? {
             openaiApiKey: openaiApiKey.value,
             openaiImageModel: openaiImageModel.value,
           }
         : {}),
+      ...(spicy
+        ? {
+            spicyApiKey: spicyApiKey.value,
+            spicyImageModel: spicyModels?.edit ?? spicyImageModel.value,
+          }
+        : {}),
       apiKey: apiKey.value,
       editModel:
-        provider.value === "openai" ? openaiImageModel.value : editModel.value,
+        provider.value === "openai"
+          ? openaiImageModel.value
+          : spicy
+            ? (spicyModels?.edit ?? spicyImageModel.value)
+            : editModel.value,
       t2iModel:
-        provider.value === "openai" ? openaiImageModel.value : t2iModel.value,
+        provider.value === "openai"
+          ? openaiImageModel.value
+          : spicy
+            ? (spicyModels?.t2i ?? spicyImageModel.value)
+            : t2iModel.value,
       opodFluxApiBaseUrl: opodFluxApiBaseUrl.value,
       opodFluxApiKey: opodFluxApiKey.value,
       sources: {
         provider: provider.source,
         apiKey:
-          provider.value === "openai" ? openaiApiKey.source : apiKey.source,
+          provider.value === "openai"
+            ? openaiApiKey.source
+            : spicy
+              ? spicyApiKey.source
+              : apiKey.source,
         editModel:
           provider.value === "openai"
             ? openaiImageModel.source
-            : editModel.source,
+            : spicy
+              ? spicyImageModel.source
+              : editModel.source,
         t2iModel:
           provider.value === "openai"
             ? openaiImageModel.source
-            : t2iModel.source,
+            : spicy
+              ? spicyImageModel.source
+              : t2iModel.source,
         opodFluxApiBaseUrl: opodFluxApiBaseUrl.source,
         opodFluxApiKey: opodFluxApiKey.source,
       },
@@ -345,9 +385,23 @@ export class GenerationSettingsService {
     provider: string,
     model: string,
   ): Promise<GenerationProviderSettings> {
-    if (provider !== "openai" && provider !== "fal" && provider !== "opod-flux")
+    if (
+      provider !== "openai" &&
+      provider !== "fal" &&
+      provider !== "opod-flux" &&
+      provider !== "spicyapi"
+    )
       throw new Error("Unsupported image provider");
     const settings = await this.resolveProviderSettings(undefined, provider);
+    if (provider === "spicyapi") {
+      const models = spicyApiImageModels(model);
+      return {
+        ...settings,
+        spicyImageModel: models?.edit ?? model,
+        editModel: models?.edit ?? model,
+        t2iModel: models?.t2i ?? model,
+      };
+    }
     return {
       ...settings,
       editModel: model,
@@ -585,6 +639,62 @@ export class GenerationSettingsService {
             message: response.ok
               ? "Sunburst 모델 접근 확인 (이미지 생성 전)"
               : `OpenAI 모델 접근 실패 (${response.status})`,
+          };
+        }
+        if (provider === "spicyapi") {
+          const saved = await this.getSettings();
+          const apiKey =
+            input.spicyApiKey?.trim() || pick(saved, env, "spicyApiKey").value;
+          const model = spicyApiImageModels(
+            input.spicyImageModel?.trim() ||
+              pick(saved, env, "spicyImageModel").value,
+          )?.edit;
+          if (!apiKey || !model)
+            return {
+              ok: false,
+              message: "SpicyAPI 키와 이미지 모델이 필요합니다",
+            };
+          // 모델 조회는 과금되지 않는다. 생성 작업은 만들지 않는다.
+          const endpoint = `${SPICYAPI_API_BASE}/models/${model}`;
+          const execute = () =>
+            fetchFn(endpoint, {
+              headers: { authorization: `Bearer ${apiKey}` },
+              signal: AbortSignal.timeout(CONNECTION_TEST_TIMEOUT_MS),
+            });
+          const response = this.llmLogs
+            ? await this.llmLogs.runJsonFetch({
+                type: LLM_LOG_TYPE.connectionTest,
+                provider: "spicyapi",
+                model,
+                endpoint,
+                requestJson: { operation: "model", model },
+                context: { metadata: { target: "image" } },
+                execute,
+              })
+            : await execute();
+          const body: unknown = await response.json().catch(() => null);
+          const data = isRecord(body) && isRecord(body.data) ? body.data : {};
+          if (!response.ok) {
+            const code =
+              isRecord(body) && typeof body.code === "number"
+                ? `, code ${body.code}`
+                : "";
+            return {
+              ok: false,
+              message:
+                response.status === 401
+                  ? "SpicyAPI 키 인증 실패 (401)"
+                  : `SpicyAPI 모델 접근 실패 (${response.status}${code})`,
+            };
+          }
+          if (data.available === false || data.enabled === false)
+            return {
+              ok: false,
+              message: "SpicyAPI 모델이 현재 사용 불가입니다",
+            };
+          return {
+            ok: true,
+            message: "SpicyAPI 모델 접근 확인 (이미지 생성 전)",
           };
         }
         if (provider === "opod-flux") {
@@ -846,6 +956,7 @@ export function settingsChangeEntries(
 }[] {
   const SECRET_FIELDS: GenerationSettingField[] = [
     "openaiApiKey",
+    "spicyApiKey",
     "falApiKey",
     "opodFluxApiKey",
     "llmApiKey",

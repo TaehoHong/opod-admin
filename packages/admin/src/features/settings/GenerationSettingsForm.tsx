@@ -74,6 +74,9 @@ export function GenerationSettingsForm({
       imageProvider: settings.imageProvider,
       openaiApiKey: "",
       openaiImageModel: settings.openaiImageModel ?? "gpt-image-2.5-sunburst",
+      spicyApiKey: "",
+      spicyImageModel:
+        settings.spicyImageModel ?? "alibaba/qwen-image-3.0-pro/edit",
       falApiKey: "",
       falImageModel: settings.falImageModel ?? "",
       falImageT2iModel: settings.falImageT2iModel ?? "",
@@ -170,16 +173,17 @@ export function GenerationSettingsForm({
                       { value: "opod-flux", label: "opod-flux v1" },
                       { value: "fal", label: "fal.ai" },
                       { value: "openai", label: "OpenAI" },
+                      { value: "spicyapi", label: "SpicyAPI" },
                     ]}
                     allowDeselect={false}
                     value={imageProvider}
                     onChange={(value) => {
                       const next =
-                        value === "openai"
-                          ? "openai"
-                          : value === "opod-flux"
-                            ? "opod-flux"
-                            : "fal";
+                        value === "openai" ||
+                        value === "opod-flux" ||
+                        value === "spicyapi"
+                          ? value
+                          : "fal";
                       form.setFieldValue("imageProvider", next);
                       setImageProvider(next);
                     }}
@@ -227,6 +231,34 @@ export function GenerationSettingsForm({
                         ) : null}
                       </Group>
                     </>
+                  ) : imageProvider === "spicyapi" ? (
+                    <Group gap="xs" wrap="nowrap" className={styles.secretRow}>
+                      <PasswordInput
+                        label="SpicyAPI 키"
+                        placeholder={
+                          settings.spicyApiKey?.set
+                            ? "변경할 때만 입력"
+                            : "SpicyAPI 콘솔에서 발급한 키"
+                        }
+                        autoComplete="off"
+                        flex={1}
+                        key={form.key("spicyApiKey")}
+                        {...form.getInputProps("spicyApiKey")}
+                      />
+                      <SecretStatusBadge
+                        status={settings.spicyApiKey ?? { set: false }}
+                        envSource={settings.resolved.sources.apiKey}
+                        missingLabel="키 없음 — 이미지 생성 불가"
+                      />
+                      {settings.spicyApiKey?.set ? (
+                        <ClearKeyButton
+                          label="SpicyAPI 키 삭제"
+                          description="저장된 SpicyAPI 키를 지우고 env 값으로 되돌립니다. env에도 키가 없으면 이미지 생성이 중단됩니다."
+                          loading={save.isPending}
+                          onConfirm={() => clearKey("spicyApiKey")}
+                        />
+                      ) : null}
+                    </Group>
                   ) : imageProvider === "openai" ? (
                     <Group gap="xs" wrap="nowrap" className={styles.secretRow}>
                       <PasswordInput
@@ -296,6 +328,28 @@ export function GenerationSettingsForm({
                       allowDeselect={false}
                       key={form.key("openaiImageModel")}
                       {...form.getInputProps("openaiImageModel")}
+                    />
+                  ) : imageProvider === "spicyapi" ? (
+                    <Select
+                      label="이미지 모델"
+                      description="레퍼런스가 없는 컷은 같은 모델의 text-to-image로 생성합니다."
+                      data={[
+                        {
+                          value: "alibaba/qwen-image-3.0-pro/edit",
+                          label: "Qwen Image 3.0 Pro",
+                        },
+                        {
+                          value: "alibaba/qwen-image-3.0/edit",
+                          label: "Qwen Image 3.0",
+                        },
+                        {
+                          value: "bytedance/seedream-5.0-pro/edit",
+                          label: "Seedream 5.0 Pro",
+                        },
+                      ]}
+                      allowDeselect={false}
+                      key={form.key("spicyImageModel")}
+                      {...form.getInputProps("spicyImageModel")}
                     />
                   ) : (
                     <>

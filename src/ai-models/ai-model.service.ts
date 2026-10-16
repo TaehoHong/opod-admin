@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { IMAGE_MODEL_POLICIES } from "../../prompts/image-model-policies";
+import { SPICYAPI_IMAGE_MODELS } from "../generation/providers/spicyapi-image.provider";
 import { decodeCursor, PageInput, pageFromRows } from "../shared/utils/page";
 import { AiModelRepository } from "./ai-model.repository";
 import { aiConfigId } from "./ai-model-id";
@@ -36,7 +37,10 @@ export function validateAiModel(
     ((provider === "openai" && model === "gpt-image-2.5-sunburst") ||
       (provider === "fal" && model.startsWith("fal-ai/")) ||
       (provider === "opod-flux" &&
-        model === "black-forest-labs/FLUX.1-Kontext-dev"));
+        model === "black-forest-labs/FLUX.1-Kontext-dev") ||
+      // edit ID만 등록한다. 레퍼런스 없는 컷은 같은 계열의 text-to-image로 실행한다.
+      (provider === "spicyapi" &&
+        SPICYAPI_IMAGE_MODELS.some((id) => id === model)));
   if (!supported)
     throw new BadRequestException(
       "Unsupported image provider/model combination",

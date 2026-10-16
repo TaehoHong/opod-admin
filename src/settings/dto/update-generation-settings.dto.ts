@@ -6,13 +6,14 @@ import {
   Matches,
   MaxLength,
 } from "class-validator";
+import { SPICYAPI_IMAGE_MODELS } from "../../generation/providers/spicyapi-image.provider";
 
 // 각 필드: 누락 = 유지, null·빈 문자열 = 삭제(필드별 기본값·상속·미설정), 값 = 저장.
 // @IsOptional은 null도 검증에서 제외하므로 null 삭제 시맨틱과 호환된다.
 export class UpdateGenerationSettingsDto {
   @IsOptional()
-  @IsIn(["fal", "opod-flux", "openai"])
-  imageProvider?: "fal" | "opod-flux" | "openai" | null;
+  @IsIn(["fal", "opod-flux", "openai", "spicyapi"])
+  imageProvider?: "fal" | "opod-flux" | "openai" | "spicyapi" | null;
 
   @IsOptional()
   @IsString()
@@ -22,6 +23,15 @@ export class UpdateGenerationSettingsDto {
   @IsOptional()
   @IsIn(["gpt-image-2.5-sunburst"])
   openaiImageModel?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  spicyApiKey?: string | null;
+
+  @IsOptional()
+  @IsIn([...SPICYAPI_IMAGE_MODELS])
+  spicyImageModel?: string | null;
 
   @IsOptional()
   @IsString()

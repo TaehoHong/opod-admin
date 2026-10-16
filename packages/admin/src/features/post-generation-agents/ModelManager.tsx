@@ -63,7 +63,7 @@ export function ModelManager() {
           />
           <TextInput
             label="공급자"
-            description="LLM: openai-compatible · 이미지: openai, fal, opod-flux"
+            description="LLM: openai-compatible · 이미지: openai, fal, opod-flux, spicyapi"
             maxLength={100}
             key={form.key("provider")}
             {...form.getInputProps("provider")}

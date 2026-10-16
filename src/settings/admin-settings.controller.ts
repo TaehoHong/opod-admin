@@ -69,6 +69,12 @@ export class AdminSettingsController {
       ...("openaiImageModel" in body
         ? { openaiImageModel: body.openaiImageModel ?? null }
         : {}),
+      ...("spicyApiKey" in body
+        ? { spicyApiKey: body.spicyApiKey ?? null }
+        : {}),
+      ...("spicyImageModel" in body
+        ? { spicyImageModel: body.spicyImageModel ?? null }
+        : {}),
       ...("imageProvider" in body
         ? { imageProvider: body.imageProvider ?? null }
         : {}),
@@ -166,6 +172,11 @@ export class AdminSettingsController {
         : { set: false },
       openaiImageModel:
         resolved.openaiImageModel ?? saved.openaiImageModel ?? null,
+      spicyApiKey: saved.spicyApiKey
+        ? { set: true, last4: saved.spicyApiKey.slice(-4) }
+        : { set: false },
+      spicyImageModel:
+        resolved.spicyImageModel ?? saved.spicyImageModel ?? null,
       falApiKey: saved.falApiKey
         ? { set: true, last4: saved.falApiKey.slice(-4) }
         : { set: false },
