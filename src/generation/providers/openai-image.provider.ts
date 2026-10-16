@@ -10,7 +10,7 @@ import {
   ImageGenerationRequest,
   ImageGenerationRequestError,
   GenerationPollResult,
-} from "./image-generation.provider";
+} from "./image-generation.contract";
 import { requestedImageAspectRatio } from "../../post-production/generated-image-validation";
 import { isRecord } from "../../shared/utils/value-utils";
 

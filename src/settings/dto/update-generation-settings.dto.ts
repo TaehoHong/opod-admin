@@ -6,7 +6,7 @@ import {
   Matches,
   MaxLength,
 } from "class-validator";
-import { SPICYAPI_IMAGE_MODELS } from "../../generation/providers/spicyapi-image.provider";
+import { SPICYAPI_IMAGE_MODELS } from "../../generation/providers/spicyapi-image-models";
 
 // 각 필드: 누락 = 유지, null·빈 문자열 = 삭제(필드별 기본값·상속·미설정), 값 = 저장.
 // @IsOptional은 null도 검증에서 제외하므로 null 삭제 시맨틱과 호환된다.

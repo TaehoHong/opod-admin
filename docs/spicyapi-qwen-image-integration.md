@@ -228,6 +228,30 @@ sequenceDiagram
   외부 유료 API는 테스트 응답으로 대체한다. provider spec은 edit/t2i 병합과
   Seedream 분리를, Admin component test는 문구 불러오기·수정·삭제를 검증한다.
 
+## 생성 코드의 책임 분리 (2026-10-16)
+
+공통 네거티브 기능을 유지하면서 요청 조립과 외부 통신의 경계를 분리했다.
+기존에는 설정·DTO·모델 등록이 모델 목록을 가져오기 위해 통신 provider를
+참조했고, provider 구현은 타입·오류를 얻기 위해 자신을 생성하는 factory를
+역참조했다. 공통값의 저장과 해석은 기존 `GenerationSettingsService`에 유지한다.
+
+- `image-generation.contract.ts`: 요청·응답·설정 타입과 공통 오류. 기존 factory
+  경로에서 재노출하므로 consumer import와 오류의 `instanceof`가 유지된다.
+- `spicyapi-image-models.ts`: 지원 모델, edit/t2i 라우팅, 계열별 상한과 비율 선택.
+  설정·DTO·모델 등록은 외부 통신 구현 대신 이 모듈을 참조한다.
+- `spicyapi-image-request.ts`: 최종 payload 조립, Qwen 공통/컷별 네거티브 병합,
+  중복 제거와 합산 길이 검사. HTTPS URL 계약은 요청과 결과 수신에서 공유한다.
+- `spicyapi-image.provider.ts`: HTTP·로그·멱등성·폴링과 결과 크롭. 전송 전에
+  요청 모듈을 호출하고, 동일한 최종 payload를 로그와 외부 요청에 사용한다.
+
+모든 provider를 새 전략/클래스 구조로 바꾸는 대신 현재의 함수를 이동해 변경
+범위를 제한했다. Qwen의 2,000자 제한, Seedream의 공통값 제외 및 컷별 negative
+거부, DB 삭제 시 fallback 없음, 기존 잡의 실행 계약은 변경하지 않는다.
+모델 정책·Agent 프롬프트·DB 값도 이 리팩터링에서 변경하지 않는다.
+기존 provider·settings·parser 단위 테스트와 Qwen 설정 E2E로 동작을 검증하며,
+외부 API는 테스트 응답으로 대체한다. 초안이나 유료 이미지를 생성하지 않으므로
+사진 품질에 대한 새 결론은 없다.
+
 ## 출처
 
 - 모델 페이지·스키마: https://spicyapi.ai/models/qwen-image-3-0-pro ,

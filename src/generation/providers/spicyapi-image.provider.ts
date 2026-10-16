@@ -1,3 +1,14 @@
+import {
+  SPICYAPI_API_BASE,
+  spicyApiImageModels,
+  spicyApiFamily,
+  nearestSupportedAspectRatio,
+} from "./spicyapi-image-models";
+import {
+  SpicyApiRequestBody,
+  spicyApiRequestBody,
+  httpsUrl,
+} from "./spicyapi-image-request";
 import sharp from "sharp";
 import {
   LLM_LOG_TYPE,
@@ -11,85 +22,23 @@ import {
   ImageGenerationConfigError,
   ImageGenerationProvider,
   ImageGenerationProviders,
-  ImageGenerationRequest,
   ImageGenerationRequestError,
-} from "./image-generation.provider";
-import {
-  GeneratedImageValidationError,
-  requestedImageAspectRatio,
-} from "../../post-production/generated-image-validation";
+} from "./image-generation.contract";
+import { GeneratedImageValidationError } from "../../post-production/generated-image-validation";
 import { isRecord } from "../../shared/utils/value-utils";
 
-export const SPICYAPI_API_BASE = "https://api.spicyapi.ai/api/v1";
+export {
+  SPICYAPI_API_BASE,
+  SPICYAPI_IMAGE_MODELS,
+  SPICYAPI_DEFAULT_IMAGE_MODEL,
+  spicyApiImageModels,
+} from "./spicyapi-image-models";
 
-// 2026-10-15 사용자 결정: Qwen Image 3.0 Pro(기본)와 3.0. 같은 날 Qwen의 사진 결이
-// 기대보다 낮아 비교용으로 Seedream 5.0 Pro를 추가했다. 설정·Agent 모델에는 edit
-// ID를 저장하고, 레퍼런스 없는 경로는 같은 계열의 text-to-image를 쓴다.
-export const SPICYAPI_IMAGE_MODELS = [
-  "alibaba/qwen-image-3.0-pro/edit",
-  "alibaba/qwen-image-3.0/edit",
-  "bytedance/seedream-5.0-pro/edit",
-] as const;
-export const SPICYAPI_DEFAULT_IMAGE_MODEL = SPICYAPI_IMAGE_MODELS[0];
-
-// 계열마다 입력 schema가 다르다. 둘 다 additionalProperties:false라 schema에 없는
-// 필드는 보내지 않는다.
-type SpicyApiFamily = {
-  kind: "qwen" | "seedream";
-  aspectRatios: readonly string[];
-  maxReferences: number;
-};
-// Qwen의 aspect_ratio enum에는 4:5가 없어 가장 가까운 비율로 생성한 뒤 요청
-// 비율로 중앙 크롭한다(2026-10-15 사용자 결정).
-const QWEN: SpicyApiFamily = {
-  kind: "qwen",
-  aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
-  maxReferences: 3,
-};
-// Seedream은 4:5를 직접 받고 레퍼런스를 10장까지 받는다. seed·negative 입력이 없다.
-const SEEDREAM: SpicyApiFamily = {
-  kind: "seedream",
-  aspectRatios: [
-    "1:1",
-    "4:3",
-    "3:4",
-    "16:9",
-    "9:16",
-    "3:2",
-    "2:3",
-    "4:5",
-    "5:4",
-    "21:9",
-    "9:21",
-    "2:1",
-    "1:2",
-    "3:1",
-    "1:3",
-  ],
-  maxReferences: 10,
-};
-const PROMPT_MAX_LENGTH = 5_000;
-const NEGATIVE_PROMPT_MAX_LENGTH = 2_000;
-const MAX_SEED = 2_147_483_647;
-const DEFAULT_RESOLUTION = "1k";
 const HTTP_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 60_000;
 const IDEMPOTENCY_CONFLICT_RETRY_MS = 500;
 // 조회 자체가 영구히 불가능한 응답. 404는 다른 키의 작업이거나 없는 작업이다.
 const PERMANENT_LOOKUP_STATUSES = new Set([400, 401, 403, 404]);
-
-export function spicyApiImageModels(
-  model: string | undefined,
-): { edit: string; t2i: string } | undefined {
-  const family = model?.trim().replace(/\/(?:edit|text-to-image)$/, "");
-  if (!family || !SPICYAPI_IMAGE_MODELS.some((id) => id === `${family}/edit`))
-    return undefined;
-  return { edit: `${family}/edit`, t2i: `${family}/text-to-image` };
-}
-
-function spicyApiFamily(model: string): SpicyApiFamily {
-  return model.startsWith("bytedance/seedream-") ? SEEDREAM : QWEN;
-}
 
 export function createSpicyApiImageProviders(
   config: {
@@ -423,141 +372,6 @@ function createSpicyApiImageProvider(
   };
 }
 
-type SpicyApiRequestBody = {
-  model: string;
-  input: {
-    prompt: string;
-    image_urls?: string[];
-    aspect_ratio?: string;
-    resolution: "1k" | "2k";
-    // Qwen만 받는 입력
-    num_outputs?: 1;
-    enable_prompt_expansion?: false;
-    negative_prompt?: string;
-    seed?: number;
-    // Seedream만 받는 입력
-    enable_thinking?: false;
-  };
-};
-
-// 다른 provider의 파라미터와 내부 metadata는 보내지 않는다. 입력 오류는 과금 전
-// terminal 실패다. 프롬프트를 다시 쓰는 단계(Qwen 확장, Seedream thinking)는 끈다.
-function spicyApiRequestBody(
-  request: ImageGenerationRequest,
-  model: string,
-  edit: boolean,
-  commonNegativePrompt?: string,
-): SpicyApiRequestBody {
-  const invalid = (message: string): never => {
-    throw new ImageGenerationRequestError(message, true);
-  };
-  const family = spicyApiFamily(model);
-  const prompt = request.prompt.trim();
-  // 공통 문구는 DB 설정에서만 받는다. 지원하지 않는 Seedream에는 붙이지 않는다.
-  const negativeEntries = [
-    ...(family.kind === "qwen" ? [commonNegativePrompt] : []),
-    request.negativePrompt,
-  ].flatMap((value) =>
-    (value ?? "")
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
-  );
-  const seen = new Set<string>();
-  const negativePrompt = negativeEntries
-    .filter((entry) => {
-      const key = entry.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .join(", ");
-  const params = request.extraParams ?? {};
-  const resolution = params.resolution ?? DEFAULT_RESOLUTION;
-  // Seedream에는 seed 입력이 없다. 재현용 힌트라 다른 provider 파라미터처럼 버린다.
-  const seed = family.kind === "qwen" ? params.seed : undefined;
-  if (!prompt || prompt.length > PROMPT_MAX_LENGTH)
-    invalid("SpicyAPI prompt must be 1 to 5,000 characters");
-  // 제외 조건을 몰래 버리거나 자르지 않는다. 합산 길이도 과금 전에 검사한다.
-  if (negativePrompt && family.kind === "seedream")
-    invalid("SpicyAPI Seedream accepts no negative prompt");
-  if (negativePrompt && negativePrompt.length > NEGATIVE_PROMPT_MAX_LENGTH)
-    invalid("SpicyAPI negative prompt must be at most 2,000 characters");
-  if (request.candidateCount !== 1)
-    invalid("SpicyAPI returns one image per request; candidateCount must be 1");
-  if (
-    edit
-      ? request.references.length < 1 ||
-        request.references.length > family.maxReferences
-      : request.references.length > 0
-  )
-    invalid(
-      edit
-        ? `SpicyAPI edit requires 1 to ${family.maxReferences} reference images`
-        : "SpicyAPI text-to-image accepts no reference images",
-    );
-  if (request.references.some((reference) => !httpsUrl(reference.url)))
-    invalid("SpicyAPI reference images must be HTTPS URLs");
-  if (resolution !== "1k" && resolution !== "2k")
-    invalid("SpicyAPI resolution must be 1k or 2k");
-  if (
-    seed !== undefined &&
-    (typeof seed !== "number" ||
-      !Number.isInteger(seed) ||
-      seed < 0 ||
-      seed > MAX_SEED)
-  )
-    invalid("SpicyAPI seed must be an integer from 0 to 2147483647");
-  const requested = requestedImageAspectRatio(params);
-  return {
-    model,
-    input: {
-      prompt,
-      ...(edit
-        ? { image_urls: request.references.map((reference) => reference.url) }
-        : {}),
-      ...(requested !== null
-        ? {
-            aspect_ratio: nearestSupportedAspectRatio(
-              requested,
-              family.aspectRatios,
-            ).label,
-          }
-        : {}),
-      resolution: resolution as "1k" | "2k",
-      ...(family.kind === "seedream"
-        ? { enable_thinking: false as const }
-        : {
-            num_outputs: 1 as const,
-            enable_prompt_expansion: false as const,
-            ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
-            ...(seed !== undefined ? { seed: seed as number } : {}),
-          }),
-    },
-  };
-}
-
-// 로그 비율 거리로 가장 가까운 지원 비율을 고른다. 정확히 같은 비율이면 그 값이다.
-function nearestSupportedAspectRatio(
-  ratio: number,
-  labels: readonly string[],
-): {
-  label: string;
-  value: number;
-} {
-  return labels
-    .map((label) => {
-      const [width, height] = label.split(":").map(Number);
-      return { label, value: width / height };
-    })
-    .reduce((best, candidate) =>
-      Math.abs(Math.log(candidate.value / ratio)) <
-      Math.abs(Math.log(best.value / ratio))
-        ? candidate
-        : best,
-    );
-}
-
 type FitTrace = {
   source: { width: number; height: number };
   output: { width: number; height: number };
@@ -653,15 +467,6 @@ async function fitToAspectRatio(
       cropped: true,
     },
   };
-}
-
-function httpsUrl(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  try {
-    return new URL(value).protocol === "https:" ? value : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 async function responsePayload(response: Response): Promise<unknown> {

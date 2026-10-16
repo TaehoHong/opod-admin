@@ -677,9 +677,18 @@ the natural-agent E2E save/read test from a frozen v4 draft to v5.
 
 Qwen 공통 네거티브의 저장 owner는 `GenerationSettingsService`이며
 `admin_settings`의 `generation.qwenImageNegativePrompt`를 사용한다. Admin 생성
-설정에서 편집하고 env/코드 fallback 없이 삭제할 수 있다. `spicyapi-image.provider.ts`가
-Qwen edit/t2i 요청에서 공통값과 컷별 제외를 쉼표 단위로 병합·중복 제거한다.
+설정에서 편집하고 env/코드 fallback 없이 삭제할 수 있다.
+`generation/providers/spicyapi-image-request.ts`가 Qwen edit/t2i 요청에서 공통값과
+컷별 제외를 쉼표 단위로 병합·중복 제거하고 최종 요청을 검증한다.
 합산 2,000자를 넘으면 외부 호출 전에 실패하며 Seedream에는 공통값을 붙이지 않는다.
 `image-model-policies.ts`의 Qwen v2와 `image-prompt-generator.ts`는 컷별 조건을
 문자열 또는 null로 받고 일반 제외를 강제하지 않는다. 회귀 owner는 provider/프롬프트
 parser spec, `SettingsPage.test.tsx`, `test/qwen-negative-settings.e2e-spec.ts`다.
+
+이미지 provider 공통 타입·오류는 `generation/providers/image-generation.contract.ts`가
+소유한다. factory는 이를 재노출해 기존 import와 `instanceof`를 보존하고, OpenAI와
+SpicyAPI 구현은 factory를 역참조하지 않는다. SpicyAPI 모델 목록·계열·비율은
+`spicyapi-image-models.ts`를 설정·DTO·모델 등록·요청·결과 처리에서 공유한다.
+`spicyapi-image.provider.ts`는 외부 통신·로그·멱등성·폴링·결과 크롭을 소유하며,
+요청 조립은 `spicyapi-image-request.ts`로 위임한다. 공통 네거티브는 이 경계에서
+한 번 합치며 Agent 출력이나 저장된 컷별 조건을 덮어쓰지 않는다.
