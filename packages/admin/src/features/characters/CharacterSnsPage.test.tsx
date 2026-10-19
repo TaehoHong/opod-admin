@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { renderPage } from "../../test/renderPage";
@@ -7,7 +7,6 @@ import { CharacterSnsPage } from "./CharacterSnsPage";
 import type { CharacterReferenceDirectoryItem } from "./api";
 
 Element.prototype.scrollIntoView = () => {};
-
 const endpoint = "/api/admin/v1/character-reference-directory";
 const first: CharacterReferenceDirectoryItem = {
   id: "character-1",
@@ -23,90 +22,190 @@ const first: CharacterReferenceDirectoryItem = {
     },
   ],
 };
-const page = Array.from({ length: 20 }, (_, i) => ({
-  ...first,
-  id: `person-${i}`,
-  publicId: `person_${i}`,
-  displayName: `인물 ${i}`,
+const second: CharacterReferenceDirectoryItem = {
+  id: "character-2",
+  publicId: "jinwoo",
+  displayName: "진우",
   referenceLinks: [],
+};
+const page = Array.from({ length: 20 }, (_, i) => ({
+  ...second,
+  id: `person-${i}`,
+  displayName: `인물 ${i}`,
+  publicId: `person_${i}`,
 }));
 
-describe("SNS reference directory", () => {
-  it("keeps multiple links compact and exposes every additional link on demand", async () => {
+describe("character to many SNS references", () => {
+  it("keeps parent selection available when one character's reference list fails", async () => {
     server.use(
-      http.get(endpoint, () =>
-        HttpResponse.json({
-          items: [
-            {
-              ...first,
-              referenceLinks: [
-                ...first.referenceLinks,
-                {
-                  ...first.referenceLinks[0],
-                  id: "2",
-                  url: "https://example.org/other",
-                },
-              ],
-            },
-          ],
-        }),
+      http.get(endpoint, () => HttpResponse.json({ items: [first, second] })),
+      http.get("/api/admin/v1/characters/:id/reference-links", ({ params }) =>
+        params.id === first.id
+          ? HttpResponse.json({ message: "참조 조회 오류" }, { status: 503 })
+          : HttpResponse.json([]),
       ),
     );
     renderPage(<CharacterSnsPage />);
-    await screen.findByText("2개 등록");
+    await userEvent.click(
+      await screen.findByRole("button", { name: "민서 선택" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "참조 조회 오류",
+    );
     expect(
-      screen.queryByRole("link", {
-        name: "민서 참조 SNS https://example.org/other 새 탭에서 열기",
-      }),
-    ).not.toBeVisible();
-    await userEvent.click(screen.getByText("추가 링크 1개 보기"));
-    const additional = await screen.findByRole("link", {
-      name: "민서 참조 SNS https://example.org/other 새 탭에서 열기",
-    });
-    expect(additional).toBeVisible();
-    expect(additional).toHaveAttribute("href", "https://example.org/other");
+      screen.queryByText("등록된 참조 링크가 없습니다."),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "진우 선택" }));
+    expect(
+      await screen.findByText("등록된 참조 링크가 없습니다."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("replaces a 20-character page on next and previous instead of accumulating rows", async () => {
+  it("shows every link for the selected character and changes the child list when another character is selected", async () => {
+    const references = [
+      first.referenceLinks[0],
+      { ...first.referenceLinks[0], id: "2", url: "https://example.org/other" },
+    ];
+    server.use(
+      http.get(endpoint, () =>
+        HttpResponse.json({
+          items: [{ ...first, referenceLinks: references }, second],
+        }),
+      ),
+      http.get("/api/admin/v1/characters/:id/reference-links", ({ params }) =>
+        HttpResponse.json(params.id === first.id ? references : []),
+      ),
+    );
+    renderPage(<CharacterSnsPage />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "민서 선택" }),
+    );
+    const detail = within(
+      await screen.findByRole("region", { name: "민서의 SNS 레퍼런스" }),
+    );
+    expect(
+      await detail.findByRole("link", {
+        name: "https://example.com/minseo 새 탭에서 열기",
+      }),
+    ).toHaveAttribute("target", "_blank");
+    expect(
+      detail.getByRole("link", {
+        name: "https://example.org/other 새 탭에서 열기",
+      }),
+    ).toBeVisible();
+    expect(detail.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "민서 선택" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "진우 선택" }));
+    const other = within(
+      await screen.findByRole("region", { name: "진우의 SNS 레퍼런스" }),
+    );
+    expect(
+      await other.findByText("등록된 참조 링크가 없습니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", {
+        name: "https://example.com/minseo 새 탭에서 열기",
+      }),
+    ).not.toBeInTheDocument();
+    expect(other.getByRole("button", { name: "링크 추가" })).toBeEnabled();
+  });
+
+  it("saves a new child under its selected parent and protects the draft while switching or paging", async () => {
+    const created: unknown[] = [];
+    let references = [...first.referenceLinks];
+    server.use(
+      http.get(endpoint, () =>
+        HttpResponse.json({ items: [first, second], nextCursor: "next-page" }),
+      ),
+      http.get("/api/admin/v1/characters/:id/reference-links", ({ params }) =>
+        HttpResponse.json(params.id === first.id ? references : []),
+      ),
+      http.post(
+        "/api/admin/v1/characters/:id/reference-links",
+        async ({ params, request }) => {
+          const body = (await request.json()) as { url: string };
+          created.push({ characterId: params.id, ...body });
+          const reference = {
+            ...first.referenceLinks[0],
+            id: "2",
+            url: body.url,
+          };
+          references = [...references, reference];
+          return HttpResponse.json(reference, { status: 201 });
+        },
+      ),
+    );
+    renderPage(<CharacterSnsPage />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "민서 선택" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "링크 추가" }),
+    );
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "참조 URL" }),
+      "https://example.org/new",
+    );
+    expect(screen.getByRole("button", { name: "진우 선택" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "다음" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "캐릭터 검색" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "참조 URL" })).toHaveValue(
+      "https://example.org/new",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+    await screen.findByRole("link", {
+      name: "https://example.org/new 새 탭에서 열기",
+    });
+    expect(created).toEqual([
+      { characterId: "character-1", url: "https://example.org/new" },
+    ]);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "진우 선택" })).toBeEnabled(),
+    );
+  });
+
+  it("replaces the 20-character selector page instead of accumulating parent items", async () => {
     server.use(
       http.get(endpoint, ({ request }) =>
         HttpResponse.json(
-          new URL(request.url).searchParams.get("cursor") === "next-page"
+          new URL(request.url).searchParams.get("cursor")
             ? { items: [first] }
             : { items: page, nextCursor: "next-page" },
         ),
       ),
+      http.get("/api/admin/v1/characters/:id/reference-links", () =>
+        HttpResponse.json([]),
+      ),
     );
     renderPage(<CharacterSnsPage />);
-    const table = await screen.findByRole("table", {
-      name: "캐릭터별 SNS 레퍼런스",
-    });
-    expect(within(table).getAllByRole("row")).toHaveLength(21);
-    expect(screen.getByRole("button", { name: "이전" })).toBeDisabled();
+    const navigation = within(
+      await screen.findByRole("navigation", { name: "캐릭터 선택" }),
+    );
+    expect(navigation.getAllByRole("button")).toHaveLength(20);
     await userEvent.click(screen.getByRole("button", { name: "다음" }));
-    await screen.findByText("민서");
-    expect(screen.queryByText("인물 0")).not.toBeInTheDocument();
-    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(
-      2,
-    );
-    const link = screen.getByRole("link", {
-      name: "민서 참조 SNS https://example.com/minseo 새 탭에서 열기",
-    });
-    expect(link).toHaveAttribute("href", "https://example.com/minseo");
-    expect(link).toHaveAttribute("target", "_blank");
-    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    await screen.findByRole("button", { name: "민서 선택" });
     expect(
-      screen.getByRole("link", { name: "민서 링크 관리" }),
-    ).toHaveAttribute("href", "/characters/character-1?section=profile");
+      screen.queryByRole("button", { name: "인물 0 선택" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("navigation", { name: "캐릭터 선택" }),
+      ).getAllByRole("button"),
+    ).toHaveLength(1);
     await userEvent.click(screen.getByRole("button", { name: "이전" }));
-    await screen.findByText("인물 0");
-    expect(screen.queryByText("민서")).not.toBeInTheDocument();
-    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(
-      21,
-    );
+    await screen.findByRole("button", { name: "인물 0 선택" });
+    expect(
+      within(
+        screen.getByRole("navigation", { name: "캐릭터 선택" }),
+      ).getAllByRole("button"),
+    ).toHaveLength(20);
   });
 
-  it("sends search and registration filters to the server, clears the old cursor and keeps filters usable for empty results", async () => {
+  it("keeps server-side search and registration filters available for empty results and resets the old cursor", async () => {
     const requests: URLSearchParams[] = [];
     server.use(
       http.get(endpoint, ({ request }) => {
@@ -120,6 +219,9 @@ describe("SNS reference directory", () => {
               : [],
         });
       }),
+      http.get("/api/admin/v1/characters/:id/reference-links", () =>
+        HttpResponse.json(first.referenceLinks),
+      ),
     );
     renderPage(<CharacterSnsPage />, {
       path: "/sns-references?cursor=old-page",
@@ -130,7 +232,7 @@ describe("SNS reference directory", () => {
       "민서",
     );
     await userEvent.click(screen.getByRole("button", { name: "검색" }));
-    await screen.findByText("민서");
+    await screen.findByRole("button", { name: "민서 선택" });
     expect(requests.at(-1)?.get("search")).toBe("민서");
     expect(requests.at(-1)?.has("cursor")).toBe(false);
     expect(requests.at(-1)?.get("limit")).toBe("20");
@@ -141,34 +243,28 @@ describe("SNS reference directory", () => {
     expect(screen.getByRole("textbox", { name: "캐릭터 검색" })).toHaveValue(
       "민서",
     );
-    expect(screen.getByRole("combobox", { name: "등록 상태" })).toHaveValue(
-      "미등록",
-    );
   });
 
-  it("distinguishes a failed request from empty data and recovers with the same filters", async () => {
+  it("opens a selected parent from a deep link even when it is outside the current selector page", async () => {
     server.use(
-      http.get(endpoint, () =>
-        HttpResponse.json({ message: "일시적인 조회 오류" }, { status: 503 }),
+      http.get(endpoint, () => HttpResponse.json({ items: page })),
+      http.get("/api/admin/v1/characters/character-1", () =>
+        HttpResponse.json(first),
+      ),
+      http.get("/api/admin/v1/characters/character-1/reference-links", () =>
+        HttpResponse.json(first.referenceLinks),
       ),
     );
-    renderPage(<CharacterSnsPage />, { path: "/sns-references?search=minseo" });
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "일시적인 조회 오류",
+    renderPage(<CharacterSnsPage />, {
+      path: "/sns-references?character=character-1",
+    });
+    const detail = within(
+      await screen.findByRole("region", { name: "민서의 SNS 레퍼런스" }),
     );
     expect(
-      screen.queryByText("조건에 맞는 캐릭터가 없습니다."),
-    ).not.toBeInTheDocument();
-    server.use(
-      http.get(endpoint, () =>
-        HttpResponse.json({ items: [{ ...first, referenceLinks: [] }] }),
-      ),
-    );
-    await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
-    await screen.findByText("등록된 링크 없음");
-    expect(screen.getByRole("textbox", { name: "캐릭터 검색" })).toHaveValue(
-      "minseo",
-    );
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      await detail.findByRole("link", {
+        name: "https://example.com/minseo 새 탭에서 열기",
+      }),
+    ).toBeVisible();
   });
 });

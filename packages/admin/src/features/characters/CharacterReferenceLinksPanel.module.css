@@ -1,0 +1,35 @@
+.links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--mantine-spacing-md);
+  padding-block: var(--mantine-spacing-md);
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+.row[data-editing] {
+  display: block;
+}
+.link {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  min-height: var(--mantine-spacing-xl);
+}
+.url {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.icon {
+  flex-shrink: 0;
+}
+@media (max-width: 48em) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--mantine-spacing-xs);
+  }
+}
