@@ -140,3 +140,13 @@ worktree 상태를 확인한다.
 - 교체 후 Admin health는 `status=ok,database=up`, Backend health는 `status=ok`를 반환했다. 기존 로그인 세션으로 수집 미디어 목록과 레퍼런스 Agent 설정을 확인했다. 신규 Agent 설정은 모델·지침을 명시 저장하기 전 상태로 유지했다.
 - 배포 확인에서 선택 starter에 테이블 구조가 들어간 오류를 찾아 승인된 1단계 프롬프트 원문으로 복구했다. starter HTTP 회귀는 이전 값에서 실패하고 수정값에서 통과했다. 최종 서버 화면에서도 역할·1~3장·반복 허용 지침을 확인했다.
 - 실행 이미지의 코드 commit은 위 값이며 이후 배포 기록 문서 커밋과 구분한다.
+
+
+### 2026-10-19 원본별 캐릭터 비주얼 배정
+
+- Admin 실행 커밋 `339572b`, 이미지 `opod-admin:reference-composition-339572b`, 시작 시각 09:10:06 UTC.
+- Backend 정본 `0ac8251`의 `20261019084411_deep_ken_ellis`를 정본 runner로 개발 DB에 적용했다. nullable composition_analysis JSONB 컬럼 하나이며 기존 description을 보존한다. Backend 앱 이미지는 교체하지 않았다.
+- 적용 전 영향 테이블 백업은 `/home/taeho/opod-backend/backups/pre-person-composition-20261019.dump`에 보관하고 목록 읽기를 확인했다.
+- 실제 분석·재색인 작업으로 활성 비주얼 35/35를 준비했다. 별도 SNS 수집이 병행되어 최종 조회 시 38/38이 person-composition-v1이고 임베딩 미완료는 0이었다. 비주얼 설명 해시도 보존됐다. 이는 해당 시점 조회 결과다.
+- 기존 임베딩 컬럼을 공통 촬영 분석 텍스트로 재색인했다. 원본 선택 이후 컷별 벡터 후보와 비전 선택으로 사용할 비주얼만 고정하며, 이후 프롬프트·생성은 같은 조합을 쓴다.
+- 타입 검사·lint·format·build·schema mirror 검사, DB metadata와 API 상태 조회를 통과했다. 사용자 지시로 테스트·실제 게시물 단계 실행·이미지 생성은 하지 않았다.
