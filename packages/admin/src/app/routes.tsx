@@ -10,6 +10,16 @@ const PostAgentsPage = lazy(() =>
     default: m.PostAgentsPage,
   })),
 );
+const AiConnectionsPage = lazy(() =>
+  import("../features/ai-management/AiConnectionsPage").then((m) => ({
+    default: m.AiConnectionsPage,
+  })),
+);
+const FeatureModelsPage = lazy(() =>
+  import("../features/ai-management/FeatureModelsPage").then((m) => ({
+    default: m.FeatureModelsPage,
+  })),
+);
 const HomePage = lazy(() =>
   import("../features/home/HomePage").then((m) => ({ default: m.HomePage })),
 );
@@ -127,6 +137,18 @@ export const NAV_ITEMS = [
     label: "게시물 Agent",
     group: "system",
     Page: PostAgentsPage,
+  },
+  {
+    id: "ai-management",
+    label: "API · 모델 관리",
+    group: "system",
+    Page: AiConnectionsPage,
+  },
+  {
+    id: "model-assignments",
+    label: "기능별 모델 설정",
+    group: "system",
+    Page: FeatureModelsPage,
   },
   { id: "settings", label: "설정", group: "system", Page: SettingsPage },
 ] as const;

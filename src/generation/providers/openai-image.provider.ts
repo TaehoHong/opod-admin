@@ -15,12 +15,12 @@ import { requestedImageAspectRatio } from "../../post-production/generated-image
 import { isRecord } from "../../shared/utils/value-utils";
 
 export const SUNBURST_MODEL = "gpt-image-2.5-sunburst";
-const BASE = "https://api.openai.com/v1/images";
+const BASE = "https://api.openai.com/v1";
 
 // Images API has no request-result retrieval endpoint. Record the local receipt
 // before starting the paid call; a lost process must fail, never silently regenerate.
 export function createOpenAiImageProvider(
-  config: { apiKey: string; model: string },
+  config: { apiKey: string; model: string; apiBaseUrl?: string },
   fetchFn: typeof fetch = fetch,
   logs?: LlmLogService,
 ): ImageGenerationProvider {
@@ -110,7 +110,7 @@ export function createOpenAiImageProvider(
       if (state.result) return state.result;
       if (!state.started) {
         state.started = true;
-        const endpoint = `${BASE}/${state.edit ? "edits" : "generations"}`;
+        const endpoint = `${(config.apiBaseUrl ?? BASE).replace(/\/$/, "")}/images/${state.edit ? "edits" : "generations"}`;
         void (async () => {
           const handle = await logs?.start({
             type: LLM_LOG_TYPE.imageGenerate,

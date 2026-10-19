@@ -103,6 +103,30 @@ export function PostAgentsPage() {
       }
     >
       <Stack gap="lg">
+        <Alert title="기능별 실행 모델" role="note">
+          각 단계에서 사용할 API·모델은 기능별 모델 설정에서 독립적으로
+          관리합니다. 기능별 선택이 아래 지침 버전의 기본 모델보다 우선합니다.
+          <Group mt="sm">
+            <Button
+              variant="default"
+              size="xs"
+              onClick={() => go("/ai-management")}
+            >
+              API · 모델 관리
+            </Button>
+            <Button
+              variant="default"
+              size="xs"
+              onClick={() =>
+                go(
+                  `/model-assignments?feature=${natural ? "natural" : "existing"}.${stage}`,
+                )
+              }
+            >
+              기능별 모델 설정
+            </Button>
+          </Group>
+        </Alert>
         <Tabs
           keepMounted={false}
           value={natural ? "natural" : "existing"}

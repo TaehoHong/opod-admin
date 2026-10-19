@@ -5,8 +5,7 @@
 // 'Do not include … selfie' 같은 배제 문장을 위반으로 오탐한다.
 // 이미지 프롬프트 정적 린트 (Layer 1) — LLM 없이 결정적으로 잡히는 결함을
 // 검출한다. 순수 함수만 두고 상태·IO를 갖지 않는다.
-// docs/image-prompt-evaluation-agent.md 3절. 심사(Layer 2)는
-// 게시물 평가 단계가 이 결과를 참고 정보로 받는다.
+// 과거 평가 단계가 이 결과를 참고 정보로 사용했다.
 
 export type PromptLintShot = {
   sortOrder: number;

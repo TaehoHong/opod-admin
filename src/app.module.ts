@@ -12,9 +12,16 @@ import { ConfigModule } from "./core/config/config.module";
 import { HttpLoggerMiddleware } from "./shared/middleware/http-logger.middleware";
 import { HealthModule } from "./health/health.module";
 import { PostProductionModule } from "./post-production/post-production.module";
+import { AiManagementModule } from "./ai-management/ai-management.module";
 
 @Module({
-  imports: [ConfigModule, AdminModule, HealthModule, PostProductionModule],
+  imports: [
+    ConfigModule,
+    AdminModule,
+    HealthModule,
+    PostProductionModule,
+    AiManagementModule,
+  ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     // 상태를 바꾸는 모든 경로에 Origin/고정 헤더 검사를 적용한다. 컨트롤러가

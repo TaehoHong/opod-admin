@@ -1,3 +1,4 @@
+import { AiSelection, pinnedAiSelection } from "../settings/ai-management";
 import { resolveImageGenerationParams } from "./image-generation-params";
 import {
   Injectable,
@@ -192,6 +193,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     // 프로세스 재시작 없이 다음 잡부터 반영된다.
     private readonly resolveProviders: (
       promptId?: string,
+      selected?: AiSelection,
     ) => Promise<ImageGenerationProviders>,
     private readonly store: GeneratedMediaStore,
     // 자동 루프 on/off도 tick마다 재해석 — 설정 화면 토글이 프로세스 재시작
@@ -373,10 +375,21 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
         isRecord(job.paramsJson) && isRecord(job.paramsJson._postAgent)
           ? job.paramsJson._postAgent
           : null;
+      const selected = pinnedAiSelection(
+        {
+          aiModelAssignments: {
+            generation: isRecord(job.paramsJson)
+              ? job.paramsJson._aiSelection
+              : null,
+          },
+        },
+        "generation",
+      );
       const providers = await this.resolveProviders(
         typeof postAgent?.promptId === "string"
           ? postAgent.promptId
           : undefined,
+        ...(selected ? [selected] : []),
       );
       const provider =
         request.references.length > 0 ? providers.edit : providers.t2i;

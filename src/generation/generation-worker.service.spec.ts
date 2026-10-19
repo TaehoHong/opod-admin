@@ -3,6 +3,7 @@ import {
   WorkerConfig,
 } from "./generation-worker.service";
 import { createHash } from "node:crypto";
+import { AiSelection } from "../settings/ai-management";
 import sharp from "sharp";
 import { GenerationSettingsService } from "../settings/generation-settings.service";
 import { resolveImageGenerationProviders } from "./providers/image-generation.provider";
@@ -184,58 +185,103 @@ function makeService(
 }
 
 describe("GenerationWorkerService", () => {
-  it("pins a post job to its selected generation version and sends its model/key to the image API", async () => {
-    const repository = repositoryFake();
-    repository.findForProcessing.mockResolvedValue(
-      claimedJob({
-        candidateCount: 1,
-        paramsJson: { _postAgent: { promptId: "17", revision: 3 } },
-        character: { visualProfile: { referenceMedia: [] } },
-      }),
-    );
-    const settings = new GenerationSettingsService({
-      findByKeys: jest.fn().mockResolvedValue([
-        { key: "generation.imageProvider", value: "fal" },
-        { key: "generation.openaiApiKey", value: "selected-key" },
-      ]),
-    } as never);
-    const fetchFn = jest
-      .fn()
-      .mockResolvedValue(
-        Response.json({ data: [{ b64_json: imageBytes.toString("base64") }] }),
+  it.each([false, true])(
+    "pins a post image job's model/key/URL with a connection assignment=%s",
+    async (assigned) => {
+      const selection: AiSelection = {
+        connectionId: "selected-api",
+        modelId: "2",
+        provider: "openai",
+        model: "gpt-image-2.5-sunburst",
+      };
+      const repository = repositoryFake();
+      repository.findForProcessing.mockResolvedValue(
+        claimedJob({
+          candidateCount: 1,
+          paramsJson: {
+            _postAgent: { promptId: "17", revision: 3 },
+            ...(assigned ? { _aiSelection: selection } : {}),
+          },
+          character: { visualProfile: { referenceMedia: [] } },
+        }),
       );
-    const resolveProviders = jest.fn(async (promptId?: string) => {
-      expect(promptId).toBe("17");
-      return resolveImageGenerationProviders(
-        await settings.resolveImageModelSettings(
-          "openai",
-          "gpt-image-2.5-sunburst",
+      const settings = new GenerationSettingsService({
+        findByKeys: jest.fn(async (keys: string[]) =>
+          [
+            { key: "generation.imageProvider", value: "fal" },
+            { key: "generation.openaiApiKey", value: "selected-key" },
+            ...(assigned
+              ? [
+                  {
+                    key: "ai.management.v1",
+                    value: JSON.stringify({
+                      version: 1,
+                      revision: "r1",
+                      changes: [],
+                      bindings: {},
+                      connections: [
+                        {
+                          id: "selected-api",
+                          type: "image",
+                          provider: "openai",
+                          apiUrl: "https://image-proxy.test/v1",
+                          apiKey: "selected-key",
+                          models: [{ id: "2", model: selection.model }],
+                        },
+                      ],
+                    }),
+                  },
+                ]
+              : []),
+          ].filter((row) => keys.includes(row.key)),
         ),
-        fetchFn,
+      } as never);
+      const fetchFn = jest.fn().mockResolvedValue(
+        Response.json({
+          data: [{ b64_json: imageBytes.toString("base64") }],
+        }),
       );
-    });
-    const store = jest.fn().mockResolvedValue({
-      url: "https://cdn.local/generated.png",
-      storageKey: "generated/test.png",
-    });
-    const service = new GenerationWorkerService(
-      repository as never,
-      resolveProviders,
-      store,
-      async () => true,
-      baseConfig,
-      async () => undefined,
-    );
-    await service.runJobNow("job-1");
-    await service.onModuleDestroy();
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchFn.mock.calls[0];
-    expect(url).toBe("https://api.openai.com/v1/images/generations");
-    expect(init.headers.authorization).toBe("Bearer selected-key");
-    expect(JSON.parse(init.body).model).toBe("gpt-image-2.5-sunburst");
-    expect(repository.persistSuccess).toHaveBeenCalled();
-    expect(repository.markFailed).not.toHaveBeenCalled();
-  });
+      const resolveProviders = jest.fn(
+        async (promptId?: string, selected?: AiSelection) => {
+          expect(promptId).toBe("17");
+          return resolveImageGenerationProviders(
+            selected
+              ? await settings.resolveAiImage(selected)
+              : await settings.resolveImageModelSettings(
+                  "openai",
+                  "gpt-image-2.5-sunburst",
+                ),
+            fetchFn,
+          );
+        },
+      );
+      const store = jest.fn().mockResolvedValue({
+        url: "https://cdn.local/generated.png",
+        storageKey: "generated/test.png",
+      });
+      const service = new GenerationWorkerService(
+        repository as never,
+        resolveProviders,
+        store,
+        async () => true,
+        baseConfig,
+        async () => undefined,
+      );
+      await service.runJobNow("job-1");
+      await service.onModuleDestroy();
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchFn.mock.calls[0];
+      expect(url).toBe(
+        assigned
+          ? "https://image-proxy.test/v1/images/generations"
+          : "https://api.openai.com/v1/images/generations",
+      );
+      expect(init.headers.authorization).toBe("Bearer selected-key");
+      expect(JSON.parse(init.body).model).toBe("gpt-image-2.5-sunburst");
+      expect(repository.persistSuccess).toHaveBeenCalled();
+      expect(repository.markFailed).not.toHaveBeenCalled();
+    },
+  );
   it("stores the actual image type and dimensions without changing the bytes", async () => {
     const repository = repositoryFake();
     repository.claimNextQueuedImageJob.mockResolvedValueOnce("job-1");

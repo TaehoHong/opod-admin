@@ -59,6 +59,7 @@ export function resolveImageGenerationProviders(
     const provider = createOpenAiImageProvider(
       {
         apiKey: settings.openaiApiKey ?? "",
+        apiBaseUrl: settings.apiBaseUrl,
         model: settings.openaiImageModel ?? "",
       },
       fetchFn,
@@ -70,6 +71,7 @@ export function resolveImageGenerationProviders(
     return createSpicyApiImageProviders(
       {
         apiKey: settings.spicyApiKey ?? "",
+        apiBaseUrl: settings.apiBaseUrl,
         model: settings.spicyImageModel ?? "",
         qwenImageNegativePrompt: settings.qwenImageNegativePrompt,
       },
@@ -102,13 +104,13 @@ export function resolveImageGenerationProviders(
     );
   }
   const edit = createFalImageGenerationProvider(
-    { apiKey, model: editModel },
+    { apiKey, model: editModel, apiBaseUrl: settings.apiBaseUrl },
     fetchFn,
     llmLogs,
   );
   const t2i = t2iModel
     ? createFalImageGenerationProvider(
-        { apiKey, model: t2iModel },
+        { apiKey, model: t2iModel, apiBaseUrl: settings.apiBaseUrl },
         fetchFn,
         llmLogs,
       )
@@ -954,15 +956,18 @@ function opodFluxPermanentHttpStatus(status: number): boolean {
 // 하지만 status/result/cancel 조회는 appId(owner/alias) 기준이어야 한다 —
 // 서브패스를 붙이면 404가 난다. (fal queue 규칙: "The subpath should be used
 // when making the request, but not when getting request status or results.")
-export function falQueueUrls(model: string): {
+export function falQueueUrls(
+  model: string,
+  apiBaseUrl = FAL_QUEUE_BASE,
+): {
   submitUrl: string;
   requestUrl: (requestId: string, suffix?: string) => string;
 } {
   const appId = model.split("/").slice(0, 2).join("/");
   return {
-    submitUrl: `${FAL_QUEUE_BASE}/${model}`,
+    submitUrl: `${apiBaseUrl.replace(/\/$/, "")}/${model}`,
     requestUrl: (requestId, suffix = "") =>
-      `${FAL_QUEUE_BASE}/${appId}/requests/${encodeURIComponent(requestId)}${suffix}`,
+      `${apiBaseUrl.replace(/\/$/, "")}/${appId}/requests/${encodeURIComponent(requestId)}${suffix}`,
   };
 }
 
@@ -972,11 +977,11 @@ export function falSupportsNegativePrompt(model: string): boolean {
 }
 
 export function createFalImageGenerationProvider(
-  config: { apiKey: string; model: string },
+  config: { apiKey: string; model: string; apiBaseUrl?: string },
   fetchFn: typeof fetch = fetch,
   llmLogs?: LlmLogService,
 ): ImageGenerationProvider {
-  const urls = falQueueUrls(config.model);
+  const urls = falQueueUrls(config.model, config.apiBaseUrl);
   const headers = {
     authorization: `Key ${config.apiKey}`,
     "content-type": "application/json",

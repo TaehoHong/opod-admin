@@ -1,5 +1,7 @@
 import {
   Article,
+  PlugsConnected,
+  SlidersHorizontal,
   Brain,
   ChartLineUp,
   Coins,
@@ -60,6 +62,8 @@ const NAV_ICONS = {
   events: Heartbeat,
   analytics: ChartLineUp,
   settings: GearSix,
+  "ai-management": PlugsConnected,
+  "model-assignments": SlidersHorizontal,
 } as const;
 
 export function AppLayout() {

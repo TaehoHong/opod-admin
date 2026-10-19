@@ -11,6 +11,9 @@ import { InputQuote, inputValue, matchesInputQuote } from "./planning-evidence";
 import { InvalidPlanningResponseError } from "./pipeline-error";
 import type { PostProduction } from "./post-planner";
 
+// 출력 계약(prompts/image-planner.ts)의 컷당 referenceBindings 상한.
+export const IMAGE_PLAN_REFERENCE_LIMIT = 5;
+
 export type ImagePlannerInput = {
   referenceSelection?: "server_ids";
   locationResolution?: "match_planned";
@@ -40,7 +43,8 @@ export type ImagePlannerInput = {
     personaContext: { title: string; content: string }[];
   };
   memories: { type: string; content: string }[];
-  recentVisualHistory: {
+  // 기존 Agent만 받는다. 새 Agent는 이전 초안의 구도를 기획 입력으로 쓰지 않는다.
+  recentVisualHistory?: {
     publicationState: "published" | "unpublished";
     premise: string | null;
     photoReview?: {
@@ -61,6 +65,8 @@ export type ImagePlannerInput = {
     }[];
   }[];
   operatorRequest?: string;
+  // 생성 모델이 컷당 받을 수 있는 레퍼런스 수. 출력 계약 상한보다 작을 때만 있다.
+  maxReferencesPerShot?: number;
   identityReferences: { id: string; description: string }[];
   locations: {
     id: string;
@@ -389,9 +395,16 @@ export function parseImagePlan(
       );
     if (
       !Array.isArray(raw[referencesKey]) ||
-      (raw[referencesKey] as unknown[]).length > 5
+      (raw[referencesKey] as unknown[]).length > IMAGE_PLAN_REFERENCE_LIMIT
     )
       throw new Error(`image plan shot ${index} bindings are invalid`);
+    if (
+      input.maxReferencesPerShot !== undefined &&
+      (raw[referencesKey] as unknown[]).length > input.maxReferencesPerShot
+    )
+      throw new Error(
+        `image plan shot ${index} exceeds the image model limit of ${input.maxReferencesPerShot} references`,
+      );
     const referenceBindings = (raw[referencesKey] as unknown[]).map(
       (binding: unknown, bindingIndex: number) =>
         parseBinding(

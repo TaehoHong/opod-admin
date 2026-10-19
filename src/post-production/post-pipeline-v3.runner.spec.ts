@@ -74,6 +74,16 @@ function setup(
       story: { value: "9:16" },
       reel: { value: "9:16" },
     }),
+    resolveAiPlanner: jest.fn(
+      async (
+        _feature: string,
+        selected: { connectionId: string; model: string },
+      ) => ({
+        apiUrl: `https://${selected.connectionId}.test/v1/chat/completions`,
+        apiKey: "selected-key",
+        model: selected.model,
+      }),
+    ),
     resolvePlannerSettings: jest.fn().mockResolvedValue({
       apiUrl: "https://llm.test/v1/chat",
       apiKey: "key",
@@ -403,6 +413,45 @@ describe("PostPipelineV3Runner", () => {
       ]);
     },
   );
+  it("gives structured post planning the KST posting moment of its scheduled time", async () => {
+    const current = draft(
+      {
+        pipelineVersion: "post-pipeline-v4",
+        postGenerationAgent: "natural-v1",
+        naturalAgentConfig: structuredBundle("structured-v5"),
+        pipeline: { stage: "post_plan", state: "running" },
+      },
+      // UTC로는 12월 31일 밤이지만 게시 시점은 KST 2027-01-01 금요일 오전이다.
+      {
+        contentType: "feed",
+        scheduledAt: new Date("2026-12-31T23:30:00.000Z"),
+      },
+    );
+    const { contextFacts: _facts, ...rest } = production;
+    void _facts;
+    const { runner, fetchMock } = setup(current, {
+      ...readyPostPlan(),
+      production: {
+        ...rest,
+        location: { id: null, description: "창가" },
+        contextFactIds: [],
+      },
+    });
+    await runner.runCurrentStage("draft-1");
+    const input = JSON.parse(
+      JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+    );
+    expect(input.productionContext).toEqual({
+      contentType: "feed",
+      mediaType: "image",
+      postingMoment: {
+        date: "2027-01-01",
+        weekday: "금요일",
+        season: "겨울",
+        timeOfDay: "오전",
+      },
+    });
+  });
   it.each(["cafe", null])(
     "matches an optional registered location (%s) only after the concept is fixed",
     async (locationId) => {
@@ -543,74 +592,6 @@ describe("PostPipelineV3Runner", () => {
       const { runner, repository, fetchMock } = setup(current, output, {
         profile: { ...EMPTY_CONTENT_PROFILE, imageStyle: "changed style" },
       });
-      repository.findRecentVisualPlanDrafts.mockResolvedValue([
-        {
-          id: "previous-structured-photo",
-          publishedPostId: null,
-          conceptJson: {
-            promptBuild: { hash: "reviewed-prompt" },
-            imagePlanning: {
-              hash: "reviewed-plan",
-              output: {
-                status: "ready",
-                shots: [
-                  {
-                    visualPurpose: "earlier plan",
-                    scene: "planned cat by window",
-                    captureSetup: "planned bedside camera",
-                    characterPresentation: { mode: "none" },
-                    visualDetails,
-                  },
-                ],
-              },
-            },
-            photoReview: {
-              imagePlanningHash: "reviewed-plan",
-              promptBuildHash: "reviewed-prompt",
-              naturalness: {
-                output: {
-                  shots: [
-                    {
-                      sortOrder: 0,
-                      verdict: "reject",
-                      observations: ["The paw floats above the bed.", 42],
-                    },
-                  ],
-                },
-              },
-              requirements: null,
-            },
-          },
-        },
-        {
-          id: "replanned-photo-with-old-review",
-          publishedPostId: null,
-          conceptJson: {
-            promptBuild: { hash: "reviewed-prompt" },
-            imagePlanning: {
-              hash: "new-plan",
-              output: {
-                status: "ready",
-                shots: [
-                  {
-                    visualPurpose: "new plan",
-                    scene: "new planned scene",
-                    captureSetup: "new planned camera",
-                    characterPresentation: { mode: "none" },
-                  },
-                ],
-              },
-            },
-            photoReview: {
-              imagePlanningHash: "old-plan",
-              promptBuildHash: "reviewed-prompt",
-              naturalness: {
-                output: { shots: [{ observations: ["Stale photo finding."] }] },
-              },
-            },
-          },
-        },
-      ]);
       await runner.runCurrentStage("draft-1");
       const request = JSON.parse(fetchMock.mock.calls[0][1].body);
       const properties =
@@ -639,39 +620,15 @@ describe("PostPipelineV3Runner", () => {
           contentProfile: { imageStyle: "필름" },
           postPlan: { production: planned },
           characterVisualContext: { personaContext: [] },
-          recentVisualHistory: [
-            {
-              premise: null,
-              shots: [
-                {
-                  visualDetails: {
-                    expressionGaze: null,
-                    poseAction: "잠든 상태",
-                    framing: "전신",
-                    camera: "침대 옆",
-                  },
-                },
-              ],
-              photoReview: {
-                naturalness: [
-                  {
-                    sortOrder: 0,
-                    verdict: "reject",
-                    observations: ["The paw floats above the bed."],
-                  },
-                ],
-                requirements: [],
-              },
-            },
-            { shots: [{ scene: "new planned scene" }] },
-          ],
         },
         output: { shots: [{ visualDetails }] },
       });
+      // 새 Agent의 이미지 기획은 이전 초안의 구도를 조회하지도 전달하지도 않는다.
+      expect(repository.findRecentVisualPlanDrafts).not.toHaveBeenCalled();
       expect(
         repository.persistV3Artifact.mock.calls[0][0].conceptJson.imagePlanning
-          .input.recentVisualHistory[1],
-      ).not.toHaveProperty("photoReview");
+          .input,
+      ).not.toHaveProperty("recentVisualHistory");
     },
   );
   it("preserves an ungrounded conflict and pauses without requeueing", async () => {
@@ -1016,6 +973,8 @@ describe("PostPipelineV3Runner", () => {
       JSON.parse(planning.fetchMock.mock.calls[0][1].body).messages[1].content,
     );
     expect(planningInput.canvas).toEqual({ aspectRatio: 1.5 });
+    // 기본 edit 모델(nano-banana-pro/edit)의 컷당 레퍼런스 상한이 기획에 전달된다.
+    expect(planningInput.maxReferencesPerShot).toBe(3);
     expect(planningInput.characterVisualContext.exclusions).toEqual(["logos"]);
     expect(planningInput.locations[0].exclusions).toEqual(["neon signs"]);
     expect(planningInput.locations[1].exclusions).toEqual(["flowers"]);
@@ -2373,72 +2332,103 @@ describe("natural photo quality gate", () => {
       ],
     });
   });
-  it("reviews generated pixels before exposing the plan, then writes caption only after both reviews accept", async () => {
-    const { runner, repository, fetchMock } = setup(naturalDraft(), undefined, {
-      captionShots: shots,
-      missingAgent: true,
-    });
-    fetchMock
-      .mockReset()
-      .mockResolvedValueOnce(
-        response({
-          shots: [
-            {
-              sortOrder: 0,
-              verdict: "accept",
-              observations: ["Hands and gaze follow the same action."],
+  it.each([false, true])(
+    "reviews pixels before the plan and writes caption after both reviews, with independent assignments=%s",
+    async (assigned) => {
+      const current = naturalDraft();
+      if (assigned)
+        Object.assign(current.conceptJson, {
+          aiModelAssignments: Object.fromEntries(
+            ["naturalness", "requirements", "caption"].map((stage) => [
+              `natural.${stage}`,
+              {
+                connectionId: stage,
+                modelId: stage,
+                provider: "openai-compatible",
+                model: `chosen-${stage}`,
+              },
+            ]),
+          ),
+        });
+      const { runner, repository, fetchMock } = setup(current, undefined, {
+        captionShots: shots,
+        missingAgent: true,
+      });
+      fetchMock
+        .mockReset()
+        .mockResolvedValueOnce(
+          response({
+            shots: [
+              {
+                sortOrder: 0,
+                verdict: "accept",
+                observations: ["Hands and gaze follow the same action."],
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          response({
+            shots: [
+              {
+                sortOrder: 0,
+                verdict: "accept",
+                observations: [
+                  "Identity and constraints match visible evidence.",
+                ],
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          response({
+            [UNION_ENVELOPE_KEY]: {
+              status: "ready",
+              caption: "잠깐 숨 돌리기",
+              captionLanguages: ["ko"],
+              hashtags: [],
             },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(
-        response({
-          shots: [
-            {
-              sortOrder: 0,
-              verdict: "accept",
-              observations: [
-                "Identity and constraints match visible evidence.",
-              ],
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(
-        response({
-          [UNION_ENVELOPE_KEY]: {
-            status: "ready",
-            caption: "잠깐 숨 돌리기",
-            captionLanguages: ["ko"],
-            hashtags: [],
-          },
-        }),
+          }),
+        );
+      await runner.runCurrentStage("draft-1");
+      const first = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      const second = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+      expect(first.model).toBe(
+        assigned ? "chosen-naturalness" : "independent-vision",
       );
-    await runner.runCurrentStage("draft-1");
-    const first = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    const second = JSON.parse(fetchMock.mock.calls[1][1].body as string);
-    expect(first.model).toBe("independent-vision");
-    expect(first.messages[1].content[0]).toEqual({
-      type: "text",
-      text: '{"shots":[0]}',
-    });
-    expect(first.messages[1].content[2].image_url.url).toBe(
-      "data:image/png;base64,cG5n",
-    );
-    expect(
-      JSON.parse(second.messages[1].content[0].text).imagePlan.shots[0].scene,
-    ).toBe("현관 전신거울에 비친 모습");
-    expect(
-      repository.persistV3Artifact.mock.calls[0][0].conceptJson,
-    ).toMatchObject({
-      photoReview: {
-        status: "accepted",
-        configRevision: naturalAgentBundle().revision,
-      },
-      captionBuild: { output: { caption: "잠깐 숨 돌리기" } },
-      pipeline: { stage: "publish", state: "pending" },
-    });
-  });
+      if (assigned) {
+        expect(second.model).toBe("chosen-requirements");
+        expect(
+          JSON.parse(fetchMock.mock.calls[2][1].body as string).model,
+        ).toBe("chosen-caption");
+        expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(
+          ["naturalness", "requirements", "caption"].map(
+            (stage) => `https://${stage}.test/v1/chat/completions`,
+          ),
+        );
+      }
+      expect(first.messages[1].content[0]).toEqual({
+        type: "text",
+        text: '{"shots":[0]}',
+      });
+      expect(first.messages[1].content[2].image_url.url).toBe(
+        "data:image/png;base64,cG5n",
+      );
+      expect(
+        JSON.parse(second.messages[1].content[0].text).imagePlan.shots[0].scene,
+      ).toBe("현관 전신거울에 비친 모습");
+      expect(
+        repository.persistV3Artifact.mock.calls[0][0].conceptJson,
+      ).toMatchObject({
+        photoReview: {
+          status: "accepted",
+          configRevision: naturalAgentBundle().revision,
+        },
+        captionBuild: { output: { caption: "잠깐 숨 돌리기" } },
+        pipeline: { stage: "publish", state: "pending" },
+      });
+    },
+  );
   it.each([
     {
       name: "post planning snapshot precedes later image and current profiles",

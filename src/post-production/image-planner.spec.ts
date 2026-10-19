@@ -171,6 +171,25 @@ describe("Image Planning Agent contract", () => {
       ],
     ]);
   });
+  it("rejects more references per shot than the target image model accepts", () => {
+    const output = structuredClone(referenceOutput);
+    output.shots[0].references.push({
+      ...output.shots[0].references[0],
+      referenceId: "person-2",
+      preserve: ["hair"],
+    });
+    const twoReferences = {
+      ...referenceInput,
+      identityReferences: [
+        ...referenceInput.identityReferences,
+        { id: "person-2", description: "body reference" },
+      ],
+    };
+    expect(() => parseImagePlan(output, twoReferences)).not.toThrow();
+    expect(() =>
+      parseImagePlan(output, { ...twoReferences, maxReferencesPerShot: 1 }),
+    ).toThrow("exceeds the image model limit of 1 references");
+  });
   it.each([
     ["bindingId", "llm-name"],
     ["id", "person-1"],

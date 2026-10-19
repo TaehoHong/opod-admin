@@ -22,6 +22,14 @@ import {
 import { LLM_LOG_TYPE, LlmLogService } from "../llm-logs/llm-log.service";
 import { GenerationSettingsRepository } from "./generation-settings.repository";
 import {
+  AI_MANAGEMENT_KEY,
+  AiManagementConfig,
+  AiConnection,
+  AiSelection,
+  aiChatUrl,
+  selectionFrom,
+} from "./ai-management";
+import {
   PlannerProviderSettings,
   contentFromChatCompletion,
   resolveContentPlanner,
@@ -212,6 +220,129 @@ export class GenerationSettingsService {
     @Optional() private readonly llmLogs?: LlmLogService,
   ) {}
 
+  async getAiManagement(): Promise<AiManagementConfig | null> {
+    const [row] = await this.repository.findByKeys([AI_MANAGEMENT_KEY]);
+    if (!row) return null;
+    try {
+      const value = JSON.parse(row.value) as AiManagementConfig;
+      if (
+        value.version !== 1 ||
+        !Array.isArray(value.connections) ||
+        !value.bindings ||
+        !Array.isArray(value.changes)
+      )
+        throw new Error();
+      return value;
+    } catch {
+      throw new BadRequestException(
+        "AI 연결 설정의 저장 형식이 유효하지 않습니다.",
+      );
+    }
+  }
+
+  async saveAiManagement(
+    value: AiManagementConfig,
+    expectedRevision: string | null,
+  ) {
+    const [row] = await this.repository.findByKeys([AI_MANAGEMENT_KEY]);
+    const current = row ? (JSON.parse(row.value) as AiManagementConfig) : null;
+    if (
+      (current?.revision ?? null) !== expectedRevision ||
+      !(await this.repository.compareAndSetValue(
+        AI_MANAGEMENT_KEY,
+        row?.value ?? null,
+        JSON.stringify(value),
+      ))
+    )
+      throw new ConflictException(
+        "다른 관리자가 AI 설정을 변경했습니다. 최신 설정을 확인한 뒤 다시 저장하세요.",
+      );
+  }
+
+  async aiConnectionKey(
+    connection: AiConnection,
+    dbOnly = false,
+  ): Promise<string | undefined> {
+    if (connection.apiKey !== undefined) return connection.apiKey || undefined;
+    if (connection.legacyKey === "planner")
+      return dbOnly
+        ? (await this.getSettings()).llmApiKey
+        : (await this.resolvePlannerSettings()).apiKey;
+    if (connection.legacyKey === "chat")
+      return (await this.resolveChatSettings()).apiKey;
+    if (!connection.legacyKey) return undefined;
+    const provider = await this.resolveProviderSettings(
+      undefined,
+      connection.legacyKey,
+    );
+    return connection.legacyKey === "openai"
+      ? provider.openaiApiKey
+      : connection.legacyKey === "spicyapi"
+        ? provider.spicyApiKey
+        : connection.legacyKey === "opod-flux"
+          ? provider.opodFluxApiKey
+          : provider.apiKey;
+  }
+
+  async snapshotAiAssignments(): Promise<
+    Record<string, AiSelection> | undefined
+  > {
+    const config = await this.getAiManagement();
+    if (!config) return undefined;
+    return Object.fromEntries(
+      Object.keys(config.bindings).map((feature) => [
+        feature,
+        selectionFrom(config, feature)!,
+      ]),
+    );
+  }
+
+  async resolveAiPlanner(
+    feature: string,
+    pinned?: AiSelection,
+  ): Promise<PlannerProviderSettings> {
+    const config = await this.getAiManagement();
+    const selected = pinned ?? (config ? selectionFrom(config, feature) : null);
+    if (!selected) return this.resolvePlannerSettings();
+    const connection = config?.connections.find(
+      (c) => c.id === selected.connectionId,
+    );
+    if (!connection || connection.type !== "llm")
+      throw new BadRequestException("LLM API 연결이 없습니다.");
+    const apiKey = await this.aiConnectionKey(connection);
+    if (!apiKey || !connection.apiUrl)
+      throw new BadRequestException("LLM API 주소와 인증 키를 설정하세요.");
+    return {
+      apiUrl: aiChatUrl(connection.apiUrl),
+      apiKey,
+      model: selected.model,
+    };
+  }
+
+  async resolveAiImage(
+    selected: AiSelection,
+  ): Promise<GenerationProviderSettings> {
+    const config = await this.getAiManagement();
+    const connection = config?.connections.find(
+      (c) => c.id === selected.connectionId,
+    );
+    if (!connection || connection.type !== "image")
+      throw new BadRequestException("이미지 API 연결이 없습니다.");
+    const key = await this.aiConnectionKey(connection);
+    return {
+      ...(await this.resolveImageModelSettings(
+        selected.provider,
+        selected.model,
+      )),
+      apiBaseUrl: connection.apiUrl,
+      apiKey: key,
+      openaiApiKey: key,
+      spicyApiKey: key,
+      opodFluxApiBaseUrl: connection.apiUrl,
+      opodFluxApiKey: key,
+    };
+  }
+
   async getNaturalAgentBundle(): Promise<NaturalAgentBundle | null> {
     const [row] = await this.repository.findByKeys(["postAgent.natural-v1"]);
     return row ? validateNaturalBundle(JSON.parse(row.value)) : null;
@@ -243,13 +374,25 @@ export class GenerationSettingsService {
 
   async scheduledAgentConcept(): Promise<JsonValue | undefined> {
     const bundle = await this.getNaturalAgentBundle();
+    const aiModelAssignments = await this.snapshotAiAssignments();
     return bundle?.schedulerDefault
       ? ({
           ...createPostPipelineV3Concept({ source: "scheduler", mode: "auto" }),
           postGenerationAgent: "natural-v1",
           naturalAgentConfig: bundle,
+          ...(aiModelAssignments ? { aiModelAssignments } : {}),
         } as unknown as JsonValue)
-      : undefined;
+      : aiModelAssignments
+        ? ({
+            ...((await this.resolvePipelineV3()).enabled
+              ? createPostPipelineV3Concept({
+                  source: "scheduler",
+                  mode: "auto",
+                })
+              : { source: "scheduler" }),
+            aiModelAssignments,
+          } as unknown as JsonValue)
+        : undefined;
   }
 
   async requireNaturalAgentBundle(): Promise<NaturalAgentBundle> {

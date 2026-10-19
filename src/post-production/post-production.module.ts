@@ -1,3 +1,4 @@
+import { AiSelection } from "../settings/ai-management";
 import { CharacterService } from "../characters/character.service";
 import { MemoryRetrievalService } from "./memory-retrieval.service";
 import { CharactersModule } from "../characters/characters.module";
@@ -132,7 +133,13 @@ function storageEnv(config: S3Config | undefined) {
       ) =>
         new GenerationWorkerService(
           jobs,
-          async (promptId) => {
+          async (promptId, aiSelection?: AiSelection) => {
+            if (aiSelection)
+              return resolveImageGenerationProviders(
+                await settings.resolveAiImage(aiSelection),
+                fetch,
+                llmLogs,
+              );
             const selected = promptId
               ? await agentPrompts.getVersion("generation", promptId)
               : null;

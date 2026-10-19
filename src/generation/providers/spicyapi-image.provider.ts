@@ -20,9 +20,9 @@ import {
   GeneratedImage,
   GenerationPollResult,
   ImageGenerationConfigError,
+  ImageGenerationRequestError,
   ImageGenerationProvider,
   ImageGenerationProviders,
-  ImageGenerationRequestError,
 } from "./image-generation.contract";
 import { GeneratedImageValidationError } from "../../post-production/generated-image-validation";
 import { isRecord } from "../../shared/utils/value-utils";
@@ -44,6 +44,7 @@ export function createSpicyApiImageProviders(
   config: {
     apiKey: string;
     model: string;
+    apiBaseUrl?: string;
     qwenImageNegativePrompt?: string;
   },
   fetchFn: typeof fetch = fetch,
@@ -59,6 +60,7 @@ export function createSpicyApiImageProviders(
   }
   const shared = {
     apiKey,
+    apiBaseUrl: config.apiBaseUrl?.replace(/\/$/, "") ?? SPICYAPI_API_BASE,
     fetchFn,
     logs,
     qwenImageNegativePrompt: config.qwenImageNegativePrompt,
@@ -80,12 +82,13 @@ function createSpicyApiImageProvider(
     logs?: LlmLogService;
     qwenImageNegativePrompt?: string;
     retryDelayMs: number;
+    apiBaseUrl: string;
   },
   edit: boolean,
 ): ImageGenerationProvider {
   const { model, fetchFn, logs } = config;
   const family = spicyApiFamily(model);
-  const createUrl = `${SPICYAPI_API_BASE}/jobs/createTask`;
+  const createUrl = `${config.apiBaseUrl}/jobs/createTask`;
   const authorization = `Bearer ${config.apiKey}`;
   const activeLogs = new Map<string, LlmLogHandle>();
   let logContext: LlmLogContext | undefined;
@@ -241,7 +244,7 @@ function createSpicyApiImageProvider(
 
     async poll(requestId, options) {
       const handle = await handleFor(requestId);
-      const endpoint = `${SPICYAPI_API_BASE}/jobs/recordInfo?taskId=${encodeURIComponent(requestId)}`;
+      const endpoint = `${config.apiBaseUrl}/jobs/recordInfo?taskId=${encodeURIComponent(requestId)}`;
       // 네트워크 오류는 그대로 던진다. 워커가 같은 taskId로 다음 시도에서 이어 조회한다.
       const response = await fetchFn(endpoint, {
         headers: { authorization },

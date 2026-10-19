@@ -1,3 +1,4 @@
+import { pinnedAiSelection } from "../settings/ai-management";
 import { assignContextFactIds } from "./planning-evidence";
 import {
   isNaturalAgent,
@@ -48,6 +49,7 @@ import {
   RecentVisualPlanDraft,
 } from "../drafts/draft-worker.repository";
 import {
+  IMAGE_PLAN_REFERENCE_LIMIT,
   ImagePlanningAgent,
   ImagePlanReady,
   ImagePlannerInput,
@@ -55,6 +57,7 @@ import {
 } from "./image-planner";
 import {
   buildPromptPackage,
+  resolveImageModelPolicy,
   UnsupportedImagePlanError,
 } from "./image-model-policy";
 import { ImagePromptGenerationAgent } from "./image-prompt-generator";
@@ -70,6 +73,7 @@ import {
   PostPlanningAgent,
   PostPlannerInput,
   PostPlanReady,
+  postingMoment,
 } from "./post-planner";
 import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
 import { isRecord } from "../shared/utils/value-utils";
@@ -198,9 +202,16 @@ export class PostPipelineV3Runner {
         ]);
         return;
       }
-      const planner = await this.settings.resolvePlannerSettings();
+      const selected = pinnedAiSelection(
+        concept,
+        `${natural ? "natural" : "existing"}.${String(stage)}`,
+      );
+      const planner = selected
+        ? await this.settings.resolveAiPlanner("", selected)
+        : await this.settings.resolvePlannerSettings();
       if (savedAgent?.id)
-        planner.model = savedAgent.effectiveModel ?? undefined;
+        planner.model =
+          selected?.model ?? savedAgent.effectiveModel ?? undefined;
       if (!planner.apiUrl || !planner.apiKey || !planner.model) {
         await this.pause(draft, concept, "needs_configuration", [
           "planner_llm_missing",
@@ -294,9 +305,10 @@ export class PostPipelineV3Runner {
               metadata: {
                 promptId: savedAgent.id,
                 revision: savedAgent.revision,
-                aiModelId: savedAgent.aiModelId,
-                provider: savedAgent.provider,
-                model: savedAgent.effectiveModel,
+                aiModelId: selected?.modelId ?? savedAgent.aiModelId,
+                provider: selected?.provider ?? savedAgent.provider,
+                model: selected?.model ?? savedAgent.effectiveModel,
+                ...(selected ? { connectionId: selected.connectionId } : {}),
               },
             }
           : undefined,
@@ -390,6 +402,12 @@ export class PostPipelineV3Runner {
         ...(contextFactSelection(concept)
           ? { contextFactSelection: "ids" as const }
           : {}),
+      };
+      // 예약 게시 시각이 없으면 기획 시각을 게시 시점으로 본다.
+      input.productionContext = {
+        contentType: draft.contentType,
+        mediaType: "image",
+        postingMoment: postingMoment(draft.scheduledAt ?? new Date()),
       };
       input.contentProfile.imageStyle = profile.imageStyle;
       if (!locationAfterConcept(concept)) {
@@ -537,15 +555,20 @@ export class PostPipelineV3Runner {
       );
     if (structuredPlanning(concept) && !this.locations)
       throw new Error("Location service is not configured");
+    // 새 Agent의 이미지 기획은 이전 초안의 구도를 보지 않는다. 이력을 받으면
+    // 반복을 피하기보다 직전 기획 문장을 옮겨 썼다(2026-10-15 평가).
+    // 게시된 글은 게시물 기획의 recentPosts로만 본다.
     const [availableLocations, recentDrafts] = await Promise.all([
       structuredPlanning(concept)
         ? this.locations!.listForPlanning(draft.characterId)
         : this.repository.findAvailableLocations(draft.characterId),
-      this.repository.findRecentVisualPlanDrafts(
-        draft.characterId,
-        draft.id,
-        8,
-      ),
+      isNaturalAgent(concept)
+        ? []
+        : this.repository.findRecentVisualPlanDrafts(
+            draft.characterId,
+            draft.id,
+            8,
+          ),
     ]);
     const production = postPlan.production;
     if (
@@ -605,6 +628,7 @@ export class PostPipelineV3Runner {
       },
       draft.character.visualProfile?.providerConfig,
     );
+    const maxReferencesPerShot = await this.planningReferenceLimit(concept);
     const input: ImagePlannerInput = {
       ...(serverReferenceSelection(concept)
         ? { referenceSelection: "server_ids" as const }
@@ -659,21 +683,13 @@ export class PostPipelineV3Runner {
             )
             .map(({ type, content }) => ({ type, content }))
         : draft.character.memories.filter((memory) => memory.content.trim()),
-      recentVisualHistory: production
-        ? recentVisualHistory(recentDrafts).map((history) => ({
-            ...history,
-            premise: null,
-            shots: history.shots.map((shot) => ({
-              ...shot,
-              visualPurpose: "",
-              scene: boundedHistoryText(shot.scene, 240),
-              captureSetup: boundedHistoryText(shot.captureSetup, 180),
-            })),
-          }))
-        : recentVisualHistory(recentDrafts),
+      ...(isNaturalAgent(concept)
+        ? {}
+        : { recentVisualHistory: recentVisualHistory(recentDrafts) }),
       ...(operatorRequest(concept)
         ? { operatorRequest: operatorRequest(concept) }
         : {}),
+      ...(maxReferencesPerShot !== undefined ? { maxReferencesPerShot } : {}),
       identityReferences: references.identityReferences,
       locations: planningLocations.map((location) => ({
         id: location.id,
@@ -841,6 +857,56 @@ export class PostPipelineV3Runner {
     if (!saved) throw new Error("image plan revision CAS lost");
   }
 
+  // 프롬프트·생성 단계가 쓸 이미지 모델 설정. 기획 단계도 같은 모델의 정책을 본다.
+  private async generationTarget(concept: V3Concept) {
+    const selected = pinnedAiSelection(
+      concept,
+      `${isNaturalAgent(concept) ? "natural" : "existing"}.generation`,
+    );
+    const originalImageAgent = isNaturalAgent(concept)
+      ? validateNaturalBundle(concept.naturalAgentConfig).generation
+      : this.agentPrompts
+        ? await this.agentPrompts.execution("generation")
+        : null;
+    const imageAgent =
+      selected && originalImageAgent
+        ? {
+            ...originalImageAgent,
+            aiModelId: selected.modelId,
+            provider: selected.provider,
+            effectiveModel: selected.model,
+          }
+        : originalImageAgent;
+    const providers = selected
+      ? await this.settings.resolveAiImage(selected)
+      : imageAgent?.id
+        ? await this.settings.resolveImageModelSettings(
+            imageAgent.provider!,
+            imageAgent.effectiveModel!,
+          )
+        : await this.settings.resolveProviderSettings();
+    return { imageAgent, providers };
+  }
+
+  // edit 모델이 출력 계약보다 적은 레퍼런스만 받으면 그 상한을 기획 입력에 넣어
+  // 프롬프트 단계의 too_many_references 정지를 기획 단계에서 미리 막는다. 모델을
+  // 아직 정할 수 없으면 넣지 않고 기존 프롬프트 단계 검사에 맡긴다.
+  private async planningReferenceLimit(
+    concept: V3Concept,
+  ): Promise<number | undefined> {
+    try {
+      const { providers } = await this.generationTarget(concept);
+      if (!providers.editModel) return undefined;
+      const policy = resolveImageModelPolicy(providers.editModel);
+      return policy.supportsReferences &&
+        policy.maxReferencesPerShot < IMAGE_PLAN_REFERENCE_LIMIT
+        ? policy.maxReferencesPerShot
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async runPromptGeneration(
     draft: PlannedDraft,
     concept: V3Concept,
@@ -850,17 +916,7 @@ export class PostPipelineV3Runner {
     const imagePlan = imagePlanReady(concept);
     if (!postPlan || !imagePlan)
       throw new Error("Prompt Generation requires ready upstream artifacts");
-    const imageAgent = isNaturalAgent(concept)
-      ? validateNaturalBundle(concept.naturalAgentConfig).generation
-      : this.agentPrompts
-        ? await this.agentPrompts.execution("generation")
-        : null;
-    const providers = imageAgent?.id
-      ? await this.settings.resolveImageModelSettings(
-          imageAgent.provider!,
-          imageAgent.effectiveModel!,
-        )
-      : await this.settings.resolveProviderSettings();
+    const { imageAgent, providers } = await this.generationTarget(concept);
     const usesReferences = imagePlan.shots.some(
       (shot) => shot.referenceBindings.length > 0,
     );
@@ -1013,6 +1069,17 @@ export class PostPipelineV3Runner {
           prompt: shot.prompt,
           sortOrder: shot.sortOrder,
           paramsJson: {
+            ...(pinnedAiSelection(
+              concept,
+              `${isNaturalAgent(concept) ? "natural" : "existing"}.generation`,
+            )
+              ? {
+                  _aiSelection: pinnedAiSelection(
+                    concept,
+                    `${isNaturalAgent(concept) ? "natural" : "existing"}.generation`,
+                  ),
+                }
+              : {}),
             ...(imageAgent?.id
               ? {
                   _postAgent: {
@@ -1106,15 +1173,18 @@ export class PostPipelineV3Runner {
       this.config.draftWorker.naturalPhotoReviewEnabled !== false
     ) {
       const bundle = validateNaturalBundle(concept.naturalAgentConfig);
-      const planner = await this.settings.resolvePlannerSettings();
-      if (!planner.apiUrl || !planner.apiKey)
-        throw new Error("planner_llm_missing");
-      const reviewClient = (stage: "naturalness" | "requirements") =>
-        new StrictJsonAgentClient(
+      const reviewClient = async (stage: "naturalness" | "requirements") => {
+        const selected = pinnedAiSelection(concept, `natural.${stage}`);
+        const planner = selected
+          ? await this.settings.resolveAiPlanner("", selected)
+          : await this.settings.resolvePlannerSettings();
+        if (!planner.apiUrl || !planner.apiKey)
+          throw new Error("planner_llm_missing");
+        return new StrictJsonAgentClient(
           {
-            apiUrl: planner.apiUrl!,
-            apiKey: planner.apiKey!,
-            model: bundle.reviewModel.model,
+            apiUrl: planner.apiUrl,
+            apiKey: planner.apiKey,
+            model: selected?.model ?? bundle.reviewModel.model,
           },
           this.fetchFn,
           this.llmLogs,
@@ -1126,9 +1196,17 @@ export class PostPipelineV3Runner {
               configRevision: bundle.revision,
               stage,
               ...bundle.reviewModel,
+              ...(selected
+                ? {
+                    aiModelId: selected.modelId,
+                    model: selected.model,
+                    connectionId: selected.connectionId,
+                  }
+                : {}),
             },
           },
         );
+      };
       const images: LabeledPhoto[] = shots.map((shot) => ({
         label: `Generated shot ${shot.sortOrder}`,
         mediaId: shot.mediaId,
@@ -1137,7 +1215,7 @@ export class PostPipelineV3Runner {
       const orders = shots.map((shot) => shot.sortOrder);
       // This first request contains only anonymous shot labels and generated pixels.
       const naturalness = await reviewPhotos(
-        reviewClient("naturalness"),
+        await reviewClient("naturalness"),
         { shots: orders },
         images,
         orders,
@@ -1199,7 +1277,7 @@ export class PostPipelineV3Runner {
       const requirements = rejected
         ? null
         : await reviewPhotos(
-            reviewClient("requirements"),
+            await reviewClient("requirements"),
             requirementsInput,
             [...images, ...(await this.referencePhotos(referenceIds))],
             orders,

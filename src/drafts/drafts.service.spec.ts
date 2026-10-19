@@ -40,6 +40,7 @@ function makeService(repository: RepositoryFake, pipelineV3Enabled = false) {
   return new DraftsService(
     repository,
     {
+      snapshotAiAssignments: jest.fn().mockResolvedValue(undefined),
       resolvePipelineV3: jest.fn().mockResolvedValue({
         enabled: pipelineV3Enabled,
         source: pipelineV3Enabled ? "db" : "none",
@@ -850,6 +851,7 @@ describe("natural post creation", () => {
       repository,
       {
         resolvePipelineV3: async () => ({ enabled: false }),
+        snapshotAiAssignments: async () => undefined,
         requireNaturalAgentBundle: async () => bundle,
       } as never,
       {} as never,

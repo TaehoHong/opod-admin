@@ -116,6 +116,7 @@ export class ImageGenerationRequestError extends Error {
 // 프로바이더 구성 값 — 출처는 env 또는 admin_settings(DB)이며 이 계층은
 // 출처를 모른다. 병합/우선순위는 GenerationSettingsService가 담당한다.
 export type GenerationProviderSettings = {
+  apiBaseUrl?: string;
   provider?: "fal" | "opod-flux" | "openai" | "spicyapi";
   openaiApiKey?: string;
   openaiImageModel?: string;

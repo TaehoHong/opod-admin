@@ -39,8 +39,18 @@ const MEMORY_TYPES = new Set([
 ]);
 
 export type PersonaEntry = PostPersonaEntry & ContextFactEntry;
+export type PostingMoment = {
+  date: string;
+  weekday: string;
+  season: "봄" | "여름" | "가을" | "겨울";
+  timeOfDay: "새벽" | "오전" | "오후" | "저녁" | "밤";
+};
 export type PostPlannerInput = {
-  productionContext?: { contentType: string; mediaType: "image" };
+  productionContext?: {
+    contentType: string;
+    mediaType: "image";
+    postingMoment?: PostingMoment;
+  };
   contentProfile: Pick<
     CharacterContentProfile,
     "accountConcept" | "constraints"
@@ -76,6 +86,47 @@ export type PostPlannerInput = {
   }[];
   operatorRequest?: string;
 };
+
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const WEEKDAYS = [
+  "일요일",
+  "월요일",
+  "화요일",
+  "수요일",
+  "목요일",
+  "금요일",
+  "토요일",
+];
+
+// 게시 시점(KST)의 날짜·요일·계절·시간대. 같은 입력이 날마다 같은 소재로
+// 굳지 않도록 실제 시간을 기획 맥락으로만 전달한다. 소재를 정하지는 않는다.
+export function postingMoment(at: Date): PostingMoment {
+  const kst = new Date(at.getTime() + KST_OFFSET_MS);
+  const month = kst.getUTCMonth() + 1;
+  const hour = kst.getUTCHours();
+  return {
+    date: kst.toISOString().slice(0, 10),
+    weekday: WEEKDAYS[kst.getUTCDay()],
+    season:
+      month >= 3 && month <= 5
+        ? "봄"
+        : month >= 6 && month <= 8
+          ? "여름"
+          : month >= 9 && month <= 11
+            ? "가을"
+            : "겨울",
+    timeOfDay:
+      hour < 6
+        ? "새벽"
+        : hour < 12
+          ? "오전"
+          : hour < 18
+            ? "오후"
+            : hour < 22
+              ? "저녁"
+              : "밤",
+  };
+}
 
 export type PostPlanReady = {
   status: "ready";

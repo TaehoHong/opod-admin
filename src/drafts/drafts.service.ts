@@ -299,7 +299,9 @@ function generationTrace(
       );
     }
     if (meta.targetModelId && provider) {
-      const executedModel = /^(?:fal|openai):(.+)$/.exec(provider)?.[1];
+      const executedModel = /^(?:fal|openai|spicyapi):(.+)$/.exec(
+        provider,
+      )?.[1];
       comparisons.push(executedModel === meta.targetModelId);
     }
   }
@@ -487,7 +489,8 @@ export class DraftsService {
     const pipelineV3 = await this.settings.resolvePipelineV3();
     const mode = input.mode ?? (natural ? "auto" : "manual");
 
-    const conceptJson = natural
+    const aiModelAssignments = await this.settings.snapshotAiAssignments();
+    const baseConceptJson = natural
       ? {
           ...createPostPipelineV3Concept({
             source: "manual",
@@ -508,6 +511,9 @@ export class DraftsService {
             mode,
             ...(sceneHint ? { sceneHint } : {}),
           };
+    const conceptJson = aiModelAssignments
+      ? { ...baseConceptJson, aiModelAssignments }
+      : baseConceptJson;
     const draft = await this.repository.createDraft({
       characterId: input.characterId,
       contentType,
