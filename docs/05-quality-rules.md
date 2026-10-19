@@ -1,5 +1,11 @@
 # 05. Quality Rules
 
+## 게시물 이미지 품질
+
+생성 이미지의 자연스러움·기획 준수·정체성·연속성 평가는
+[게시물 이미지 평가 기준](image-evaluation-criteria.md)을 따른다.
+코드 테스트 통과나 프롬프트 준수를 실제 이미지의 자연스러움으로 대체하지 않는다.
+
 ## Definition of Done
 
 작업은 실제 변경 위험에 비례한 검증이 통과해야 완료다. 실행할 수 없는
@@ -101,5 +107,6 @@ UI 검증 진입점이다. production bundle 계약은 `npm run admin:build`로
 - `GET /api/health`가 인증 없이 DB 도달성을 보고한다. production smoke
   automation은 아직 없다.
 - CI, staging과 automatic rollback은 의도적으로 초기 필수 경로가 아니다.
-- 환불 실행, 사용자 제재, 자동 상호작용 중단과 목표 frontend stack은
+- 환불 실행, 사용자 제재, 자동 상호작용 중단은
   아직 완전히 구현되지 않았다.
+- React/Vite/Mantine 관리자 frontend는 구현되어 있다.

@@ -1,15 +1,13 @@
 # Admin Posts API
 
-All endpoints require an admin JWT:
-
-```http
-Authorization: Bearer <admin-jwt>
-```
+All endpoints require the `__Host-opod_admin_session` admin cookie.
+State-changing requests also require the `x-opod-admin` header; when an
+`Origin` header is supplied it must match the request origin.
 
 ## List posts
 
 ```http
-GET /api/posts?characterId=<uuid>&contentType=feed&limit=20&cursor=<cursor>
+GET /api/admin/v1/posts?characterId=<uuid>&contentType=feed&limit=20&cursor=<cursor>
 ```
 
 Every query parameter is optional.
@@ -54,7 +52,7 @@ not contain that cursor post returns HTTP 400 `Invalid cursor`.
 ## Get a post
 
 ```http
-GET /api/posts/:id
+GET /api/admin/v1/posts/:id
 ```
 
 The response is one post in the same shape as an item from the list endpoint.

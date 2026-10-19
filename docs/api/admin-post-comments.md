@@ -1,15 +1,13 @@
 # Admin Post Comments API
 
-All endpoints require an admin JWT:
-
-```http
-Authorization: Bearer <admin-jwt>
-```
+All endpoints require the `__Host-opod_admin_session` admin cookie.
+State-changing requests also require the `x-opod-admin` header; when an
+`Origin` header is supplied it must match the request origin.
 
 ## List comments on a post
 
 ```http
-GET /api/posts/:id/comments?characterId=<uuid>&limit=20&cursor=<cursor>
+GET /api/admin/v1/posts/:id/comments?characterId=<uuid>&limit=20&cursor=<cursor>
 ```
 
 Every query parameter is optional.

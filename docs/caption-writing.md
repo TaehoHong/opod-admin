@@ -9,13 +9,13 @@
 
 | 확인된 문제 | 근거 | 적용한 원칙 |
 | --- | --- | --- |
-| 동기부여·자기관리 문구, 사진별 설명과 억지 결론, 용어만으로 운동 말투를 흉내 냄 | [권도건 크로스핏](post-creation-skill-agent-feedback-dogeon-crossfit-2026-08-27.md) §3.4 | 성격·기획 목적을 슬로건으로 옮기지 않는다. 당사자가 공유할 내용과 반응을 쓴다. |
-| 추상적인 선수 태도를 표현한 문장이 어색함 | [권도건 5km TT](post-creation-skill-agent-feedback-dogeon-5km-tt-2026-09-16.md) character/active | 명시된 운동 결과와 체감에 집중한다. 기록·중량·시간·성과는 추측하지 않는다. |
-| 동선 요약과 작위적인 관찰 문장이 캐릭터와 맞지 않음 | [한소이 강릉](post-creation-skill-agent-feedback-hansoi-gangneung-2026-09-15.md) 부정 평가 | 캐러셀의 모든 사진을 설명하거나 감상으로 마무리할 의무가 없다. |
-| 이미지 평가·질문·팔로워 선택 유도가 개인 근황의 리듬을 해침 | [나희 호텔](post-creation-skill-agent-feedback-nahee-dongtan-hotel-2026-08-28.md) 부정 평가 | 광고·참여 유도·감성 결론을 자동으로 덧붙이지 않는다. |
-| 새 문구 요청에도 기존 캡션과 비슷한 표현을 재사용 | [서린 카페](post-creation-skill-agent-feedback-seorin-cafe-2026-09-25-01a094e6.md) 부정 평가 | 최근 글은 말투의 근거이며 빈칸 채우기 템플릿이 아니다. 반복적인 도입부·구조·결론을 피한다. |
-| 짧은 문장·이모지 하나·해시태그 없음도 승인됨 | [한소이 한강](post-creation-skill-agent-feedback-hansoi-hangang.md), [서린 운동](post-creation-skill-agent-feedback-seorin-gym-2026-08-30.md) | 짧은 결과를 미완성으로 보고 문장이나 태그를 채우지 않는다. |
-| 수정에서 제거한 요소의 복원 방지 필요 | 스킬 8단계, [나희 상세 브리프](post-creation-skill-agent-feedback-nahee-dongtan-hotel-2026-08-28-01a0462a.md) §6.6 | 현재 전달된 작성 지시의 삭제·정정을 존중하고, 호환되는 확정 문자열의 문구·줄바꿈·문장부호를 유지한다. |
+| 동기부여·자기관리 문구, 사진별 설명과 억지 결론, 용어만으로 운동 말투를 흉내 냄 | [권도건 크로스핏](/Users/hongtaeho/opod-content-feedback/post-creation-skill-agent-feedback-dogeon-crossfit-2026-08-27.md) §3.4 | 성격·기획 목적을 슬로건으로 옮기지 않는다. 당사자가 공유할 내용과 반응을 쓴다. |
+| 추상적인 선수 태도를 표현한 문장이 어색함 | [권도건 5km TT](/Users/hongtaeho/opod-content-feedback/post-creation-skill-agent-feedback-dogeon-5km-tt-2026-09-16.md) character/active | 명시된 운동 결과와 체감에 집중한다. 기록·중량·시간·성과는 추측하지 않는다. |
+| 동선 요약과 작위적인 관찰 문장이 캐릭터와 맞지 않음 | [한소이 강릉](/Users/hongtaeho/opod-content-feedback/post-creation-skill-agent-feedback-hansoi-gangneung-2026-09-15.md) 부정 평가 | 캐러셀의 모든 사진을 설명하거나 감상으로 마무리할 의무가 없다. |
+| 이미지 평가·질문·팔로워 선택 유도가 개인 근황의 리듬을 해침 | [나희 호텔](/Users/hongtaeho/opod-content-feedback/post-creation-skill-agent-feedback-nahee-dongtan-hotel-2026-08-28.md) 부정 평가 | 광고·참여 유도·감성 결론을 자동으로 덧붙이지 않는다. |
+| 새 문구 요청에도 기존 캡션과 비슷한 표현을 재사용 | [서린 카페](/Users/hongtaeho/opod-content-feedback/post-creation-skill-agent-feedback-seorin-cafe-2026-09-25-01a094e6.md) 부정 평가 | 최근 글은 말투의 근거이며 빈칸 채우기 템플릿이 아니다. 반복적인 도입부·구조·결론을 피한다. |
+| 짧은 문장·이모지 하나·해시태그 없음도 승인됨 | [한소이 한강](/Users/hongtaeho/opod-content-feedback/post-creation-skill-agent-feedback-hansoi-hangang.md), [서린 운동](/Users/hongtaeho/opod-content-feedback/post-creation-skill-agent-feedback-seorin-gym-2026-08-30.md) | 짧은 결과를 미완성으로 보고 문장이나 태그를 채우지 않는다. |
+| 수정에서 제거한 요소의 복원 방지 필요 | 스킬 8단계, [나희 상세 브리프](/Users/hongtaeho/opod-content-feedback/post-creation-skill-agent-feedback-nahee-dongtan-hotel-2026-08-28-01a0462a.md) §6.6 | 현재 전달된 작성 지시의 삭제·정정을 존중하고, 호환되는 확정 문자열의 문구·줄바꿈·문장부호를 유지한다. |
 
 스킬은 수동 제작 워크플로우다. 그 승인 단계나 외부 소셜 조사 절차를 제품의
 자동 생성에 그대로 추가하지 않았다. 특정 캐릭터의 승인 문장·하트 개수·어미를

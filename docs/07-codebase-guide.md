@@ -32,6 +32,20 @@
 
 ## Current Module Map
 
+### API·모델 연결과 기능별 선택
+
+`src/ai-management/`가 Admin 연결 목록·팝업·기능별 선택 API를 소유한다.
+`GenerationSettingsService`가 `admin_settings`의 `ai.management.v1` JSON과 원문 CAS를 소유하며
+`AiManagementService`는 기존 settings/model/prompt 서비스를 조합한다. 신규 Repository나 DDL은 없다.
+UI owner는 `packages/admin/src/features/ai-management/`이며 `/ai-management`, `/model-assignments`를
+React route와 `src/main.ts` SPA 허용 경로에 함께 등록한다.
+기존 Agent 5단계·새 Agent 7단계·채팅 응답의 선택은 독립적이다.
+신규 초안의 `aiModelAssignments`와 이미지 잡의 `_aiSelection`이 모델/연결 ID를 고정하고,
+현재 연결 owner가 URL·키를 해석한다. 키는 초안·잡·API 응답에 노출하지 않는다.
+기능별 선택이 있으면 아래 prompt/bundle 모델보다 우선하며 과거 초안의 지침·실행은 유지한다.
+채팅 consumer는 `opod-agent/src/provider/db-settings-provider.ts`다.
+계약·테스트 인덱스는 [API·모델 관리](api/admin-ai-management.md)에 기록한다.
+
 백엔드는 `src/<feature>/`에 컨트롤러·서비스·Repository·DTO·unit spec을 모은다.
 `core/`에는 설정과 DB 인프라, `shared/`에는 filter·middleware·순수 헬퍼를 둔다.
 생성 실행은 `generation/`, 초안 워커는 `drafts/`, 기획 파이프라인은
@@ -48,8 +62,8 @@
 ai_model_id / nullable model override를 사용한다. BIGINT ID는 JSON에서 문자열이다.
 실효 모델은 override 우선이며 공급자는 참조 모델에서 가져온다. 키와 URL은 기존
 settings owner가 담당하고 모델 목록에는 저장하지 않는다. 현재 LLM adapter는
-openai-compatible, 이미지 adapter는 openai/fal/opod-flux다.
-단계별 현재값은 최대 revision이며 저장·복원·기본값 적용은 새 행을 추가한다.
+openai-compatible, 이미지 adapter는 openai/fal/opod-flux/spicyapi다.
+단계별 현재값은 최대 revision이며 저장·복원은 새 행을 추가한다.
 PostAgentPromptRepository는 단계 advisory transaction lock과 expectedRevision으로
 첫 저장을 포함한 동시 변경을 막는다. 출력 규격은 실제 LLM 요청에 보내는 schema이며,
 현재 parser 계약과 같아야 저장·복원·실행된다. generation 행의 지침/schema는 NULL이다.
@@ -58,7 +72,11 @@ PostAgentPromptRepository는 단계 advisory transaction lock과 expectedRevisio
 정상/차단 분기 선택에 영향을 주지 않도록 하기 위해서이며, 저장값·이력·다른 속성
 순서와 조건은 보존한다. 순수 변환 owner는 `prompts/strict-schema.ts`이고 회귀는
 `test/post-generation-agents.e2e-spec.ts`의 실제 DB 저장·조회→provider 요청 검사다.
-처음 저장하기 전에는 기존 공통 설정/코드 지침을 사용하며 저장은 모델 참조가 필수다.
+LLM 단계는 DB 지침 미설정 시 needs_configuration/<stage>_prompt_missing으로 중단한다.
+코드 지침 fallback과 기본값 적용 API/UI는 없으며 저장은 모델 참조가 필수다.
+`prompts/post-agent-contracts.ts`는 단계 목록·출력 규격만 소유한다. 네 단계의
+`prompts/*.ts`에는 출력 계약과 호환용 버전 표지만 남고 시스템 지침 본문은 없다.
+`requireAgentPromptSettings`가 직접 Agent 호출에서도 저장 지침 없이 실행되는 것을 막는다.
 `PostPipelineV3Runner`가 네 LLM 단계에서 저장 지침/schema/모델을 읽는다.
 이미지 프롬프트 단계는 generation 모델로 model policy를 정하고 잡의 `_postAgent`에
 해당 버전을 보존한다. 이미지 worker는 최신값 대신 그 버전을 읽어 실행하므로 프롬프트
@@ -68,7 +86,7 @@ agentConfig가 적용 설정을 기록한다. 기존 metadata 없는 잡은 기�
 직접 진입/새로고침은 `src/main.ts`의 SPA 허용 경로가 담당한다. 새 관리 화면을
 추가할 때 React route와 서버의 허용 경로를 함께 반영한다.
 기존 Mantine theme/DataPage를 사용하고 단계별 URL, 모델 등록·선택, 지침 편집,
-읽기 전용 출력 규격, 이력 조회·복원·기본값 적용, 입력 임시 보관/전환 보호,
+읽기 전용 출력 규격, 이력 조회·복원, 미설정 표시와 입력 임시 보관/전환 보호,
 409에서 최신값 확인 후 입력 유지 재편집을 제공한다.
 회귀 owner는 `test/post-generation-agents.e2e-spec.ts`,
 `post-pipeline-v3.runner.spec.ts`, `generation-worker.service.spec.ts`,
@@ -119,6 +137,46 @@ OpenAI 공급자·Sunburst 모델 선택을 연결한다. 키는 설정 여부·
 `resolved.sources.apiKey`로 현재 공급자의 키 출처를 표시한다. 회귀 owner는
 `openai-image.provider.spec.ts`, `generation-settings.service.spec.ts`,
 `SettingsPage.test.tsx`, `payload.test.ts`다.
+
+SpicyAPI Qwen Image 3.0·Seedream 5.0 Pro 생성은 `src/generation/providers/spicyapi-image.provider.ts`가
+소유하며 `image-generation.provider.ts`의 `provider="spicyapi"` 분기에서 연결한다
+(2026-10-15, [연동 문서](spicyapi-qwen-image-integration.md)). 설정·Agent 모델에는
+`/edit` ID(Qwen Pro 기본, Qwen 표준, Seedream 5.0 Pro)만 저장하고 레퍼런스 없는 경로는
+같은 계열의 `/text-to-image`로 정한다. 계열마다 입력 schema·지원 비율·레퍼런스 상한이
+달라 provider가 계열별로 요청을 만든다. 제출 시 `createTask`를 한 번 호출하고(응답 유실 때만 같은
+`Idempotency-Key`로 재전송), 이후 같은 taskId를 `recordInfo`로 끝까지 조회한다.
+접수된 작업은 취소할 수 없어 queued도 running으로 보고하며, failed·expired·
+content_rejected·조회 404는 자동 재제출 없는 terminal 실패다. 4:5처럼 지원하지 않는
+비율은 가장 가까운 지원 비율로 생성하고 provider가 결과를 받아 넘치는 축만 중앙
+크롭한 뒤 워커의 기존 MIME·디코딩·1% 비율 검증에 넘긴다. 워커는 크롭 기준으로
+제출 snapshot의 `_shot.execution.outputAspectRatio`를 `poll`에 전달해 재시작 뒤에도
+같은 비율을 쓴다(“원본을 크롭하지 않는다”의 이 provider 예외). 원본·결과 크기는
+이미지 생성 로그의 `opodPostprocess`에 남는다. 키·모델은 `GenerationSettingsService`의
+`generation.spicyApiKey` / `generation.spicyImageModel`(env `SPICY_API_KEY` /
+`SPICY_IMAGE_MODEL`)이 소유하고 화면은 OpenAI와 같은 마스킹·삭제 규칙을 쓴다.
+edit 모델 정책의 컷당 상한이 출력 계약(5)보다 작으면 `PostPipelineV3Runner`가 이미지
+기획 입력에 `maxReferencesPerShot`을 넣고 parser가 초과 응답을 거부한다. 회귀 owner는
+`spicyapi-image.provider.spec.ts`, `generation-settings.service.spec.ts`,
+`image-planner.spec.ts`, `image-model-policy.spec.ts`, `ai-model.service.spec.ts`,
+`payload.test.ts`, `SettingsPage.test.tsx`다.
+
+Qwen 공통 네거티브의 저장 owner는 `GenerationSettingsService`이며
+`admin_settings`의 `generation.qwenImageNegativePrompt`를 사용한다. Admin 생성
+설정에서 편집하고 env/코드 fallback 없이 삭제할 수 있다.
+`generation/providers/spicyapi-image-request.ts`가 Qwen edit/t2i 요청에서 공통값과
+컷별 제외를 쉼표 단위로 병합·중복 제거하고 최종 요청을 검증한다.
+합산 2,000자를 넘으면 외부 호출 전에 실패하며 Seedream에는 공통값을 붙이지 않는다.
+`image-model-policies.ts`의 Qwen v2와 `image-prompt-generator.ts`는 컷별 조건을
+문자열 또는 null로 받고 일반 제외를 강제하지 않는다. 회귀 owner는 provider/프롬프트
+parser spec, `SettingsPage.test.tsx`, `test/qwen-negative-settings.e2e-spec.ts`다.
+
+이미지 provider 공통 타입·오류는 `generation/providers/image-generation.contract.ts`가
+소유한다. factory는 이를 재노출해 기존 import와 `instanceof`를 보존하고, OpenAI와
+SpicyAPI 구현은 factory를 역참조하지 않는다. SpicyAPI 모델 목록·계열·비율은
+`spicyapi-image-models.ts`를 설정·DTO·모델 등록·요청·결과 처리에서 공유한다.
+`spicyapi-image.provider.ts`는 외부 통신·로그·멱등성·폴링·결과 크롭을 소유하며,
+요청 조립은 `spicyapi-image-request.ts`로 위임한다. 공통 네거티브는 이 경계에서
+한 번 합치며 Agent 출력이나 저장된 컷별 조건을 덮어쓰지 않는다.
 
 수동 게시 최종 확인은 `packages/admin/src/features/posts/PostWorkPage.tsx`의
 `PublishStage` / `PublishPreview`가 소유한다. `지금 게시`는 확인 팝업을 열고,
@@ -176,7 +234,6 @@ spec이 검증하며, 실제 이미지의 자연스러움은 별도 모델 평�
 | Drafts         | `src/drafts/`                                                                                                                | draft CRUD, planning, generation, approval, publish, 수동 memory candidate 선택 | `DraftsController`, `DraftsService`                                                          | `drafts.service.spec.ts`, generation E2E                    |
 | Post workspace | `src/post-workspace/`                                                                                                        | draft/Post 통합 운영 큐, legacy/V3 단계와 paused next-action read model         | `PostWorkspaceController`, `PostWorkspaceService`                                            | `post-workspace.service.spec.ts`                            |
 | Generation     | `src/generation/`, `src/post-production/`, `prompts/post-planner.ts`, `prompts/image-planner.ts`, `prompts/image-prompt-generator.ts` | job/provider/lease/publish와 V3 생성 Agent 오케스트레이션                       | `GenerationService`, `GenerationWorkerService`, `DraftWorkerService`, `PostPipelineV3Runner` | colocated specs, `test/generation.e2e-spec.ts`              |
-| Evaluations    | `src/administration/evaluations/`, `src/post-production/evaluation*`, `src/post-production/v3-evaluators.ts`, `prompts/v3-evaluators.ts`                      | legacy 3종과 V3 4종의 비차단 평가·이력                                          | `EvaluationWorkerService`, `EvaluationsService`                                              | evaluator/worker/evaluations specs                          |
 | Characters     | `src/characters/`                                                                                                                  | character/persona/memory/profile image/posting policy/visual profile            | `CharactersController`, feature services와 repositories                                      | colocated specs, `test/character-profile-image.e2e-spec.ts` |
 | Locations      | `src/locations/`                                                                                                             | global/character location CRUD, filtering, ordered references                   | `LocationsController`, `LocationsService`, `LocationsRepository`                             | `locations.service.spec.ts`, `test/locations.e2e-spec.ts`   |
 | Media          | `src/media/`, `src/media/generated-media-store.ts`, `src/media/film-finish.ts`                                             | upload, signing, generated media persistence                                    | `MediaService`, store factories                                                              | media/film specs                                            |
@@ -306,12 +363,14 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
 숫자 progress가 없으면 진행 막대를 렌더하지 않는다.
 
 목록이 참조하는 캐릭터·사용자는 `shared/ui/EntityName`의 `CharacterName` /
-`UserName`으로 이름을 표시한다(못 찾으면 8자 축약 + title에 전체 ID). mutation
+`UserName`으로 이름을 표시한다(못 찾으면 8자 축약 + title에 전체 ID).
+사용자 이름은 `/users?limit=100`의 첫 목록을 5분 캐시해 해석하므로
+목록 밖 사용자는 축약 ID로 표시한다. 전 사용자 이름 해석이 필요하면
+해당 목록 API의 사용자 label 계약을 별도로 확장해야 한다. mutation
 결과는 `shared/ui/MutationAlert` 하나로 성공(role=status)·실패(role=alert)를
 같은 모양으로 알린다. 실패 상세의 canonical owner는
 `shared/ui/OperationErrorAlert`이며 문제·발생 이유·다음 행동을 먼저, 원문을
-접힌 기술 상세로 표시한다. 유실 기능 대조 기록은
-`docs/react-migration-gaps.md`에 있다.
+접힌 기술 상세로 표시한다.
 
 ## Verification Paths
 
@@ -353,8 +412,13 @@ opod-flux phase·stage·실제 progress를 기존 2초 job polling으로 표시�
   `GenerationSettingsService`가 요청마다 재해석한다. 워커 자동 루프 on/off도
   같은 서비스가 소유하고 워커가 tick마다 재해석한다 — `AppConfigService`에는
   `enabled` 필드가 없다.
-- 평가 LLM(`evaluator.*`)과 채팅 LLM(`agent.*`)은 env 폴백이 없다. DB 값이
-  없으면 planner 실효값을 필드 단위로 상속한다.
+- 채팅 LLM `agent.*`는 DB `planner.*`를 필드별 상속하며 env 폴백이 없다.
+  opod-agent의 `DbSettingsProvider`는 매 호출 DB를 읽고 조회 실패/필수값
+  누락 시 이전 provider나 env로 대체하지 않는다. 임베딩 URL·키·모델은
+  별도의 DB 설정 3종이 필수다.
+- 게시물 평가 Agent/워커·화면은 제거했다. 과거 평가 테이블·행과 저장된
+  `evaluator.*` 값은 보존한다. 현재 단계별 모델은 AiModelService와
+  PostAgentPromptService가 소유하며 설정 API가 평가를 실행하지 않는다.
 - frontend는 nav 16개 화면과 admin 쓰기·상세 workflow를 React로 렌더한다.
   legacy entry, script, stylesheet, node:test suite는 제거했다.
 - Helmet CSP는 켜져 있다. `style-src`에 `'unsafe-inline'`이 남아 있고
@@ -598,7 +662,9 @@ LLM 로그와 액션 로그의 목록은 `shared/ui/LogRow.tsx`로 행 클릭을
 항목별 기획은 `planningContract=structured-v3`로 명시적으로 설치한다.
 `prompts/structured-planning.ts`가 새 스키마와 설치용 지침을 소유하고,
 `naturalSchemas`/`validateNaturalBundle`이 이전 번들과 새 번들의 계약을 구분한다.
-`post-planner.ts`가 장소·사진 형식·순서·사실 선택을 검증한다.
+`post-planner.ts`가 장소·사진 형식·순서·사실 선택을 검증하고, structured 기획 입력의
+게시 시점(`postingMoment`, KST)을 순수 함수로 만든다. 새 Agent의 이미지 기획은 이전 초안의
+최근 시각 기록을 조회·전달하지 않는다(기존 Agent만 받음).
 `planning-evidence.ts`가 실행 입력 항목의 ID 부여와 원문 연결을 소유한다. v3의 LLM은
 `contextFactIds`만 출력하고 서버가 저장된 입력에서 `contextFacts`를 구성한다. v1/v2의
 인용 계약은 유지한다. runner는 imageStyle을
@@ -631,10 +697,9 @@ mode 없는 API 요청은 이전 기본값을 유지한다. `DraftsService.setAu
 `src/post-production/natural-post-agent.ts`, 픽셀 전송·검수 parser 경계는
 `natural-photo-review.ts`다. `PostPipelineV3Runner`는 새 이미지 기획에 실제 참조 픽셀을
 전달하고 캡션 이전에 사진만 보는 자연스러움 검수 후 정체성·요구사항 검수를 실행한다.
-`AppConfigService.draftWorker.naturalPhotoReviewEnabled`가 두 검수의 실행을 함께 제어한다.
-환경변수 `NATURAL_PHOTO_REVIEW_ENABLED=false`이면 runner는 `skipped/disabled`와
-현재 산출물 식별값을 저장하고 캡션으로 진행한다. 게시 guard는 비활성화 때만 이 기록을
-허용하되 이미지·캡션·입력 버전 일치 조건은 유지한다. 미설정 기본값은 true다.
+요구사항 검수에는 게시물 기획 입력의 계정 컨셉·이미지 스타일 스냅샷과 게시 목적을
+전달한다. 필드별 누락만 이미지 기획 스냅샷 및 기존 `imagePlanningStyle` 경로로 보완하며,
+빈 값은 유지하고 근거가 없으면 null이다. 첫 독립 검수에는 이 맥락을 보내지 않는다.
 `DraftWorkerService`는 최신 검수·캡션의 집합 hash와 입력 버전이 맞아야 게시하며
 생성 사건을 자동 Canon에 넣지 않는다. 관련 회귀는 runner/worker/drafts spec과
 `test/natural-post-agent.e2e-spec.ts`, `PostBriefCreatePage.test.tsx`, `NaturalAgentPanel.test.tsx`다.
@@ -677,25 +742,17 @@ so frozen drafts continue to validate. This is guidance, not a new semantic chec
 or an automatic retry. Regression coverage extends the runner contract tests and
 the natural-agent E2E save/read test from a frozen v4 draft to v5.
 
-## Qwen 공통 네거티브 프롬프트
+The v2 image-prompt instruction stores optional fixed English sections inside each
+existing prompt string: Scene, Wardrobe, Pose/Expression/Gaze, Camera/Framing,
+Lighting, Style, References and Constraints. Missing content omits the whole
+section; headings do not authorize new visual decisions. The active DB
+image_prompt instruction is the runtime source; changing this format alone does
+not change the output schema or frozen draft configuration.
 
-Qwen 공통 네거티브의 저장 owner는 `GenerationSettingsService`이며
-`admin_settings`의 `generation.qwenImageNegativePrompt`를 사용한다. Admin 생성
-설정에서 편집하고 env/코드 fallback 없이 삭제할 수 있다.
-`generation/providers/spicyapi-image-request.ts`가 Qwen edit/t2i 요청에서 공통값과
-컷별 제외를 쉼표 단위로 병합·중복 제거하고 최종 요청을 검증한다.
-합산 2,000자를 넘으면 외부 호출 전에 실패하며 Seedream에는 공통값을 붙이지 않는다.
-`image-model-policies.ts`의 Qwen v2와 `image-prompt-generator.ts`는 컷별 조건을
-문자열 또는 null로 받고 일반 제외를 강제하지 않는다. 회귀 owner는 provider/프롬프트
-parser spec, `SettingsPage.test.tsx`, `test/qwen-negative-settings.e2e-spec.ts`다.
-
-이미지 provider 공통 타입·오류는 `generation/providers/image-generation.contract.ts`가
-소유한다. factory는 이를 재노출해 기존 import와 `instanceof`를 보존하고, OpenAI와
-SpicyAPI 구현은 factory를 역참조하지 않는다. SpicyAPI 모델 목록·계열·비율은
-`spicyapi-image-models.ts`를 설정·DTO·모델 등록·요청·결과 처리에서 공유한다.
-`spicyapi-image.provider.ts`는 외부 통신·로그·멱등성·폴링·결과 크롭을 소유하며,
-요청 조립은 `spicyapi-image-request.ts`로 위임한다. 공통 네거티브는 이 경계에서
-한 번 합치며 Agent 출력이나 저장된 컷별 조건을 덮어쓰지 않는다.
+사진 검수 4·5번은 `NATURAL_PHOTO_REVIEW_ENABLED=false`로 함께 생략한다.
+실행 owner는 `AppConfigService`→`PostPipelineV3Runner`, 게시 정합성 owner는
+`assertNaturalPublishable`→`DraftWorkerService`다. 생략 기록과 재활성화 경계는
+[natural-post-agent.md](natural-post-agent.md)의 사진 검수 실행 스위치를 참고한다.
 
 ## Character reference links
 

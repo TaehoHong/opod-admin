@@ -1,15 +1,13 @@
 # Admin Stories API
 
-All endpoints require an admin JWT:
-
-```http
-Authorization: Bearer <admin-jwt>
-```
+All endpoints require the `__Host-opod_admin_session` admin cookie.
+State-changing requests also require the `x-opod-admin` header; when an
+`Origin` header is supplied it must match the request origin.
 
 ## List stories
 
 ```http
-GET /api/stories?characterId=<uuid>&limit=20&cursor=<cursor>
+GET /api/admin/v1/stories?characterId=<uuid>&limit=20&cursor=<cursor>
 ```
 
 Every query parameter is optional.
@@ -48,7 +46,7 @@ Stories are ordered newest first by `createdAt`, then `id`.
 ## Get a story
 
 ```http
-GET /api/stories/:id
+GET /api/admin/v1/stories/:id
 ```
 
 The response is one story in the same shape as a list item. A missing story

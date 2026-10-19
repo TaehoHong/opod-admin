@@ -6,7 +6,7 @@
 
 기존 `GenerationSettingsService`와 `resolveImageGenerationProviders`를 확장한다
 (owner-found). OpenAI Images API adapter는 기존 구현이 없어
-`src/worker/openai-image.provider.ts`에 둔다 (owner-absent). 레퍼런스 변환과
+`src/generation/providers/openai-image.provider.ts`에 둔다 (owner-absent). 레퍼런스 변환과
 API 호출만 담당하며, 파일 검사·업로드·완료 전이는 기존 generation worker가 소유한다.
 DB 테이블이나 DDL은 추가하지 않는다.
 

@@ -5,7 +5,7 @@ All endpoints require an admin JWT.
 ## List users
 
 ```http
-GET /api/users?q=<term>&limit=20&cursor=<cursor>
+GET /api/admin/v1/users?q=<term>&limit=20&cursor=<cursor>
 ```
 
 Each item includes `followCount`, the number of characters followed by the
@@ -24,7 +24,7 @@ user:
 ## Get a user
 
 ```http
-GET /api/users/:id
+GET /api/admin/v1/users/:id
 ```
 
 Detail includes `followCount`, current spendable `creditBalance`, and linked

@@ -225,13 +225,13 @@ long edge, format, quality, seed와 profile별 identity/primary 규칙을 제출
 
 ## Verification owners
 
-- HTTP contract: `src/worker/image-generation.provider.spec.ts`
+- HTTP contract: `src/generation/providers/image-generation.provider.spec.ts`
 - request/profile/reference mapping and output digest:
-  `src/worker/generation-worker.service.spec.ts`
+  `src/generation/generation-worker.service.spec.ts`
 - progress persistence and admin read model:
-  `src/worker/generation-job.repository.spec.ts`,
-  `src/admin/generation/generation.service.spec.ts`
+  `src/generation/generation-job.repository.spec.ts`,
+  `src/generation/generation.service.spec.ts`
 - live progress UI: `packages/admin/src/features/generation/ImageWizard.test.tsx`
 - DB/env resolution and connection probe:
-  `src/domain/settings/generation-settings.service.spec.ts`
+  `src/settings/generation-settings.service.spec.ts`
 - admin form payload: `packages/admin/src/features/settings/payload.test.ts`

@@ -14,7 +14,7 @@
 아래 항목은 승인된 제품·기술 목표지만 이 목록 자체가 구현 우선순위를
 의미하지는 않는다. 실제 순서는 별도 기능 요청에서 정한다.
 
-- React/Vite/Mantine 기반 관리자 UI 전환
+- React/Vite/Mantine 기반 관리자 UI의 기존 운영 흐름 유지·개선
 - entity 중심 repository 구조로 데이터 접근 분리
 - 일반 기능, LLM, 결제·환불, 크레딧 로그 분리
 - 최근 30일 토큰 사용량 합계·추이와 provider/model 집계

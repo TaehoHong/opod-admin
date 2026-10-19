@@ -1,6 +1,12 @@
 # 캐릭터 게시글 미디어 자동 생성 파이프라인
 
-Status: 운영 중인 Phase 1·2 구조
+Status: Phase 1·2 운영 결정 기록
+
+기획·프롬프트 빌드와 검수 순서 중 V2 전용 계약은 당시 기록이다.
+현재 V3/V4는 [파이프라인 화면 UX](draft-pipeline-ux.md)의 “현재 화면 계약”과
+[초안 API](api/admin-drafts.md)를 따른다. V4는 이미지 생성 후 캡션을 작성하며
+별도 후보 선택·승인 단계가 없다. 아래 워커 토글과 provider 제출 기록은
+현재 코드에서도 유지되는 운영 계약이다.
 
 이 문서는 캐릭터 게시물의 기획, 이미지 생성, 검수, 게시 파이프라인에서
 코드만으로 드러나지 않는 운영 결정을 기록한다. HTTP 계약은
@@ -22,8 +28,11 @@ docs/api/admin-settings.md를 따른다.
 - 생성 워커와 초안 워커는 현재 opod-admin 프로세스의 독립 WorkerModule에서
   실행한다.
 - 워커 모듈은 admin HTTP 모듈을 역참조하지 않는다.
-- 자동 루프는 WORKER_ENABLED로 제어한다. 관리자 수동 실행은 이 설정과
-  무관하다.
+- 생성·초안 워커의 자동 루프는 `admin_settings.worker.enabled`가 소유한다.
+  두 워커가 tick 진입 시 다시 읽으므로 저장 뒤 다음 poll부터 적용된다.
+  `WORKER_ENABLED`는 DB에 값이 없을 때의 초기 기본값이다. 자동 루프가 꺼져
+  있으면 lease 회수도 하지 않고 다시 켤 때 회수한다. 관리자 수동 실행은
+  이 토글과 무관하다. 자동 초안 스케줄러의 부팅 설정은 별도다.
 - admin을 수평 확장하기 전에는 워커를 별도 프로세스로 분리해야 한다.
 
 ### 큐와 상태 전이
@@ -36,6 +45,10 @@ docs/api/admin-settings.md를 따른다.
 - provider 제출 직후 providerRequestId를 저장해 재시작 시 중복 제출과
   이중 과금을 막는다. 같은 갱신에서 실제 라우트와 해결된 레퍼런스 ID를
   `paramsJson._shot.execution`에 저장한다.
+- provider가 반환한 최종 `sentPrompt`도 제출 기록과 함께 잡의 `prompt`에
+  저장한다. 제외 조건이 본문에 합쳐지는 모델에서는 작성한 프롬프트와 실제
+  전송본이 다를 수 있으므로 기획·프롬프트 artifact와 이 전송본을 구분해
+  확인한다. `_shot.execution`이 없는 이전 잡의 실제 제출 내용을 추측하지 않는다.
 - 자동 재시도는 같은 job의 attempt를 증가시키고, 사람의 재생성은
   originJobId로 연결된 새 job을 만든다.
 
@@ -170,7 +183,7 @@ docs/api/admin-settings.md를 따른다.
 
 ## 스키마 소유권
 
-opod-service-backend/src/domain/database/schema.ts가 canonical schema다. 변경 적용은
+opod-service-backend/src/core/database/schema.ts가 canonical schema다. 변경 적용은
 **Drizzle Kit**로 한다 (2026-07-19 도입, 상세 절차·baseline·pgvector 확장
 설계는 opod-service-backend/docs/db-management.md).
 

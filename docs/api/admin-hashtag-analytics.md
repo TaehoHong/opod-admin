@@ -1,15 +1,13 @@
 # Admin Hashtag Analytics API
 
-All endpoints require an admin JWT:
-
-```http
-Authorization: Bearer <admin-jwt>
-```
+All endpoints require the `__Host-opod_admin_session` admin cookie.
+State-changing requests also require the `x-opod-admin` header; when an
+`Origin` header is supplied it must match the request origin.
 
 ## List top global hashtags
 
 ```http
-GET /api/analytics/hashtags?limit=10
+GET /api/admin/v1/analytics/hashtags?limit=10
 ```
 
 | Parameter | Values           | Behavior               |

@@ -110,7 +110,7 @@
 
 ## eval-rubric-v1 — 평가 루브릭 초판 (2026-08-07)
 
-- 상태: 적용 중 (2026-08-10 재구성, `plan-prompt-evaluation-agent.md` 참조)
+- 당시 상태: 적용 중 (2026-08-10 재구성). 평가 Agent는 2026-08-18 제거했다.
 - 구성: 기획 평가 8차원 (persona_fit, voice_tone_fit, ai_tell_free,
   memory_continuity, location_coherence, shot_composition, reference_usage,
   caption_quality) + 프롬프트 평가 6차원 (scene_capture_separation,
@@ -124,7 +124,7 @@
     한국어 단일 패턴에서 설계 변경(2026-08-07). 영어 팩은 공개 연구 자산
     (Wikipedia AI Cleanup, 과대표현 어휘 목록) 기반, 타 언어는 자체 구축
   - 평가는 비동기 워커로 비차단 실행 (LLM 3연쇄 lease 부담 회피)
-  - 프롬프트 평가는 2계층 설계 (`image-prompt-evaluation-agent.md`):
+  - 당시 프롬프트 평가는 2계층 설계:
     결정적 결함은 정적 린트로 무비용 검출, LLM은 의미 수준 심사만 담당.
     전 컷 배치 1콜로 컷 간 일관성(cross_shot_consistency)까지 판정.
     정답 신호는 생성 결과(실패율·재생성·후보 선택률)와의 상관으로 계측 —
@@ -1095,3 +1095,85 @@ Agent의 입력에서 사라졌고, 캡션 평가 Agent는 만들지 않는다. 
   검증은 배포 뒤 별도 원본 자료로 확인한다. 새 지침 revision을 만들지 않는다.
 - 증거: OPOD 작업 보관함의 planner-root-cause-20261002-01,
   planner-schema-fix-review-20261002-01, planner-schema-order-fix-20261002-01.
+
+## natural-v1 지침·입력 정리 — 차단 우회 제거, 이력 복사 차단, 게시 시점 (2026-10-15)
+
+- 가설:
+  - 같은 구도의 반복은 이미지 기획이 직전 미게시 초안의 기획 문장을 틀로 옮겨 쓰기 때문이다.
+  - 같은 소재의 반복은 게시물 기획 입력에 시간이 없어, 날이 바뀌어도 입력이 같기 때문이다.
+  - 차단을 피하려던 지시는 계정 스타일을 깨고 자세를 굳힌다. 사용자 결정에 따라 현재 이미지 모델은 테스트용이다.
+- 근거: [단계별 입·출력 평가](post-agent-stage-io-review-2026-10-15.md)
+  - 나희 17:20 이미지 기획은 직전 초안과 문장 유사도가 카메라 0.93, 자세 0.77, 표정 0.82였다.
+  - 해나와 소이는 각각 세 번의 게시물 기획 입력이 요청 문구 외에 같았다. 소이는 세탁소 간판, 해나는 슬레드가 연속으로 나왔다.
+  - 해나는 기획이 미리 쓴 캡션이 최종 캡션과 글자 그대로 같았다.
+- 변경:
+  - 새 Agent의 이미지 기획 입력에서 `recentVisualHistory`를 뺐다. 이전 초안 조회도 하지 않는다. 게시된 글은 게시물 기획의 `recentPosts`로만 본다(사용자 결정). 기존 Agent 경로는 그대로다.
+  - structured 게시물 기획 입력에 `productionContext.postingMoment`를 더했다. 예약 게시 시각(없으면 기획 시각)의 KST 날짜·요일·계절·시간대다.
+  - 설치용 지침(`prompts/structured-planning.ts`)을 다음과 같이 바꿨다.
+    - post_plan: 공급자 거부 대응 문장을 지웠다. postingMoment는 주제가 아니라 실제 시점이라는 설명을 넣었다. 형식·캡션 요청을 requirements로 옮기거나 캡션 문구를 쓰지 않는다는 문장을 넣었다.
+    - image_plan: 최근 시각 기록 관련 두 문장을 지웠다.
+    - image_prompt: "safety/model policy"를 "model policy and authored restrictions"로 바꿨다.
+  - 유지한 것:
+    - 나희의 제외 목록(노골적 노출 등): 사용자 결정으로 캐릭터 설정으로 보고 유지했다.
+    - 아동처럼 보이는 외형·실존 인물 닮음 제외
+    - 스키마와 계약 버전
+- 회귀:
+  - 새 Agent 이미지 기획이 이전 초안을 조회·전달하지 않는다.
+  - 게시 시점이 UTC가 아니라 KST 날짜·요일·계절·시간대로 들어간다(연말 경계).
+  - 결과: lint, build, unit 648개 통과. 로컬 Docker가 응답하지 않아 E2E는 돌리지 못했다.
+- 판정: 적용.
+  - 2026-10-15 10:26 KST 개발 서버에 배포했다(이미지 `opod-admin:stage-io-20261015`, 롤백 `opod-admin:rollback-stage-io-20261015`).
+  - natural-v1 번들을 `sha256:6576bd77…`에서 `sha256:dd9b4002…`로 바꿨다. GenerationSettingsService CAS를 썼고 바뀐 단계는 post_plan·image_plan·image_prompt뿐이며 모델·스키마는 그대로다.
+  - 반복이 실제로 줄었는지는 날짜를 달리한 새 초안으로 따로 관측한다.
+  - 증거: `content-work/stage-io-deploy-20261015/`(preview·apply 영수증, 빌드 로그)
+
+## qwen-image-3-policy-v1 — SpicyAPI Qwen Image 3.0 모델 정책 (2026-10-15)
+
+- 상태: 관찰 중 (첫 실모델 파일럿 3장 완료)
+- 가설: 성인 패션·라이프스타일 컷이 `gpt-image-2.5-sunburst`의 `sexual` 차단(10/13 이후 39건 중 12건)에 막혔다. 차단 필터를 선언하지 않은 Qwen Image 3.0 계열로 바꾸면 차단 우회 지시 없이 계정 스타일을 유지할 수 있다.
+- 변경 (`prompts/image-model-policies.ts`):
+  - `alibaba/qwen-image-3.0-pro/edit`, `alibaba/qwen-image-3.0/edit`, 같은 계열의 `/text-to-image` 4개를 `qwen-image-3-natural-language` / `qwen-image-3-policy-v1`로 등록했다.
+  - edit는 컷당 레퍼런스 3장, 라벨 `Image N`(전송 순서). text-to-image는 레퍼런스 0장.
+  - 지침은 네 줄이다: 대상 모델명, 영어·4,500자 이내, 라벨 그대로 사용(edit만), negativePrompt는 null로 두고 제외 조건은 본문에 쓴다.
+  - 안전·"비성적" 금지 문장은 넣지 않았다(같은 날 차단 우회 지시를 걷어낸 결정 유지). 성인 연령은 기존 외형·인물 설명이 담당하고 정책 규칙으로 더하지 않았다.
+  - `usesNegativePrompt=false`: API에는 `negative_prompt`(2,000자)가 있지만, 현재 프롬프트 생성 계약은 이 값이 true면 모든 컷에 비어 있지 않은 negativePrompt를 강제하고 4,000자까지 허용한다. 적용할 제외 조건이 없는 컷에도 문장을 만들게 되고 API 상한도 넘을 수 있어 다른 정책처럼 본문에 둔다. 예전 잡이 네거티브를 가지고 오면 provider가 `negative_prompt`로 그대로 보낸다.
+  - 기획 입력: edit 모델의 컷당 상한(3)이 출력 계약 상한(5)보다 작으면 `maxReferencesPerShot`으로 이미지 기획에 전달하고, 초과한 기획 응답은 기획 단계에서 거부한다.
+- 결과:
+  - 코드 계약 테스트(정책 슬롯·상한, provider 요청·크롭)는 통과했다.
+  - 첫 파일럿(10/15 14:36 KST)은 새 natural-v1 초안을 해나·유하·나희 각 1장씩 만들었다. 수동 모드, 운영자 요청 없음, 게시 안 함. 상세는 `docs/spicyapi-qwen-image-integration.md` "전환과 첫 시범"에 있다.
+  - 거부: 0/3. 나희 프롬프트에는 OpenAI에서 7/7 차단된 "cleavage"가, 유하 프롬프트에는 "deliberately expresses sexual appeal"이 있었지만 모두 `succeeded`였다.
+  - 얼굴: 세 명 모두 레퍼런스와 같은 사람으로 보인다.
+  - 체형: 나희·유하는 가슴이 체형 레퍼런스보다 눈에 띄게 크게 나왔다. 프롬프트에는 "natural body proportions", "petite frame"이 있었다.
+  - 해나: "Another person takes … smartphone photograph"가 화면 오른쪽 끝에 폰을 든 손으로 그려졌다. 같은 유형인 나희의 "A companion … photographs her"는 그려지지 않았다(1/2).
+  - 나희: 얼굴 레퍼런스의 정면 자세와 미소를 거의 그대로 따랐다. 프롬프트에 "Do not copy its … expression or pose"가 있었다.
+  - 사진 검수는 3장 모두 accept였다. 해나 검수는 폰을 관찰하고도 통과시켰다.
+  - 크롭: 864×1152에서 864×1080으로 위아래 36px씩 잘랐고, 머리·발이 잘린 경우는 없었다.
+  - 비용: 정산 비용은 장당 $0.046~0.049, 합계 $0.144다. 공개 가격 $0.04보다 높다. 생성 시간은 40초~2분이었다.
+- 판정: 유지 — Pro 1k를 기본으로 둔다. 표본이 3장이라 거부율과 체형 변화는 추가 관측으로 판단한다.
+- 다음:
+  - 촬영자 묘사가 사진 속 인물·폰으로 그려지는 빈도를 본다. 반복되면 Qwen 정책에서 촬영 방식을 사람 없이 시점으로만 쓰는 규칙을 따로 실험한다.
+  - 체형 확대가 반복되는지, 얼굴 레퍼런스의 자세·표정을 따라 하는 경향이 반복 구도로 이어지는지 본다.
+  - 출력 폭 864px는 Instagram 권장 1080×1350보다 작다. 2k는 10/15에 확인했다(1536×2048 → 1536×1920, 장당 $0.081~0.084). 사진 결은 1k와 같았다(아래 seedream-5-policy-v1).
+  - 10/13~14 차단된 12개 프롬프트와 통과한 대조군을 Pro/표준 각 1장씩 생성해 `content_rejected` 비율, 얼굴·체형 유지, 4:5 크롭 구도를 비교한다.
+  - 제외 조건을 본문에 둔 것이 오히려 그 개념을 끌어들이는지(예: "childlike appearance" 문구) 관찰하고, 필요하면 프롬프트 계약을 바꿔 `negative_prompt`로 옮기는 실험을 따로 등록한다.
+  - 기획 지침에 `maxReferencesPerShot` 설명을 넣을지는 실제 초과 응답이 관측될 때 결정한다.
+
+## seedream-5-policy-v1 — SpicyAPI Seedream 5.0 Pro 모델 정책과 Qwen 비교 (2026-10-15)
+
+- 상태: 관찰 중 (비교 1회, provider 방식 결정 대기)
+- 가설: Qwen 사진의 매끈한 AI 화보 결은 해상도나 프롬프트가 아니라 모델 탓이다. 같은 프롬프트와 레퍼런스를 다른 무검열 모델에 보내면 사진 결이 달라진다.
+- 변경 (`prompts/image-model-policies.ts`, `spicyapi-image.provider.ts`):
+  - `bytedance/seedream-5.0-pro/edit`와 `/text-to-image`를 `seedream-5-natural-language` / `seedream-5-policy-v1`로 등록했다.
+  - 지침은 Qwen과 같은 형식 규칙 네 줄이다. 레퍼런스 상한은 10이고 negative는 쓰지 않는다.
+  - 결함을 막는 금지 문장은 넣지 않았다. 사용자가 "쓸데없는 제약"이라며 거절했다.
+- 결과 (첫 시범 세 초안의 실제 프롬프트·레퍼런스 재사용, 상세는 `docs/spicyapi-qwen-image-integration.md` "Seedream 5.0 Pro 추가와 비교"):
+  - Qwen 2k도 1k와 같은 매끈한 결이었다. 해상도는 원인이 아니다.
+  - Seedream은 피부 결, 빛, 배경이 실제 사진에 더 가깝다. 4:5 + thinking 기본(a)이 가장 자연스러웠다.
+  - 얼굴 일치는 Qwen > Seedream (b) > (a) 순서다. (a)는 나희 얼굴이 가장 많이 달라졌다.
+  - thinking을 끄면(b) 프롬프트의 촬영자 묘사를 그대로 그렸다(2/3). thinking을 켜면(a) 0/3이었다.
+  - 4:5와 thinking false 조합은 API가 지금 받지 않는다(`40004`).
+  - 거부는 0/9였다. 비용은 Seedream 2k 장당 $0.075~0.078, Qwen 2k 장당 $0.081~0.084였다.
+- 판정: 보류 — 사진 결은 Seedream (a)가 낫고 얼굴 일치는 Qwen이 낫다. 사용자 판단을 기다린다.
+- 다음:
+  - 방식을 정하면 provider를 맞춰 고친다. (a)는 4:5 + thinking 기본이고, (b)는 3:4 + thinking false 뒤 크롭이다.
+  - 이어서 새 Agent로 실제 초안 몇 장을 만들어 얼굴 일치가 반복적으로 흔들리는지 본다.

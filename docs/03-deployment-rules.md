@@ -12,7 +12,8 @@
 - Local: sibling `opod-service-backend`의 database를 먼저 실행하고 admin을
   시작한다.
 - Staging: POC 필수 환경으로 두지 않는다.
-- Production: 단일 운영 서버에 Docker image를 수동 배포한다.
+- 개발 서버: backend와 같은 `dev-run-taeho`에 Docker image를 수동 배포한다.
+- 운영 환경은 아직 없다. DB 환경 용어는 backend의 개발 규칙을 따른다.
 - GitHub Actions CI, CI/CD와 자동 rollback은 사용하지 않는다.
 
 ## Manual Deployment Flow
@@ -20,9 +21,9 @@
 1. 변경 위험에 맞는 로컬 검증을 통과한다.
 2. schema 변경이 있다면 `opod-service-backend`의 migration을 먼저
    검증하고 배포한다.
-3. 명시적인 commit의 build context를 SSH로 운영 서버 Docker daemon에
+3. 명시적인 commit의 build context를 SSH로 개발 서버 Docker daemon에
    전송한다.
-4. 운영 서버에서 Linux/amd64 image를 네이티브로 build한다.
+4. 개발 서버에서 Linux/amd64 image를 네이티브로 build한다.
 5. server-local compose 설정으로 admin service를 재시작한다.
 6. 로그인, 주요 화면, DB 연결, media 접근과 worker 상태를 수동으로
    확인한다.
@@ -44,7 +45,7 @@ worktree 상태를 확인한다.
 
 ## Schema Ownership
 
-- production migration은 이 저장소에서 실행하지 않는다.
+- 공유 DB migration은 이 저장소에서 실행하지 않는다.
 - migration은 canonical owner인 `opod-service-backend`에서 생성·검증·배포한다.
 - admin은 canonical과 동일한 Drizzle `schema.ts` mirror를 동기화한다.
 - backward compatibility가 필요한 schema rollout은 backend migration,
@@ -52,12 +53,18 @@ worktree 상태를 확인한다.
 
 ## Secrets
 
-- production secret은 server-local 환경 또는 credential 관리 위치에서
+- 배포 secret은 server-local 환경 또는 credential 관리 위치에서
   실행 시 주입한다.
 - secret을 repository, Docker image, archive, log 또는 문서에 넣지 않는다.
 - 필수 secret 누락과 형식 오류는 startup failure다.
 - 유출이 의심되면 즉시 교체한다.
-- bootstrap password는 최초 계정 생성 후 운영 환경에서 제거한다.
+- bootstrap password는 최초 계정 생성 후 배포 환경에서 제거한다.
+- 2026-07-21 결정으로 `admin_settings`의 API 키는 애플리케이션의 at-rest
+  암호화 없이 저장한다. DB 접근 통제, 응답의 설정 여부/끝 4자리 마스킹,
+  `console_logs` 변경 이력이 현재 방어선이다. DB 접근 주체 증가,
+  침해 사고 또는 새 컴플라이언스 요구 시 암호화 결정을 재검토한다.
+- 당시 권고된 운영 DB 비밀번호 교체의 이행 여부는 문서와 현재 코드만으로
+  확인되지 않는다. 이 기록을 현재 유출이나 교체 완료의 증거로 사용하지 않는다.
 
 ## First Admin
 
@@ -79,9 +86,44 @@ worktree 상태를 확인한다.
 
 ## Rollback and Operations
 
-- 이전 image 복구와 database backup 책임은 현재 저장소에서 확인되지
-  않은 setup gap이다.
-- 자동 rollback이나 down migration이 있다고 가정하지 않는다.
-- schema 변경은 app image만 되돌려도 안전한지 배포 전에 확인한다.
+- 배포 전에 실행 commit·이전 image tag·DB backup 위치와 검증 결과를 기록한다.
+  변경에 DDL 또는 데이터 이전이 있으면 app image 복구와 데이터 복구를 분리한다.
+- DB backup은 서버 내부에서 `pg_restore --list`로 읽을 수 있는지 확인한다.
+  이것이 전체 복원 리허설이나 정기 backup 체계 구축을 뜻하지는 않는다.
+- 콘텐츠 프로필 분리 후 옛 admin image만 되돌리면 `never_prompt`로 옮긴 제작
+  지침을 legacy 코드가 읽지 못할 수 있다. image 전환만을 전체 복구로 보지 않는다.
+  현재 데이터와 backup을 비교하고 소유 Service를 통해 필요한 라우팅을 복구한다.
+  공유 DB 전체 복원·테이블 삭제·down migration을 자동 실행하지 않는다.
+- 자동 rollback과 정기 backup/restore 운영 체계는 여전히 별도 정비 대상이다.
+
+### 2026-09-28 전체 개발 배포 기록
+
+당일 검증된 실행 버전이며 현재 서버 상태를 새로 확인한 결과는 아니다. 이전
+기능별 legacy 배포를 대체한 기록을 이 절에 병합했다.
+
+| 대상 | 당시 실행 commit | image tag |
+| --- | --- | --- |
+| backend | `7cd7c4bf63a30ee39ca3db66a81b3c8b63ecbdcb` | `opod-service-backend:full-7cd7c4b` |
+| admin API·worker·UI | `cb11be47c880c3933e83d675f2df3944d45b8210` | `opod-admin:full-cb11be4` |
+| Agent API·web·Qwen embedding | `a348b799ab94b24b275f5f9544faf8215955b07a` | 각 image의 `full-a348b79` |
+
+- DB backup: `/home/taeho/opod-backend/backups/pre-all-services-20260928.dump`.
+  당시 `pg_restore --list`로 검증했고 로컬로 복사하지 않았다.
+- 다섯 image의 이전 보존 tag: 각 image 이름의 `before-all-services-20260928`.
+- 권도건·서린·한소이의 제작 지침을 별도 프로필로 이전하고 원문·Canon 연결을
+  유지했다. 해나의 프로필을 보존했고 나희·유하의 별도 설정은 빈 상태로 유지했다.
+  원문·구조 해시는 서버 내부에서 비교했고 변경은 기존 소유 Service와 감사
+  이력으로 처리했다.
+- 해나의 Canon 연결 조각은 중복 사실만 `never_prompt`로 분리했다. 추가 성격·
+  취향은 retrieved로 남겼으며 behavior/lore 조각의 schema version 표기를
+  지원되는 v1로 정정했다. 이를 공통 검사 우회나 캐릭터 전용 runtime 예외로
+  구현하지 않았다.
+- 실제 DB reader/router와 세 단계의 설정 전달, 기동·health를 검증한 기록이다.
+  유료 이미지/캡션 생성 품질 비교·게시 결과를 검증한 기록은 아니다.
+- 상세 당시 테스트 숫자·일회성 실패·원문은 외부 보관함의
+  [당시 전체 배포 기록](../../../opod-evaluation-archive/2026-09-29-cleanup-recovery/documents/opod-admin/docs/full-development-deployment-2026-09-28.md)에 보존한다.
+
+### 공통 운영 기록
+
 - 운영 로그에는 time, level, module과 request/job ID를 포함하고 secret을
   마스킹한다.

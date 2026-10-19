@@ -102,27 +102,31 @@ required during character creation is deferred.
 ## Persona input
 
 Persona titles are free text so operators can add character-specific sections.
-The Admin UI offers the twelve standard blocks as presets, listed here in their
+The Admin UI offers fourteen standard blocks as presets, listed here in their
 conventional order (Korean label in parentheses is UI-only — the stored title is
 the key):
 
 - `identity` (기본 프로필): role, occupation, and basic self-image
+- `appearance` (외형): stable appearance
 - `personality` (성격): temperament and emotional expression
 - `values` (가치관): what the character prizes and refuses, sponsorship stance
   included
+- `social_style` (대인 반응): responses to other people
 - `emotions` (감정·대인): emotional responses and how the character treats others
 - `voice` (말투): vocabulary, sentence length, names, and prohibited expressions
 - `world` (배경): background and living environment
-- `content_style` (콘텐츠 스타일): what the character posts and how it reads
 - `relationships` (관계): named people and organizations around the character
 - `preferences` (취향): likes and dislikes
+- `goals` (목표): ongoing goals
 - `boundaries` (가드레일): behavior rules, public-comment rules included
 - `greeting` (첫인사): the message the character opens a conversation with
 - `examples` (대화 예시): example dialogue, free-form `유저:` / `캐릭터:` lines
 
-Each block should cover one concern because its title and content are inserted
-verbatim into Agent and content-planning prompts. Do not number the titles —
-ordering is `sortOrder` alone.
+Each block should cover one concern. Structured role and injection metadata
+control prompt selection; a title alone does not insert a block into every Agent
+or content-planning prompt. Do not number the titles — ordering is `sortOrder` alone.
+Account concept, image style, caption style, and production constraints belong
+to `GET/PUT /api/admin/v1/characters/:id/content-profile`, separate from persona.
 
 Write only statements that stay true if the character moves to another system.
 Cadence and channel ("주 1회 릴스") belong to posting policy, not persona.
@@ -135,7 +139,7 @@ Content-Type: application/json
 ```
 
 Custom titles such as `"photography philosophy"` are also accepted, and older
-titles outside the twelve (for example `goals`) keep working.
+custom titles keep working.
 
 ## Canon memory input
 

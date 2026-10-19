@@ -156,7 +156,17 @@ proxy IP 정책은 적용하지 않는다.
 
 ## Logging Architecture
 
-DB log는 네 개의 물리 테이블로 분리한다.
+아래 네 개의 물리 테이블 분리는 승인된 목표이며 현재 구현 완료를 뜻하지 않는다.
+현재 설정 변경 감사는 `AdminSettingsController`가 diff를 만들고
+`SettingsAuditRepository`를 통해 `console_logs`에 기록한다. 실제 바뀐 필드만
+`SETTINGS_SET`/`SETTINGS_CLEAR`로 저장하며 API 키는 끝 4자리만 남긴다.
+시스템 오류는 `service_logs`에 별도로 남긴다. 현재 게시 실패 owner는
+`DraftWorkerRepository.recordPublishFailure`, DM 응답 실패 owner는
+backend `MessagesService.logFailure`다. 두 기록은 best-effort이며 로그 기록
+실패가 원래 오류 처리까지 차단하지 않는다. 이 현황은 새 Repository 의존
+규칙을 충족하는 정본 예시를 의미하지 않는다.
+
+목표 DB log 분류:
 
 - general feature usage
 - LLM

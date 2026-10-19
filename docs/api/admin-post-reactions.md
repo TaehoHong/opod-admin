@@ -1,15 +1,13 @@
 # Admin Post Reactions API
 
-All endpoints require an admin JWT:
-
-```http
-Authorization: Bearer <admin-jwt>
-```
+All endpoints require the `__Host-opod_admin_session` admin cookie.
+State-changing requests also require the `x-opod-admin` header; when an
+`Origin` header is supplied it must match the request origin.
 
 ## List reactions on a post
 
 ```http
-GET /api/posts/:id/reactions?characterId=<uuid>&reactionType=like&limit=20&cursor=<cursor>
+GET /api/admin/v1/posts/:id/reactions?characterId=<uuid>&reactionType=like&limit=20&cursor=<cursor>
 ```
 
 Every query parameter is optional.

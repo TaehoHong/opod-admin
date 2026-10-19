@@ -3,8 +3,8 @@
 All active admins can read external model execution logs.
 
 ```http
-GET /api/llm-logs
-GET /api/llm-logs/:id
+GET /api/admin/v1/llm-logs
+GET /api/admin/v1/llm-logs/:id
 ```
 
 The list supports `status`, `type`, `provider`, `model`, `requestId`,

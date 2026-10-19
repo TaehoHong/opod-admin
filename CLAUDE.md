@@ -26,6 +26,5 @@ UI/UX, fullstack, and QA subagent discovery.
   결과(정량 지표·실사례) → 판정(유지/롤백)" 구조로 연구 기록하듯 남긴다.
   실패·롤백한 실험도 반드시 기록한다.
 - 주요 문서: `docs/post-creation-agent-workflow.md`(워크플로우 UML),
-  `docs/plan-prompt-evaluation-agent.md`(평가 Agent 설계),
   `docs/prompt-research-log.md`(프롬프트 실험 로그),
   `docs/media-generation-pipeline.md`, `docs/media-generation-quality-improvements.md`

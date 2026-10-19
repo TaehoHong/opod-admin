@@ -1,10 +1,8 @@
 # Admin Generation Jobs API
 
-All endpoints require an admin JWT:
-
-```http
-Authorization: Bearer <admin-jwt>
-```
+All endpoints require the `__Host-opod_admin_session` admin cookie.
+State-changing requests also require the `x-opod-admin` header; when an
+`Origin` header is supplied it must match the request origin.
 
 Staged image lifecycle: `draft → queued → running → completed | failed`.
 `draft` means the prompt and candidate count are still editable; no provider
@@ -16,7 +14,7 @@ failed afterwards).
 ## List generation jobs
 
 ```http
-GET /api/generation/jobs?characterId=<uuid>&status=queued&mediaType=image&limit=20&cursor=<cursor>
+GET /api/admin/v1/generation/jobs?characterId=<uuid>&status=queued&mediaType=image&limit=20&cursor=<cursor>
 ```
 
 Every query parameter is optional.
@@ -72,7 +70,7 @@ provider.
 ### 1. Create an image draft
 
 ```http
-POST /api/generation/image-jobs/draft
+POST /api/admin/v1/generation/image-jobs/draft
 Content-Type: application/json
 
 {
@@ -96,7 +94,7 @@ includes `candidateCount`, `mediaType: "image"`, `attemptCount: 0`,
 ### 2. Edit the draft
 
 ```http
-PATCH /api/generation/jobs/:id/draft
+PATCH /api/admin/v1/generation/jobs/:id/draft
 Content-Type: application/json
 
 { "prompt": "edited final prompt", "candidateCount": 3 }
@@ -110,7 +108,7 @@ is unchanged.
 ### 3. Confirm the draft
 
 ```http
-POST /api/generation/jobs/:id/confirm
+POST /api/admin/v1/generation/jobs/:id/confirm
 ```
 
 Atomically changes `draft` to `queued`. Retrying confirm is idempotent and
@@ -120,20 +118,20 @@ only after this transition.
 For an immediate manual worker run, independent of `WORKER_ENABLED`:
 
 ```http
-POST /api/generation/worker/run
+POST /api/admin/v1/generation/worker/run
 Content-Type: application/json
 
 { "jobId": "<uuid>" }
 ```
 
 The response is `{ "jobId": "<uuid>" }`; processing continues in the
-background. Poll `GET /api/generation/jobs/:id` until it reaches `completed` or
+background. Poll `GET /api/admin/v1/generation/jobs/:id` until it reaches `completed` or
 `failed`.
 
 ### 4. Select a completed output
 
 ```http
-POST /api/generation/jobs/:id/select-output
+POST /api/admin/v1/generation/jobs/:id/select-output
 Content-Type: application/json
 
 { "mediaId": "<candidate media uuid>" }
@@ -147,7 +145,7 @@ the updated `outputs` and `outputMedia`.
 ### 5. Regenerate
 
 ```http
-POST /api/generation/jobs/:id/regenerate
+POST /api/admin/v1/generation/jobs/:id/regenerate
 ```
 
 Only a completed or failed image job can be regenerated. This creates a new
@@ -176,7 +174,7 @@ default applies when that draft is confirmed and processed.
 ## Get a generation job
 
 ```http
-GET /api/generation/jobs/:id
+GET /api/admin/v1/generation/jobs/:id
 ```
 
 The response is one job in the same shape as a list item, plus `outputs` — the
@@ -201,7 +199,7 @@ returns HTTP 400 `Generation job not found`.
 ## Enqueue a generation job
 
 ```http
-POST /api/generation/jobs
+POST /api/admin/v1/generation/jobs
 Content-Type: application/json
 
 { "characterId": "<uuid>", "mediaType": "image", "prompt": "Portrait at sunset" }
@@ -214,7 +212,7 @@ the worker and for recovery.
 ## Start a generation job (manual)
 
 ```http
-POST /api/generation/jobs/:id/start
+POST /api/admin/v1/generation/jobs/:id/start
 ```
 
 Atomically moves a `queued` job to `running`, increments `attemptCount`, and
@@ -225,7 +223,7 @@ worker sweep. Any other status returns HTTP 400
 ## Run a generation job (manual)
 
 ```http
-POST /api/generation/jobs/:id/run
+POST /api/admin/v1/generation/jobs/:id/run
 Content-Type: application/json
 
 { "provider": "local" }
@@ -237,7 +235,7 @@ character action log. Legacy endpoint; prefer the worker.
 ## Complete a generation job (manual)
 
 ```http
-POST /api/generation/jobs/:id/complete
+POST /api/admin/v1/generation/jobs/:id/complete
 Content-Type: application/json
 
 { "mediaId": "<uploaded media uuid>" }
@@ -258,7 +256,7 @@ the publish pipeline.
 ## Fail a generation job (manual)
 
 ```http
-POST /api/generation/jobs/:id/fail
+POST /api/admin/v1/generation/jobs/:id/fail
 Content-Type: application/json
 
 { "errorMessage": "provider rejected the prompt" }
@@ -270,7 +268,7 @@ idempotent. `errorMessage` defaults to `failed manually by admin`.
 ## Retry a generation job
 
 ```http
-POST /api/generation/jobs/:id/retry
+POST /api/admin/v1/generation/jobs/:id/retry
 Content-Type: application/json
 
 { "reason": "transient provider error" }

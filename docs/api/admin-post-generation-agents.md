@@ -5,13 +5,12 @@
 
 | 메서드 | 경로 | 동작 |
 | --- | --- | --- |
-| GET | `/` | 다섯 단계 현재 설정 및 코드 기본 지침/규격 |
+| GET | `/` | 다섯 단계 현재 설정 및 출력 규격 |
 | GET | `/models?cursor=&limit=` | 모델 목록 (cursor pagination) |
 | POST | `/models` | type/provider/model 등록 |
 | GET | `/:stage/versions?cursor=&limit=` | 해당 단계 이력 |
 | POST | `/:stage/versions` | 새 버전 저장·적용 |
 | POST | `/:stage/versions/:id/restore` | 이전 버전을 새 버전으로 적용 |
-| POST | `/:stage/reset` | 코드 지침/규격을 새 버전으로 적용 |
 
 `stage`: `post_plan`, `image_plan`, `image_prompt`, `generation`, `caption`.
 현재 설정은 단계별 최대 revision이다. 모델 등록은 추가/조회만 제공한다.
@@ -24,8 +23,11 @@
 ```
 
 현재 LLM 공급자는 `openai-compatible`이고 기존 LLM URL/키를 사용한다.
-이미지 공급자는 `openai`, `fal`, `opod-flux`이며 기존 이미지 model policy와
+이미지 공급자는 `openai`, `fal`, `opod-flux`, `spicyapi`이며 기존 이미지 model policy와
 adapter가 지원하는 조합만 등록/실행한다. URL/키는 기존 설정 화면이 담당한다.
+`spicyapi`는 `alibaba/qwen-image-3.0-pro/edit`, `alibaba/qwen-image-3.0/edit`,
+`bytedance/seedream-5.0-pro/edit`(2026-10-15 비교용 추가)만 등록할 수 있고, 레퍼런스
+없는 컷은 같은 계열의 `/text-to-image`로 실행한다.
 
 저장 예시 (outputSchema에는 GET이 반환한 현재 코드 출력 규격을 전달):
 
@@ -35,7 +37,7 @@ adapter가 지원하는 조합만 등록/실행한다. URL/키는 기존 설정 
   "aiModelId": "1",
   "model": null,
   "systemPrompt": "이 단계에서 적용할 지침 전문",
-  "outputSchema": {"...": "GET의 defaultOutputSchema와 동일한 전체 JSON Schema"}
+  "outputSchema": {"...": "GET의 outputSchema와 동일한 전체 JSON Schema"}
 }
 ```
 
@@ -47,14 +49,16 @@ StrictJsonAgentClient가 실제 response_format.json_schema.schema에 전달한�
 출력 필드 변경은 코드와 함께 수정해야 하므로 UI에서는 읽기 전용이다.
 generation의 systemPrompt/outputSchema는 모두 NULL로 전송한다.
 
-복원/기본값 적용 body는 `{"expectedRevision": 3}`이다. 복원은 지침, 출력 규격,
-모델 참조/override를 복사한다. 코드 기본값 적용은 현재 참조 모델을 유지하고
-override를 NULL로 비운다. 아직 저장한 모델이 없으면 먼저 선택·저장해야 한다.
+복원 body는 `{"expectedRevision": 3}`이다. DB에 저장된 해당 버전의 지침,
+출력 규격, 모델 참조/override를 새 버전으로 복사한다. 코드 지침과 기본값 적용
+API/UI는 제공하지 않는다.
 
-응답의 provider/effectiveModel은 해석된 실행값이고 defaultSystemPrompt /
-defaultOutputSchema는 현재 코드 기본값이다. 최초 미저장 단계는 id=NULL,
-revision=0, aiModelId=NULL로 표시하지만 실제 저장 행은 필수 FK를 가진다.
-미저장 단계는 기존 공통 실행 설정을 사용한다.
+최초 미저장 단계는 id=NULL, revision=0, aiModelId=NULL, systemPrompt=NULL이다.
+outputSchema는 최초 저장에 필요한 코드 parser 계약을 제공하며 실행 지침의 대체값이 아니다.
+LLM 단계는 저장된 지침이 없으면 모델을 호출하지 않고 `needs_configuration`과
+`<stage>_prompt_missing` 사유로 중단한다. 목록의 provider/effectiveModel도 미설정이다.
+`defaultSystemPrompt`/`defaultOutputSchema` 필드는 제공하지 않는다.
+프롬프트가 없는 generation 단계의 공통 이미지 모델 설정은 유지한다.
 
 충돌은 HTTP 409이며 입력을 보존해 최신 설정을 확인한 후 새 expectedRevision으로
 재시도한다. 잘못된 ID/유형/지침/규격/모델 조합은 400, 미존재 ID나 다른 단계의

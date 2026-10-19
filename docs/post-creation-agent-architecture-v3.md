@@ -3,7 +3,11 @@
 - 작성일: 2026-08-13
 - 상태: V3 contract 및 runtime 구현 완료, production rollout 비활성
 - 범위: 게시글 기획부터 게시·메모리 반영까지의 Agent 구성, 계약, 실행 구조와 개선 효과
-- 상세 구현 계획: [V3 PAVE 구현 계획](../.codex/pave/plans/2026-08-13-post-pipeline-v3-implementation.md)
+
+> 이 문서는 V3→V4의 설계·실험·변경 이력을 보존한다. 위 상태와 초기 평가
+> Agent 설계는 작성 당시 기록이다. 평가 기능 제거는 §19.7, V4 계약은 §20,
+> 재시도·실패·게시·메모리 복구는 §21을 함께 읽는다. 현재 화면과 HTTP 계약은
+> [파이프라인 UX](draft-pipeline-ux.md)와 [초안 API](api/admin-drafts.md)를 따른다.
 
 ## 1. 문서 목적
 
@@ -29,12 +33,7 @@ V3의 목표는 Agent 수를 늘리는 것이 아니다. 한 구성요소가 글
 
 세부 품질 결함과 1차 보강 내역은
 [media-generation-quality-improvements.md](./media-generation-quality-improvements.md)에
-있다. V3 생성·검증 Agent의 역할과 전문은 다음 설계가 정본이다.
-
-- [게시물 생성 Agent 역할 재정립](../.codex/pave/plans/2026-08-12-post-generation-agent-role-redesign.md)
-- [이미지 기획 평가 Agent](../.codex/pave/plans/2026-08-12-image-planning-evaluation-agent.md)
-- [이미지 프롬프트 평가 Agent](../.codex/pave/plans/2026-08-12-image-prompt-evaluation-agent.md)
-- [생성 이미지 평가 Agent](../.codex/pave/plans/2026-08-12-generated-image-evaluation-agent.md)
+있다. V3 계약과 단계별 역할은 이 문서에 기록하며, 평가 Agent 제거 결정은 §19.7을 따른다.
 
 문서마다 소유하는 것이 다르다. 같은 사실을 두 곳에 쓰지 않는다.
 
@@ -43,17 +42,11 @@ V3의 목표는 Agent 수를 늘리는 것이 아니다. 한 구성요소가 글
 | [post-creation-agent-workflow.md](./post-creation-agent-workflow.md)                                                                                                                                                       | V2 워크플로우와 UML. V2가 legacy로 동결됐으므로 **역사 기록**으로 읽는다                                 |
 | 이 문서                                                                                                                                                                                                                    | V3 설계 정본 — 계약, 상태 경계, 검증 아키텍처, 유보(§17), V4 백로그(§18), 개선 연대기(§19), V4 설계(§20) |
 | [prompt-research-log.md](./prompt-research-log.md)                                                                                                                                                                         | 프롬프트·루브릭 실험. 가설 → 변경 → 결과 → 판정                                                          |
-| [pipeline-v3-ux-plan.md](./pipeline-v3-ux-plan.md)                                                                                                                                                                         | V3 운영 화면 설계 — 8단계 데이터 성격별 표현                                                             |
 | [media-generation-quality-improvements.md](./media-generation-quality-improvements.md)                                                                                                                                     | 품질 결함과 1차 보강 누적 기록                                                                           |
 | [media-generation-pipeline.md](./media-generation-pipeline.md)                                                                                                                                                             | 미디어 생성 파이프라인                                                                                   |
-| [image-prompt-optimization-report.md](./image-prompt-optimization-report.md)                                                                                                                                               | 프롬프트 최적화 실측 보고                                                                                |
-| [plan-prompt-evaluation-agent.md](./plan-prompt-evaluation-agent.md), [image-prompt-evaluation-agent.md](./image-prompt-evaluation-agent.md), [generated-image-evaluation-agent.md](./generated-image-evaluation-agent.md) | 평가 Agent 3종 설계                                                                                      |
 | [api/admin-drafts.md](./api/admin-drafts.md)                                                                                                                                                                               | draft API 계약                                                                                           |
 
-작업 단위 기록은 `.codex/pave/plans/`(착수 시점 판단)와 `.codex/pave/reports/`
-(완료 시점 실측과 정정)에 있다. 둘이 다르면 **정정 자체가 자료다**.
-
-현재 코드의 주요 소유자:
+작성 당시 V2 코드 소유자(아래 이동 전 경로·평가 워커는 역사 기록):
 
 | 책임                            | 현재 코드                                                                 |
 | ------------------------------- | ------------------------------------------------------------------------- |
@@ -64,6 +57,12 @@ V3의 목표는 Agent 수를 늘리는 것이 아니다. 한 구성요소가 글
 | 기획·프롬프트·이미지 평가       | `src/worker/evaluation-worker.service.ts`, `evaluation.repository.ts`     |
 | LLM 시도 이력                   | `src/domain/llm-logs/*`, Drizzle `LlmLog`                                 |
 | 평가 시도 이력                  | Drizzle `DraftEvaluation`                                                 |
+
+현재 역할과 소스 위치는 [코드베이스 가이드](07-codebase-guide.md)를 따른다.
+V3/V4 오케스트레이터는 `src/post-production/post-pipeline-v3.runner.ts`,
+단계 Agent는 `src/post-production/{post-planner,image-planner,caption-writer}.ts`,
+초안 워커는 `src/drafts/`, 이미지 실행은 `src/generation/`, LLM 기록은
+`src/llm-logs/`가 소유한다. 제거된 평가 워커에 현재 실행 소유자를 부여하지 않는다.
 
 ## 3. 아키텍처 버전 계보
 
@@ -295,9 +294,7 @@ executor의 운영 정책이며 Agent 시스템 프롬프트의 책임이 아니
 
 ## 12. 구현 현황
 
-상세 파일·테스트·승인 gate는
-[2026-08-13-post-pipeline-v3-implementation.md](../.codex/pave/plans/2026-08-13-post-pipeline-v3-implementation.md)를
-정본으로 사용한다.
+현재 파일·테스트 위치는 [코드베이스 가이드](./07-codebase-guide.md)를 따른다.
 
 적용된 구현:
 
@@ -594,6 +591,13 @@ capability probe와 같은 가짜 통과를 만들 위험이 크다 — 모델�
 
 ## 19. 개선 연대기와 되풀이된 실패 유형
 
+이미지 비교는 게시 가능 여부를 먼저 기록하고, 양쪽 모두 통과한 쌍에서만
+상대 선호를 비교한다. 양쪽 모두 부적절한 쌍의 강제 선택을 게시 가능 판정으로
+해석하지 않는다. 요소 존재와 공간·장면의 정합성을 구분하고, 시드 페어링·
+표본 수·검수자 수와 사전 판정 규칙을 함께 남긴다. 아래 소표본 관측을
+모든 모델·캐릭터의 효과로 일반화하지 않는다. 원문 실험은
+[프롬프트 연구 로그](prompt-research-log.md)에 보존한다.
+
 나중에 문서·연구로 정리할 때 쓰는 뼈대다. 결론이 아니라 인과 사슬과 1차 증거의
 위치를 담는다.
 
@@ -622,7 +626,7 @@ capability probe와 같은 가짜 통과를 만들 위험이 크다 — 모델�
 | 19  | 한소이 V4(`01a0093b…`) 손 컷이 **누가 뒤에서 찍은 3인칭**으로 렌더 — 혼자인 캐릭터에 촬영자가 있다. 기획이 "양손 화면 안 + 손으로 든 카메라"를 냈고 기획 평가 `capture_plausibility` 5, 이미지 평가 `character_presentation` 5 (가짜 초록불 2건) | 원인 추적: 한소이 `content_style`에 "뒤에서 따라 찍는 구도 금지·혼자면 셀프타이머·기본은 소이 시점 손 디테일"이 **있는데 ③ 입력에서 그 블록을 뺀다**(글쓰기 프로필로 분류). 어블레이션 15장: 촬영 문구 수정 0/6, 장면 계약 수정 6/6                                                                        | (미적용) 처방 후보는 규칙 추가가 아니라 입력 한 줄 — ③에 `content_style` 전달. 프롬프트 불변. §19.2 "규칙은 있는데 입력이 없다"                                                                                              | research-log `image-planner-v3` 관측 3                                                        |
 | 20  | 같은 초안 캡션 "자연스럽지 않다" — 규칙(문장 수·마침표·이모지·해시태그·근거)은 전부 통과. premise의 문어체("꺼내어…첫 기록")가 캡션에 그대로 새고(② → ⑥ 누출 **n=2**), "시적"을 예시(명사형 한 줄)가 아니라 의인화 은유로 해석, 두 줄에 명사 7개 | (미적용) 후보 `caption-writer-v2` = 예시가 형용사보다 권위, premise는 사실 기록이지 문장 재료가 아님. 부수: 이전 파이프라인이 게시한 과장 캡션이 recentPosts로 되먹임                                                                                                                                      | 관측만(운영자 결정 대기)                                                                                                                                                                                                     | research-log caption-writer-v1 관측 2                                                         |
 | 21  | 서린 V4 초안이 ⑦ 게시에서 `unknown_stage`로 실패하고, 그 뒤로는 **재실행·게시·캡션 편집·컷 재생성이 전부 400**. 화면에는 ⑥ 완료 / ⑦ 실패                                                                                                         | 원인은 claim이 `stage`를 안 보는 것 — ⑥이 끝나면 `publish/pending`이 되는데 `POST /drafts/:id/plan`(=캡션 다시 생성)이 그대로 집어 러너에 넘겼고, 러너에는 publish 분기가 없다. 자동 모드는 더 나빠서 `planClaimedV3Drafts`의 `for(;;)`가 같은 tick에 다시 집어 `publishDueDrafts` 차례가 오기 전에 죽였다 | claim 두 곳에 Agent 단계 술어 추가 + 수동만 `publish→caption` 되감기, 수동 claim은 `state <> 'running'`(멈춘 초안 재실행 허용), 러너 else는 fail 대신 release. 회귀 테스트 3건                                               | §20.4, `draft-worker.repository.ts` `agentStageSql`, §19.2 "실패 상태가 복구 경로까지 잠근다" |
-| 22  | 3캐릭터 5컷 동시 관측 — 계약에 **적힌 것**은 화이트보드 기록·타이머 일치까지 지켜지는데, 안 적힌 칸이 정적 기본값으로 채워진다(마른 머리, 걷는 자세, 프레임 안 카메라, 마루 위 신발)                                                             | 원인 분해: 촬영 문법이 `content_style`에 갇혀 ③에 안 감(서린은 다른 블록에 중복돼 우연히 통과, 권도건은 아예 없음) · `captureSetup`이 기하 전용이라 픽셀에 안 내려감 · 장소 네거티브가 컷 유형과 무관하게 병합돼 인물 컷과 정면 모순                                                                       | 페르소나 `capture_style` 블록 신설 + ③ 전용 입력 · ③ 계약에 `subjectState`·`motionEvidence`·`notInFrame` 필수 필드(`image-plan-v2`/`image-planner-v4`) + ④가 번역(`v2`) · 장소 네거티브를 `reference_negative_prompt`로 분리 | research-log 관측 4, 계획 `2026-08-18-capture-contract-gaps.md`                               |
+| 22  | 3캐릭터 5컷 동시 관측 — 계약에 **적힌 것**은 화이트보드 기록·타이머 일치까지 지켜지는데, 안 적힌 칸이 정적 기본값으로 채워진다(마른 머리, 걷는 자세, 프레임 안 카메라, 마루 위 신발)                                                             | 원인 분해: 촬영 문법이 `content_style`에 갇혀 ③에 안 감(서린은 다른 블록에 중복돼 우연히 통과, 권도건은 아예 없음) · `captureSetup`이 기하 전용이라 픽셀에 안 내려감 · 장소 네거티브가 컷 유형과 무관하게 병합돼 인물 컷과 정면 모순                                                                       | 페르소나 `capture_style` 블록 신설 + ③ 전용 입력 · ③ 계약에 `subjectState`·`motionEvidence`·`notInFrame` 필수 필드(`image-plan-v2`/`image-planner-v4`) + ④가 번역(`v2`) · 장소 네거티브를 `reference_negative_prompt`로 분리 | research-log 관측 4                               |
 
 ### 19.2 되풀이된 실패 유형
 

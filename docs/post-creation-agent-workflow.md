@@ -1,9 +1,11 @@
 # opod-admin 게시물 생성 Agent — 아키텍처 UML
 
-> 문서 상태: 현재 운영 코드의 V2 아키텍처를 설명한다. 역할 분리, strict artifact
-> 계약과 생성 Agent 3개·검증 Agent 4개로 전환하는 목표 구조는
-> [게시글 생성 Agent 아키텍처 V3 개선안](./post-creation-agent-architecture-v3.md)을
-> 정본으로 사용한다. V3 적용 전까지 이 문서의 V2 흐름이 현재 저장소 사실이다.
+> 문서 상태: V2 운영 구조의 역사 기록이다. 아래 다이어그램의 평가 워커와
+> 평가 단계는 현재 기능이 아니다. 현재 V3/V4의 단계별 화면·입력 계약은
+> [파이프라인 화면 UX](./draft-pipeline-ux.md)의 “현재 화면 계약”을,
+> 역할 분리와 실험·개선 결정 이력은
+> [게시글 생성 Agent 아키텍처](./post-creation-agent-architecture-v3.md)를 따른다.
+> 현재 HTTP 동작은 [초안 API](./api/admin-drafts.md)가 소유한다.
 
 파이프라인 한 줄 요약: **기획 → 프롬프트 빌드 → 이미지 생성 → 저장 → 검수(휴먼) → 게시 → 메모리 반영**
 

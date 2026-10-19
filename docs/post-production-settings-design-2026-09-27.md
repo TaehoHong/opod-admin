@@ -1,6 +1,6 @@
 # 캐릭터 게시물 제작 설정 분리
 
-상태: 2026-09-27 DDL 포함 승인 후 로컬 구현·검증. 실제 캐릭터 데이터 이전과 개발 배포는 아직 실행하지 않았다.
+상태: 2026-09-27 로컬 구현·검증 후 backend/DDL 개발 배포 완료. admin 이미지 빌드 완료, 실제 지침 이전 및 admin 전환은 데이터 조회 승인 대기.
 
 ## 목적과 확정된 경계
 
@@ -21,7 +21,7 @@
   `routePersona`. 신규 설정 테이블을 조회하거나 전달하지 않는다.
 - owner-absent: 게시물 제작 설정의 독립 저장·조회 기능. 기존 posting-policy는
   게시 시간과 빈도, visual-profile은 외모와 이미지 참조를 관리하므로 대체 저장소로 쓰지 않는다.
-- DB 정본은 backend `src/domain/database/schema.ts`와 `drizzle/`이며 admin은 미러를 가진다.
+- DB 정본은 backend `src/core/database/schema.ts`와 `drizzle/`이며 admin은 미러를 가진다.
 
 ## 저장 및 API 계약
 
@@ -30,9 +30,9 @@
 텍스트 필드는 account_concept, image_style, caption_style, constraints의 네 개이며 빈 문자열이
 기본값이다. created_at과 updated_at을 가진다. 기존 테이블/컬럼은 삭제하거나 변경하지 않는다.
 
-정본 수정 대상: backend `src/domain/database/schema.ts`,
+정본 수정 대상: backend `src/core/database/schema.ts`,
 `drizzle/20260927073129_character_content_profiles/`의 migration 및 snapshot.
-미러 수정 대상: admin `src/domain/database/schema.ts`. SQL과 migration snapshot 생성을 완료했다.
+미러 수정 대상: admin `src/core/database/schema.ts`. SQL과 migration snapshot 생성을 완료했다.
 
 관리 API: 기존 인증을 따르는 GET/PUT `/api/admin/v1/characters/:id/content-profile`.
 응답 및 PUT 본문은 accountConcept, imageStyle, captionStyle, constraints.

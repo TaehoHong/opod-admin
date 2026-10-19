@@ -1,10 +1,16 @@
 # Admin Post Drafts API
 
-All endpoints require an admin JWT:
+All endpoints require the `__Host-opod_admin_session` admin cookie.
+State-changing requests also require the `x-opod-admin` header; when an
+`Origin` header is supplied it must match the request origin.
 
-```http
-Authorization: Bearer <admin-jwt>
-```
+The opening status diagram describes legacy V2. For current V3/V4 stages,
+immutable saved inputs, and operator actions, see the
+[current workflow contract](../draft-pipeline-ux.md). V4 runs image generation →
+caption → publish without a separate candidate approval stage. The API sections
+below identify V3/V4-specific restrictions where they differ from V2. Automatic
+runs use the DB worker switch described in
+[settings](admin-settings.md); `WORKER_ENABLED` is its initial fallback.
 
 A draft is one unit of the automated content pipeline
 (`docs/media-generation-pipeline.md`): concept planning → prompt build →
@@ -25,7 +31,7 @@ characters are held (not planned, not published).
 ## List drafts
 
 ```http
-GET /api/drafts?status=needs_review&characterId=<uuid>&limit=20&cursor=<cursor>
+GET /api/admin/v1/drafts?status=needs_review&characterId=<uuid>&limit=20&cursor=<cursor>
 ```
 
 Every query parameter is optional. `status` must be one of the eight statuses
@@ -58,7 +64,7 @@ Optional fields appear only when set: `errorMessage`, `publishedPostId`,
 ## Get a draft
 
 ```http
-GET /api/drafts/:id
+GET /api/admin/v1/drafts/:id
 ```
 
 Adds `shots` — the latest generation job per cut with its best-of-N candidates:
@@ -133,7 +139,7 @@ one selected image for every cut.
 ## Create a draft
 
 ```http
-POST /api/drafts
+POST /api/admin/v1/drafts
 Content-Type: application/json
 
 { "characterId": "<uuid>", "postGenerationAgent": "existing", "mode": "manual", "sceneHint": "골목 카페", "scheduledAt": "2026-07-13T10:00:00Z", "contentType": "feed" }
@@ -148,7 +154,7 @@ operator request. See the [selection and compatibility rules](#생성-agent-선�
 ## Operator request (post-pipeline-v3/v4 only)
 
 ```http
-PATCH /api/drafts/:id/operator-request   { "operatorRequest": "거울 셀카는 후면 카메라로" }
+PATCH /api/admin/v1/drafts/:id/operator-request   { "operatorRequest": "거울 셀카는 후면 카메라로" }
 ```
 
 Rewrites `conceptJson.operatorRequest`, which both the Post Planning and Image
@@ -170,12 +176,12 @@ plain re-run repeats the same input.
 ## Manual pipeline steps
 
 ```http
-POST /api/drafts/:id/plan                   { "note": "이모지 빼고" }   // note optional
-POST /api/drafts/:id/build-prompts
-POST /api/drafts/:id/jobs/:jobId/generate   { "prompt": "...", "candidateCount": 2, "runNow": true }
-POST /api/drafts/:id/jobs/:jobId/run        // run an already-queued shot now
-POST /api/drafts/:id/aggregate
-POST /api/drafts/:id/publish
+POST /api/admin/v1/drafts/:id/plan                   { "note": "이모지 빼고" }   // note optional
+POST /api/admin/v1/drafts/:id/build-prompts
+POST /api/admin/v1/drafts/:id/jobs/:jobId/generate   { "prompt": "...", "candidateCount": 2, "runNow": true }
+POST /api/admin/v1/drafts/:id/jobs/:jobId/run        // run an already-queued shot now
+POST /api/admin/v1/drafts/:id/aggregate
+POST /api/admin/v1/drafts/:id/publish
 ```
 
 Each mirrors one automatic step (manual = step-execution mode of the automatic
@@ -214,7 +220,7 @@ pipeline) and returns the updated draft; failures are HTTP 400 with a reason
 ## Edit a draft
 
 ```http
-PATCH /api/drafts/:id
+PATCH /api/admin/v1/drafts/:id
 Content-Type: application/json
 
 { "caption": "...", "hashtags": ["필름사진"], "scheduledAt": null, "reason": "연어가 어색해서" }
@@ -237,8 +243,8 @@ improvement — it changes nothing else.
 ## Approve / reject
 
 ```http
-POST /api/drafts/:id/approve
-POST /api/drafts/:id/reject   { "reason": "구도가 어색함" }
+POST /api/admin/v1/drafts/:id/approve
+POST /api/admin/v1/drafts/:id/reject   { "reason": "구도가 어색함" }
 ```
 
 V2/V3 only — V4 has no approval step (the caption stage hands off straight to
@@ -250,7 +256,7 @@ published by the worker at `scheduledAt` (or immediately).
 ## Regenerate a shot
 
 ```http
-POST /api/drafts/:id/jobs/:jobId/regenerate
+POST /api/admin/v1/drafts/:id/jobs/:jobId/regenerate
 Content-Type: application/json
 
 { "prompt": "다른 구도의 해변 장면 ...", "runNow": true }
@@ -268,7 +274,7 @@ generation set hash changed — a warning, not a block.
 ## Select a shot output
 
 ```http
-POST /api/drafts/:id/jobs/:jobId/select
+POST /api/admin/v1/drafts/:id/jobs/:jobId/select
 Content-Type: application/json
 
 { "mediaId": "<candidate media uuid>" }
@@ -283,7 +289,7 @@ there is nothing to choose; the sole output is selected when the job completes.
 ## Set a candidate filter
 
 ```http
-PATCH /api/drafts/:id/jobs/:jobId/outputs/:mediaId/filter
+PATCH /api/admin/v1/drafts/:id/jobs/:jobId/outputs/:mediaId/filter
 Content-Type: application/json
 
 { "filterPreset": "film" }
@@ -297,8 +303,8 @@ the generated original unchanged.
 ## Posting policy (scheduler input)
 
 ```http
-GET /api/characters/:id/posting-policy
-PUT /api/characters/:id/posting-policy
+GET /api/admin/v1/characters/:id/posting-policy
+PUT /api/admin/v1/characters/:id/posting-policy
 Content-Type: application/json
 
 { "enabled": true, "weeklyCadence": 3, "hourStartKst": 18, "hourEndKst": 22 }
