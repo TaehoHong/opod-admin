@@ -28,6 +28,11 @@ const CharactersPage = lazy(() =>
     default: m.CharactersPage,
   })),
 );
+const InfluencerLibraryPage = lazy(() =>
+  import("../features/influencers/InfluencerLibraryPage").then((m) => ({
+    default: m.InfluencerLibraryPage,
+  })),
+);
 const CharacterSnsPage = lazy(() =>
   import("../features/characters/CharacterSnsPage").then((m) => ({
     default: m.CharacterSnsPage,
@@ -208,6 +213,10 @@ export function AppRoutes() {
         <Route
           path="characters/:characterId"
           element={<CharacterManagerPage />}
+        />
+        <Route
+          path="sns-references/library"
+          element={<InfluencerLibraryPage />}
         />
         <Route
           path="sns-references/:characterId"

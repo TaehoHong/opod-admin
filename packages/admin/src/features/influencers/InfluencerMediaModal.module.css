@@ -1,0 +1,26 @@
+.card {
+  overflow: hidden;
+}
+.wrap {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.description {
+  white-space: pre-wrap;
+}
+.analysis {
+  margin: 0;
+  font-size: var(--mantine-font-size-sm);
+}
+.analysis > div {
+  padding-block: var(--mantine-spacing-xs);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+.analysis dt {
+  font-weight: 600;
+  color: var(--mantine-color-ink-7);
+}
+.analysis dd {
+  margin: 0;
+  white-space: pre-wrap;
+}

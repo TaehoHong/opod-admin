@@ -764,3 +764,7 @@ not change the output schema or frozen draft configuration.
 정본 migration은 backend `drizzle/20261019042242_influencers/`이며 기존 참조 링크를 검증 이전 후 삭제한다. 배포 시 기존 코드와의 호환 전환이 필요하다. UI owner는 기존 CharacterReferenceLinksPanel/CharacterSnsPage/CharacterSnsDetailPage 및 api.ts이며 Mantine 컴포넌트를 유지한다.
 
 계약·이전·복구·검증 명령은 [Admin 인플루언서 API](api/admin-influencers.md), 테스트 owner는 `test/influencer-media.e2e-spec.ts`, `test/character-reference-links.e2e-spec.ts`, `test/character-reference-directory.e2e-spec.ts`, `src/influencers/influencer-input.spec.ts` 및 기존 UI 테스트다. 실제 S3/임베딩 공급자와 개발 배포는 별도 확인해야 한다.
+
+### 수집 라이브러리 UI
+
+`features/influencers/InfluencerLibraryPage.tsx`가 `/sns-references/library`의 전체 계정 목록을 소유한다. 기존 SNS 목록에서 진입하고 캐릭터 연결을 해제한 계정도 조회한다. `InfluencerMediaModal`은 계정 목록과 기존 `CharacterReferenceLinksPanel`에서 함께 사용하며 계정 ID로 미디어를 조회한다. API owner는 같은 폴더의 api.ts이고, 공통 apiRequest/useCursorList/LoadMore/previewUrl/ZoomableImage를 재사용한다. 사진·영상 썸네일 구분, 분석 없음, 목록 추가 조회, 이미지 확대, 분석 상세와 원본 링크를 표시한다. URL 만료 시 새로고침으로 서명 URL을 다시 조회한다. `/sns-references/library`는 기존 서버 SPA 허용 경로에 포함된다. 이번 UI 변경은 사용자 요청에 따라 테스트를 작성·실행하지 않으며 배포용 타입 검사·빌드만 수행한다.

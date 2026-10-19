@@ -26,6 +26,7 @@ import {
   saveCharacterReferenceLink,
   type CharacterReferenceLink,
 } from "./api";
+import { InfluencerMediaModal } from "../influencers/InfluencerMediaModal";
 import classes from "./CharacterReferenceLinksPanel.module.css";
 
 export function CharacterReferenceLinksPanel({
@@ -39,6 +40,8 @@ export function CharacterReferenceLinksPanel({
   headingOrder?: 2 | 5;
   onBusyChange?: (busy: boolean) => void;
 }) {
+  const [mediaAccount, setMediaAccount] =
+    useState<CharacterReferenceLink | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const queryKey = ["character", characterId, "reference-links"];
@@ -168,6 +171,14 @@ export function CharacterReferenceLinksPanel({
                         size="xs"
                         variant="default"
                         disabled={editing !== null || remove.isPending}
+                        onClick={() => setMediaAccount(link)}
+                      >
+                        수집 미디어
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="default"
+                        disabled={editing !== null || remove.isPending}
                         onClick={() => setEditing(link.id)}
                       >
                         수정
@@ -197,6 +208,13 @@ export function CharacterReferenceLinksPanel({
           errorTitle="참조 링크를 삭제하지 못했습니다."
         />
       </Stack>
+      {mediaAccount ? (
+        <InfluencerMediaModal
+          key={mediaAccount.id}
+          account={mediaAccount}
+          onClose={() => setMediaAccount(null)}
+        />
+      ) : null}
     </Paper>
   );
 }

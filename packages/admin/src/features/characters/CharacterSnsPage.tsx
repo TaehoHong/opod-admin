@@ -49,11 +49,20 @@ export function CharacterSnsPage() {
       isPending={directory.isPending}
       error={directory.error}
       actions={
-        directory.error ? (
-          <Button variant="default" onClick={() => void directory.refetch()}>
-            다시 시도
+        <Group gap="xs">
+          <Button
+            component={Link}
+            to="/sns-references/library"
+            variant="default"
+          >
+            수집 라이브러리
           </Button>
-        ) : null
+          {directory.error ? (
+            <Button variant="default" onClick={() => void directory.refetch()}>
+              다시 시도
+            </Button>
+          ) : null}
+        </Group>
       }
       filters={
         <Paper p="md" component="section" aria-label="캐릭터 검색 조건">
