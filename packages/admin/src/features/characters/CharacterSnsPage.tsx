@@ -80,7 +80,7 @@ export function CharacterSnsPage() {
           <Text size="sm" c="ink.6">
             {directory.data?.items.length ?? 0}명 표시
           </Text>
-          <Table.ScrollContainer minWidth={320}>
+          <Table.ScrollContainer minWidth={280}>
             <Table highlightOnHover aria-label="캐릭터별 SNS 레퍼런스">
               <Table.Thead>
                 <Table.Tr>
