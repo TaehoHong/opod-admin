@@ -317,6 +317,26 @@ export class CharacterService {
     );
   }
 
+  listPersonaEmbeddingSources(characterId: string) {
+    return this.characters.listPersonaEmbeddingSources(characterId);
+  }
+
+  savePersonaEmbedding(input: {
+    characterId: string;
+    personaId: string;
+    fragmentId: string;
+    content: string;
+    embedding: number[];
+    model: string;
+  }) {
+    assertReferenceEmbedding(input.embedding);
+    if (!input.model.trim() || !input.content.trim())
+      throw new BadRequestException(
+        "Persona embedding model and content are required",
+      );
+    return this.characters.savePersonaEmbedding(input);
+  }
+
   listMemoryEmbeddingSources(characterId?: string) {
     return this.characters.listMemoryEmbeddingSources(characterId);
   }

@@ -851,6 +851,74 @@ export class CharacterRepository {
     });
   }
 
+  async listPersonaEmbeddingSources(characterId: string) {
+    return this.database.client
+      .select({
+        ...fragmentFields,
+        characterId: characterPersonas.characterId,
+        sourceSha256: sql<string>`encode(sha256(convert_to(${characterPersonaFragments.content}, 'UTF8')), 'hex')`,
+        embeddingModel: characterPersonaFragments.embeddingModel,
+        embeddedTextSha256: characterPersonaFragments.embeddingSourceSha256,
+        indexed: sql<boolean>`${characterPersonaFragments.embedding} IS NOT NULL AND ${characterPersonaFragments.embeddedAt} IS NOT NULL AND public.vector_norm(${characterPersonaFragments.embedding}) > 0`,
+      })
+      .from(characterPersonaFragments)
+      .innerJoin(
+        characterPersonas,
+        eq(characterPersonas.id, characterPersonaFragments.personaId),
+      )
+      .where(
+        and(
+          eq(characterPersonas.characterId, characterId),
+          isNull(characterPersonas.deletedAt),
+          eq(characterPersonaFragments.injection, "retrieved"),
+        ),
+      );
+  }
+
+  async savePersonaEmbedding(input: {
+    characterId: string;
+    personaId: string;
+    fragmentId: string;
+    content: string;
+    embedding: number[];
+    model: string;
+  }): Promise<boolean> {
+    return this.database.client.transaction(async (tx) => {
+      // Match structure replacement's source lock; old fragment IDs cannot
+      // receive a delayed embedding after an edit, even when text is reused.
+      const [source] = await tx
+        .select({ id: characterPersonas.id })
+        .from(characterPersonas)
+        .where(
+          and(
+            eq(characterPersonas.id, input.personaId),
+            eq(characterPersonas.characterId, input.characterId),
+            isNull(characterPersonas.deletedAt),
+          ),
+        )
+        .for("update");
+      if (!source) return false;
+      const rows = await tx
+        .update(characterPersonaFragments)
+        .set({
+          embedding: input.embedding,
+          embeddingModel: input.model,
+          embeddingSourceSha256: sourceHash(input.content),
+          embeddedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(characterPersonaFragments.id, input.fragmentId),
+            eq(characterPersonaFragments.personaId, input.personaId),
+            eq(characterPersonaFragments.content, input.content),
+            eq(characterPersonaFragments.injection, "retrieved"),
+          ),
+        )
+        .returning({ id: characterPersonaFragments.id });
+      return rows.length === 1;
+    });
+  }
+
   async listMemoryEmbeddingSources(
     characterId?: string,
   ): Promise<MemoryEmbeddingSource[]> {
