@@ -55,6 +55,22 @@ addition to existing `personas` and `memories`.
 URL DB CHECK는 사용자 결정에 따라 두지 않는다. 새 테이블의 unique index와 FK는 유지한다.
 링크 열기는 새 탭의 `noopener noreferrer` 앵커로 제공한다.
 
+### SNS reference directory
+
+`GET /api/admin/v1/character-reference-directory`는 관리자 인증 후
+`{ items: [{ id, publicId, displayName, referenceLinks }], nextCursor? }`를 반환한다.
+`referenceLinks`는 위 링크 응답 형식을 그대로 쓴다.
+
+- `search`: 이름·핸들 부분 검색, 대소문자 무시, 100자 이내. 핸들 앞 `@`를 허용하며 `%`·`_`는 일반 문자로 검색한다.
+- `registration`: `all`(기본), `registered`, `missing`. 전체 후보에 필터를 적용한 뒤 페이지를 만든다.
+- `limit`: 기본 20, 최대 50. `cursor`는 응답의 `nextCursor`를 사용한다. 검색·필터를 바꾸면 cursor를 지운다.
+- UUID 내림차순 keyset 조회로 페이지를 교체한다. 전체 개수나 페이지 수를 추정해 반환하지 않는다.
+- 잘못된 검색·필터·cursor는 400, 비인증은 401이다. 일괄 조회는 기존 캐릭터·참조 링크 Domain Service를 조합한다.
+
+Admin의 `/sns-references`는 한 요청으로 현재 20명의 목록·참조 링크를 받는다.
+등록 상태가 드문 조건에서는 서버가 후보를 50명씩 순회하며 필요한 결과를 찾는다.
+캐릭터별 HTTP 요청·클라이언트 전체 목록 적재·카드 누적은 사용하지 않는다.
+
 ## Profile image
 
 Profile images reuse upload-confirmed image rows from the media library. The

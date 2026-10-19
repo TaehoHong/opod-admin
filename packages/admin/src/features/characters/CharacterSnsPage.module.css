@@ -1,18 +1,41 @@
-.identity {
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--mantine-spacing-sm);
+}
+.search {
+  flex: 1 1 14rem;
   min-width: 0;
 }
-
+.registration {
+  flex: 0 1 9rem;
+}
+.surface {
+  overflow: hidden;
+}
+.character {
+  width: 22%;
+}
+.status {
+  width: 15%;
+}
 .link {
   display: flex;
   align-items: center;
   gap: var(--mantine-spacing-xs);
+  min-height: var(--mantine-spacing-xl);
 }
-
 .url {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-
 .icon {
   flex-shrink: 0;
+}
+.summary {
+  padding-block: var(--mantine-spacing-xs);
+  color: var(--mantine-color-ink-6);
+  font-size: var(--mantine-font-size-sm);
+  cursor: pointer;
 }

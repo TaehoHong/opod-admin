@@ -4,7 +4,18 @@ import {
   Injectable,
 } from "@nestjs/common";
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   type DatabaseClient,
   DatabaseService,
@@ -360,6 +371,34 @@ export class CharacterRepository {
       .where(eq(characters.id, characterId))
       .limit(1)
       .then(([row]) => row ?? null);
+  }
+
+  findReferenceDirectoryCandidates(input: {
+    search: string;
+    afterId?: string;
+    take: number;
+  }) {
+    const pattern = `%${input.search.replace(/[\\%_]/g, "\\$&")}%`;
+    return this.database.client
+      .select({
+        id: characters.id,
+        publicId: characters.publicId,
+        displayName: characters.displayName,
+      })
+      .from(characters)
+      .where(
+        and(
+          input.afterId ? lt(characters.id, input.afterId) : undefined,
+          input.search
+            ? or(
+                ilike(characters.displayName, pattern),
+                ilike(characters.publicId, pattern),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(desc(characters.id))
+      .limit(input.take);
   }
 
   async cursorMatchesFilter(

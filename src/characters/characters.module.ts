@@ -14,6 +14,8 @@ import { CharacterRepository } from "./character.repository";
 import { CharacterReferenceLinkRepository } from "./character-reference-link.repository";
 import { CharacterReferenceLinkService } from "./character-reference-link.service";
 import { CharacterReferenceLinksController } from "./character-reference-links.controller";
+import { CharacterReferenceDirectoryController } from "./character-reference-directory.controller";
+import { CharacterReferenceDirectoryApplicationService } from "./character-reference-directory-application.service";
 import { CharacterService } from "./character.service";
 import { CharacterActionLogRepository } from "./character-action-log.repository";
 import { CharacterActionLogService } from "./character-action-log.service";
@@ -37,8 +39,13 @@ import { LlmLogService } from "../llm-logs/llm-log.service";
     SettingsModule,
     CharacterContentProfilesModule,
   ],
-  controllers: [CharactersController, CharacterReferenceLinksController],
+  controllers: [
+    CharactersController,
+    CharacterReferenceLinksController,
+    CharacterReferenceDirectoryController,
+  ],
   providers: [
+    CharacterReferenceDirectoryApplicationService,
     CharacterReferenceLinkRepository,
     CharacterReferenceLinkService,
     CharacterRepository,

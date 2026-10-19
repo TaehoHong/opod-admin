@@ -317,6 +317,21 @@ export class CharacterService {
     );
   }
 
+  referenceDirectoryCandidates(input: {
+    search?: string;
+    afterId?: string;
+    take: number;
+  }) {
+    const search = input.search?.trim().replace(/^@/, "") ?? "";
+    if (search.length > 100) {
+      throw new BadRequestException("검색어는 100자 이내로 입력해 주세요.");
+    }
+    return this.characters.findReferenceDirectoryCandidates({
+      ...input,
+      search,
+    });
+  }
+
   listPersonaEmbeddingSources(characterId: string) {
     return this.characters.listPersonaEmbeddingSources(characterId);
   }

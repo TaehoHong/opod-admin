@@ -37,13 +37,20 @@ export function CharacterReferenceLinksPanel({
     queryKey,
     queryFn: () => fetchCharacterReferenceLinks(characterId),
   });
+  const invalidate = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey }),
+      queryClient.invalidateQueries({
+        queryKey: ["character-reference-directory"],
+      }),
+    ]);
   const remove = useMutation({
     mutationFn: (id: string) => deleteCharacterReferenceLink(characterId, id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+    onSuccess: invalidate,
   });
   const saved = async () => {
     setEditing(null);
-    await queryClient.invalidateQueries({ queryKey });
+    await invalidate();
   };
 
   return (

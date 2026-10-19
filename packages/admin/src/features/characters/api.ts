@@ -83,6 +83,23 @@ export function fetchCharacterReferenceLinks(
   return apiRequest(`${characterPath(characterId)}/reference-links`);
 }
 
+export type CharacterReferenceDirectoryItem = Pick<
+  Character,
+  "id" | "publicId" | "displayName"
+> & {
+  referenceLinks: CharacterReferenceLink[];
+};
+
+export function fetchCharacterReferenceDirectory(params: {
+  search?: string;
+  registration?: string;
+  cursor?: string;
+}): Promise<CursorPage<CharacterReferenceDirectoryItem>> {
+  return apiRequest(
+    `/character-reference-directory${toQuery({ ...params, limit: "20" })}`,
+  );
+}
+
 export function saveCharacterReferenceLink(
   characterId: string,
   url: string,

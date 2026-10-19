@@ -30,6 +30,11 @@ export class CharacterReferenceLinkService {
     );
   }
 
+  async listForCharacters(characterIds: string[]) {
+    if (!characterIds.length) return [];
+    return (await this.links.listForCharacters(characterIds)).map(toLink);
+  }
+
   async update(characterId: string, linkId: string, url: string) {
     const id = parseBigintId(linkId, "참조 링크 ID가 올바르지 않습니다.");
     await this.characters.requireActivityCharacter(characterId);

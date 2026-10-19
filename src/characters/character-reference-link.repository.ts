@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { DatabaseService } from "../core/database/database.service";
 import { characterReferenceLinks } from "../core/database/schema";
 
@@ -24,6 +24,14 @@ export class CharacterReferenceLinkRepository {
       .values({ characterId, url })
       .returning();
     return row;
+  }
+
+  listForCharacters(characterIds: string[]) {
+    return this.database.client
+      .select()
+      .from(characterReferenceLinks)
+      .where(inArray(characterReferenceLinks.characterId, characterIds))
+      .orderBy(asc(characterReferenceLinks.id));
   }
 
   async update(characterId: string, id: bigint, url: string) {
