@@ -7,6 +7,7 @@
 .search {
   flex: 1 1 14rem;
   min-width: 0;
+  max-width: 28rem;
 }
 .registration {
   flex: 0 1 9rem;

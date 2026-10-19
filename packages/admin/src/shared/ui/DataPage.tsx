@@ -21,6 +21,7 @@ import classes from "./DataPage.module.css";
 export function DataPage({
   title,
   actions,
+  filters,
   isPending,
   error,
   isEmpty,
@@ -29,6 +30,7 @@ export function DataPage({
 }: {
   title: string;
   actions?: ReactNode;
+  filters?: ReactNode;
   isPending: boolean;
   error?: Error | null;
   isEmpty?: boolean;
@@ -46,6 +48,7 @@ export function DataPage({
         </div>
         {actions ? <div className={classes.actions}>{actions}</div> : null}
       </header>
+      {filters}
       {isPending ? (
         <Paper className={classes.state} p="lg" role="status">
           <Group h="100%" gap="md" wrap="nowrap">

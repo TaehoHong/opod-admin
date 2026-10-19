@@ -352,6 +352,7 @@ job 등록/실행/완료/재시도가 모두 React에 있다. 사용자·게시�
 공통화했다. application shell의 route 위치와 keyboard 우회 동작은
 `app/AppLayout`이, 긴 table 셀의 줄바꿈·말줄임은 `shared/ui/TableText`가
 공통으로 소유한다. `DataPage`는 빈 목록일 때 children을 통째로 감추므로 목록 외
+검색·필터는 로딩·실패·빈 상태에서도 유지되는 `filters` 슬롯에 둔다. 그 외
 컨트롤(생성 폼, 상세 패널)을 children에 두는 화면은 빈 상태를 직접 그린다.
 
 이미지 확대(라이트박스)는 `shared/ui/ZoomableImage`가 소유한다. 이미지

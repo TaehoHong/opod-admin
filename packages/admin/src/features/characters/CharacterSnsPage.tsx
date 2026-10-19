@@ -48,8 +48,8 @@ export function CharacterSnsPage() {
       error={directory.error}
       isEmpty={directory.data?.items.length === 0}
       emptyLabel="조건에 맞는 캐릭터가 없습니다."
-      actions={
-        <Stack gap="xs">
+      filters={
+        <Paper p="md">
           <ReferenceFilters
             key={`${search}/${registration}`}
             search={search}
@@ -62,6 +62,10 @@ export function CharacterSnsPage() {
               setParams(next, { state: { previousCursors: [] } });
             }}
           />
+        </Paper>
+      }
+      actions={
+        <Stack gap="xs">
           {directory.error ? (
             <Button
               variant="default"
