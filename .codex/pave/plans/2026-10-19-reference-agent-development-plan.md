@@ -1,7 +1,7 @@
 # 레퍼런스 기반 게시물 생성 Agent — 전체 개발 계획
 
 - 날짜: 2026-10-19
-- 상태: reference 설정·검색/픽셀 선택·프롬프트·생성 잡·캡션·실패 컷 재시도·게시 경로와 기존 Agent 보관을 구현했다. 성공 후 재선택/같은 입력 전체 재생성도 구현했으며 최종 통합 검증 중이다. DB 적용·DB E2E·실제 공급자 검증은 보류한다.
+- 상태: 구현·main 병합·개발 배포 완료. source_caption 정본 DDL은 후속 승인으로 개발 DB에 적용했다. DB 동시성 E2E와 실제 생성 공급자 검증은 보류한다. 아래 구현 당시 보류 기록보다 마지막 배포 기록이 우선한다.
 - 구현 대상: OPOD Admin의 신규 Agent `reference-v1`.
 - 사용자: 기존 권한을 가진 Admin 운영자.
 - 진입: 게시물 생성 화면에서 캐릭터와 레퍼런스 기반 Agent를 선택하고 시작.
@@ -180,3 +180,12 @@ DB 테스트에는 원본 sourceCaption 동시 갱신·검색 범위·잠금/게
 - 보관 manifest의 원본 snapshot 29개 SHA-256 무결성을 확인했다. 개발 DB·Docker 재시작·DDL 적용·DB E2E·실제 공급자 호출·배포·커밋은 수행하지 않았다.
 - 검증 완료 범위는 코드·mock 계약·UI fixture다. 병합 전 사람 검토 대상은 `DraftsRepository`의 원본 게시 예약/재시작 잠금, 기존 게시 트랜잭션의 동일 잠금·lease 검사, 이미지 모델별 실제 요청이다. 실제 DB 동시성과 실제 사진·캡션 품질은 아직 검증하지 않았다.
 - Knowledge Delta: 별도 reference runner와 공용 Drafts/Generation 모듈 소유권, 설정 snapshot/CAS, 원본 ID·SHA 사용 이력, reference 재시작 계약, existing 보관 규칙을 소스·사용자 승인 근거로 `docs/07-codebase-guide.md`, `docs/api/admin-post-generation-agents.md`, `docs/caption-writing.md`에 반영했다.
+
+
+## 2026-10-19 최종 main 배포
+
+사용자가 전체 변경의 main 병합·푸시·배포, 개발 DB 컬럼 추가와 백업 생략을 명시 승인했다. Admin `aa5662c`, Backend `668e3fb`를 배포했고 두 서비스 health와 로그인된 Admin의 수집 미디어·레퍼런스 설정 화면을 확인했다. 상세 증거와 검증 한계는 [배포 기록](../../../docs/03-deployment-rules.md)을 따른다.
+
+전체 변경 기준 서버 863개·UI 142개 테스트 및 build/lint/format/schema:check 통과. Sol 6.1 subagent는 기존 UI 테스트 경로를 수정하고 원본 선택 starter 오류를 승인된 프롬프트 원문으로 복구했다. 메인 에이전트가 diff·전체 검증·최종 서버 화면을 재확인했다. 실제 생성 호출과 DB 잠금 경합 테스트는 수행하지 않았다.
+
+Knowledge Delta: 후속 사용자 승인과 서버 검증에 근거해 DDL·main 배포 상태를 docs/03-deployment-rules.md와 docs/07-codebase-guide.md에 반영했다. 기본 지침 오입력은 소유 상수와 기존 HTTP 계약 테스트에서 복구했고 별도 중복 troubleshooting 문서는 만들지 않았다.

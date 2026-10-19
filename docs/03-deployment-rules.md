@@ -127,3 +127,16 @@ worktree 상태를 확인한다.
 
 - 운영 로그에는 time, level, module과 request/job ID를 포함하고 secret을
   마스킹한다.
+
+
+### 2026-10-19 레퍼런스 Agent·수집 라이브러리 main 배포
+
+- 사용자 승인으로 기존 개발 브랜치 전체를 두 저장소의 main에 fast-forward 병합하고 푸시했다.
+- Admin 실행 코드: `aa5662c`, 이미지 `opod-admin:release-aa5662c`.
+- Backend 실행 코드: `668e3fb`, 이미지 `opod-service-backend:release-668e3fb`.
+- 개발 DB에는 정본 `20261019060222_orange_warlock`의 nullable `source_caption text`만 추가했다. 기존 migration 해시와 대기 목록을 대조한 뒤 Backend 정본 runner로 적용하고 migration 이력을 기록했다. 컬럼 타입·nullable·기본값 없음 확인을 통과했다.
+- 사용자가 명시적으로 백업 생략을 지시하여 이번 DB 백업은 수행하지 않았다. DB 컨테이너를 재시작하거나 기존 데이터를 덮어쓰지 않았다.
+- 최종 서버 단위 테스트 77 suites/863 tests, UI 30 files/142 tests, build/lint/format/schema:check 통과. Backend build 통과. 실제 DB 동시성 E2E와 유료 생성은 실행하지 않았다.
+- 교체 후 Admin health는 `status=ok,database=up`, Backend health는 `status=ok`를 반환했다. 기존 로그인 세션으로 수집 미디어 목록과 레퍼런스 Agent 설정을 확인했다. 신규 Agent 설정은 모델·지침을 명시 저장하기 전 상태로 유지했다.
+- 배포 확인에서 선택 starter에 테이블 구조가 들어간 오류를 찾아 승인된 1단계 프롬프트 원문으로 복구했다. starter HTTP 회귀는 이전 값에서 실패하고 수정값에서 통과했다. 최종 서버 화면에서도 역할·1~3장·반복 허용 지침을 확인했다.
+- 실행 이미지의 코드 commit은 위 값이며 이후 배포 기록 문서 커밋과 구분한다.
