@@ -33,6 +33,11 @@ const CharacterSnsPage = lazy(() =>
     default: m.CharacterSnsPage,
   })),
 );
+const CharacterSnsDetailPage = lazy(() =>
+  import("../features/characters/CharacterSnsDetailPage").then((m) => ({
+    default: m.CharacterSnsDetailPage,
+  })),
+);
 const CharacterManagerPage = lazy(() =>
   import("../features/characters/CharacterManagerPage").then((m) => ({
     default: m.CharacterManagerPage,
@@ -203,6 +208,10 @@ export function AppRoutes() {
         <Route
           path="characters/:characterId"
           element={<CharacterManagerPage />}
+        />
+        <Route
+          path="sns-references/:characterId"
+          element={<CharacterSnsDetailPage />}
         />
         <Route path="locations/:locationId" element={<LocationManagerPage />} />
         <Route path="drafts" element={<Navigate to="/posts" replace />} />
