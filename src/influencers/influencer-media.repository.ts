@@ -1,5 +1,17 @@
 import { ConflictException, Injectable } from "@nestjs/common";
-import { and, asc, eq, gt, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import { DatabaseService } from "../core/database/database.service";
 import { influencerMedia } from "../core/database/schema";
@@ -14,9 +26,80 @@ export type MediaFilter = {
   work?: string;
   model?: string;
 };
+export type ReferenceMediaSearch = {
+  influencerIds: bigint[];
+  embedding: number[];
+  model: string;
+  excludedMediaIds?: bigint[];
+  excludedSha256s?: string[];
+  limit?: number;
+};
+export type InfluencerReferenceCandidate = {
+  mediaId: string;
+  influencerId: string;
+  postId: string;
+  slideIndex: number;
+  mediaKey: string;
+  sha256: string;
+  sourceCaption: string | null;
+  analysis: Record<string, string | number | null>;
+  score: number;
+};
 @Injectable()
 export class InfluencerMediaRepository {
   constructor(private readonly db: DatabaseService) {}
+  async searchReferences(
+    input: ReferenceMediaSearch,
+  ): Promise<InfluencerReferenceCandidate[]> {
+    if (!input.influencerIds.length) return [];
+    const distance = sql<number>`${influencerMedia.embedding} OPERATOR(public.<=>) ${JSON.stringify(input.embedding)}::public.vector(1024)`;
+    const rows = await this.db.client
+      .select({ media: influencerMedia, score: sql<number>`1 - (${distance})` })
+      .from(influencerMedia)
+      .where(
+        and(
+          inArray(influencerMedia.influencerId, input.influencerIds),
+          eq(influencerMedia.embeddingModel, input.model),
+          isNotNull(influencerMedia.embedding),
+          sql`public.vector_norm(${influencerMedia.embedding}) > 0`,
+          isNotNull(influencerMedia.analysis),
+          sql`jsonb_typeof(${influencerMedia.analysis}) = 'object'`,
+          sql`jsonb_typeof(${influencerMedia.analysis}->'description') = 'string' AND btrim(${influencerMedia.analysis}->>'description') <> ''`,
+          sql`btrim(${influencerMedia.mediaKey}) <> ''`,
+          input.excludedMediaIds?.length
+            ? notInArray(influencerMedia.id, input.excludedMediaIds)
+            : undefined,
+          input.excludedSha256s?.length
+            ? notInArray(influencerMedia.sha256, input.excludedSha256s)
+            : undefined,
+        ),
+      )
+      .orderBy(asc(distance), asc(influencerMedia.id))
+      .limit(Math.min(12, Math.max(1, input.limit ?? 12)));
+    return rows.map(({ media, score }) => ({
+      mediaId: String(media.id),
+      influencerId: String(media.influencerId),
+      postId: media.postId,
+      slideIndex: media.slideIndex,
+      mediaKey: media.mediaKey,
+      sha256: media.sha256,
+      sourceCaption: media.sourceCaption,
+      analysis: media.analysis!,
+      score: Number(score),
+    }));
+  }
+  findReadSources(influencerIds: bigint[], mediaIds: bigint[]) {
+    if (!influencerIds.length || !mediaIds.length) return Promise.resolve([]);
+    return this.db.client
+      .select()
+      .from(influencerMedia)
+      .where(
+        and(
+          inArray(influencerMedia.influencerId, influencerIds),
+          inArray(influencerMedia.id, mediaIds),
+        ),
+      );
+  }
   private identity(value: {
     influencerId: bigint;
     postId: string;

@@ -6,7 +6,6 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { AiModelService, validateAiModel } from "../ai-models/ai-model.service";
-import { PostAgentPromptService } from "../post-agent-prompts/post-agent-prompt.service";
 import { GenerationSettingsService } from "../settings/generation-settings.service";
 import {
   AI_FEATURES,
@@ -32,16 +31,14 @@ export class AiManagementService {
   constructor(
     private readonly settings: GenerationSettingsService,
     private readonly models: AiModelService,
-    private readonly prompts: PostAgentPromptService,
   ) {}
 
   private async current(): Promise<AiManagementConfig> {
     const stored = await this.settings.getAiManagement();
     if (stored) return stored;
-    const [planner, chat, configs, natural] = await Promise.all([
+    const [planner, chat, natural] = await Promise.all([
       this.settings.resolvePlannerSettings(),
       this.settings.resolveChatSettings(),
-      this.prompts.all(),
       this.settings.getNaturalAgentBundle(),
     ]);
     const connections: AiConnection[] = [
@@ -133,19 +130,6 @@ export class AiManagementService {
         );
       cursor = page.nextCursor;
     } while (cursor);
-    for (const item of configs.items) {
-      const connectionId =
-        item.stage === "generation"
-          ? `image-${item.provider ?? "fal"}`
-          : "llm-1";
-      if (!connections.some((c) => c.id === connectionId)) continue;
-      const binding = addModel(
-        connectionId,
-        item.effectiveModel ??
-          (item.stage === "generation" ? null : planner.model),
-      );
-      if (binding) config.bindings[`existing.${item.stage}`] = binding;
-    }
     for (const feature of AI_FEATURES.filter((f) =>
       f.id.startsWith("natural."),
     )) {

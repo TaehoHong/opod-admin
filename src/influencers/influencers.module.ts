@@ -24,6 +24,10 @@ import { InfluencersController } from "./influencers.controller";
     InfluencerMediaStore,
     InfluencerMediaApplicationService,
   ],
-  exports: [InfluencerService, CharacterInfluencerService],
+  exports: [
+    InfluencerService,
+    CharacterInfluencerService,
+    InfluencerMediaService,
+  ],
 })
 export class InfluencersModule {}

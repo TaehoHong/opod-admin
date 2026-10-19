@@ -1,4 +1,11 @@
 import {
+  EnsureReferenceDraftJobsInput,
+  freezeReferenceShot,
+  referenceJobId,
+  referenceGenerationMetadata,
+} from "./reference-generation";
+export type { EnsureReferenceDraftJobsInput } from "./reference-generation";
+import {
   BadGatewayException,
   BadRequestException,
   Injectable,
@@ -159,6 +166,38 @@ export class GenerationService {
     private readonly resolvePromptBuilder: () => Promise<ImagePromptBuilder> = async () =>
       localImagePromptBuilder,
   ) {}
+
+  async ensureReferenceDraftJobs(
+    input: EnsureReferenceDraftJobsInput,
+  ): Promise<{ jobIds: string[] }> {
+    if (
+      !input.draftId ||
+      !input.characterId ||
+      !input.promptRevision ||
+      !input.shots.length ||
+      new Set(input.shots.map((shot) => shot.shotId)).size !==
+        input.shots.length ||
+      new Set(input.shots.map((shot) => shot.sortOrder)).size !==
+        input.shots.length
+    )
+      throw new BadRequestException("Invalid reference generation jobs");
+    const jobs = input.shots.map((shot) => {
+      const snapshot = freezeReferenceShot(input.promptRevision, shot);
+      return {
+        id: referenceJobId(input.draftId, input.promptRevision, shot.shotId),
+        characterId: input.characterId,
+        draftId: input.draftId,
+        sortOrder: shot.sortOrder,
+        prompt: shot.prompt,
+        paramsJson: {
+          _referenceAgent: snapshot,
+          _postAgent: { promptId: shot.generation.id },
+        },
+      };
+    });
+    await this.generation.ensureReferenceDraftJobs(jobs);
+    return { jobIds: jobs.map((job) => job.id) };
+  }
 
   async createImageDraft(input: {
     characterId: string;
@@ -324,6 +363,9 @@ export class GenerationService {
     jobId: string,
     input: { prompt: string; candidateCount: number },
   ): Promise<GenerationJob> {
+    const existing = await this.generation.findJob(jobId);
+    if (referenceGenerationMetadata(existing?.paramsJson))
+      throw new BadRequestException("Reference generation prompts are frozen");
     const prompt = input.prompt.trim();
     if (!prompt) {
       throw new BadRequestException("Generation prompt is required");
@@ -375,6 +417,10 @@ export class GenerationService {
       );
     }
 
+    if (referenceGenerationMetadata(source.paramsJson))
+      throw new BadRequestException(
+        "Reference generation jobs must be retried with the same job ID",
+      );
     const job = await this.generation.createRegeneratedImageJob(source);
     return this.toGenerationJob(job as PersistedGenerationJob);
   }
@@ -474,7 +520,7 @@ export class GenerationService {
         "Only failed generation jobs can be retried",
       );
     }
-    if (source.draftId) {
+    if (source.draftId && !referenceGenerationMetadata(source.paramsJson)) {
       throw new BadRequestException(
         "Draft generation jobs must be retried from draft review",
       );

@@ -24,10 +24,10 @@
 회귀 owner는 runner/worker spec이며 실제 모델의 의미 보존과 사진 자연스러움은
 코드 계약 테스트가 보증하지 않는다.
 
-공통 Agent 지침은 `post_agent_prompts`의 저장 버전만 실행한다.
+활성 Agent는 명시적으로 저장한 자연형/reference 번들의 지침만 실행한다.
+`post_agent_prompts`의 기존 LLM 단계는 이력 조회용이며 공통 generation 모델 버전은 유지한다.
 `prompts/post-agent-contracts.ts`는 단계 목록·출력 규격만 소유하며 지침 본문·
-기본값 복원은 제공하지 않는다. 네 LLM 단계는 미설정이면 외부 호출 전에
-`needs_configuration/<stage>_prompt_missing`으로 멈춘다. 출력의 장면 의미·
+기본값 복원은 제공하지 않는다. 불완전한 활성 번들은 초안 생성/실행 전에 거부한다. 출력의 장면 의미·
 영어 작성·레퍼런스별 범위는 DB 지침과 실모델 출력으로 확인한다.
 
 ## Current Module Map
@@ -36,13 +36,13 @@
 
 `src/ai-management/`가 Admin 연결 목록·팝업·기능별 선택 API를 소유한다.
 `GenerationSettingsService`가 `admin_settings`의 `ai.management.v1` JSON과 원문 CAS를 소유하며
-`AiManagementService`는 기존 settings/model/prompt 서비스를 조합한다. 신규 Repository나 DDL은 없다.
+`AiManagementService`는 settings/model 서비스를 조합하며 기존 prompt 초기화 의존성은 제거했다. 신규 Repository나 DDL은 없다.
 UI owner는 `packages/admin/src/features/ai-management/`이며 `/ai-management`, `/model-assignments`를
 React route와 `src/main.ts` SPA 허용 경로에 함께 등록한다.
-기존 Agent 5단계·새 Agent 7단계·채팅 응답의 선택은 독립적이다.
+자연형 Agent와 채팅의 기능별 선택은 독립적이다. reference는 아래 전용 번들에서 모델을 저장한다. 기존 Agent의 `existing.*` 모델 선택은 더 이상 생성하지 않는다.
 신규 초안의 `aiModelAssignments`와 이미지 잡의 `_aiSelection`이 모델/연결 ID를 고정하고,
 현재 연결 owner가 URL·키를 해석한다. 키는 초안·잡·API 응답에 노출하지 않는다.
-기능별 선택이 있으면 아래 prompt/bundle 모델보다 우선하며 과거 초안의 지침·실행은 유지한다.
+자연형 기능별 선택이 있으면 해당 bundle 모델보다 우선한다. 과거 자연형 초안의 고정 지침은 유지하며 보관된 기존 초안은 실행하지 않는다.
 채팅 consumer는 `opod-agent/src/provider/db-settings-provider.ts`다.
 계약·테스트 인덱스는 [API·모델 관리](api/admin-ai-management.md)에 기록한다.
 
@@ -72,12 +72,12 @@ PostAgentPromptRepository는 단계 advisory transaction lock과 expectedRevisio
 정상/차단 분기 선택에 영향을 주지 않도록 하기 위해서이며, 저장값·이력·다른 속성
 순서와 조건은 보존한다. 순수 변환 owner는 `prompts/strict-schema.ts`이고 회귀는
 `test/post-generation-agents.e2e-spec.ts`의 실제 DB 저장·조회→provider 요청 검사다.
-LLM 단계는 DB 지침 미설정 시 needs_configuration/<stage>_prompt_missing으로 중단한다.
+기존 LLM 단계의 HTTP 저장·복원은 차단하고 이력 조회만 유지한다. 활성 reference/natural 설정은 별도 저장 번들을 사용한다.
 코드 지침 fallback과 기본값 적용 API/UI는 없으며 저장은 모델 참조가 필수다.
 `prompts/post-agent-contracts.ts`는 단계 목록·출력 규격만 소유한다. 네 단계의
 `prompts/*.ts`에는 출력 계약과 호환용 버전 표지만 남고 시스템 지침 본문은 없다.
 `requireAgentPromptSettings`가 직접 Agent 호출에서도 저장 지침 없이 실행되는 것을 막는다.
-`PostPipelineV3Runner`가 네 LLM 단계에서 저장 지침/schema/모델을 읽는다.
+`PostPipelineV3Runner`는 활성 `natural-v1` 초안의 저장 번들에서 네 LLM 단계 지침/schema/모델을 읽는다. 기존 Agent용 `PostAgentPromptService.execution` fallback은 제거했다.
 이미지 프롬프트 단계는 generation 모델로 model policy를 정하고 잡의 `_postAgent`에
 해당 버전을 보존한다. 이미지 worker는 최신값 대신 그 버전을 읽어 실행하므로 프롬프트
 작성 뒤 설정을 바꾸어도 이미 만든 잡의 모델은 바뀌지 않는다. 호출 로그와 artifact의
@@ -85,8 +85,8 @@ agentConfig가 적용 설정을 기록한다. 기존 metadata 없는 잡은 기�
 관리 UI owner는 `packages/admin/src/features/post-generation-agents/`다.
 직접 진입/새로고침은 `src/main.ts`의 SPA 허용 경로가 담당한다. 새 관리 화면을
 추가할 때 React route와 서버의 허용 경로를 함께 반영한다.
-기존 Mantine theme/DataPage를 사용하고 단계별 URL, 모델 등록·선택, 지침 편집,
-읽기 전용 출력 규격, 이력 조회·복원, 미설정 표시와 입력 임시 보관/전환 보호,
+기존 Mantine theme/DataPage를 사용하고 활성 Agent 번들 편집, 모델 등록·선택,
+읽기 전용 출력 규격, 공통 generation 이력 조회·복원, 미설정 표시와 입력 임시 보관/전환 보호,
 409에서 최신값 확인 후 입력 유지 재편집을 제공한다.
 회귀 owner는 `test/post-generation-agents.e2e-spec.ts`,
 `post-pipeline-v3.runner.spec.ts`, `generation-worker.service.spec.ts`,
@@ -759,7 +759,7 @@ not change the output schema or frozen draft configuration.
 
 `src/influencers/`의 테이블별 Repository와 소유 Domain Service가 influencers/character_influencers/influencer_media를 담당한다. `CharacterReferenceLinkService`는 기존 캐릭터 화면의 coordinator로 새 Domain Service를 조합하며 직접 DB에 접근하지 않는다. 기존 directory의 referenceLinks 응답 형태를 유지하고, 실제 계정 관리 API는 `/api/admin/v1/characters/:id/influencers`다. 연결 변경·삭제는 해당 캐릭터만 바꾸며 공유 계정·미디어를 삭제하지 않는다.
 
-`InfluencerMediaApplicationService`는 multipart 파일·분석 등록을 조합한다. `influencer-input.ts`가 Instagram URL·분석 규격·구도 검색 텍스트 owner다. 이미지 검증과 조건부 S3 저장은 `InfluencerMediaStore`, 임베딩 호출은 기존 `ReferenceEmbeddingClient`와 `GenerationSettingsService.resolveChatSettings`를 사용한다. 서버 비전 호출은 없다. 분석 변경 시 벡터를 무효화하고 snapshot 조건으로 늦은 결과 저장을 거부한다.
+`InfluencerMediaApplicationService`는 multipart 파일·분석 등록을 조합한다. `influencer-input.ts`가 Instagram URL·분석 규격·구도 검색 텍스트 owner다. 이미지 검증과 조건부 S3 저장은 `InfluencerMediaStore`, 임베딩 호출은 기존 `ReferenceEmbeddingClient`와 `GenerationSettingsService.resolveChatSettings`를 사용한다. 서버 비전 호출은 없다. 원본 sourceCaption은 raw 문자열로 저장하며 media Repository의 게시물 단위 advisory lock 트랜잭션이 같은 influencerId + postId의 슬라이드 전파·상속을 소유한다. 누락/null은 보존, 빈 문자열은 확인된 빈 값이며 캡션만 바뀌면 벡터를 유지한다. 분석 변경 시 벡터를 무효화하고 snapshot 조건으로 늦은 결과 저장을 거부한다.
 
 정본 migration은 backend `drizzle/20261019042242_influencers/`이며 기존 참조 링크를 검증 이전 후 삭제한다. 배포 시 기존 코드와의 호환 전환이 필요하다. UI owner는 기존 CharacterReferenceLinksPanel/CharacterSnsPage/CharacterSnsDetailPage 및 api.ts이며 Mantine 컴포넌트를 유지한다.
 
@@ -768,3 +768,72 @@ not change the output schema or frozen draft configuration.
 ### 수집 라이브러리 UI
 
 `features/influencers/InfluencerLibraryPage.tsx`가 `/sns-references/library`의 전체 계정 목록을 소유한다. 기존 SNS 목록에서 진입하고 캐릭터 연결을 해제한 계정도 조회한다. `InfluencerMediaModal`은 계정 목록과 기존 `CharacterReferenceLinksPanel`에서 함께 사용하며 계정 ID로 미디어를 조회한다. API owner는 같은 폴더의 api.ts이고, 공통 apiRequest/useCursorList/LoadMore/previewUrl/ZoomableImage를 재사용한다. 사진·영상 썸네일 구분, 분석 없음, 목록 추가 조회, 이미지 확대, 분석 상세와 원본 링크를 표시한다. URL 만료 시 새로고침으로 서명 URL을 다시 조회한다. `/sns-references/library`는 기존 서버 SPA 허용 경로에 포함된다. 이번 UI 변경은 사용자 요청에 따라 테스트를 작성·실행하지 않으며 배포용 타입 검사·빌드만 수행한다.
+
+## 레퍼런스 게시물 Agent 실행과 설정
+
+`ReferencePostAgentRunner` (`src/post-production/reference-post-agent.runner.ts`)가
+`reference-v1`의 `reference_select → image_prompt → generation → caption`을 소유한다.
+`DraftWorkerService`는 reference claim·수동 실행·복구·집계·게시를 `DraftsService`와
+runner에 전달한다. `DraftsModule`은 초안 소유 Service를, `GenerationModule`은 이미지
+잡 소유 Service를 export하고 `PostProductionModule`이 조합한다. 새 runner는 Repository를
+직접 주입하지 않는다. 자연형 `PostPipelineV3Runner`와 전용 post_plan/image_plan은 별개다.
+
+`InfluencerReferenceRetrievalService`는 연결 계정과 설정된 composition 임베딩 모델의
+준비된 이미지 후보만 조회한다. `reference-selection.ts`는 회당 최대 12장·기본 1회·
+설정 최대 3회를 실행하고 ID·SHA 중복을 제거한다. 유효한 no_match일 때만 추가 탐색하며
+성공·후보 소진·오류에서 멈춘다. 실제 후보 픽셀을 `ReferenceSelectionAgent`에 전달하고
+Agent가 원본 1~3장과 이유를 결정한다. 게시된 동일 캐릭터의 정확한 원본 ID 또는 SHA는
+제외하되 같은 구도·장소나 같은 게시물의 다른 이미지를 일괄 제외하지 않는다.
+
+`GenerationSettingsService`가 `postAgent.reference-v1`의 설정과 원문 CAS를 소유한다.
+`GET/POST post-generation-agents/reference/config`에서 선택 횟수와 세 LLM 단계
+(`reference_select`, `image_prompt`, `caption`)의 지침·모델을 저장한다. 코드 starter는
+명시적 설치용이며 실행 fallback이 아니다. 이미지 모델은 공통 generation 저장 버전을
+설정 저장 시 복사한다. 초안 생성은 명시적 reference 선택과 완전한 설정을 요구하며
+`referenceAgentConfig` 전체를 고정한다. 계약은 [Agent 관리 API](api/admin-post-generation-agents.md)에 기록한다.
+
+이미지 프롬프트는 원본과 캐릭터 정체성 픽셀·SHA·역할·모델별 label 순서를 보존한다.
+`GenerationService.ensureReferenceDraftJobs`가 prompt revision별 컷 잡을 재사용하고
+`_referenceAgent` snapshot에 prompt/negative·참조·모델·생성 파라미터를 고정한다.
+worker는 현재 프로필로 입력을 다시 만들지 않고 snapshot을 검증하며, 저장된 외부
+provider ID로 이어서 조회한다. negative 전용 필드가 없는 모델은 해당 provider가 본문에
+병합하며 원래 prompt/negative와 전송 요청은 로그에서 구분한다. `reference-post-artifacts.ts`의 `currentReferenceOutputs`가 현재 잡 ID 집합·shotId·
+prompt revision과 단일 선택 완료 출력을 함께 검사한다. 맞는 출력만 캡션으로 넘기며
+실패 컷 재시도가 완료 컷을 새로 만들지 않는다.
+
+`CaptionWriterAgent`의 reference 입력은 생성 이미지 전체·캐릭터·원본 게시물별 캡션을
+받는다. `captionBuild.source`의 생성 집합 해시와 prompt revision, expectedOutputs/CAS가
+늦거나 변경된 결과 저장을 거부한다. 게시 직전 `DraftsRepository.claimReferencePublication`은
+캐릭터 advisory lock과 초안 행 잠금 아래 실제 게시/유효 예약의 원본 ID·SHA를 검사하고
+publication lease를 잡는다. 원본 충돌은 게시를 보류한다. 이 SQL 동시성은 구현 증거이며
+실제 DB 잠금·중복 게시 방지는 DB E2E가 보류되어 아직 검증 완료로 주장하지 않는다.
+
+`PostWorkspaceService`와 `ReferenceAgentWorkView`가 네 단계의 결과·실행·실패 컷 재시도·
+승인/게시를 연결한다. 다음 버튼은 화면 이동이다.
+`POST drafts/:id/reference/restart`는 draft.updatedAt 기반 expectedRevision과
+`target: reference_select|generation`을 받는다. 원본 재선택은 후속 artifact를 비우고,
+같은 입력 전체 재생성은 원본·prompt/negative·참조·설정을 보존한 채 prompt revision을
+올려 새 job ID 집합을 만든다. 두 경로는 기존 caption/generation artifact와 게시 승인을
+무효화한다. 활성 잡/lease·변경된 초안·게시/거절된 초안은 재시작하지 않는다. `StageExecutionRecords`는 저장된
+producerLogId 또는 requestId/type·generationJobId의 원본 입력·출력을 조회하며
+`LlmLogPayload`를 재사용한다. 원본 이미지 읽기는 연결 범위와 정확한 ID·SHA를 재검사한다.
+회귀 owner는 reference selection/prompt/runner spec, generation snapshot/worker spec,
+reference publication spec, caption-writer spec과 관련 UI 테스트다.
+
+## 기존 Agent 보관과 조회
+
+UI의 `기존 Agent` (`existing` 및 식별자가 없는 과거 초안)는 실행 대상에서 제거했다.
+`archive/existing-agent/2026-10-19/`에 원문 `.snapshot`, SHA-256 manifest와 복구 안내를
+보관하며 TypeScript/Jest/lint/build 대상에 포함하지 않는다. 혼합 파일은 자연형·이미지
+위저드가 쓰는 공유 구현을 남기고 기존 전용 worker orchestration과 runner fallback만
+제거했다. DB 행·과거 로그·산출물은 유지한다.
+
+생성 DTO/Service는 기존/암묵적 Agent 생성을 거부한다. 초안 변경과 HTTP 이미지 잡 변경,
+worker claim·lease 복구·집계·게시는 기존 초안을 처리하지 않는다. 기존 LLM 단계 지침의
+HTTP 저장/복원은 400이며 이력 조회와 공통 generation 설정은 유지한다.
+`ArchivedAgentWorkView`는 저장된 캡션·이미지·프롬프트·산출물·실행 로그만 제공하고
+자동화·단계 실행·수정·재생성·게시 컨트롤을 숨긴다. `natural-v1`과 `reference-v1`,
+독립 이미지 생성 위저드는 활성 경로를 유지한다.
+
+이번 작업에서 DB E2E·DDL 적용·실제 S3/임베딩/LLM/이미지 공급자 실행은 수행하지 않았다.
+최종 전체 검증 상태는 작업 계획의 검증 기록을 따른다.

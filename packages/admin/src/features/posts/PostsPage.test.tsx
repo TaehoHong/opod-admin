@@ -121,7 +121,7 @@ function registerListHandlers(onRequest?: (filter: string | null) => void) {
 }
 
 describe("post operations workspace", () => {
-  it("starts with the all queue, shows the six approved columns, and opens a row at its overview", async () => {
+  it("starts with the all queue, shows the six approved columns, and opens an old agent row as a read-only archive", async () => {
     let requestedFilter: string | null = null;
     registerListHandlers((filter) => {
       requestedFilter = filter;
@@ -170,9 +170,12 @@ describe("post operations workspace", () => {
       ),
     );
     expect(
-      await screen.findByRole("heading", { name: "콘텐츠" }),
+      await screen.findByRole("heading", { name: "기존 Agent 작업 기록" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("3/7")).toBeInTheDocument();
+    expect(screen.getByText("보관된 작업 · 읽기 전용")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "게시하기" }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens the focused row with Enter", async () => {
@@ -298,6 +301,9 @@ describe("post operations workspace", () => {
     let body: unknown;
     registerListHandlers();
     server.use(
+      http.get("/api/admin/v1/post-generation-agents/natural/config", () =>
+        HttpResponse.json({ current: { revision: "saved" }, starters: {} }),
+      ),
       http.post("/api/admin/v1/drafts", async ({ request }) => {
         body = await request.json();
         return HttpResponse.json(draft, { status: 201 });
@@ -330,7 +336,7 @@ describe("post operations workspace", () => {
       expect(body).toEqual({
         characterId: "character-1",
         contentType: "feed",
-        postGenerationAgent: "existing",
+        postGenerationAgent: "natural-v1",
         mode: "manual",
         sceneHint: "비 오는 날 창가",
       }),

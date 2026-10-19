@@ -1,3 +1,9 @@
+import {
+  ConfiguredReferenceAgentConfig,
+  ReferenceAgentConfig,
+  REFERENCE_AGENT_STAGES,
+} from "../post-production/reference-agent-config";
+import { randomUUID } from "node:crypto";
 import { createPostPipelineV3Concept } from "../post-production/post-pipeline-v3";
 import { JsonValue } from "../shared/utils/json";
 import { isRecord } from "../shared/utils/value-utils";
@@ -43,6 +49,9 @@ import {
   SPICYAPI_API_BASE,
   spicyApiImageModels,
 } from "../generation/providers/spicyapi-image-models";
+
+export const REFERENCE_AGENT_SETTINGS_KEY = "postAgent.reference-v1";
+export type ReferenceAgentSettings = ReferenceAgentConfig;
 
 // admin_settings 키. 프로바이더 설정이 늘면 네임스페이스만 추가한다.
 // generation.* = 이미지 생성(fal), planner.* = 기획 LLM(OpenAI-compatible).
@@ -343,6 +352,90 @@ export class GenerationSettingsService {
     };
   }
 
+  async getReferenceAgentSettings(): Promise<ReferenceAgentSettings> {
+    const [row] = await this.repository.findByKeys([
+      REFERENCE_AGENT_SETTINGS_KEY,
+    ]);
+    if (!row)
+      return { revision: null, selection: { batchSize: 12, maxAttempts: 1 } };
+    const value = JSON.parse(row.value) as ReferenceAgentSettings;
+    if (typeof value.revision !== "string" || value.selection?.batchSize !== 12)
+      throw new BadRequestException(
+        "레퍼런스 Agent 설정 형식이 유효하지 않습니다.",
+      );
+    this.validateReferenceMaxAttempts(value.selection.maxAttempts);
+    return value;
+  }
+
+  async saveReferenceAgentSettings(
+    maxAttempts: number,
+    expectedRevision: string | null,
+    fullConfig?: Pick<ConfiguredReferenceAgentConfig, "stages" | "generation">,
+  ): Promise<ReferenceAgentSettings & { revision: string }> {
+    this.validateReferenceMaxAttempts(maxAttempts);
+    if (expectedRevision !== null && typeof expectedRevision !== "string")
+      throw new BadRequestException("설정 revision을 입력하세요.");
+    const [row] = await this.repository.findByKeys([
+      REFERENCE_AGENT_SETTINGS_KEY,
+    ]);
+    const current = row
+      ? (JSON.parse(row.value) as ReferenceAgentSettings)
+      : null;
+    const value = {
+      ...(current?.stages ? { stages: current.stages } : {}),
+      ...(current?.generation ? { generation: current.generation } : {}),
+      ...fullConfig,
+      revision: randomUUID(),
+      selection: { batchSize: 12 as const, maxAttempts },
+    };
+    if (
+      (current?.revision ?? null) !== expectedRevision ||
+      !(await this.repository.compareAndSetValue(
+        REFERENCE_AGENT_SETTINGS_KEY,
+        row?.value ?? null,
+        JSON.stringify(value),
+      ))
+    )
+      throw new ConflictException(
+        "레퍼런스 Agent 설정이 변경되었습니다. 최신 설정을 불러온 후 다시 저장하세요.",
+      );
+    return value;
+  }
+
+  async requireReferenceAgentConfig(): Promise<ConfiguredReferenceAgentConfig> {
+    const config = await this.getReferenceAgentSettings();
+    if (
+      !config.revision ||
+      !config.stages ||
+      !config.generation ||
+      REFERENCE_AGENT_STAGES.some((stage) => {
+        const value = config.stages?.[stage];
+        return (
+          !value?.aiModelId ||
+          !value.provider ||
+          !value.model ||
+          !value.systemPrompt?.trim() ||
+          !isRecord(value.outputSchema)
+        );
+      }) ||
+      !config.generation.id ||
+      !config.generation.aiModelId ||
+      !config.generation.provider ||
+      !config.generation.effectiveModel
+    )
+      throw new BadRequestException(
+        "레퍼런스 Agent의 모든 단계 지침과 모델을 먼저 저장하세요.",
+      );
+    return config as ConfiguredReferenceAgentConfig;
+  }
+
+  private validateReferenceMaxAttempts(value: number): void {
+    if (!Number.isInteger(value) || value < 1 || value > 3)
+      throw new BadRequestException(
+        "최대 탐색 횟수는 1~3 사이 정수여야 합니다.",
+      );
+  }
+
   async getNaturalAgentBundle(): Promise<NaturalAgentBundle | null> {
     const [row] = await this.repository.findByKeys(["postAgent.natural-v1"]);
     return row ? validateNaturalBundle(JSON.parse(row.value)) : null;
@@ -374,25 +467,14 @@ export class GenerationSettingsService {
 
   async scheduledAgentConcept(): Promise<JsonValue | undefined> {
     const bundle = await this.getNaturalAgentBundle();
+    if (!bundle?.schedulerDefault) return undefined;
     const aiModelAssignments = await this.snapshotAiAssignments();
-    return bundle?.schedulerDefault
-      ? ({
-          ...createPostPipelineV3Concept({ source: "scheduler", mode: "auto" }),
-          postGenerationAgent: "natural-v1",
-          naturalAgentConfig: bundle,
-          ...(aiModelAssignments ? { aiModelAssignments } : {}),
-        } as unknown as JsonValue)
-      : aiModelAssignments
-        ? ({
-            ...((await this.resolvePipelineV3()).enabled
-              ? createPostPipelineV3Concept({
-                  source: "scheduler",
-                  mode: "auto",
-                })
-              : { source: "scheduler" }),
-            aiModelAssignments,
-          } as unknown as JsonValue)
-        : undefined;
+    return {
+      ...createPostPipelineV3Concept({ source: "scheduler", mode: "auto" }),
+      postGenerationAgent: "natural-v1",
+      naturalAgentConfig: bundle,
+      ...(aiModelAssignments ? { aiModelAssignments } : {}),
+    } as unknown as JsonValue;
   }
 
   async requireNaturalAgentBundle(): Promise<NaturalAgentBundle> {

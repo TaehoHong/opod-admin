@@ -1692,3 +1692,150 @@ describe("GenerationWorkerService", () => {
     );
   });
 });
+
+describe("frozen reference image execution", () => {
+  const snapshot = () => ({
+    promptRevision: "2",
+    shotId: "shot-a",
+    prompt: "Image 1 composition; Image 2 same person",
+    negativePrompt: "no blur",
+    generation: {
+      id: "17",
+      revision: 1,
+      aiModelId: "4",
+      provider: "spicyapi",
+      effectiveModel: "alibaba/qwen-image-3.0-pro/edit",
+    },
+    generationParams: { aspect_ratio: "4:5" },
+    references: [
+      {
+        id: "30000000001",
+        role: "source",
+        inputOrder: 1,
+        promptLabel: "Image 1",
+        sha256: createHash("sha256").update(imageBytes).digest("hex"),
+        media: { url: "", storageKey: "sources/a.png" },
+      },
+      {
+        id: "03cbf3d9-dca6-4bc8-b2f4-416dc3c98e9f",
+        role: "character_identity",
+        inputOrder: 2,
+        promptLabel: "Image 2",
+        sha256: createHash("sha256").update(imageBytes).digest("hex"),
+        media: { url: "", storageKey: "identities/a.png" },
+      },
+    ],
+  });
+
+  function setup(metadata = snapshot(), changedBytes = false) {
+    const repository = repositoryFake();
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        draftId: "draft-a",
+        prompt: "already merged provider prompt",
+        paramsJson: {
+          _referenceAgent: metadata,
+          _postAgent: { promptId: "17" },
+        },
+      }),
+    );
+    const provider = providerMock([
+      { status: "completed", images: [{ url: "https://output.test/result" }] },
+    ]);
+    const resolve = jest.fn().mockResolvedValue(bothProviders(provider));
+    const logs = {
+      start: jest.fn().mockResolvedValue("log-1"),
+      finish: jest.fn(),
+    };
+    const service = new GenerationWorkerService(
+      repository as never,
+      resolve,
+      jest.fn().mockResolvedValue({
+        url: "https://stored.test/a.png",
+        storageKey: "outputs/a.png",
+      }),
+      async () => true,
+      baseConfig,
+      async () => {},
+      async () => imageBytes,
+      async (key) => `https://signed.test/${key}`,
+      logs as never,
+      async () => ({ feed: "1:1", story: "1:1", reel: "1:1" }),
+      async () => ({
+        bytes: changedBytes ? Buffer.from("changed") : imageBytes,
+        contentType: "image/png",
+      }),
+    );
+    return { repository, provider, resolve, service, logs };
+  }
+
+  it("uses frozen source/identity order, hash and ratio instead of current character settings", async () => {
+    const { repository, provider, resolve, service } = setup();
+    await service.runJobNow("job-1");
+    await service.onModuleDestroy();
+    expect(provider.submit).toHaveBeenCalledTimes(1);
+    expect(provider.submit.mock.calls[0][0]).toMatchObject({
+      prompt: snapshot().prompt,
+      negativePrompt: "no blur",
+      candidateCount: 1,
+      extraParams: { aspect_ratio: "4:5" },
+      references: [
+        {
+          id: "30000000001",
+          role: "composition",
+          url: "https://signed.test/sources/a.png",
+        },
+        {
+          id: "03cbf3d9-dca6-4bc8-b2f4-416dc3c98e9f",
+          role: "identity",
+          primary: true,
+          url: "https://signed.test/identities/a.png",
+        },
+      ],
+    });
+    expect(resolve).toHaveBeenCalledWith(
+      "17",
+      undefined,
+      snapshot().generation,
+    );
+    expect(repository.persistSuccess).toHaveBeenCalledTimes(1);
+    expect(
+      repository.recordProviderSubmission.mock.calls[0][0].paramsJson
+        ._referenceAgent.prompt,
+    ).toBe(snapshot().prompt);
+  });
+
+  it("resumes an existing provider request without another paid submission", async () => {
+    const { repository, provider, service } = setup();
+    repository.findForProcessing.mockResolvedValue(
+      claimedJob({
+        draftId: "draft-a",
+        provider: provider.name,
+        providerRequestId: "existing-request",
+        paramsJson: {
+          _referenceAgent: snapshot(),
+          _postAgent: { promptId: "17" },
+          _shot: { execution: { outputAspectRatio: 0.8 } },
+        },
+      }),
+    );
+    await service.runJobNow("job-1");
+    await service.onModuleDestroy();
+    expect(provider.submit).not.toHaveBeenCalled();
+    expect(provider.poll).toHaveBeenCalledWith("existing-request", {
+      outputAspectRatio: 0.8,
+    });
+    expect(repository.persistSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails changed source bytes before any paid provider submission", async () => {
+    const { repository, provider, service } = setup(snapshot(), true);
+    await service.runJobNow("job-1");
+    await service.onModuleDestroy();
+    expect(provider.submit).not.toHaveBeenCalled();
+    expect(repository.markFailed).toHaveBeenCalledWith(
+      "job-1",
+      expect.stringContaining("SHA256 mismatch"),
+    );
+  });
+});

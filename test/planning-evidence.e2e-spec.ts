@@ -1,3 +1,4 @@
+import { naturalAgentBundle } from "./natural-agent-fixture";
 import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { randomUUID } from "node:crypto";
@@ -66,6 +67,8 @@ describe("planning response evidence persistence", () => {
         status: "generating",
         attemptCount: 1,
         conceptJson: {
+          postGenerationAgent: "natural-v1",
+          naturalAgentConfig: naturalAgentBundle(),
           mode: "auto",
           pipelineVersion: "post-pipeline-v4",
           pipeline: {

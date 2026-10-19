@@ -216,7 +216,7 @@ export class DraftWorkerRepository {
     const result = await this.database.client.execute<PublishDraft>(sql`
       update opod.post_drafts d
       set lease_expires_at = now() + make_interval(secs => ${leaseSeconds})
-      where d.id = ${draftId}::uuid and d.draft_type = 'post'
+      where d.id = ${draftId}::uuid and d.draft_type = 'post' and d.concept_json->>'postGenerationAgent' = 'natural-v1'
         and (d.status = 'approved' or (d.status = 'planned' and d.concept_json#>>'{pipeline,stage}' = 'publish' and d.concept_json#>>'{pipeline,state}' = 'pending'))
         and (d.lease_expires_at is null or d.lease_expires_at < now())
         and exists (select 1 from opod.characters c where c.id = d.character_id and c.status = 'active')
@@ -578,13 +578,13 @@ export class DraftWorkerRepository {
     const requeued = await this.database.client.execute<{ id: string }>(sql`
       update opod.post_drafts set status = 'planned', lease_expires_at = null,
         concept_json = jsonb_set(concept_json, '{pipeline,state}', '"pending"'::jsonb), updated_at = now()
-      where status = 'generating' and lease_expires_at < now() and attempt_count < ${maxAttempts}
+      where concept_json->>'postGenerationAgent' = 'natural-v1' and status = 'generating' and lease_expires_at < now() and attempt_count < ${maxAttempts}
         and concept_json->>'pipelineVersion' in (${POST_PIPELINE_V3}, ${POST_PIPELINE_V4}) returning id
     `);
     const failed = await this.database.client.execute<{ id: string }>(sql`
       update opod.post_drafts set status = 'failed', lease_expires_at = null, error_message = 'V3 stage lease expired',
         concept_json = jsonb_set(jsonb_set(concept_json, '{pipeline,state}', '"failed"'::jsonb), '{pipeline,reasonCodes}', '["lease_expired"]'::jsonb), updated_at = now()
-      where status = 'generating' and lease_expires_at < now() and attempt_count >= ${maxAttempts}
+      where concept_json->>'postGenerationAgent' = 'natural-v1' and status = 'generating' and lease_expires_at < now() and attempt_count >= ${maxAttempts}
         and concept_json->>'pipelineVersion' in (${POST_PIPELINE_V3}, ${POST_PIPELINE_V4}) returning id
     `);
     return { requeued: requeued.rows.length, failed: failed.rows.length };
@@ -594,7 +594,7 @@ export class DraftWorkerRepository {
     const result = await this.database.client.execute<{ id: string }>(sql`
       update opod.post_drafts set status = 'generating', lease_expires_at = now() + make_interval(secs => ${leaseSeconds}), attempt_count = attempt_count + 1, updated_at = now()
       where id = (select d.id from opod.post_drafts d join opod.characters c on c.id = d.character_id and c.status = 'active'
-        where d.status = 'planned' and d.draft_type = 'post' and (d.concept_json->>'mode') is distinct from 'manual'
+        where d.status = 'planned' and d.draft_type = 'post' and d.concept_json->>'postGenerationAgent' = 'natural-v1' and (d.concept_json->>'mode') is distinct from 'manual'
           and (d.concept_json->>'pipelineVersion' is null or d.concept_json->>'pipelineVersion' not in (${POST_PIPELINE_V3}, ${POST_PIPELINE_V4}))
         order by d.created_at, d.id limit 1 for update of d skip locked) returning id
     `);
@@ -606,7 +606,7 @@ export class DraftWorkerRepository {
       update opod.post_drafts set status = 'generating', lease_expires_at = now() + make_interval(secs => ${leaseSeconds}), attempt_count = attempt_count + 1,
         concept_json = jsonb_set(concept_json #- '{pipeline,failure}', '{pipeline,state}', '"running"'::jsonb), updated_at = now()
       where id = (select d.id from opod.post_drafts d join opod.characters c on c.id = d.character_id and c.status = 'active'
-        where d.status = 'planned' and d.draft_type = 'post' and d.concept_json->>'pipelineVersion' in (${POST_PIPELINE_V3}, ${POST_PIPELINE_V4})
+        where d.status = 'planned' and d.draft_type = 'post' and d.concept_json->>'postGenerationAgent' = 'natural-v1' and d.concept_json->>'pipelineVersion' in (${POST_PIPELINE_V3}, ${POST_PIPELINE_V4})
           and d.concept_json#>>'{pipeline,state}' = 'pending' and d.concept_json#>>'{pipeline,stage}' in ('post_plan','image_plan','image_prompt','caption')
           and (d.concept_json->>'mode') is distinct from 'manual'
         order by d.created_at, d.id limit 1 for update of d skip locked) returning id
@@ -623,7 +623,7 @@ export class DraftWorkerRepository {
         attempt_count = case when status = 'failed' then 1 else attempt_count + 1 end, error_message = null,
         concept_json = jsonb_set(jsonb_set(concept_json #- '{pipeline,failure}', '{pipeline,stage}',
           case when concept_json#>>'{pipeline,stage}' = 'publish' then '"caption"'::jsonb else concept_json#>'{pipeline,stage}' end), '{pipeline,state}', '"running"'::jsonb), updated_at = now()
-      where id = ${draftId}::uuid and status in ('planned','failed') and draft_type = 'post'
+      where id = ${draftId}::uuid and concept_json->>'postGenerationAgent' = 'natural-v1' and status in ('planned','failed') and draft_type = 'post'
         and concept_json->>'pipelineVersion' in (${POST_PIPELINE_V3}, ${POST_PIPELINE_V4}) and concept_json#>>'{pipeline,state}' <> 'running'
         and (concept_json#>>'{pipeline,stage}' in ('post_plan','image_plan','image_prompt','caption') or (concept_json#>>'{pipeline,stage}' = 'publish' and concept_json->'captionBuild' is not null))
       returning id
@@ -860,7 +860,7 @@ export class DraftWorkerRepository {
 
   async findGeneratingDrafts(take: number): Promise<AggregateDraft[]> {
     const result = await this.database.client.execute<{ id: string }>(
-      sql`select d.id from opod.post_drafts d where d.status in ('generating','regenerating') and d.lease_expires_at is null and (d.concept_json->>'mode') is distinct from 'manual' order by d.updated_at, d.id limit ${take}`,
+      sql`select d.id from opod.post_drafts d where d.concept_json->>'postGenerationAgent' = 'natural-v1' and d.status in ('generating','regenerating') and d.lease_expires_at is null and (d.concept_json->>'mode') is distinct from 'manual' order by d.updated_at, d.id limit ${take}`,
     );
     return Promise.all(
       result.rows.map(async ({ id }) => (await this.findAggregateDraft(id))!),
@@ -916,7 +916,7 @@ export class DraftWorkerRepository {
     const result = await this.database.client.execute<PublishDraft>(sql`
       with candidates as (
         select d.id from opod.post_drafts d join opod.characters c on c.id = d.character_id and c.status = 'active'
-        where d.draft_type = 'post' and (d.status = 'approved' or (d.status = 'planned' and d.concept_json#>>'{pipeline,stage}' = 'publish' and d.concept_json#>>'{pipeline,state}' = 'pending'))
+        where d.draft_type = 'post' and d.concept_json->>'postGenerationAgent' = 'natural-v1' and (d.status = 'approved' or (d.status = 'planned' and d.concept_json#>>'{pipeline,stage}' = 'publish' and d.concept_json#>>'{pipeline,state}' = 'pending'))
           and (d.scheduled_at is null or d.scheduled_at <= ${now}) and (d.concept_json->>'mode') is distinct from 'manual'
           and (d.lease_expires_at is null or d.lease_expires_at < now()) and (d.error_message is null or d.updated_at <= ${retryBefore})
         order by (d.error_message is not null), d.scheduled_at asc nulls first, d.id limit ${take} for update of d skip locked)
@@ -1020,6 +1020,7 @@ export class DraftWorkerRepository {
     hashtags: string[];
     leaseExpiresAt?: Date | null;
     memoryContent?: string;
+    referencePublication?: { expectedConceptJson: Record<string, unknown> };
     memories?: { type: string; content: string; reason: string }[];
     media: {
       originalMediaId: string;
@@ -1027,6 +1028,11 @@ export class DraftWorkerRepository {
     }[];
   }): Promise<void> {
     await this.database.client.transaction(async (tx) => {
+      if (input.referencePublication) {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${"reference-publish:" + input.characterId}, 0))`,
+        );
+      }
       const transitioned = await tx
         .update(postDrafts)
         .set({ status: "published", errorMessage: null, leaseExpiresAt: null })
@@ -1034,6 +1040,17 @@ export class DraftWorkerRepository {
           and(
             eq(postDrafts.id, input.draftId),
             publishableCondition,
+            ...(input.referencePublication
+              ? [
+                  eq(postDrafts.status, "approved"),
+                  sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+                  eq(
+                    postDrafts.conceptJson,
+                    input.referencePublication.expectedConceptJson,
+                  ),
+                  sql`${postDrafts.leaseExpiresAt} > clock_timestamp()`,
+                ]
+              : []),
             input.leaseExpiresAt
               ? eq(postDrafts.leaseExpiresAt, input.leaseExpiresAt)
               : undefined,

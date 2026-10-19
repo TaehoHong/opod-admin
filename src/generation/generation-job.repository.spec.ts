@@ -51,3 +51,54 @@ describe("GenerationJobRepository", () => {
     ]);
   });
 });
+
+it("checks accepted reference build IDs and prompt revision before auto claim", async () => {
+  const mock = createDrizzleMock([{ rows: [] }]);
+  await new GenerationJobRepository(
+    mock.database as never,
+  ).claimNextQueuedImageJob(60);
+  const query = sqlText(mock.client.execute.mock.calls[0][0]);
+  expect(query).toContain("'generationBuild'->'jobIds'");
+  expect(query).toContain("'_referenceAgent'->>'promptRevision'");
+});
+
+it.each(["next", "specific"])(
+  "does not claim a %s reference job while reset owns its execution lock",
+  async (kind) => {
+    const mock = createDrizzleMock([
+      { rows: [{ id: "job-1" }] },
+      { rows: [{ locked: false }] },
+    ]);
+    const repository = new GenerationJobRepository(mock.database as never);
+    expect(
+      await (kind === "next"
+        ? repository.claimNextQueuedImageJob(60)
+        : repository.claimQueuedImageJob("job-1", 60)),
+    ).toBeUndefined();
+    expect(mock.client.update).not.toHaveBeenCalled();
+    expect(mock.client.transaction).toHaveBeenCalledTimes(1);
+    expect(sqlText(mock.client.execute.mock.calls[1][0])).toContain(
+      "pg_try_advisory_xact_lock",
+    );
+    expect(sqlText(mock.client.execute.mock.calls[1][0])).toContain(
+      "reference-execute:",
+    );
+  },
+);
+
+it("acquires the reset coordination lock before the claim update obtains its fresh snapshot", async () => {
+  const mock = createDrizzleMock([
+    { rows: [{ id: "job-1" }] },
+    { rows: [{ locked: true }] },
+    [{ id: "job-1" }],
+  ]);
+  expect(
+    await new GenerationJobRepository(
+      mock.database as never,
+    ).claimNextQueuedImageJob(60),
+  ).toBe("job-1");
+  expect(mock.client.execute.mock.invocationCallOrder[1]).toBeLessThan(
+    mock.client.update.mock.invocationCallOrder[0],
+  );
+  expect(mock.operations[0].set).toMatchObject({ status: "running" });
+});

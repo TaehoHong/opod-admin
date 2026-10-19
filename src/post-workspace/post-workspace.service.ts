@@ -27,6 +27,8 @@ export const POST_WORK_FILTERS = [
 
 export type PostWorkFilter = (typeof POST_WORK_FILTERS)[number];
 export type PostWorkStage =
+  | "reference_select"
+  | "image_prompt"
   | "brief"
   | "plan"
   | "post_plan"
@@ -212,6 +214,7 @@ export type PostWorkItem = {
   contentType: string;
   caption: string;
   thumbnailUrl?: string;
+  postGenerationAgent?: "existing" | "natural-v1" | "reference-v1";
   currentStage: PostWorkStage;
   stageIndex: number;
   operationalStatus: OperationalStatus;
@@ -269,6 +272,13 @@ const V4_STAGES: PostWorkStage[] = [
   "caption",
   "publish",
   "memory",
+];
+
+const REFERENCE_STAGES: PostWorkStage[] = [
+  "reference_select",
+  "image_prompt",
+  "generation",
+  "caption",
 ];
 
 @Injectable()
@@ -402,7 +412,13 @@ function matchesFilter(item: PostWorkItem, filter: PostWorkFilter): boolean {
   if (filter === "publish_waiting") {
     return item.operationalStatus === "publish_waiting";
   }
-  if (filter === "published") return item.currentStage === "memory";
+  if (filter === "published")
+    return (
+      item.currentStage === "memory" ||
+      (item.postGenerationAgent === "reference-v1" &&
+        item.operationalStatus === "completed" &&
+        item.postId !== undefined)
+    );
   return item.operationalStatus === "failed";
 }
 
@@ -411,12 +427,26 @@ function toDraftWorkItem(
   includeAgentInput = false,
 ): PostWorkItem {
   const concept = record(draft.conceptJson);
+  const postGenerationAgent = recognizedAgent(concept.postGenerationAgent);
   const mode = concept.mode === "manual" ? "manual" : "auto";
   const source = sourceOf(concept.source);
-  const latestJobs = latestJobsPerShot(draft);
+  const acceptedIds = record(concept.generationBuild).jobIds;
+  const latestJobs = latestJobsPerShot(
+    postGenerationAgent === "reference-v1"
+      ? {
+          ...draft,
+          jobs: draft.jobs.filter(
+            (job) => Array.isArray(acceptedIds) && acceptedIds.includes(job.id),
+          ),
+        }
+      : draft,
+  );
   const currentStage = stageForDraft(draft, latestJobs);
   const operational = statusForDraft(draft, latestJobs, currentStage, mode);
-  const pipelineV3 = v3ReadModel(concept, draft, latestJobs, includeAgentInput);
+  const pipelineV3 =
+    postGenerationAgent === "reference-v1"
+      ? undefined
+      : v3ReadModel(concept, draft, latestJobs, includeAgentInput);
   const publishedThumbnail =
     draft.publishedPost?.postMedia[0]?.media.url ?? undefined;
   const generatedThumbnail = latestJobs
@@ -435,13 +465,16 @@ function toDraftWorkItem(
     ...(publishedThumbnail || generatedThumbnail
       ? { thumbnailUrl: publishedThumbnail ?? generatedThumbnail }
       : {}),
+    ...(postGenerationAgent ? { postGenerationAgent } : {}),
     currentStage,
     stageIndex:
-      (pipelineV3
-        ? pipelineV3.version === "post-pipeline-v4"
-          ? V4_STAGES
-          : V3_STAGES
-        : STAGES
+      (postGenerationAgent === "reference-v1"
+        ? REFERENCE_STAGES
+        : pipelineV3
+          ? pipelineV3.version === "post-pipeline-v4"
+            ? V4_STAGES
+            : V3_STAGES
+          : STAGES
       ).indexOf(currentStage) + 1,
     operationalStatus: operational.status,
     statusDetail: operational.detail,
@@ -492,12 +525,27 @@ function stageForDraft(
   draft: PostWorkDraft,
   jobs: PostWorkDraft["jobs"],
 ): PostWorkStage {
+  const concept = record(draft.conceptJson);
+  if (concept.postGenerationAgent === "reference-v1") {
+    if (draft.status === "regenerating") return "generation";
+    if (
+      ["published", "approved", "needs_review", "rejected"].includes(
+        draft.status,
+      )
+    )
+      return "caption";
+    const stage = record(concept.pipeline).stage;
+    return REFERENCE_STAGES.includes(stage as PostWorkStage)
+      ? (stage as PostWorkStage)
+      : stage === "publish" || stage === "memory"
+        ? "caption"
+        : "reference_select";
+  }
   if (draft.status === "published") return "memory";
   if (draft.status === "approved") return "publish";
   if (draft.status === "needs_review" || draft.status === "rejected") {
     return "review";
   }
-  const concept = record(draft.conceptJson);
   if (isPostPipelineV3(concept)) {
     // V4 컷 재생성 중(regenerating)은 conceptJson stage가 caption/publish여도
     // 실제로는 ⑤가 다시 도는 중이다.
@@ -542,7 +590,13 @@ function statusForDraft(
     return { status: "failed", detail: "실패 확인 필요" };
   }
   if (draft.status === "needs_review") {
-    return { status: "needs_action", detail: "검수 필요" };
+    return {
+      status: "needs_action",
+      detail:
+        record(draft.conceptJson).postGenerationAgent === "reference-v1"
+          ? "캡션 확인 필요"
+          : "검수 필요",
+    };
   }
   if (draft.status === "approved") {
     return { status: "publish_waiting", detail: "게시 대기" };
@@ -554,11 +608,16 @@ function statusForDraft(
     return { status: "completed", detail: "반려됨" };
   }
   const concept = record(draft.conceptJson);
-  if (isPostPipelineV3(concept)) {
+  if (
+    isPostPipelineV3(concept) ||
+    concept.postGenerationAgent === "reference-v1"
+  ) {
     const pipeline = record(concept.pipeline);
     const state =
       typeof pipeline.state === "string" ? pipeline.state : "pending";
     if (
+      (concept.postGenerationAgent === "reference-v1" &&
+        state === "no_match") ||
       [
         "needs_input",
         "conflict",
@@ -573,7 +632,10 @@ function statusForDraft(
         detail:
           typeof failure.problem === "string" && failure.problem
             ? failure.problem
-            : v3StateCopy(state).detail,
+            : concept.postGenerationAgent === "reference-v1" &&
+                state === "no_match"
+              ? "선택 가능한 참조 이미지가 없습니다"
+              : v3StateCopy(state).detail,
       };
     }
     if (state === "failed")
@@ -589,6 +651,8 @@ function statusForDraft(
     return { status: "agent_running", detail: "Agent 진행 중" };
   }
   const detail: Record<PostWorkStage, string> = {
+    reference_select: "참조 이미지 선택 필요",
+    image_prompt: "프롬프트 생성 필요",
     brief: "브리프 작성 필요",
     plan: "기획 실행 필요",
     post_plan: "게시글 기획 실행 필요",
@@ -1210,3 +1274,11 @@ function parseCursor(value?: string): WorkCursor | undefined {
 }
 import type { PostProduction } from "../post-production/post-planner";
 import type { VisualDetails } from "../post-production/image-planner";
+
+function recognizedAgent(value: unknown): PostWorkItem["postGenerationAgent"] {
+  return value === "existing" ||
+    value === "natural-v1" ||
+    value === "reference-v1"
+    ? value
+    : undefined;
+}

@@ -257,7 +257,7 @@ describe("SpicyAPI image provider", () => {
     },
   );
 
-  it("sends up to ten Seedream references and rejects an eleventh or a negative prompt before any paid call", async () => {
+  it("sends up to ten Seedream references and rejects an eleventh before any paid call", async () => {
     const fetchFn = jest.fn().mockResolvedValue(accepted());
     const provider = createSpicyApiImageProviders(seedream, fetchFn).edit;
     const ten = Array.from({ length: 10 }, (_, index) =>
@@ -276,13 +276,21 @@ describe("SpicyAPI image provider", () => {
       name: "ImageGenerationRequestError",
       permanent: true,
     });
-    await expect(
-      provider.submit(request({ negativePrompt: "blurry" })),
-    ).rejects.toMatchObject({
-      name: "ImageGenerationRequestError",
-      permanent: true,
-    });
     expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("merges Seedream exclusions once in the prompt without a native negative field", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(accepted());
+    const provider = createSpicyApiImageProviders(seedream, fetchFn).edit;
+    const submitted = await provider.submit(
+      request({ negativePrompt: " blurry, blurry " }),
+    );
+    const body = JSON.parse(fetchFn.mock.calls[0][1].body);
+    expect(body.input.prompt).toBe(
+      "Image 1 woman by a window Do not include: blurry.",
+    );
+    expect(body.input).not.toHaveProperty("negative_prompt");
+    expect(submitted.sentPrompt).toBe(body.input.prompt);
   });
 
   it.each([

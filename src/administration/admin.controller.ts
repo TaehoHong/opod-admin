@@ -16,6 +16,7 @@ import { GenerationWorkerService } from "../generation/generation-worker.service
 import { AdminJwtGuard, AdminRequest } from "../auth/admin-jwt.guard";
 import { AdminService } from "./admin.service";
 import { GenerationService } from "../generation/generation.service";
+import { DraftsService } from "../drafts/drafts.service";
 import { MediaService } from "../media/media.service";
 import { CompleteGenerationJobDto } from "./dto/complete-generation-job.dto";
 import { CreateImageGenerationDraftDto } from "./dto/create-image-generation-draft.dto";
@@ -43,7 +44,14 @@ export class AdminController {
     private readonly generationService: GenerationService,
     private readonly mediaService: MediaService,
     private readonly generationWorker: GenerationWorkerService,
+    private readonly draftsService: DraftsService,
   ) {}
+
+  private async assertActiveGenerationAgent(jobId: string): Promise<void> {
+    const job = await this.generationService.getJob(jobId);
+    if (job.draftId)
+      await this.draftsService.assertGenerationJobMutable(job.draftId, jobId);
+  }
 
   @Get("posts")
   listPosts(
@@ -256,65 +264,87 @@ export class AdminController {
   }
 
   @Patch("generation/jobs/:id/draft")
-  updateImageGenerationDraft(
+  async updateImageGenerationDraft(
     @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: UpdateImageGenerationDraftDto,
   ) {
+    await this.assertActiveGenerationAgent(jobId);
     return this.generationService.updateImageDraft(jobId, body);
   }
 
   @Post("generation/jobs/:id/confirm")
-  confirmImageGenerationDraft(@Param("id", ParseUUIDPipe) jobId: string) {
+  async confirmImageGenerationDraft(@Param("id", ParseUUIDPipe) jobId: string) {
+    await this.assertActiveGenerationAgent(jobId);
     return this.generationService.confirmImageDraft(jobId);
   }
 
   @Post("generation/jobs/:id/select-output")
-  selectGenerationOutput(
+  async selectGenerationOutput(
     @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: SelectGenerationOutputDto,
   ) {
+    await this.assertActiveGenerationAgent(jobId);
     return this.generationService.selectOutput(jobId, body.mediaId);
   }
 
   @Post("generation/jobs/:id/regenerate")
-  regenerateImageJob(@Param("id", ParseUUIDPipe) jobId: string) {
+  async regenerateImageJob(@Param("id", ParseUUIDPipe) jobId: string) {
+    await this.assertActiveGenerationAgent(jobId);
     return this.adminService.regenerateImageJob(jobId);
   }
 
   @Post("generation/jobs/:id/start")
-  startGenerationJob(@Param("id", ParseUUIDPipe) jobId: string) {
+  async startGenerationJob(@Param("id", ParseUUIDPipe) jobId: string) {
+    await this.assertActiveGenerationAgent(jobId);
     return this.adminService.startGenerationJob(jobId);
   }
 
   @Post("generation/jobs/:id/run")
-  runGenerationJob(
+  async runGenerationJob(
     @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: RunGenerationJobDto,
   ) {
+    await this.assertActiveGenerationAgent(jobId);
     return this.adminService.runGenerationJob({ jobId, ...body });
   }
 
   @Post("generation/jobs/:id/retry")
-  retryGenerationJob(
+  async retryGenerationJob(
     @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: RetryGenerationJobDto,
   ) {
+    await this.assertActiveGenerationAgent(jobId);
+    const job = await this.generationService.getJob(jobId);
+    if (
+      job.draftId &&
+      (await this.draftsService.isReferenceDraft(job.draftId))
+    ) {
+      const retried = await this.draftsService.retryReferenceGenerationJob(
+        job.draftId,
+        jobId,
+        body.reason,
+      );
+      await this.generationWorker.runJobNow(jobId);
+      return retried;
+    }
     return this.adminService.retryGenerationJob({ jobId, ...body });
   }
 
   @Post("generation/jobs/:id/complete")
-  completeGenerationJob(
+  async completeGenerationJob(
     @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: CompleteGenerationJobDto,
   ) {
+    await this.assertActiveGenerationAgent(jobId);
     return this.adminService.completeGenerationJob({ jobId, ...body });
   }
 
   @Post("generation/jobs/:id/fail")
-  failGenerationJob(
+  async failGenerationJob(
     @Param("id", ParseUUIDPipe) jobId: string,
     @Body() body: FailGenerationJobDto,
   ) {
+    await this.assertActiveGenerationAgent(jobId);
     return this.adminService.failGenerationJob({ jobId, ...body });
   }
 
@@ -322,6 +352,7 @@ export class AdminController {
   // 처리한다. WORKER_ENABLED와 무관하게 동작한다 (리허설/즉시 실행용).
   @Post("generation/worker/run")
   async runGenerationWorker(@Body() body: RunGenerationWorkerDto) {
+    if (body.jobId) await this.assertActiveGenerationAgent(body.jobId);
     const result = await this.generationWorker.runJobNow(body.jobId);
     if (body.jobId && !result.jobId) {
       throw new BadRequestException(

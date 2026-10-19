@@ -364,6 +364,18 @@ export class CharacterRepository {
     return row;
   }
 
+  findReferenceCaptionCharacter(characterId: string) {
+    return this.database.client
+      .select({
+        ...characterFields,
+        contentLanguage: characters.contentLanguage,
+      })
+      .from(characters)
+      .where(eq(characters.id, characterId))
+      .limit(1)
+      .then(([row]) => row ?? null);
+  }
+
   findDetail(characterId: string): Promise<CharacterListRow | null> {
     return this.database.client
       .select(characterListFields)

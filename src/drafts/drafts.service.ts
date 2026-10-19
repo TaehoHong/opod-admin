@@ -1,3 +1,5 @@
+import { currentReferenceOutputs } from "../post-production/reference-post-artifacts";
+import { generationSetHash } from "../post-production/post-pipeline-v3";
 import {
   NATURAL_AGENT,
   isNaturalAgent,
@@ -339,6 +341,200 @@ export class DraftsService {
     private readonly generation: GenerationService,
   ) {}
 
+  async restartReferenceDraft(input: {
+    draftId: string;
+    target: "reference_select" | "generation";
+    expectedRevision: string;
+  }) {
+    if (
+      !["reference_select", "generation"].includes(input.target) ||
+      !Number.isFinite(Date.parse(input.expectedRevision))
+    )
+      throw new BadRequestException("Invalid reference restart request");
+    const { draft, jobs } = await this.getReferenceDraftState(input.draftId);
+    if (
+      ["published", "rejected"].includes(draft.status) ||
+      (draft.leaseExpiresAt && draft.leaseExpiresAt.getTime() > Date.now())
+    )
+      throw new BadRequestException(
+        "Reference draft is active or no longer editable",
+      );
+    if (
+      draft.updatedAt.toISOString() !==
+      new Date(input.expectedRevision).toISOString()
+    )
+      throw new BadRequestException(
+        "Reference draft changed; reload before restarting",
+      );
+    const concept = this.record(draft.conceptJson);
+    const acceptedIds = this.record(concept.generationBuild).jobIds;
+    if (
+      Array.isArray(acceptedIds) &&
+      jobs.some(
+        (job) =>
+          acceptedIds.includes(job.id) &&
+          ["queued", "running"].includes(job.status),
+      )
+    )
+      throw new BadRequestException("Reference generation is still active");
+    const revision =
+      Math.max(
+        typeof concept.referenceRevision === "number"
+          ? concept.referenceRevision
+          : 1,
+        typeof this.record(concept.promptBuild).revision === "number"
+          ? (this.record(concept.promptBuild).revision as number)
+          : 1,
+      ) + 1;
+    const updated: Record<string, unknown> = {
+      ...concept,
+      referenceRevision: revision,
+    };
+    if (input.target === "reference_select") {
+      delete updated.referenceSelection;
+      delete updated.promptBuild;
+    } else {
+      const prompt = this.record(concept.promptBuild);
+      if (
+        this.record(prompt.output).status !== "ready" ||
+        !Array.isArray(this.record(prompt.input).shots) ||
+        !this.record(concept.referenceSelection).shots
+      )
+        throw new BadRequestException(
+          "Saved reference generation input is required",
+        );
+      updated.promptBuild = { ...prompt, revision };
+    }
+    delete updated.generationBuild;
+    delete updated.captionBuild;
+    updated.pipeline = {
+      ...this.record(concept.pipeline),
+      stage: input.target,
+      state: "pending",
+      blockers: [],
+    };
+    delete (updated.pipeline as Record<string, unknown>).failure;
+    const saved = await this.repository.restartReferenceDraft({
+      ...input,
+      expectedConceptJson: concept,
+      conceptJson: updated,
+    });
+    if (!saved)
+      throw new BadRequestException(
+        "Reference draft changed or generation is active; reload before restarting",
+      );
+    return this.getDraft(input.draftId);
+  }
+
+  listReferencePublicationsDue(now: Date, limit: number, retryBefore?: Date) {
+    return this.repository.listReferencePublicationsDue(
+      now,
+      limit,
+      retryBefore,
+    );
+  }
+
+  releaseReferencePublication(
+    draftId: string,
+    leaseExpiresAt: Date,
+    message: string,
+  ) {
+    return this.repository.releaseReferencePublication(
+      draftId,
+      leaseExpiresAt,
+      message,
+    );
+  }
+
+  async claimReferencePublication(draftId: string, leaseSeconds: number) {
+    const { draft, jobs } = await this.getReferenceDraftState(draftId);
+    const concept = this.record(draft.conceptJson);
+    const outputs = currentReferenceOutputs(concept, jobs);
+    if (!outputs || draft.status !== "approved" || !draft.caption.trim())
+      return null;
+    const jobIds = this.record(concept.generationBuild).jobIds as string[];
+    const expectedOutputs = outputs.map((output, index) => ({
+      ...output,
+      jobId: jobIds[index],
+    }));
+    const caption = this.record(concept.captionBuild);
+    const source = this.record(caption.source);
+    if (
+      source.generationSetHash !== generationSetHash(expectedOutputs) ||
+      source.promptBuildRevision !== this.record(concept.promptBuild).revision
+    )
+      throw new BadRequestException("Reference caption is stale");
+    try {
+      return await this.repository.claimReferencePublication({
+        draftId,
+        leaseSeconds,
+        expectedConceptJson: concept,
+        expectedOutputs,
+      });
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        error.message !== "reference_source_already_published_or_reserved"
+      )
+        throw error;
+      const message =
+        "동일한 원본을 사용한 게시물이 있거나 게시 중입니다. 원본을 다시 선택하세요.";
+      await this.repository.pauseReferencePublicationConflict({
+        draftId,
+        expectedConceptJson: concept,
+        message,
+      });
+      throw new BadRequestException(message);
+    }
+  }
+
+  async getReferenceDraftState(draftId: string) {
+    const draft = await this.repository.findDraft(draftId);
+    if (
+      !draft ||
+      this.record(draft.conceptJson).postGenerationAgent !== "reference-v1"
+    )
+      throw new BadRequestException("Reference draft not found");
+    return { draft, jobs: await this.repository.findDraftJobs(draftId) };
+  }
+
+  getPublishedReferenceSources(characterId: string) {
+    return this.repository.findPublishedReferenceSources(characterId);
+  }
+
+  async restoreReferenceGeneration(
+    draftId: string,
+    expectedConceptJson: unknown,
+  ): Promise<boolean> {
+    return this.repository.restoreReferenceGeneration(
+      draftId,
+      expectedConceptJson,
+    );
+  }
+
+  async retryReferenceGenerationJob(
+    draftId: string,
+    jobId: string,
+    reason?: string,
+  ) {
+    await this.assertGenerationJobMutable(draftId, jobId);
+    const { draft, jobs } = await this.getReferenceDraftState(draftId);
+    const job = jobs.find((row) => row.id === jobId);
+    if (job?.status !== "failed")
+      throw new BadRequestException(
+        "Only failed reference generation jobs can be retried",
+      );
+    const result = await this.generation.retryJob(jobId, reason);
+    await this.restoreReferenceGeneration(draftId, draft.conceptJson);
+    return result;
+  }
+
+  saveReferenceStage(
+    input: Parameters<DraftsRepository["saveReferenceStage"]>[0],
+  ) {
+    return this.repository.saveReferenceStage(input);
+  }
+
   async listDrafts(
     input: { status?: string; characterId?: string } & PageInput,
   ): Promise<Page<AdminDraft>> {
@@ -376,7 +572,14 @@ export class DraftsService {
 
     // 컷별 최신 잡만 노출한다 (재생성 이력은 최신이 대체).
     const latestPerShot = new Map<number, DraftJobRow>();
+    const concept = this.record(draft.conceptJson);
+    const currentIds = this.record(concept.generationBuild).jobIds;
     for (const job of jobs) {
+      if (
+        concept.postGenerationAgent === "reference-v1" &&
+        (!Array.isArray(currentIds) || !currentIds.includes(job.id))
+      )
+        continue;
       if (!latestPerShot.has(job.sortOrder)) {
         latestPerShot.set(job.sortOrder, job);
       }
@@ -455,12 +658,20 @@ export class DraftsService {
   // Agent와 진행 방식은 독립이다. mode가 없는 이전 요청의 기본값은 유지한다.
   async createDraft(input: {
     characterId: string;
-    postGenerationAgent?: "existing" | "natural-v1";
+    postGenerationAgent?: "existing" | "natural-v1" | "reference-v1";
     mode?: "manual" | "auto";
     sceneHint?: string;
     scheduledAt?: string;
     contentType?: string;
   }): Promise<AdminDraft> {
+    if (
+      input.postGenerationAgent !== NATURAL_AGENT &&
+      input.postGenerationAgent !== "reference-v1"
+    ) {
+      throw new BadRequestException(
+        "기존 Agent는 보관되었습니다. 새 Agent를 명시적으로 선택하세요.",
+      );
+    }
     if (!(await this.repository.characterExists(input.characterId))) {
       throw new BadRequestException("Character not found");
     }
@@ -475,42 +686,30 @@ export class DraftsService {
         `Scene hint must be at most ${OPERATOR_REQUEST_MAX_LENGTH} characters`,
       );
     }
-    if (
-      input.postGenerationAgent !== undefined &&
-      !["existing", NATURAL_AGENT].includes(input.postGenerationAgent)
-    )
-      throw new BadRequestException("Invalid post generation agent");
     if (input.mode !== undefined && !["manual", "auto"].includes(input.mode))
       throw new BadRequestException("Invalid draft execution mode");
-    const natural =
-      input.postGenerationAgent === NATURAL_AGENT
-        ? await this.settings.requireNaturalAgentBundle()
-        : null;
-    const pipelineV3 = await this.settings.resolvePipelineV3();
-    const mode = input.mode ?? (natural ? "auto" : "manual");
-
+    const reference = input.postGenerationAgent === "reference-v1";
+    const mode = input.mode ?? "auto";
     const aiModelAssignments = await this.settings.snapshotAiAssignments();
-    const baseConceptJson = natural
+    const baseConceptJson = reference
       ? {
+          source: "manual",
+          mode,
+          postGenerationAgent: "reference-v1",
+          ...(sceneHint ? { operatorRequest: sceneHint } : {}),
+          referenceAgentConfig:
+            await this.settings.requireReferenceAgentConfig(),
+          pipeline: { stage: "reference_select", state: "pending" },
+        }
+      : {
           ...createPostPipelineV3Concept({
             source: "manual",
             mode,
             ...(sceneHint ? { operatorRequest: sceneHint } : {}),
           }),
           postGenerationAgent: NATURAL_AGENT,
-          naturalAgentConfig: natural,
-        }
-      : pipelineV3.enabled
-        ? createPostPipelineV3Concept({
-            source: "manual",
-            mode,
-            ...(sceneHint ? { operatorRequest: sceneHint } : {}),
-          })
-        : {
-            source: "manual",
-            mode,
-            ...(sceneHint ? { sceneHint } : {}),
-          };
+          naturalAgentConfig: await this.settings.requireNaturalAgentBundle(),
+        };
     const conceptJson = aiModelAssignments
       ? { ...baseConceptJson, aiModelAssignments }
       : baseConceptJson;
@@ -535,6 +734,7 @@ export class DraftsService {
   }
 
   async setAutomation(draftId: string, enabled: boolean): Promise<AdminDraft> {
+    await this.assertActiveAgent(draftId);
     if (!(await this.repository.setAutomation(draftId, enabled)))
       throw new BadRequestException(
         enabled
@@ -557,6 +757,7 @@ export class DraftsService {
     hashtags: string[];
     shots: { sortOrder: number; scene: string }[];
   }): Promise<AdminDraft> {
+    await this.assertEditableLegacyPipeline(input.draftId);
     const draft = await this.repository.findPlanEditDraft(input.draftId);
     if (!draft) throw new BadRequestException("Draft not found");
     const concept = this.record(draft.conceptJson);
@@ -638,6 +839,7 @@ export class DraftsService {
     draftId: string;
     items: { jobId: string; prompt: string }[];
   }): Promise<AdminDraft> {
+    await this.assertEditableLegacyPipeline(input.draftId);
     const draft = await this.repository.findPlanEditDraft(input.draftId);
     if (!draft) throw new BadRequestException("Draft not found");
     const concept = this.record(draft.conceptJson);
@@ -675,6 +877,7 @@ export class DraftsService {
     finish?: string | null;
     reason?: string;
   }): Promise<AdminDraft> {
+    await this.assertActiveAgent(input.draftId);
     const data: Record<string, unknown> = {};
     if (input.caption !== undefined) {
       const caption = input.caption.trim();
@@ -773,6 +976,7 @@ export class DraftsService {
     draftId: string;
     operatorRequest?: string | null;
   }): Promise<AdminDraft> {
+    await this.assertEditableLegacyPipeline(input.draftId);
     const trimmed = input.operatorRequest?.trim() ?? "";
     if (trimmed.length > OPERATOR_REQUEST_MAX_LENGTH) {
       throw new BadRequestException(
@@ -821,6 +1025,7 @@ export class DraftsService {
     draftId: string;
     selectedKeys: string[];
   }): Promise<AdminDraft> {
+    await this.assertEditableLegacyPipeline(input.draftId);
     const existing = await this.repository.findDraftConcept(input.draftId);
     if (!existing) throw new BadRequestException("Draft not found");
     const concept = this.record(existing.conceptJson);
@@ -880,6 +1085,7 @@ export class DraftsService {
   }
 
   async approveDraft(draftId: string): Promise<AdminDraft> {
+    await this.assertActiveAgent(draftId);
     const current = await this.getDraft(draftId);
     if (current.status !== "needs_review") {
       throw new BadRequestException("Only needs_review drafts can be approved");
@@ -915,6 +1121,7 @@ export class DraftsService {
     draftId: string;
     reason?: string;
   }): Promise<AdminDraft> {
+    await this.assertActiveAgent(input.draftId);
     const transitioned = await this.repository.rejectDraft(input.draftId);
     if (!transitioned) {
       await this.assertDraftExists(input.draftId);
@@ -938,6 +1145,7 @@ export class DraftsService {
     prompt?: string;
     candidateCount?: number;
   }): Promise<void> {
+    await this.assertEditableLegacyPipeline(input.draftId);
     const prompt = input.prompt?.trim();
     if (input.prompt !== undefined && !prompt) {
       throw new BadRequestException("Shot prompt cannot be empty");
@@ -990,6 +1198,7 @@ export class DraftsService {
     jobId: string;
     prompt?: string;
   }): Promise<{ draft: AdminDraft; newJobId: string }> {
+    await this.assertEditableLegacyPipeline(input.draftId);
     const job = await this.repository.findRegenerationSource(
       input.draftId,
       input.jobId,
@@ -1035,6 +1244,7 @@ export class DraftsService {
     jobId: string;
     mediaId: string;
   }): Promise<AdminDraft> {
+    await this.assertActiveAgent(input.draftId);
     const existing = await this.repository.findDraftConcept(input.draftId);
     if (existing && isPostPipelineV4(existing.conceptJson)) {
       // V4: 프롬프트당 1장, 고를 것이 없다(아키텍처 §20.0 결정 3).
@@ -1066,6 +1276,7 @@ export class DraftsService {
     mediaId: string;
     filterPreset: string;
   }): Promise<AdminDraft> {
+    await this.assertActiveAgent(input.draftId);
     if (
       input.filterPreset !== "none" &&
       !parseFinishPreset(input.filterPreset)
@@ -1096,6 +1307,101 @@ export class DraftsService {
       await this.assertDraftExists(draftId);
       throw new BadRequestException("Draft shot job not found");
     }
+  }
+
+  async assertGenerationJobMutable(
+    draftId: string,
+    jobId: string,
+  ): Promise<void> {
+    await this.assertActiveAgent(draftId);
+    const draft = await this.repository.findDraftConcept(draftId);
+    const concept = this.record(draft?.conceptJson);
+    if (concept.postGenerationAgent !== "reference-v1") return;
+    const state = await this.repository.findDraft(draftId);
+    if (
+      !state ||
+      !["generating", "regenerating", "failed"].includes(state.status) ||
+      state.leaseExpiresAt ||
+      this.record(concept.pipeline).stage !== "generation"
+    )
+      throw new BadRequestException(
+        "Reference generation is not mutable in this draft state",
+      );
+    const build = this.record(concept.generationBuild);
+    const prompt = this.record(concept.promptBuild);
+    const job = (await this.repository.findDraftJobs(draftId)).find(
+      (row) => row.id === jobId,
+    );
+    const marker = this.record(this.record(job?.paramsJson)._referenceAgent);
+    if (
+      !Array.isArray(build.jobIds) ||
+      !build.jobIds.includes(jobId) ||
+      build.promptRevision !== prompt.revision ||
+      marker.promptRevision !== String(prompt.revision)
+    )
+      throw new BadRequestException(
+        "Reference generation job is stale or inactive",
+      );
+  }
+
+  private async assertEditableLegacyPipeline(draftId: string): Promise<void> {
+    await this.assertActiveAgent(draftId);
+    if (await this.isReferenceDraft(draftId))
+      throw new BadRequestException(
+        "Reference artifacts are frozen; use the current reference stage or retry a failed shot",
+      );
+  }
+
+  async assertActiveAgent(draftId: string): Promise<void> {
+    const draft = await this.repository.findDraftConcept(draftId);
+    if (!draft) throw new BadRequestException("Draft not found");
+    if (
+      !isNaturalAgent(draft.conceptJson) &&
+      this.record(draft.conceptJson).postGenerationAgent !== "reference-v1"
+    )
+      throw new BadRequestException("기존 Agent 초안은 읽기 전용입니다.");
+  }
+
+  async isReferenceDraft(draftId: string): Promise<boolean> {
+    return (
+      this.record(
+        (await this.repository.findDraftConcept(draftId))?.conceptJson,
+      ).postGenerationAgent === "reference-v1"
+    );
+  }
+
+  claimReferenceDraft(leaseSeconds: number) {
+    return this.repository.claimReferenceDraft({ leaseSeconds });
+  }
+
+  async claimReferenceDraftNow(
+    draftId: string,
+    leaseSeconds: number,
+    expected?: {
+      expectedStage?: string;
+      expectedRevision?: string;
+      expectedPromptRevision?: number;
+    },
+  ): Promise<boolean> {
+    return Boolean(
+      await this.repository.claimReferenceDraft({
+        draftId,
+        leaseSeconds,
+        ...expected,
+      }),
+    );
+  }
+
+  recoverExpiredReferenceLeases() {
+    return this.repository.recoverExpiredReferenceLeases();
+  }
+
+  listReferenceGenerationWaiting(limit: number, draftId?: string) {
+    return this.repository.listReferenceGenerationWaiting(limit, draftId);
+  }
+
+  failReferenceStage(draftId: string, message: string) {
+    return this.repository.failReferenceStage(draftId, message);
   }
 
   private async assertDraftExists(draftId: string): Promise<void> {

@@ -5,10 +5,37 @@ import {
   InfluencerMediaRow,
   MediaFilter,
   MediaWrite,
+  ReferenceMediaSearch,
 } from "./influencer-media.repository";
 @Injectable()
 export class InfluencerMediaService {
   constructor(private readonly repository: InfluencerMediaRepository) {}
+  searchReferences(input: ReferenceMediaSearch) {
+    assertReferenceEmbedding(input.embedding);
+    if (
+      input.limit !== undefined &&
+      (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 12)
+    )
+      throw new Error("reference_candidate_limit_invalid");
+    return this.repository.searchReferences(input);
+  }
+  async findReadSources(
+    influencerIds: bigint[],
+    sources: { mediaId: string; sha256: string }[],
+  ) {
+    const rows = await this.repository.findReadSources(
+      influencerIds,
+      sources.map((source) => BigInt(source.mediaId)),
+    );
+    return sources.map((source) => {
+      const row = rows.find(
+        (item) =>
+          String(item.id) === source.mediaId && item.sha256 === source.sha256,
+      );
+      if (!row) throw new ConflictException("reference_source_changed");
+      return row;
+    });
+  }
   find(value: { influencerId: bigint; postId: string; slideIndex: number }) {
     return this.repository.find(value);
   }

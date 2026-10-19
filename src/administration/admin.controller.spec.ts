@@ -10,6 +10,7 @@ import { AdminController } from "./admin.controller";
 import { AdminService } from "./admin.service";
 import { AdminJwtGuard } from "../auth/admin-jwt.guard";
 import { GenerationService } from "../generation/generation.service";
+import { DraftsService } from "../drafts/drafts.service";
 import { MediaService } from "../media/media.service";
 
 const CHARACTER_ID = "11111111-1111-4111-8111-111111111111";
@@ -40,6 +41,10 @@ describe("AdminController reads", () => {
     const module = await Test.createTestingModule({
       controllers: [AdminController],
       providers: [
+        {
+          provide: DraftsService,
+          useValue: { assertGenerationJobMutable: jest.fn() },
+        },
         {
           provide: AdminService,
           useValue: {
@@ -102,6 +107,7 @@ describe("AdminController reads", () => {
     getStory.mockReset();
     listGenerationJobs.mockReset();
     getGenerationJob.mockReset();
+    getGenerationJob.mockResolvedValue({ id: JOB_ID, draftId: null });
     listTopHashtags.mockReset();
     runJobNow.mockReset();
     createImageGenerationDraft.mockReset();

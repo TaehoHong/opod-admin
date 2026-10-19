@@ -42,7 +42,7 @@ export function spicyApiRequestBody(
     throw new ImageGenerationRequestError(message, true);
   };
   const family = spicyApiFamily(model);
-  const prompt = request.prompt.trim();
+  let prompt = request.prompt.trim();
   // 공통 문구는 DB 설정에서만 받는다. 지원하지 않는 Seedream에는 붙이지 않는다.
   const negativeEntries = [
     ...(family.kind === "qwen" ? [commonNegativePrompt] : []),
@@ -70,7 +70,9 @@ export function spicyApiRequestBody(
     invalid("SpicyAPI prompt must be 1 to 5,000 characters");
   // 제외 조건을 몰래 버리거나 자르지 않는다. 합산 길이도 과금 전에 검사한다.
   if (negativePrompt && family.kind === "seedream")
-    invalid("SpicyAPI Seedream accepts no negative prompt");
+    prompt = `${prompt} Do not include: ${negativePrompt}.`;
+  if (prompt.length > PROMPT_MAX_LENGTH)
+    invalid("SpicyAPI combined prompt must be at most 5,000 characters");
   if (negativePrompt && negativePrompt.length > NEGATIVE_PROMPT_MAX_LENGTH)
     invalid("SpicyAPI negative prompt must be at most 2,000 characters");
   if (request.candidateCount !== 1)

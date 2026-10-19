@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { fetchNaturalAgent } from "../post-generation-agents/api";
+import {
+  fetchNaturalAgent,
+  fetchReferenceAgent,
+} from "../post-generation-agents/api";
 import {
   Alert,
   Button,
@@ -23,6 +26,13 @@ import { createDraft } from "../drafts/api";
 export function PostBriefCreatePage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState("manual");
+  const [agent, setAgent] = useState("natural-v1");
+  const reference = useQuery({
+    queryKey: ["reference-post-agent"],
+    queryFn: fetchReferenceAgent,
+  });
+  const referenceReady =
+    !!reference.data?.current.stages && !!reference.data?.current.generation;
   const natural = useQuery({
     queryKey: ["natural-post-agent"],
     queryFn: fetchNaturalAgent,
@@ -34,12 +44,15 @@ export function PostBriefCreatePage() {
     initialValues: {
       characterId: params.get("characterId") ?? "",
       contentType: "feed",
-      postGenerationAgent: "existing",
+      postGenerationAgent: "natural-v1",
       mode: "manual",
       sceneHint: "",
       scheduledAt: "",
     },
-    onValuesChange: (values) => setMode(values.mode),
+    onValuesChange: (values) => {
+      setMode(values.mode);
+      setAgent(values.postGenerationAgent);
+    },
     validate: {
       characterId: (value) => (value ? null : "캐릭터를 선택해 주세요"),
       sceneHint: (value) =>
@@ -54,7 +67,7 @@ export function PostBriefCreatePage() {
         characterId: values.characterId,
         contentType: values.contentType as "feed" | "reel",
         postGenerationAgent: values.postGenerationAgent as
-          "existing" | "natural-v1",
+          "natural-v1" | "reference-v1",
         mode: values.mode as "manual" | "auto",
         ...(values.sceneHint.trim()
           ? { sceneHint: values.sceneHint.trim() }
@@ -92,14 +105,20 @@ export function PostBriefCreatePage() {
           <Select
             label="게시물 생성 Agent"
             description={
-              natural.isPending
-                ? "새 Agent 설정을 확인하는 중입니다."
-                : natural.data?.current
-                  ? "Agent와 진행 방식을 각각 선택하세요."
-                  : "새 Agent를 사용하려면 Agent 관리에서 설정을 먼저 저장하세요."
+              agent === "reference-v1"
+                ? "원본 선택부터 캡션까지 레퍼런스 Agent로 제작합니다."
+                : natural.isPending
+                  ? "새 Agent 설정을 확인하는 중입니다."
+                  : natural.data?.current
+                    ? "Agent와 진행 방식을 각각 선택하세요."
+                    : "새 Agent를 사용하려면 Agent 관리에서 설정을 먼저 저장하세요."
             }
             data={[
-              { value: "existing", label: "기존 Agent" },
+              {
+                value: "reference-v1",
+                label: "레퍼런스 Agent",
+                disabled: !referenceReady,
+              },
               {
                 value: "natural-v1",
                 label: "새 Agent · 자연스러운 사진",
@@ -112,7 +131,7 @@ export function PostBriefCreatePage() {
           />
           <Select
             label="진행 방식"
-            description="두 Agent 모두 자동·수동으로 진행할 수 있습니다."
+            description="자동·수동으로 진행할 수 있습니다."
             data={[
               { value: "manual", label: "수동 · 단계별 실행" },
               { value: "auto", label: "자동 · 연속 진행" },
@@ -121,6 +140,20 @@ export function PostBriefCreatePage() {
             key={form.key("mode")}
             {...form.getInputProps("mode")}
           />
+          {agent === "reference-v1" ? (
+            <Alert color="blue">
+              원본 선택 Agent가 적합한 사진 1~3장을 선택합니다. 사용하려면 모든
+              단계 설정을 먼저 저장하세요.
+            </Alert>
+          ) : null}
+          {reference.error ? (
+            <OperationErrorAlert
+              failure={operationFailure(
+                reference.error,
+                "레퍼런스 Agent 설정을 확인하지 못했습니다.",
+              )}
+            />
+          ) : null}
           {natural.error ? (
             <OperationErrorAlert
               failure={operationFailure(
@@ -164,7 +197,15 @@ export function PostBriefCreatePage() {
             />
           ) : null}
           <Group>
-            <Button type="submit" loading={create.isPending}>
+            <Button
+              type="submit"
+              loading={create.isPending}
+              disabled={
+                agent === "reference-v1"
+                  ? !referenceReady
+                  : !natural.data?.current
+              }
+            >
               {mode === "auto" ? "자동 제작 시작" : "저장하고 기획으로"}
             </Button>
             <Button

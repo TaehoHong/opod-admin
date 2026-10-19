@@ -73,7 +73,10 @@ export type DraftShot = {
 // 기획 LLM이 채우는 부분. 서버가 Json 그대로 돌려주므로 화면이 쓰는 필드만
 // 좁게 선언하고 나머지는 원본 보기(details)로 넘긴다.
 export type DraftConcept = {
-  postGenerationAgent?: "existing" | "natural-v1";
+  postGenerationAgent?: "existing" | "natural-v1" | "reference-v1";
+  referenceSelection?: unknown;
+  promptBuild?: unknown;
+  captionBuild?: unknown;
   naturalAgentConfig?: { revision?: string };
   photoReview?: unknown;
   mode?: string;
@@ -137,7 +140,7 @@ export function fetchDraft(draftId: string): Promise<Draft> {
 
 export function createDraft(body: {
   characterId: string;
-  postGenerationAgent?: "existing" | "natural-v1";
+  postGenerationAgent?: "existing" | "natural-v1" | "reference-v1";
   mode?: "manual" | "auto";
   sceneHint?: string;
   scheduledAt?: string;
@@ -228,7 +231,7 @@ export function runDraftStage(
   draftId: string,
   action: DraftStageAction,
   // V4 ⑥ 캡션 재실행의 일회성 운영자 지시(이번 실행에만 전달).
-  body?: { note?: string },
+  body?: { note?: string; expectedStage?: string; expectedRevision?: string },
 ): Promise<Draft> {
   return draftAction(draftId, action, body);
 }
@@ -354,3 +357,13 @@ export const setDraftAutomation = (id: string, enabled: boolean) =>
     method: "POST",
     body: { enabled },
   });
+
+export function restartReferenceDraft(
+  draftId: string,
+  body: {
+    target: "reference_select" | "generation";
+    expectedRevision: string;
+  },
+): Promise<Draft> {
+  return draftAction(draftId, "reference/restart", body);
+}

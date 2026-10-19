@@ -196,9 +196,51 @@ describe("natural post agent durable settings and recovery", () => {
     ).toBeNull();
   });
 
+  it.each(["existing", undefined])(
+    "rejects new archived Agent selection %s and preserves old draft history read-only",
+    async (agent) => {
+      await request(app.getHttpServer())
+        .post("/api/admin/v1/drafts")
+        .set(headers)
+        .send({ characterId, ...(agent ? { postGenerationAgent: agent } : {}) })
+        .expect(400);
+      const db = app.get(DatabaseService).client;
+      const [draft] = await db
+        .insert(postDrafts)
+        .values({
+          characterId,
+          draftType: "post",
+          status: "planned",
+          conceptJson: {
+            ...(agent ? { postGenerationAgent: agent } : {}),
+            pipelineVersion: "post-pipeline-v4",
+            mode: "auto",
+            pipeline: { stage: "post_plan", state: "pending" },
+          },
+        })
+        .returning();
+      await request(app.getHttpServer())
+        .get(`/api/admin/v1/drafts/${draft.id}`)
+        .set(headers)
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`/api/admin/v1/drafts/${draft.id}/automation`)
+        .set(headers)
+        .send({ enabled: true })
+        .expect(400);
+      const repository = app.get(DraftWorkerRepository);
+      expect(await repository.claimV3DraftNow(draft.id, 120)).toBe(false);
+      const [unchanged] = await db
+        .select()
+        .from(postDrafts)
+        .where(eq(postDrafts.id, draft.id));
+      expect(unchanged.status).toBe("planned");
+      expect(unchanged.attemptCount).toBe(0);
+      await db.delete(postDrafts).where(eq(postDrafts.id, draft.id));
+    },
+  );
+
   it.each([
-    ["existing", "manual"],
-    ["existing", "auto"],
     ["natural-v1", "manual"],
     ["natural-v1", "auto"],
   ])(
@@ -243,7 +285,7 @@ describe("natural post agent durable settings and recovery", () => {
     },
   );
 
-  it.each(["existing", "natural-v1"])(
+  it.each(["natural-v1"])(
     "switches %s between manual and auto without bypassing a running or blocked stage",
     async (agent) => {
       await request(app.getHttpServer())
@@ -328,13 +370,9 @@ describe("natural post agent durable settings and recovery", () => {
   );
 
   it.each([
-    ["existing", "post_plan"],
     ["natural-v1", "post_plan"],
-    ["existing", "image_plan"],
     ["natural-v1", "image_plan"],
-    ["existing", "image_prompt"],
     ["natural-v1", "image_prompt"],
-    ["existing", "caption"],
     ["natural-v1", "caption"],
   ])(
     "waits for explicit execution of %s at %s while automatic polling is available",
@@ -379,7 +417,7 @@ describe("natural post agent durable settings and recovery", () => {
     },
   );
 
-  it.each(["existing", "natural-v1"])(
+  it.each(["natural-v1"])(
     "keeps %s manual generation and publishing out of automatic worker claims",
     async (agent) => {
       const db = app.get(DatabaseService).client;
@@ -420,7 +458,7 @@ describe("natural post agent durable settings and recovery", () => {
     },
   );
 
-  it.each(["existing", "natural-v1"])(
+  it.each(["natural-v1"])(
     "queues %s prepared manual images when switching to automatic generation",
     async (agent) => {
       const db = app.get(DatabaseService).client;

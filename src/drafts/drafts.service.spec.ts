@@ -17,7 +17,11 @@ function repositoryFake(overrides: Partial<DraftsRepository> = {}) {
     updatePlan: jest.fn().mockResolvedValue(true),
     updatePrompts: jest.fn().mockResolvedValue(true),
     markManual: jest.fn().mockResolvedValue(undefined),
-    findDraftConcept: jest.fn().mockResolvedValue(null),
+    findDraftConcept: jest.fn().mockResolvedValue({
+      conceptJson: {
+        postGenerationAgent: "natural-v1",
+      },
+    }),
     updateEditableDraft: jest.fn().mockResolvedValue(true),
     approveDraft: jest.fn().mockResolvedValue(true),
     rejectDraft: jest.fn().mockResolvedValue(true),
@@ -62,7 +66,7 @@ const draftRow = {
   errorMessage: null,
   scheduledAt: new Date("2026-07-13T10:00:00.000Z"),
   publishedPostId: null,
-  conceptJson: { plan: {} },
+  conceptJson: { postGenerationAgent: "natural-v1", plan: {} },
   createdAt: new Date("2026-07-12T00:00:00.000Z"),
   updatedAt: new Date("2026-07-12T00:00:00.000Z"),
 } as const;
@@ -97,6 +101,7 @@ describe("DraftsService", () => {
   describe("updateOperatorRequest", () => {
     const v3Concept = {
       conceptJson: {
+        postGenerationAgent: "natural-v1",
         pipelineVersion: "post-pipeline-v3",
         mode: "manual",
         operatorRequest: "이전 요청",
@@ -149,9 +154,12 @@ describe("DraftsService", () => {
     // 운영자는 반영됐다고 믿고 재실행하지만 아무것도 달라지지 않는다.
     it("refuses V2 drafts instead of storing a value nothing reads", async () => {
       const repository = repositoryFake({
-        findDraftConcept: jest
-          .fn()
-          .mockResolvedValue({ conceptJson: { sceneHint: "노을 지는 골목" } }),
+        findDraftConcept: jest.fn().mockResolvedValue({
+          conceptJson: {
+            postGenerationAgent: "natural-v1",
+            sceneHint: "노을 지는 골목",
+          },
+        }),
       });
       const service = makeService(repository);
 
@@ -187,6 +195,7 @@ describe("DraftsService", () => {
 
   describe("updateMemoryCandidates", () => {
     const conceptJson = {
+      postGenerationAgent: "natural-v1",
       pipelineVersion: "post-pipeline-v4",
       mode: "manual",
       postPlanning: { hash: "sha256:current" },
@@ -472,32 +481,6 @@ describe("DraftsService", () => {
     },
   );
 
-  it("creates a manual draft with normalized operator intent", async () => {
-    const repository = repositoryFake({
-      createDraft: jest.fn().mockResolvedValue({
-        ...draftRow,
-        status: "planned",
-        caption: "",
-        hashtags: [],
-        scheduledAt: null,
-        conceptJson: { source: "manual", mode: "manual", sceneHint: "카페" },
-      }),
-    });
-    const service = makeService(repository);
-
-    await expect(
-      service.createDraft({ characterId: "ai-1", sceneHint: " 카페 " }),
-    ).resolves.toMatchObject({ status: "planned" });
-    expect(repository.createDraft).toHaveBeenCalledWith({
-      characterId: "ai-1",
-      contentType: "feed",
-      conceptJson: { source: "manual", mode: "manual", sceneHint: "카페" },
-    });
-    expect(repository.recordActionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ actionType: "DRAFT_CREATED" }),
-    );
-  });
-
   it("rejects an oversized scene request before creating a draft", async () => {
     const repository = repositoryFake();
     const service = makeService(repository, true);
@@ -506,64 +489,10 @@ describe("DraftsService", () => {
       service.createDraft({
         characterId: "ai-1",
         sceneHint: "가".repeat(2001),
+        postGenerationAgent: "natural-v1",
       }),
     ).rejects.toThrow("at most 2000");
     expect(repository.createDraft).not.toHaveBeenCalled();
-  });
-
-  it("pins an enabled new draft to V3 without converting legacy fields", async () => {
-    const repository = repositoryFake({
-      createDraft: jest.fn().mockResolvedValue({
-        ...draftRow,
-        status: "planned",
-        caption: "",
-        hashtags: [],
-        scheduledAt: null,
-        conceptJson: {},
-      }),
-    });
-    const service = makeService(repository, true);
-
-    await service.createDraft({
-      characterId: "ai-1",
-      sceneHint: " 카페에서 비 오는 오후 ",
-    });
-
-    expect(repository.createDraft).toHaveBeenCalledWith({
-      characterId: "ai-1",
-      contentType: "feed",
-      conceptJson: {
-        pipelineVersion: "post-pipeline-v4",
-        source: "manual",
-        mode: "manual",
-        operatorRequest: "카페에서 비 오는 오후",
-        pipeline: {
-          stage: "post_plan",
-          state: "pending",
-          imageCount: null,
-          reasonCodes: [],
-        },
-      },
-    });
-  });
-
-  it("honors automatic mode even for the legacy pipeline", async () => {
-    const repository = repositoryFake({
-      createDraft: jest.fn().mockResolvedValue({
-        ...draftRow,
-        status: "planned",
-        conceptJson: { source: "manual", mode: "manual" },
-      }),
-    });
-    const service = makeService(repository);
-
-    await service.createDraft({ characterId: "ai-1", mode: "auto" } as never);
-
-    expect(repository.createDraft).toHaveBeenCalledWith(
-      expect.objectContaining({
-        conceptJson: { source: "manual", mode: "auto" },
-      }),
-    );
   });
 
   it("refuses to queue a shot whose stored prompt is empty", async () => {
@@ -636,6 +565,7 @@ describe("DraftsService", () => {
         status: "generating",
         leaseExpiresAt: null,
         conceptJson: {
+          postGenerationAgent: "natural-v1",
           source: "manual",
           mode: "manual",
           plan: {
@@ -874,6 +804,7 @@ describe("natural post creation", () => {
     const service = new DraftsService(
       repository,
       {
+        snapshotAiAssignments: async () => undefined,
         requireNaturalAgentBundle: async () => {
           throw new Error("configuration missing");
         },
@@ -885,7 +816,7 @@ describe("natural post creation", () => {
         characterId: "ai-1",
         postGenerationAgent: "unknown",
       } as never),
-    ).rejects.toThrow("Invalid post generation agent");
+    ).rejects.toThrow("기존 Agent는 보관되었습니다");
     await expect(
       service.createDraft({
         characterId: "ai-1",
@@ -893,22 +824,6 @@ describe("natural post creation", () => {
       }),
     ).rejects.toThrow("configuration missing");
     expect(repository.createDraft).not.toHaveBeenCalled();
-  });
-  it("keeps explicit existing selection in manual mode", async () => {
-    const repository = repositoryFake({
-      createDraft: jest
-        .fn()
-        .mockImplementation(async (input) => ({ ...draftRow, ...input })),
-    });
-    const result = await makeService(repository, true).createDraft({
-      characterId: "ai-1",
-      postGenerationAgent: "existing",
-    });
-    expect(result.conceptJson).toMatchObject({
-      mode: "manual",
-      pipelineVersion: "post-pipeline-v4",
-    });
-    expect(result.conceptJson).not.toHaveProperty("naturalAgentConfig");
   });
 });
 
@@ -945,6 +860,7 @@ it("records explicit operator selection for new-agent canon without auto-selecti
   });
   expect(repository.updateEditableDraft.mock.calls[0][2]).toMatchObject({
     conceptJson: {
+      postGenerationAgent: "natural-v1",
       memoryCandidates: [
         { key: "first", selected: true, selectedByOperator: true },
         { key: "second", selected: false, selectedByOperator: false },

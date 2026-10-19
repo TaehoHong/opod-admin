@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { renderPage } from "../../test/renderPage";
 import { server } from "../../test/server";
 import { PostBriefCreatePage } from "./PostBriefCreatePage";
@@ -9,10 +9,22 @@ import { PostBriefCreatePage } from "./PostBriefCreatePage";
 if (!window.HTMLElement.prototype.scrollIntoView)
   window.HTMLElement.prototype.scrollIntoView = () => {};
 
+beforeEach(() =>
+  server.use(
+    http.get("/api/admin/v1/post-generation-agents/reference/config", () =>
+      HttpResponse.json({
+        current: {
+          revision: null,
+          selection: { batchSize: 12, maxAttempts: 1 },
+        },
+      }),
+    ),
+  ),
+);
 describe("post agent choice", () => {
   it.each([
-    ["existing", "manual", "기존 Agent", "수동 · 단계별 실행"],
-    ["existing", "auto", "기존 Agent", "자동 · 연속 진행"],
+    ["reference-v1", "manual", "레퍼런스 Agent", "수동 · 단계별 실행"],
+    ["reference-v1", "auto", "레퍼런스 Agent", "자동 · 연속 진행"],
     [
       "natural-v1",
       "manual",
@@ -25,6 +37,16 @@ describe("post agent choice", () => {
     async (agent, mode, agentLabel, modeLabel) => {
       let submitted: unknown;
       server.use(
+        http.get("/api/admin/v1/post-generation-agents/reference/config", () =>
+          HttpResponse.json({
+            current: {
+              revision: "saved",
+              selection: { batchSize: 12, maxAttempts: 1 },
+              stages: { reference_select: {}, image_prompt: {}, caption: {} },
+              generation: { revision: 1 },
+            },
+          }),
+        ),
         http.get("/api/admin/v1/characters", () =>
           HttpResponse.json({
             items: [{ id: "character-1", displayName: "서린" }],
@@ -48,6 +70,10 @@ describe("post agent choice", () => {
         ),
       );
       await screen.findByText("Agent와 진행 방식을 각각 선택하세요.");
+      expect(screen.queryByText("기존 Agent")).toBeNull();
+      expect(
+        screen.getByRole("combobox", { name: "게시물 생성 Agent" }),
+      ).toHaveValue("새 Agent · 자연스러운 사진");
       await user.click(
         screen.getByRole("combobox", { name: "게시물 생성 Agent" }),
       );

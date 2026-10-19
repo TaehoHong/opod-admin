@@ -6,6 +6,16 @@ import { IsOptional, IsString, MaxLength } from "class-validator";
 export class RunStageDto {
   @IsOptional()
   @IsString()
+  @MaxLength(40)
+  expectedStage?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  expectedRevision?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(2000)
   note?: string;
 }

@@ -1,4 +1,9 @@
-import { captionUserContent, parseCaptionSet } from "./caption-writer";
+import {
+  captionUserContent,
+  parseCaptionSet,
+  groupReferenceSourceCaptions,
+  ReferenceCaptionWriterInput,
+} from "./caption-writer";
 
 const ready = {
   status: "ready",
@@ -117,5 +122,99 @@ describe("Caption Agent contract", () => {
       text: "Generated image for shot 1 media m1",
     });
     expect(readBytes).toHaveBeenNthCalledWith(1, { url: "u0" });
+  });
+});
+
+describe("reference caption source grouping", () => {
+  it("groups sibling slides but keeps equal post IDs from different accounts separate", () => {
+    expect(
+      groupReferenceSourceCaptions([
+        {
+          influencerId: "1",
+          postId: "post",
+          sourceUrl: "url",
+          shotId: "S1",
+          sourceCaption: "context",
+        },
+        {
+          influencerId: "1",
+          postId: "post",
+          sourceUrl: "url",
+          shotId: "S2",
+          sourceCaption: "context",
+        },
+        {
+          influencerId: "2",
+          postId: "post",
+          sourceUrl: "other",
+          shotId: "S3",
+          sourceCaption: null,
+        },
+      ]),
+    ).toEqual([
+      {
+        influencerId: "1",
+        postId: "post",
+        sourceUrl: "url",
+        shotIds: ["S1", "S2"],
+        caption: "context",
+      },
+      {
+        influencerId: "2",
+        postId: "post",
+        sourceUrl: "other",
+        shotIds: ["S3"],
+        caption: null,
+      },
+    ]);
+  });
+
+  it("uses generated pixels with reference context without fabricating a post plan", async () => {
+    const input: ReferenceCaptionWriterInput = {
+      kind: "reference",
+      character: {
+        name: "test",
+        bio: "",
+        interests: [],
+        defaultContentLanguage: "ko",
+      },
+      persona: {
+        characterContext: [],
+        writingProfile: { contentStyle: [], voice: [] },
+        boundaries: [],
+        additionalContext: [],
+      },
+      generatedShots: [{ shotId: "S1", sortOrder: 1, mediaId: "generated" }],
+      sourceCaptions: [
+        {
+          influencerId: "1",
+          postId: "p",
+          sourceUrl: null,
+          shotIds: ["S1"],
+          caption: "source context",
+        },
+      ],
+    };
+    const content = await captionUserContent(
+      input,
+      [{ sortOrder: 1, mediaId: "generated", media: { url: "generated" } }],
+      async () => ({
+        bytes: Buffer.from("generated pixels"),
+        contentType: "image/png",
+      }),
+    );
+    expect(content[0]).toEqual({ type: "text", text: JSON.stringify(input) });
+    expect(content[2]).toEqual({
+      type: "image_url",
+      image_url: {
+        url: `data:image/png;base64,${Buffer.from("generated pixels").toString("base64")}`,
+        detail: "high",
+      },
+    });
+    await expect(
+      captionUserContent(input, [], async () => {
+        throw new Error("must not read");
+      }),
+    ).rejects.toThrow("mapping mismatch");
   });
 });

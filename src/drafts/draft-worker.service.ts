@@ -1,3 +1,6 @@
+import type { DraftsService } from "./drafts.service";
+import type { ReferencePostAgentRunner } from "../post-production/reference-post-agent.runner";
+import { BadRequestException } from "@nestjs/common";
 import {
   assertNaturalPublishable,
   isNaturalAgent,
@@ -10,12 +13,8 @@ import {
 } from "@nestjs/common";
 import type { JsonValue } from "../shared/utils/json";
 import { AppConfig } from "../core/config/app-config";
-import {
-  assertVisibleCharacterHasReference,
-  ContentPlanner,
-  ShotReferencePolicyError,
-} from "../post-production/content-planner";
-import { DraftWorkerRepository, PlannedDraft } from "./draft-worker.repository";
+import { ContentPlanner } from "../post-production/content-planner";
+import { DraftWorkerRepository } from "./draft-worker.repository";
 import {
   applyFinishWithMeta,
   downloadMediaBytes,
@@ -29,10 +28,7 @@ import {
   localGeneratedMediaStore,
   ReferenceUrlSigner,
 } from "../media/generated-media-store";
-import {
-  ImagePromptBuilder,
-  targetModelIdForShot,
-} from "../post-production/image-prompt-builder";
+import { ImagePromptBuilder } from "../post-production/image-prompt-builder";
 import { errorMessage, isRecord } from "../shared/utils/value-utils";
 import {
   isPostPipelineV3,
@@ -91,21 +87,19 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly resolveScheduledAgentConcept: () => Promise<
       JsonValue | undefined
     > = async () => undefined,
+    private readonly referenceLifecycle?: {
+      drafts: DraftsService;
+      runner: ReferencePostAgentRunner;
+      assertCharacterActive?: (characterId: string) => Promise<void>;
+      runQueuedJob?: (jobId: string) => Promise<unknown>;
+    },
   ) {}
 
   onModuleInit(): void {
     // 루프는 항상 띄우고 켜짐 여부는 tick이 판단한다.
-    void this.resolvePlanner()
-      .then((planner) =>
-        this.logger.log(
-          `Draft worker loop started (planner=${planner.name}, scheduler=${this.config.schedulerEnabled})`,
-        ),
-      )
-      .catch(() =>
-        this.logger.log(
-          `Draft worker loop started (scheduler=${this.config.schedulerEnabled})`,
-        ),
-      );
+    this.logger.log(
+      `Draft worker loop started (scheduler=${this.config.schedulerEnabled})`,
+    );
     this.scheduleNext();
   }
 
@@ -143,12 +137,14 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     if (!(await this.resolveEnabled())) {
       return;
     }
+    await this.referenceLifecycle?.drafts.recoverExpiredReferenceLeases();
     await this.sweepExpiredPlanLeases();
     if (this.config.schedulerEnabled) {
       await this.createScheduledDrafts();
     }
+    await this.planClaimedReferenceDrafts();
     await this.planClaimedV3Drafts();
-    await this.planClaimedDrafts();
+    await this.aggregateReferenceDrafts();
     await this.aggregateGeneratingDrafts();
     await this.publishDueDrafts();
   }
@@ -161,8 +157,44 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
   // 기획 실패는 자동 경로와 동일하게 planned 복귀/failed 전이로 흡수된다.
   async planDraftNow(
     draftId: string,
-    options?: { operatorNote?: string },
+    options?: {
+      operatorNote?: string;
+      expectedStage?: string;
+      expectedRevision?: string;
+      expectedPromptRevision?: number;
+    },
   ): Promise<{ planned: boolean }> {
+    const reference = this.referenceLifecycle;
+    if (reference && (await reference.drafts.isReferenceDraft(draftId))) {
+      if (!options?.expectedStage || !options.expectedRevision)
+        throw new BadRequestException(
+          "Reference stage and revision are required",
+        );
+      const claimed = await reference.drafts.claimReferenceDraftNow(
+        draftId,
+        this.config.planLeaseSeconds,
+        options,
+      );
+      if (!claimed) return { planned: false };
+      await this.runReferenceStage(draftId);
+      if (options.expectedStage === "generation") {
+        const { draft, jobs } =
+          await reference.drafts.getReferenceDraftState(draftId);
+        const concept = isRecord(draft.conceptJson) ? draft.conceptJson : {};
+        const build = isRecord(concept.generationBuild)
+          ? concept.generationBuild
+          : {};
+        const ids = Array.isArray(build.jobIds) ? build.jobIds : [];
+        for (const job of jobs) {
+          if (job.status !== "queued" || !ids.includes(job.id)) continue;
+          await reference.drafts.assertGenerationJobMutable(draftId, job.id);
+          if (!reference.runQueuedJob)
+            throw new Error("reference_generation_worker_required");
+          await reference.runQueuedJob(job.id);
+        }
+      }
+      return { planned: true };
+    }
     if (this.runV3Stage) {
       const claimedV3 = await this.repository.claimV3DraftNow(
         draftId,
@@ -173,38 +205,46 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
         return { planned: true };
       }
     }
-    const claimed = await this.repository.claimDraftNow(
-      draftId,
-      PUBLISH_LEASE_SECONDS,
-    );
-    if (!claimed) {
-      return { planned: false };
-    }
-    await this.planDraft(draftId);
-    return { planned: true };
+    return { planned: false };
   }
 
   // 지정 approved draft를 scheduledAt과 무관하게 즉시 게시한다.
   async publishDraftNow(
     draftId: string,
   ): Promise<{ published: boolean; reason?: string }> {
-    const draft = await this.repository.findApprovedDraft(
-      draftId,
-      this.config.planLeaseSeconds,
-    );
+    const reference = this.referenceLifecycle;
+    const isReference =
+      !!reference && (await reference.drafts.isReferenceDraft(draftId));
+    const draft = isReference
+      ? await reference!.drafts.claimReferencePublication(
+          draftId,
+          this.config.planLeaseSeconds,
+        )
+      : await this.repository.findApprovedDraft(
+          draftId,
+          this.config.planLeaseSeconds,
+        );
     if (!draft) {
       return { published: false };
     }
     try {
-      await this.publishDraft(draft);
+      await this.publishDraft({ ...draft, hashtags: draft.hashtags ?? [] });
       return { published: true };
     } catch (error) {
       const message = errorMessage(error).slice(0, 500);
-      await this.repository.recordPublishError(
-        draftId,
-        message,
-        draft.leaseExpiresAt,
-      );
+      if (isReference && draft.leaseExpiresAt) {
+        await reference!.drafts.releaseReferencePublication(
+          draftId,
+          draft.leaseExpiresAt,
+          message,
+        );
+      } else {
+        await this.repository.recordPublishError(
+          draftId,
+          message,
+          draft.leaseExpiresAt,
+        );
+      }
       return { published: false, reason: message };
     }
   }
@@ -215,6 +255,21 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
   async aggregateDraftNow(
     draftId: string,
   ): Promise<{ aggregated: boolean; reason?: string }> {
+    if (
+      this.referenceLifecycle &&
+      (await this.referenceLifecycle.drafts.isReferenceDraft(draftId))
+    ) {
+      const waiting =
+        await this.referenceLifecycle.drafts.listReferenceGenerationWaiting(
+          1,
+          draftId,
+        );
+      return {
+        aggregated:
+          waiting.length > 0 &&
+          (await this.referenceLifecycle.runner.aggregateGeneration(draftId)),
+      };
+    }
     const draft = await this.repository.findAggregateDraft(draftId);
     if (!draft) {
       return { aggregated: false };
@@ -235,159 +290,45 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
   async buildDraftPromptsNow(
     draftId: string,
   ): Promise<{ built: boolean; reason?: string }> {
-    const draft = await this.repository.findPromptBuildDraft(draftId);
-    if (!draft) {
-      return { built: false };
-    }
-    const jobs = await this.repository.findDraftImageJobs(draftId);
-    // 컷별 최신 잡만 대상 — 재생성 이력이 있어도 현행 잡만 빌드한다.
-    const latestPerShot = new Map<number, (typeof jobs)[number]>();
-    for (const job of jobs) {
-      if (!latestPerShot.has(job.sortOrder)) {
-        latestPerShot.set(job.sortOrder, job);
-      }
-    }
-    const targets = [...latestPerShot.values()]
-      .filter((job) => job.status === "draft")
-      .sort((a, b) => a.sortOrder - b.sortOrder);
-    if (targets.length === 0) {
-      return {
-        built: false,
-        reason: "draft has no draft-state shots to build prompts for",
-      };
-    }
-    const shots: {
-      sortOrder: number;
-      scene: string;
-      captureSetup: string;
-      characterVisible: boolean;
-      referenceMediaIds?: string[];
-    }[] = [];
-    for (const job of targets) {
-      const shot = shotPlanOf(job.paramsJson, job.sortOrder);
-      if (!shot) {
-        return {
-          built: false,
-          reason: `shot ${job.sortOrder} has no planned scene`,
-        };
-      }
-      shots.push(shot);
-    }
-    const profile = draft.character.visualProfile;
-    const availableIdentityIds = (profile?.referenceMedia ?? [])
-      .filter((reference) => reference.media.uploadedAt)
-      .map((reference) => reference.mediaId);
-    const availableEnvironmentIds = (draft.location?.references ?? [])
-      .filter((reference) => reference.media.uploadedAt)
-      .map((reference) => reference.mediaId);
-    const availableReferenceIds = [
-      ...availableIdentityIds,
-      ...availableEnvironmentIds,
-    ];
-    const effectiveShots = shots.map(({ referenceMediaIds, ...shot }) => {
-      const selected =
-        referenceMediaIds === undefined
-          ? shot.characterVisible
-            ? availableIdentityIds
-            : []
-          : referenceMediaIds.filter((mediaId) =>
-              availableReferenceIds.includes(mediaId),
-            );
-      const identityReferenceMediaIds = selected.filter((mediaId) =>
-        availableIdentityIds.includes(mediaId),
-      );
-      const environmentReferenceMediaIds = selected.filter((mediaId) =>
-        availableEnvironmentIds.includes(mediaId),
-      );
-      return {
-        ...shot,
-        identityReferenceMediaIds,
-        environmentReferenceMediaIds,
-        referenceMediaIds: [
-          ...(shot.characterVisible ? identityReferenceMediaIds : []),
-          ...environmentReferenceMediaIds,
-        ],
-      };
-    });
-    try {
-      for (const shot of effectiveShots) {
-        assertVisibleCharacterHasReference(
-          shot.characterVisible,
-          shot.identityReferenceMediaIds.length,
-          `shot ${shot.sortOrder}`,
-        );
-      }
-    } catch (error) {
-      return { built: false, reason: errorMessage(error).slice(0, 500) };
-    }
-    const builder = await this.resolvePromptBuilder();
-    const buildShots = effectiveShots.map((shot) => ({
-      ...shot,
-      targetModelId: targetModelIdForShot(
-        builder,
-        shot.referenceMediaIds.length > 0,
-      ),
-    }));
-    let prompts: string[];
-    try {
-      prompts = (
-        await builder.build(
-          {
-            appearancePrompt: profile?.appearancePrompt ?? "",
-            stylePrompt: profile?.stylePrompt ?? "",
-            environmentPrompt: draft.location?.visualPrompt ?? "",
-            shots: buildShots.map((shot) => ({
-              sortOrder: shot.sortOrder,
-              scene: shot.scene,
-              captureSetup: shot.captureSetup,
-              characterVisible: shot.characterVisible,
-              targetModelId: shot.targetModelId,
-            })),
-          },
-          { requestId: draft.id, characterId: draft.characterId },
-        )
-      ).prompts;
-    } catch (error) {
-      return { built: false, reason: errorMessage(error).slice(0, 500) };
-    }
-    const concept = isRecord(draft.conceptJson) ? draft.conceptJson : {};
-    try {
-      await this.repository.persistBuiltPrompts({
-        draftId: draft.id,
-        characterId: draft.characterId,
-        builderName: builder.name,
-        conceptJson: {
-          ...concept,
-          builderName: builder.name,
-        } as JsonValue,
-        jobs: targets.map((job, index) => {
-          const targetModelId = buildShots[index].targetModelId;
-          return {
-            id: job.id,
-            sortOrder: job.sortOrder,
-            prompt: prompts[index],
-            paramsJson: withShotBuildMetadata(
-              job.paramsJson,
-              buildShots[index].identityReferenceMediaIds,
-              buildShots[index].environmentReferenceMediaIds,
-              targetModelId,
-            ),
-          };
-        }),
-      });
-    } catch (error) {
-      return { built: false, reason: errorMessage(error).slice(0, 500) };
-    }
-    this.logger.log(
-      `Draft ${draft.id} prompts built (${targets.length} shot(s))`,
-    );
-    return { built: true };
+    void draftId;
+    return { built: false, reason: "기존 Agent는 보관되었습니다." };
   }
 
   // ── 기획 단계 ────────────────────────────────────────────────────────────
 
+  private async runReferenceStage(draftId: string): Promise<void> {
+    const reference = this.referenceLifecycle!;
+    try {
+      if (!reference.assertCharacterActive)
+        throw new Error("reference_character_service_required");
+      const { draft } = await reference.drafts.getReferenceDraftState(draftId);
+      await reference.assertCharacterActive(draft.characterId);
+      await reference.runner.runCurrentStage(draftId);
+    } catch (error) {
+      await reference.drafts.failReferenceStage(draftId, errorMessage(error));
+    }
+  }
+
+  private async planClaimedReferenceDrafts(): Promise<void> {
+    if (!this.referenceLifecycle) return;
+    for (;;) {
+      const draftId = await this.referenceLifecycle.drafts.claimReferenceDraft(
+        this.config.planLeaseSeconds,
+      );
+      if (!draftId) return;
+      await this.runReferenceStage(draftId);
+    }
+  }
+
+  private async aggregateReferenceDrafts(): Promise<void> {
+    if (!this.referenceLifecycle) return;
+    for (const draft of await this.referenceLifecycle.drafts.listReferenceGenerationWaiting(
+      AGGREGATE_BATCH,
+    ))
+      await this.referenceLifecycle.runner.aggregateGeneration(draft.id);
+  }
+
   private async sweepExpiredPlanLeases(): Promise<void> {
-    const now = new Date();
     const v3 = await this.repository.sweepExpiredV3Leases(
       this.config.maxAttempts,
     );
@@ -395,13 +336,6 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `Recovered V3 leases (requeued=${v3.requeued}, failed=${v3.failed})`,
       );
-    }
-    const requeued = await this.repository.sweepExpiredPlanLeases(
-      now,
-      this.config.maxAttempts,
-    );
-    if (requeued > 0) {
-      this.logger.warn(`Requeued ${requeued} expired planning draft(s)`);
     }
   }
 
@@ -414,231 +348,6 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       if (!draftId) return;
       await this.runV3Stage(draftId);
     }
-  }
-
-  private async planClaimedDrafts(): Promise<void> {
-    for (;;) {
-      const draftId = await this.claimPlannedDraft();
-      if (!draftId) {
-        return;
-      }
-      await this.planDraft(draftId);
-    }
-  }
-
-  // planned draft를 SKIP LOCKED으로 집는다. inactive 캐릭터의 draft는 보류.
-  // 수동 진행 초안(conceptJson.mode = 'manual')은 자동 기획이 집지 않는다 —
-  // 운영자가 단계마다 버튼으로 진행하며(planDraftNow), 자동으로 넘어가지 않는다.
-  private async claimPlannedDraft(): Promise<string | undefined> {
-    return this.repository.claimPlannedDraft(this.config.planLeaseSeconds);
-  }
-
-  private async planDraft(draftId: string): Promise<void> {
-    const draft = await this.repository.findPlannedDraft(draftId);
-    if (!draft || draft.status !== "generating") {
-      return;
-    }
-
-    try {
-      const concept = isRecord(draft.conceptJson) ? draft.conceptJson : {};
-      const sceneHint = String(concept.sceneHint ?? "").trim() || undefined;
-      // 수동 진행 초안: 컷 잡을 draft(비claim) 상태로 만들어 생성 워커가
-      // 자동으로 집지 않게 한다 — 운영자가 컷별 "이미지 생성 실행"으로 진행.
-      const manualMode = concept.mode === "manual";
-      const planner = await this.resolvePlanner();
-      // 캡션 있는 레퍼런스만 카탈로그로 — LLM이 샷별로 어울리는 컷을 고른다.
-      const referenceCatalog = (
-        draft.character.visualProfile?.referenceMedia ?? []
-      )
-        .filter(
-          (reference) => reference.description && reference.media.uploadedAt,
-        )
-        .map((reference) => ({
-          id: reference.mediaId,
-          description: reference.description,
-        }));
-      const availableLocations = await this.repository.findAvailableLocations(
-        draft.characterId,
-      );
-      const locationCatalog = availableLocations.map((location) => ({
-        id: location.id,
-        name: location.displayName,
-        description: location.description,
-        references: location.references
-          .filter((reference) => reference.media.uploadedAt)
-          .map((reference) => ({
-            id: reference.mediaId,
-            description: reference.description,
-          })),
-      }));
-      const planInput = {
-        characterName: draft.character.displayName,
-        bio: draft.character.bio,
-        interests: draft.character.interests,
-        personas: draft.character.personas,
-        memories: draft.character.memories.map((memory) => memory.content),
-        recentCaptions: draft.character.posts
-          .map((post) => post.content)
-          .filter(Boolean),
-        sceneHint,
-        maxShots: this.config.maxShots,
-        ...(referenceCatalog.length > 0 ? { referenceCatalog } : {}),
-        ...(locationCatalog.length > 0 ? { locationCatalog } : {}),
-      };
-      const planned = await planner.plan(planInput, {
-        requestId: draft.id,
-        characterId: draft.characterId,
-      });
-      const availableReferenceIds = new Set(
-        referenceCatalog.map((reference) => reference.id),
-      );
-      const selectedLocation = planned.locationId
-        ? availableLocations.find(
-            (location) => location.id === planned.locationId,
-          )
-        : undefined;
-      const availableEnvironmentIds = new Set(
-        selectedLocation?.references
-          .filter((reference) => reference.media.uploadedAt)
-          .map((reference) => reference.mediaId) ?? [],
-      );
-      const plan = {
-        ...planned,
-        shots: planned.shots.map((shot) => {
-          const referenceIds = shot.characterVisible
-            ? shot.referenceIds.filter((id) => availableReferenceIds.has(id))
-            : [];
-          const environmentReferenceIds = (
-            shot.environmentReferenceIds ?? []
-          ).filter((id) => availableEnvironmentIds.has(id));
-          assertVisibleCharacterHasReference(
-            shot.characterVisible,
-            referenceIds.length,
-            `shot ${shot.sortOrder}`,
-          );
-          return { ...shot, referenceIds, environmentReferenceIds };
-        }),
-      };
-
-      // 기획·빌드 LLM을 직렬로 부르면 기본 리스(120s)를 넘길 수 있어,
-      // 스윕이 중간에 회수해 이중 기획하지 않도록 리스를 연장한다.
-      await this.repository.extendPlanLease(
-        draft.id,
-        this.config.planLeaseSeconds,
-      );
-
-      // 자동 모드는 기획 직후 프롬프트 빌드까지 한 시도로 진행한다 (빌드
-      // 실패 = 기획 실패, 같은 재시도 경로). 수동 모드는 컷 프롬프트를 비워
-      // 두고 운영자가 "프롬프트 빌드" 버튼으로 별도 진행한다.
-      const profile = draft.character.visualProfile;
-      const builder = manualMode ? null : await this.resolvePromptBuilder();
-      const buildShots = builder
-        ? plan.shots.map((shot) => ({
-            sortOrder: shot.sortOrder,
-            scene: shot.scene,
-            captureSetup: shot.captureSetup,
-            characterVisible: shot.characterVisible,
-            targetModelId: targetModelIdForShot(
-              builder,
-              shot.referenceIds.length + shot.environmentReferenceIds.length >
-                0,
-            ),
-          }))
-        : [];
-      const built = builder
-        ? await builder.build(
-            {
-              appearancePrompt: profile?.appearancePrompt ?? "",
-              stylePrompt: profile?.stylePrompt ?? "",
-              environmentPrompt: selectedLocation?.visualPrompt ?? "",
-              shots: buildShots,
-            },
-            { requestId: draft.id, characterId: draft.characterId },
-          )
-        : null;
-
-      await this.repository.persistPlan({
-        draftId: draft.id,
-        characterId: draft.characterId,
-        ...(selectedLocation ? { locationId: selectedLocation.id } : {}),
-        caption: plan.caption,
-        hashtags: plan.hashtags,
-        plannerName: planner.name,
-        ...(builder ? { builderName: builder.name } : {}),
-        // 기존 키(source/mode/sceneHint)는 보존하고 기획 산출물을 덧쓴다.
-        // planInput은 "기획이 어떤 데이터를 받았는지" 추적용 스냅샷.
-        conceptJson: {
-          ...concept,
-          plannerName: planner.name,
-          ...(builder ? { builderName: builder.name } : {}),
-          planInput: planInput as unknown as Record<string, unknown>,
-          plan: plan as unknown as Record<string, unknown>,
-        } as JsonValue,
-        jobs: plan.shots.map((shot, index) => {
-          // 커스텀/구버전 플래너가 referenceIds를 생략해도 동작해야 한다.
-          const referenceIds = shot.referenceIds ?? [];
-          const environmentReferenceIds = shot.environmentReferenceIds ?? [];
-          const combinedReferenceIds = [
-            ...referenceIds,
-            ...environmentReferenceIds,
-          ];
-          return {
-            // 수동 모드는 빈 프롬프트 — "프롬프트 빌드" 단계에서 채운다.
-            prompt: built ? built.prompts[index] : "",
-            sortOrder: index,
-            ...(manualMode ? { status: "draft" as const } : {}),
-            // _shot: 파이프라인 메타데이터 (프로바이더 미전달).
-            paramsJson: {
-              _shot: {
-                sortOrder: shot.sortOrder,
-                scene: shot.scene,
-                captureSetup: shot.captureSetup,
-                characterVisible: shot.characterVisible,
-                identityReferenceMediaIds: referenceIds,
-                environmentReferenceMediaIds: environmentReferenceIds,
-                referenceMediaIds: combinedReferenceIds,
-                ...(buildShots[index]?.targetModelId
-                  ? { targetModelId: buildShots[index].targetModelId }
-                  : {}),
-              },
-            },
-          };
-        }),
-      });
-      this.logger.log(`Draft ${draft.id} planned (${plan.shots.length} shots)`);
-    } catch (error) {
-      await this.handlePlanningFailure(draft, error);
-    }
-  }
-
-  private async handlePlanningFailure(
-    draft: PlannedDraft,
-    error: unknown,
-  ): Promise<void> {
-    const message = errorMessage(error).slice(0, 500);
-    this.logger.error(
-      `Draft ${draft.id} planning failed: ${message}`,
-      error instanceof Error ? error.stack : undefined,
-    );
-    if (
-      error instanceof ShotReferencePolicyError ||
-      draft.attemptCount >= this.config.maxAttempts
-    ) {
-      const transitioned = await this.repository.failPlanning(
-        draft.id,
-        message,
-      );
-      if (transitioned) {
-        await this.recordActionLog(
-          draft.characterId,
-          draft.id,
-          "DRAFT_FAILED",
-          message,
-        );
-      }
-      return;
-    }
-    await this.repository.requeuePlanning(draft.id, message);
   }
 
   // ── 집계 단계 ────────────────────────────────────────────────────────────
@@ -660,6 +369,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     conceptJson: unknown;
     jobs: { sortOrder: number; status: string }[];
   }): Promise<"planned" | "failed" | "needs_review" | "caption" | "pending"> {
+    if (!isNaturalAgent(draft.conceptJson)) return "pending";
     if (draft.jobs.length === 0) {
       // 기획 트랜잭션이 잡을 못 만든 비정상 상태 — 기획으로 되돌린다.
       await this.repository.requeueDraftWithoutJobs(draft.id, draft.status);
@@ -737,6 +447,36 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
 
   private async publishDueDrafts(): Promise<void> {
     const now = new Date();
+    if (this.referenceLifecycle) {
+      const { drafts } = this.referenceLifecycle;
+      const ids = await drafts.listReferencePublicationsDue(
+        now,
+        PUBLISH_BATCH,
+        new Date(now.getTime() - PUBLISH_RETRY_BACKOFF_MS),
+      );
+      for (const { id } of ids) {
+        let lease: Date | null = null;
+        try {
+          const draft = await drafts.claimReferencePublication(
+            id,
+            PUBLISH_LEASE_SECONDS,
+          );
+          if (!draft) continue;
+          lease = draft.leaseExpiresAt;
+          await this.publishDraft({ ...draft, hashtags: draft.hashtags ?? [] });
+        } catch (error) {
+          this.logger.error(
+            `Reference draft ${id} publish failed: ${errorMessage(error)}`,
+          );
+          if (lease)
+            await drafts.releaseReferencePublication(
+              id,
+              lease,
+              errorMessage(error),
+            );
+        }
+      }
+    }
     const candidates = await this.repository.findDueDrafts(
       now,
       PUBLISH_BATCH,
@@ -784,7 +524,35 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       throw new Error("caption_missing: draft has no caption to publish");
     }
     // 컷별 최신 completed 잡의 선택 출력 수집.
-    const jobs = await this.repository.findPublishJobs(draft.id);
+    const referenceConcept =
+      isRecord(draft.conceptJson) &&
+      draft.conceptJson.postGenerationAgent === "reference-v1"
+        ? draft.conceptJson
+        : null;
+    if (referenceConcept) {
+      if (!this.referenceLifecycle?.assertCharacterActive)
+        throw new Error("reference_character_service_required");
+      await this.referenceLifecycle.assertCharacterActive(draft.characterId);
+    }
+    const allJobs = referenceConcept
+      ? (
+          await this.referenceLifecycle!.drafts.getReferenceDraftState(draft.id)
+        ).jobs.map((job) => ({
+          ...job,
+          outputMediaId:
+            job.outputs.find((output) => output.selected)?.mediaId ?? null,
+        }))
+      : await this.repository.findPublishJobs(draft.id);
+    const build =
+      referenceConcept && isRecord(referenceConcept.generationBuild)
+        ? referenceConcept.generationBuild
+        : null;
+    const jobIds = build && Array.isArray(build.jobIds) ? build.jobIds : [];
+    const jobs = referenceConcept
+      ? allJobs.filter((job) => jobIds.includes(job.id))
+      : allJobs;
+    if (referenceConcept && (!jobIds.length || jobs.length !== jobIds.length))
+      throw new Error("reference_generation_incomplete");
     const mediaByShot = new Map<
       number,
       { mediaId: string; filterPreset: string | null }
@@ -852,16 +620,18 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       hashtags,
       leaseExpiresAt: draft.leaseExpiresAt,
       // 메모리 역반영 — 확정 세계관 캐릭터가 다음 기획에서 모순을 내지 않게 한다.
-      ...(isPostPipelineV3(draft.conceptJson)
-        ? {
-            memories: selectedPublishedMemories(draft.conceptJson),
-          }
-        : {
-            memoryContent: publishedMemoryContent(
-              draft.caption,
-              draft.conceptJson,
-            ),
-          }),
+      ...(referenceConcept
+        ? { referencePublication: { expectedConceptJson: referenceConcept } }
+        : isPostPipelineV3(draft.conceptJson)
+          ? {
+              memories: selectedPublishedMemories(draft.conceptJson),
+            }
+          : {
+              memoryContent: publishedMemoryContent(
+                draft.caption,
+                draft.conceptJson,
+              ),
+            }),
       media: orderedMedia.map(({ mediaId }, index) => ({
         originalMediaId: mediaId,
         finishedFile: finishedFiles[index],
@@ -920,6 +690,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     const policies = await this.repository.findEnabledPostingPolicies();
     const pipelineV3Enabled = await this.resolvePipelineV3Enabled();
     const scheduledConcept = await this.resolveScheduledAgentConcept();
+    if (!isNaturalAgent(scheduledConcept)) return;
 
     const now = new Date();
     for (const policy of policies) {
@@ -1012,67 +783,6 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
 
 // 잡 paramsJson._shot — 기획이 남긴 구조화 컷 계약 (프롬프트 빌드 입력).
 // 구버전 수동 초안은 scene만 있으므로 기존 인물 중심 동작을 보수적으로 유지한다.
-function shotPlanOf(
-  paramsJson: unknown,
-  sortOrder: number,
-): {
-  sortOrder: number;
-  scene: string;
-  captureSetup: string;
-  characterVisible: boolean;
-  referenceMediaIds?: string[];
-} | null {
-  if (!isRecord(paramsJson) || !isRecord(paramsJson._shot)) {
-    return null;
-  }
-  const scene = paramsJson._shot.scene;
-  if (typeof scene !== "string" || !scene.trim()) {
-    return null;
-  }
-  const captureSetup = paramsJson._shot.captureSetup;
-  const referenceMediaIds = Array.isArray(paramsJson._shot.referenceMediaIds)
-    ? paramsJson._shot.referenceMediaIds.filter(
-        (id): id is string => typeof id === "string",
-      )
-    : undefined;
-  return {
-    sortOrder,
-    scene: scene.trim(),
-    captureSetup:
-      typeof captureSetup === "string" && captureSetup.trim()
-        ? captureSetup.trim()
-        : "Legacy plan without capture metadata; use a physically plausible viewpoint.",
-    characterVisible:
-      typeof paramsJson._shot.characterVisible === "boolean"
-        ? paramsJson._shot.characterVisible
-        : true,
-    ...(referenceMediaIds !== undefined ? { referenceMediaIds } : {}),
-  };
-}
-
-function withShotBuildMetadata(
-  paramsJson: unknown,
-  identityReferenceMediaIds: string[],
-  environmentReferenceMediaIds: string[],
-  targetModelId?: string,
-): JsonValue {
-  const params = isRecord(paramsJson) ? paramsJson : {};
-  const shot = isRecord(params._shot) ? params._shot : {};
-  return {
-    ...params,
-    _shot: {
-      ...shot,
-      identityReferenceMediaIds,
-      environmentReferenceMediaIds,
-      referenceMediaIds: [
-        ...identityReferenceMediaIds,
-        ...environmentReferenceMediaIds,
-      ],
-      ...(targetModelId ? { targetModelId } : {}),
-    },
-  } as JsonValue;
-}
-
 export function publishedMemoryContent(
   caption: string,
   conceptJson: unknown,

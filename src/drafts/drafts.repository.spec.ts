@@ -53,7 +53,11 @@ describe("DraftsRepository", () => {
     await repository.selectShotOutput("job-1", "media-1");
 
     expect(mock.client.transaction).toHaveBeenCalledTimes(1);
-    expect(mock.operations.map((operation) => operation.set)).toEqual([
+    expect(
+      mock.operations
+        .filter((operation) => operation.kind === "update")
+        .map((operation) => operation.set),
+    ).toEqual([
       { selected: false },
       { selected: true },
       { outputMediaId: "media-1" },

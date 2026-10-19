@@ -1,7 +1,6 @@
 import {
   Accordion,
   Alert,
-  Code,
   Group,
   Badge,
   Button,
@@ -19,9 +18,8 @@ import { CharacterName, UserName } from "../../shared/ui/EntityName";
 import { LogField as Field, logDateTime } from "../../shared/ui/LogField";
 import classes from "../../shared/ui/LogDetails.module.css";
 import { useQuery } from "@tanstack/react-query";
-import { previewUrl } from "../../shared/media/previewUrl";
-import { ZoomableImage } from "../../shared/ui/ZoomableImage";
-import { fetchLlmLog, type LlmLogMediaItem } from "./api";
+import { fetchLlmLog } from "./api";
+import { LlmLogPayload, LlmLogMediaTile } from "./LlmLogPayload";
 
 // provider payload는 기본 화면에 펼치지 않고 필요할 때 연다
 // (docs/04-design-rules.md:12).
@@ -152,11 +150,7 @@ function LogContent({
             <Accordion.Item key={key} value={key}>
               <Accordion.Control>{label}</Accordion.Control>
               <Accordion.Panel>
-                <Code block className={classes.payload}>
-                  {typeof detail[key] === "string"
-                    ? (detail[key] as string)
-                    : JSON.stringify(detail[key] ?? null, null, 2)}
-                </Code>
+                <LlmLogPayload value={detail[key]} />
               </Accordion.Panel>
             </Accordion.Item>
           ))}
@@ -166,7 +160,7 @@ function LogContent({
             <Title order={3}>미디어 입출력</Title>
             <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
               {detail.media.map((item) => (
-                <MediaTile
+                <LlmLogMediaTile
                   key={`${item.role}-${item.sortOrder}-${item.id}`}
                   item={item}
                 />
@@ -278,41 +272,13 @@ function LogContent({
             <Accordion.Item key={section.key} value={section.key}>
               <Accordion.Control>{section.label}</Accordion.Control>
               <Accordion.Panel>
-                <Code block className={classes.payload}>
-                  {JSON.stringify(detail[section.key] ?? null, null, 2)}
-                </Code>
+                <LlmLogPayload value={detail[section.key]} stringify />
               </Accordion.Panel>
             </Accordion.Item>
           ))}
         </Accordion>
       </Stack>
     </Paper>
-  );
-}
-
-function MediaTile({ item }: { item: LlmLogMediaItem }) {
-  const source = previewUrl(item.url);
-  return (
-    <Stack gap={4}>
-      {source ? (
-        <ZoomableImage
-          src={source}
-          alt={`${item.role} ${item.sortOrder + 1}`}
-          h={120}
-          fit="contain"
-        />
-      ) : (
-        <Text size="xs" c="dimmed">
-          미리보기 없음
-        </Text>
-      )}
-      <Text size="xs">
-        {item.role} #{item.sortOrder + 1}
-      </Text>
-      <Text size="xs" c="dimmed">
-        {item.contentType ?? item.mediaType}
-      </Text>
-    </Stack>
   );
 }
 

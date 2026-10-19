@@ -1,3 +1,7 @@
+import {
+  activeReferenceDraftJob,
+  referenceJobExecutionLock,
+} from "./reference-job-condition";
 import { Injectable } from "@nestjs/common";
 import { and, asc, desc, eq, gte, isNotNull, lt, sql, sum } from "drizzle-orm";
 import { DatabaseService } from "../core/database/database.service";
@@ -40,6 +44,12 @@ export type GenerationJobWithProfile = typeof generationJobs.$inferSelect & {
       })
     | null;
 };
+const activeDraftJob = sql`(${generationJobs.draftId} is null or exists (
+  select 1 from ${postDrafts} where ${postDrafts.id} = ${generationJobs.draftId}
+  and (${postDrafts.draftType} <> 'post' or ${postDrafts.conceptJson}->>'postGenerationAgent' in ('natural-v1', 'reference-v1'))
+  and (${postDrafts.conceptJson}->>'postGenerationAgent' is distinct from 'reference-v1' or ${activeReferenceDraftJob})
+))`;
+
 export type ExpiredLeaseJob = {
   id: string;
   characterId: string;
@@ -60,43 +70,77 @@ export class GenerationJobRepository {
   async claimNextQueuedImageJob(
     leaseSeconds: number,
   ): Promise<string | undefined> {
-    const result = await this.database.client.execute<{ id: string }>(sql`
-      update opod.generation_jobs
-      set status = 'running',
-          lease_expires_at = now() + make_interval(secs => ${leaseSeconds}),
-          attempt_count = attempt_count + 1,
-          updated_at = now()
-      where id = (
-        select id from opod.generation_jobs
-        where status = 'queued' and media_type = 'image'
-        order by created_at, id
-        limit 1 for update skip locked
-      )
-      returning id
-    `);
-    return result.rows[0]?.id;
+    return this.database.client.transaction(
+      async (tx) => {
+        const candidate = await tx.execute<{ id: string }>(sql`
+        select id from ${generationJobs}
+        where status = 'queued' and media_type = 'image' and ${activeDraftJob}
+        order by created_at, id limit 1 for update skip locked
+      `);
+        const jobId = candidate.rows[0]?.id;
+        if (!jobId) return undefined;
+        const lock = await tx.execute<{ locked: boolean }>(
+          referenceJobExecutionLock(jobId),
+        );
+        if (lock.rows[0]?.locked === false) return undefined;
+        const rows = await tx
+          .update(generationJobs)
+          .set({
+            status: "running",
+            leaseExpiresAt: sql`now() + make_interval(secs => ${leaseSeconds})`,
+            attemptCount: sql`${generationJobs.attemptCount} + 1`,
+            updatedAt: sql`now()`,
+          })
+          .where(
+            and(
+              eq(generationJobs.id, jobId),
+              eq(generationJobs.status, "queued"),
+              activeDraftJob,
+            ),
+          )
+          .returning({ id: generationJobs.id });
+        return rows[0]?.id;
+      },
+      { isolationLevel: "read committed" },
+    );
   }
 
   async claimQueuedImageJob(
     jobId: string,
     leaseSeconds: number,
   ): Promise<string | undefined> {
-    const rows = await this.database.client
-      .update(generationJobs)
-      .set({
-        status: "running",
-        leaseExpiresAt: new Date(Date.now() + leaseSeconds * 1000),
-        attemptCount: sql`${generationJobs.attemptCount} + 1`,
-      })
-      .where(
-        and(
-          eq(generationJobs.id, jobId),
-          eq(generationJobs.status, "queued"),
-          eq(generationJobs.mediaType, "image"),
-        ),
-      )
-      .returning({ id: generationJobs.id });
-    return rows[0]?.id;
+    return this.database.client.transaction(
+      async (tx) => {
+        const candidate = await tx.execute<{ id: string }>(sql`
+        select id from ${generationJobs} where ${generationJobs.id} = ${jobId}
+        and status = 'queued' and media_type = 'image' and ${activeDraftJob}
+        limit 1 for update skip locked
+      `);
+        if (!candidate.rows[0]) return undefined;
+        const lock = await tx.execute<{ locked: boolean }>(
+          referenceJobExecutionLock(jobId),
+        );
+        if (lock.rows[0]?.locked === false) return undefined;
+        const rows = await tx
+          .update(generationJobs)
+          .set({
+            status: "running",
+            leaseExpiresAt: new Date(Date.now() + leaseSeconds * 1000),
+            attemptCount: sql`${generationJobs.attemptCount} + 1`,
+          })
+          .where(
+            and(
+              eq(generationJobs.id, jobId),
+              activeDraftJob,
+              eq(generationJobs.status, "queued"),
+              eq(generationJobs.mediaType, "image"),
+            ),
+          )
+          .returning({ id: generationJobs.id });
+        return rows[0]?.id;
+      },
+      { isolationLevel: "read committed" },
+    );
   }
 
   async requeueExpiredLeases(now: Date, maxAttempts: number): Promise<number> {
@@ -105,6 +149,7 @@ export class GenerationJobRepository {
       .set({ status: "queued", leaseExpiresAt: null })
       .where(
         and(
+          activeDraftJob,
           eq(generationJobs.status, "running"),
           lt(generationJobs.leaseExpiresAt, now),
           lt(generationJobs.attemptCount, maxAttempts),
@@ -127,6 +172,7 @@ export class GenerationJobRepository {
       .from(generationJobs)
       .where(
         and(
+          activeDraftJob,
           eq(generationJobs.status, "running"),
           lt(generationJobs.leaseExpiresAt, now),
           gte(generationJobs.attemptCount, maxAttempts),
@@ -161,6 +207,7 @@ export class GenerationJobRepository {
       .where(
         and(
           eq(generationJobs.id, input.jobId),
+          activeDraftJob,
           eq(generationJobs.status, "running"),
         ),
       );
@@ -185,7 +232,7 @@ export class GenerationJobRepository {
     const [job] = await this.database.client
       .select()
       .from(generationJobs)
-      .where(eq(generationJobs.id, jobId))
+      .where(and(eq(generationJobs.id, jobId), activeDraftJob))
       .limit(1);
     if (!job) return null;
     const [character] = await this.database.client
@@ -285,6 +332,7 @@ export class GenerationJobRepository {
       .where(
         and(
           eq(generationJobs.id, input.jobId),
+          activeDraftJob,
           eq(generationJobs.status, "running"),
         ),
       );
@@ -354,6 +402,7 @@ export class GenerationJobRepository {
         .where(
           and(
             eq(generationJobs.id, input.jobId),
+            activeDraftJob,
             eq(generationJobs.status, "running"),
           ),
         )

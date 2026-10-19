@@ -416,7 +416,7 @@ function NaturalEditor({
                   </Badge>
                 </Text>
                 <Text size="xs" c="ink.6">
-                  기존·새 Agent가 함께 사용하는 설정
+                  게시물 Agent의 공통 설정
                 </Text>
                 <Text size="sm" className={classes.code}>
                   {generation?.id
@@ -483,7 +483,7 @@ function NaturalEditor({
         </Stack>
         <Checkbox
           label="예약 자동 생성에도 새 Agent 사용"
-          description="기본은 기존 Agent입니다. 저장 후 새로 만드는 예약 작업에 적용합니다."
+          description="켜면 자연스러운 사진 Agent로 예약 작업을 자동 생성합니다. 끄면 자동 생성하지 않습니다."
           disabled={save.isPending}
           classNames={{ description: classes.fieldDescription }}
           key={form.key("schedulerDefault")}

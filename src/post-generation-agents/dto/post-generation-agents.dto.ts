@@ -5,6 +5,7 @@ import {
   IsString,
   Matches,
   MaxLength,
+  Max,
   Min,
   ValidateIf,
 } from "class-validator";
@@ -52,4 +53,12 @@ export class SaveNaturalAgentDto {
   @IsString() @Matches(/^[1-9][0-9]*$/) planningAiModelId!: string;
   @IsString() @Matches(/^[1-9][0-9]*$/) reviewAiModelId!: string;
   @ValidateIf(() => false) prompts!: unknown;
+}
+
+export class SaveReferenceAgentDto {
+  @ValidateIf((_object, value) => value !== null)
+  @IsString()
+  expectedRevision!: string | null;
+  @IsInt() @Min(1) @Max(3) maxAttempts!: number;
+  @ValidateIf(() => false) stages?: unknown;
 }

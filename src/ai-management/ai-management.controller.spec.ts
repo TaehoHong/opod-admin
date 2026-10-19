@@ -40,7 +40,6 @@ describe("AI management HTTP boundary", () => {
         },
       } as never,
       {} as never,
-      {} as never,
     );
     const module = await Test.createTestingModule({
       controllers: [AiManagementController],

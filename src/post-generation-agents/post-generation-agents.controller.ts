@@ -1,3 +1,20 @@
+import {
+  REFERENCE_SELECTION_SYSTEM_PROMPT,
+  REFERENCE_SELECTION_JSON_SCHEMA,
+} from "../../prompts/reference-selection";
+import {
+  REFERENCE_IMAGE_PROMPT_SYSTEM_PROMPT,
+  REFERENCE_IMAGE_PROMPT_JSON_SCHEMA,
+} from "../../prompts/reference-image-prompt";
+import {
+  REFERENCE_CAPTION_SYSTEM_PROMPT,
+  REFERENCE_CAPTION_JSON_SCHEMA,
+} from "../../prompts/reference-caption";
+import {
+  REFERENCE_AGENT_STAGES,
+  ReferenceAgentStage,
+  ReferenceAgentStageConfig,
+} from "../post-production/reference-agent-config";
 import { BadRequestException } from "@nestjs/common";
 import { NATURAL_AGENT_STARTERS } from "../../prompts/natural-post-agent";
 import { STRUCTURED_PLANNING_PROMPTS } from "../../prompts/structured-planning";
@@ -28,6 +45,7 @@ import { parsePageQuery } from "../shared/utils/page";
 import {
   CreateAiModelDto,
   SaveNaturalAgentDto,
+  SaveReferenceAgentDto,
   PromptRevisionDto,
   SavePostAgentPromptDto,
 } from "./dto/post-generation-agents.dto";
@@ -55,6 +73,106 @@ export class PostGenerationAgentsController {
             },
       ),
     };
+  }
+  @Get("reference/config") async referenceConfig() {
+    return {
+      current: await this.settings.getReferenceAgentSettings(),
+      starters: {
+        reference_select: {
+          systemPrompt: REFERENCE_SELECTION_SYSTEM_PROMPT,
+          outputSchema: REFERENCE_SELECTION_JSON_SCHEMA,
+        },
+        image_prompt: {
+          systemPrompt: REFERENCE_IMAGE_PROMPT_SYSTEM_PROMPT,
+          outputSchema: REFERENCE_IMAGE_PROMPT_JSON_SCHEMA,
+        },
+        caption: {
+          systemPrompt: REFERENCE_CAPTION_SYSTEM_PROMPT,
+          outputSchema: REFERENCE_CAPTION_JSON_SCHEMA,
+        },
+      },
+    };
+  }
+  @Post("reference/config") async saveReferenceConfig(
+    @Body() body: SaveReferenceAgentDto,
+  ) {
+    if (body.stages === undefined)
+      return this.settings.saveReferenceAgentSettings(
+        body.maxAttempts,
+        body.expectedRevision,
+      );
+    const input = body.stages;
+    if (
+      !isRecord(input) ||
+      Object.keys(input).length !== REFERENCE_AGENT_STAGES.length ||
+      REFERENCE_AGENT_STAGES.some((stage) => {
+        const value = input[stage];
+        return (
+          !isRecord(value) ||
+          typeof value.aiModelId !== "string" ||
+          !/^[1-9][0-9]*$/.test(value.aiModelId) ||
+          typeof value.systemPrompt !== "string" ||
+          !value.systemPrompt.trim() ||
+          value.systemPrompt.length > 50000
+        );
+      })
+    )
+      throw new BadRequestException(
+        "레퍼런스 Agent의 모든 단계 지침과 모델을 입력하세요.",
+      );
+    const generation = await this.prompts.execution("generation");
+    if (
+      !generation?.id ||
+      !generation.aiModelId ||
+      !generation.provider ||
+      !generation.effectiveModel
+    )
+      throw new BadRequestException("이미지 생성 모델을 먼저 저장하세요.");
+    const schemas = {
+      reference_select: REFERENCE_SELECTION_JSON_SCHEMA,
+      image_prompt: REFERENCE_IMAGE_PROMPT_JSON_SCHEMA,
+      caption: REFERENCE_CAPTION_JSON_SCHEMA,
+    };
+    const entries = await Promise.all(
+      REFERENCE_AGENT_STAGES.map(async (stage) => {
+        const value = input[stage] as {
+          aiModelId: string;
+          systemPrompt: string;
+        };
+        const model = await this.models.get(value.aiModelId);
+        if (model.type !== "llm")
+          throw new BadRequestException(
+            "레퍼런스 Agent 단계 모델은 LLM을 선택하세요.",
+          );
+        return [
+          stage,
+          {
+            aiModelId: model.id,
+            provider: model.provider,
+            model: model.model,
+            systemPrompt: value.systemPrompt,
+            outputSchema: schemas[stage],
+          },
+        ] as const;
+      }),
+    );
+    return this.settings.saveReferenceAgentSettings(
+      body.maxAttempts,
+      body.expectedRevision,
+      {
+        stages: Object.fromEntries(entries) as Record<
+          ReferenceAgentStage,
+          ReferenceAgentStageConfig
+        >,
+        generation: {
+          id: generation.id,
+          revision: generation.revision,
+          aiModelId: generation.aiModelId,
+          provider: generation.provider,
+          effectiveModel: generation.effectiveModel,
+        },
+      },
+    );
   }
   @Get("natural/config") async naturalConfig() {
     return {
@@ -140,6 +258,7 @@ export class PostGenerationAgentsController {
     @Param("stage") stage: string,
     @Body() body: SavePostAgentPromptDto,
   ) {
+    this.requireWritableStage(stage);
     return this.prompts.save(postAgentStage(stage), body);
   }
   @Post(":stage/versions/:id/restore") restore(
@@ -147,10 +266,18 @@ export class PostGenerationAgentsController {
     @Param("id") id: string,
     @Body() body: PromptRevisionDto,
   ) {
+    this.requireWritableStage(stage);
     return this.prompts.restore(
       postAgentStage(stage),
       id,
       body.expectedRevision,
     );
+  }
+  private requireWritableStage(stage: string): void {
+    postAgentStage(stage);
+    if (stage !== "generation")
+      throw new BadRequestException(
+        "기존 Agent 설정은 보관되어 읽기만 가능합니다.",
+      );
   }
 }

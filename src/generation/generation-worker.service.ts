@@ -1,3 +1,9 @@
+import {
+  referenceGenerationMetadata,
+  ReferenceGenerationMetadata,
+} from "./reference-generation";
+import type { MediaBytesReader } from "../post-production/reference-captioner";
+import type { ReferenceAgentGenerationConfig } from "../post-production/reference-agent-config";
 import { AiSelection, pinnedAiSelection } from "../settings/ai-management";
 import { resolveImageGenerationParams } from "./image-generation-params";
 import {
@@ -194,6 +200,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly resolveProviders: (
       promptId?: string,
       selected?: AiSelection,
+      frozenGeneration?: ReferenceAgentGenerationConfig,
     ) => Promise<ImageGenerationProviders>,
     private readonly store: GeneratedMediaStore,
     // 자동 루프 on/off도 tick마다 재해석 — 설정 화면 토글이 프로세스 재시작
@@ -214,6 +221,7 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly resolveAspectRatios: () => Promise<
       Record<AspectRatioFormat, string>
     > = async () => DEFAULT_ASPECT_RATIOS,
+    private readonly readReferenceBytes?: MediaBytesReader,
   ) {}
 
   onModuleInit(): void {
@@ -385,12 +393,19 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
         },
         "generation",
       );
-      const providers = await this.resolveProviders(
+      const frozenGeneration = referenceGenerationMetadata(
+        job.paramsJson,
+      )?.generation;
+      const promptId =
         typeof postAgent?.promptId === "string"
           ? postAgent.promptId
-          : undefined,
-        ...(selected ? [selected] : []),
-      );
+          : undefined;
+      const providers = frozenGeneration
+        ? await this.resolveProviders(promptId, undefined, frozenGeneration)
+        : await this.resolveProviders(
+            promptId,
+            ...(selected ? [selected] : []),
+          );
       const provider =
         request.references.length > 0 ? providers.edit : providers.t2i;
       const result = await this.generate(job, provider, request);
@@ -424,7 +439,9 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       requestId = submitted.requestId;
       job.providerRequestId = requestId;
       job.provider = provider.name;
-      const referenceMediaIds = this.requestInputMediaIds.get(request) ?? [];
+      const referenceMediaIds = request.references.map(
+        (reference) => reference.id,
+      );
       const paramsJson = withShotExecution(job.paramsJson, {
         route: referenceMediaIds.length > 0 ? "edit" : "t2i",
         referenceMediaIds,
@@ -509,6 +526,13 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async buildRequest(job: ClaimedJob): Promise<ImageGenerationRequest> {
+    let reference: ReferenceGenerationMetadata | null;
+    try {
+      reference = referenceGenerationMetadata(job.paramsJson);
+    } catch (error) {
+      throw new ProviderJobFailedError(errorMessage(error), true);
+    }
+    if (reference) return this.buildReferenceRequest(job, reference);
     const profile = job.character.visualProfile;
     // 인물 정체성 레퍼런스와 선택 장소의 환경 레퍼런스를 구분해 해석한다.
     const uploadedIdentity = (profile?.referenceMedia ?? []).filter(
@@ -670,6 +694,76 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
         .slice(0, MAX_REFERENCE_IMAGES)
         .map((reference) => reference.mediaId)
         .filter(Boolean),
+    );
+    return request;
+  }
+
+  private async buildReferenceRequest(
+    job: ClaimedJob,
+    snapshot: ReferenceGenerationMetadata,
+  ): Promise<ImageGenerationRequest> {
+    if (!this.readReferenceBytes)
+      throw new ProviderJobFailedError(
+        "Reference generation byte reader is unavailable",
+        true,
+      );
+    const references: ImageGenerationRequest["references"] = [];
+    for (const reference of snapshot.references) {
+      if (reference.media.storageKey && !this.signReferenceUrl)
+        throw new ProviderJobFailedError(
+          "Reference generation URL signer is unavailable",
+          true,
+        );
+      const { bytes } = await this.readReferenceBytes(reference.media);
+      if (
+        createHash("sha256").update(bytes).digest("hex") !==
+        reference.sha256.toLowerCase()
+      )
+        throw new ProviderJobFailedError(
+          `Reference ${reference.id} SHA256 mismatch`,
+          true,
+        );
+      references.push({
+        id: reference.id,
+        role: reference.role === "source" ? "composition" : "identity",
+        ...(reference.role === "character_identity" &&
+        !references.some((value) => value.role === "identity")
+          ? { primary: true }
+          : {}),
+        description: reference.promptLabel,
+        url: reference.media.storageKey
+          ? await this.signReferenceUrl!(reference.media.storageKey)
+          : reference.media.url,
+      });
+    }
+    const request: ImageGenerationRequest = {
+      idempotencyKey: `${job.id}-attempt-${job.attemptCount}`,
+      profile: references.some((reference) => reference.role === "identity")
+        ? "photoreal_identity_v1"
+        : "photoreal_scene_v1",
+      prompt: snapshot.prompt,
+      negativePrompt: snapshot.negativePrompt || undefined,
+      references,
+      candidateCount: 1,
+      extraParams: snapshot.generationParams,
+      metadata: {
+        character_id: job.characterId,
+        generation_job_id: job.id,
+        ...(job.draftId ? { draft_id: job.draftId } : {}),
+      },
+    };
+    // The log link table accepts media UUIDs; influencer source IDs are BIGINTs.
+    this.requestInputMediaIds.set(
+      request,
+      snapshot.references
+        .filter(
+          (reference) =>
+            reference.role === "character_identity" &&
+            /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i.test(
+              reference.id,
+            ),
+        )
+        .map((reference) => reference.id),
     );
     return request;
   }

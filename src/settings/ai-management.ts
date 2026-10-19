@@ -40,15 +40,6 @@ const stages = [
   ["caption", "캡션", "게시물 캡션 작성", "llm"],
 ] as const;
 export const AI_FEATURES = [
-  ...stages
-    .filter(([stage]) => stage !== "naturalness" && stage !== "requirements")
-    .map(([stage, label, description, type]) => ({
-      id: `existing.${stage}`,
-      group: "기존 Agent",
-      label,
-      description,
-      type,
-    })),
   ...stages.map(([stage, label, description, type]) => ({
     id: `natural.${stage}`,
     group: "새 Agent",

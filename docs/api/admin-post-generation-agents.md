@@ -5,14 +5,17 @@
 
 | 메서드 | 경로 | 동작 |
 | --- | --- | --- |
-| GET | `/` | 다섯 단계 현재 설정 및 출력 규격 |
+| GET | `/` | 과거 다섯 단계 설정·출력 규격 조회와 공통 이미지 생성 설정 |
 | GET | `/models?cursor=&limit=` | 모델 목록 (cursor pagination) |
 | POST | `/models` | type/provider/model 등록 |
 | GET | `/:stage/versions?cursor=&limit=` | 해당 단계 이력 |
-| POST | `/:stage/versions` | 새 버전 저장·적용 |
-| POST | `/:stage/versions/:id/restore` | 이전 버전을 새 버전으로 적용 |
+| POST | `/:stage/versions` | 공통 `generation`만 저장; 기존 LLM 단계는 400 |
+| POST | `/:stage/versions/:id/restore` | 공통 `generation`만 복원; 기존 LLM 단계는 400 |
 
 `stage`: `post_plan`, `image_plan`, `image_prompt`, `generation`, `caption`.
+기존 Agent는 보관되어 LLM 네 단계의 HTTP 저장·복원과 기존 초안 실행은 거부한다.
+이력·설정 읽기는 유지한다. 아래 버전 저장 형식 설명은 공통 generation 설정과
+과거 저장 데이터의 해석을 위한 계약이며 보관된 LLM Agent의 실행을 허용하지 않는다.
 현재 설정은 단계별 최대 revision이다. 모델 등록은 추가/조회만 제공한다.
 저장된 모델은 수정하지 않으므로 이전 버전 복원 시 공급자/기본 모델도 유지된다.
 
@@ -64,13 +67,10 @@ LLM 단계는 저장된 지침이 없으면 모델을 호출하지 않고 `needs
 재시도한다. 잘못된 ID/유형/지침/규격/모델 조합은 400, 미존재 ID나 다른 단계의
 복원 ID는 404다. 변경 이력은 수정/삭제하지 않는다.
 
-저장한 LLM 지침은 다음 해당 단계 실행부터 적용된다. 이미지 모델은 새 이미지
-프롬프트 생성 때 policy를 결정하고 잡의 `_postAgent`에 해당 설정 버전을 기록한다.
-이미지 worker는 그 버전으로 실행한다. 이미 생성한 이미지 잡은 이후 설정 변경의
-영향을 받지 않는다. 기존 metadata 없는 잡은 기존 공통 이미지 설정을 사용한다.
-실행 로그/artifact의 agentConfig에 promptId/revision/aiModelId/provider/model을
-기록하며 API secret은 포함하지 않는다. 기존 레거시 파이프라인은 관리 대상이 아니고
-현재 PostPipelineV3Runner의 단계들이 관리 대상이다.
+자연형 Agent는 초안에 고정한 natural 번들을, 레퍼런스 Agent는 아래 reference 설정
+snapshot을 실행한다. 기존 LLM 단계 설정으로 fallback하지 않는다. 이미지 위저드와
+공통 generation 설정은 유지한다. 키·URL은 기존 연결 소유자에서 해석하며 초안과
+실행 artifact에 secret을 저장하지 않는다.
 
 정본 DDL은 opod-service-backend의
 `drizzle/20260928080853_post_agent_prompts/migration.sql`이다.
@@ -88,3 +88,42 @@ LLM 단계는 저장된 지침이 없으면 모델을 호출하지 않고 `needs
 
 새 초안은 선택 시 전체 번들을 복사한다. 이전 초안은 이후 설정 저장의 영향을 받지 않는다.
 [동작과 단계별 계약](../natural-post-agent.md)에 픽셀 검수·게시 차단·복구 범위를 기록한다.
+
+## 레퍼런스 Agent 설정
+
+- `GET /reference/config`는 `{ current, starters }`를 반환한다. 미저장 current는
+  `{ revision: null, selection: { batchSize: 12, maxAttempts: 1 } }`이며 읽기로 저장하지 않는다.
+  starters는 세 LLM 단계의 `systemPrompt`와 읽기 전용 `outputSchema`다.
+- `POST /reference/config` body는 `expectedRevision`(첫 저장 null), 정수
+  `maxAttempts`(1~3), 선택적 `stages`다. batchSize는 서버 상수 12다.
+  stages가 있으면 `reference_select`, `image_prompt`, `caption`을 모두 전달하며
+  각 값은 `{ aiModelId, systemPrompt }`다. 모델은 LLM이어야 하고 지침은 비공백
+  50,000자 이하다. outputSchema/provider/model은 서버가 모델 목록·고정 parser 계약으로 정한다.
+- 단계 설정 저장에는 공통 `generation`의 저장 모델 버전이 필요하다. 해당 버전의
+  `{ id, revision, aiModelId, provider, effectiveModel }`을 reference 설정에 복사한다.
+  stages를 생략하면 탐색 횟수만 변경하고 이미 저장한 단계·이미지 모델을 보존한다.
+- 저장 결과는 새 UUID revision과 `selection`, 선택적 `stages`, `generation`이다.
+  stale revision이나 최초 저장 경쟁은 원문 compare-and-set으로 HTTP 409다.
+  잘못된 횟수·모델·지침·누락 단계는 400이다. 키·URL은 반환하지 않는다.
+- 새 초안은 `POST /api/admin/v1/drafts`에 `postGenerationAgent: "reference-v1"`을
+  명시하고 완전한 설정을 저장한 상태여야 한다. 탐색 횟수만 저장한 설정은 실행에
+  충분하지 않다. `referenceAgentConfig`에 revision·selection·세 단계 지침/schema/모델·
+  이미지 버전을 고정한다. 이후 설정 변경은 이미 만든 초안에 소급 적용하지 않는다.
+- 수동 단계 실행은 `POST /api/admin/v1/drafts/:id/plan`에 `expectedStage`와
+  `expectedRevision`(조회한 draft.updatedAt)을 전달한다. 현재 단계/초안 timestamp를
+  확인해 변경되었거나 실행 중인 요청을 거부한다(현재 controller는 400). 설정 UUID
+  revision과 초안 timestamp는 별개다. 공통 UI의 다음 버튼은 실행이 아닌 단계 이동이다.
+
+재선택/전체 재생성은 `POST /api/admin/v1/drafts/:id/reference/restart`로 요청한다.
+body는 `{ target: "reference_select" | "generation", expectedRevision: draft.updatedAt }`다.
+expectedRevision은 ISO timestamp이며 stale 초안, 활성 publication/stage lease 또는 현재
+queued/running 이미지 잡, 게시/거절된 초안은 거부한다. `reference_select`는 원본 선택과
+후속 prompt/이미지/캡션 artifact를 비운다. `generation`은 저장된 prompt/negative·순서·
+참조·원본·설정을 그대로 보존하고 prompt revision을 증가시켜 새 이미지 job ID를 만든다.
+두 경우 caption/generation artifact와 기존 승인을 무효화하고 해당 단계 pending으로
+되돌린다. 실패한 컷만 retry하는 API와 구분하며 UI는 확인 Modal 이후 요청한다.
+
+코드 owner는 `ReferencePostAgentRunner`, `GenerationSettingsService`,
+`PostGenerationAgentsController`이며 Repository 변경은 소유 Domain Service를 통해 수행한다.
+기존 Agent 원문은 `archive/existing-agent/2026-10-19/`에 보관한다. 자연형 Agent와
+공통 이미지 생성 모델 설정은 유지한다. DB E2E·DDL 적용과 실제 공급자 실행은 보류 상태다.

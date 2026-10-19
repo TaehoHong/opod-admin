@@ -36,6 +36,8 @@ const STAGE_LABEL: Record<PostWorkItem["currentStage"], string> = {
   plan: "기획",
   post_plan: "게시글 기획",
   image_plan: "이미지 기획",
+  reference_select: "원본 선택",
+  image_prompt: "프롬프트",
   prompt: "프롬프트",
   evaluation: "평가",
   generation: "이미지 생성",
@@ -164,7 +166,8 @@ export function PostQueuePage() {
                 <Table.Td>
                   <Text size="sm" fw={600}>
                     {STAGE_NUMBER[item.stageIndex - 1]}{" "}
-                    {STAGE_LABEL[item.currentStage]} · {item.stageIndex}/8단계
+                    {STAGE_LABEL[item.currentStage]} · {item.stageIndex}/
+                    {item.postGenerationAgent === "reference-v1" ? 4 : 8}단계
                   </Text>
                 </Table.Td>
                 <Table.Td>

@@ -29,25 +29,8 @@ describe("post agent management", () => {
     await app?.close();
   });
 
-  it("persists immutable prompt versions, resolves model override, rejects concurrent overwrite and restores", async () => {
-    const defaults = (
-      await request(app.getHttpServer()).get(base).set(headers).expect(200)
-    ).body.items;
-    expect(defaults.map((v: { stage: string }) => v.stage)).toEqual([
-      "post_plan",
-      "image_plan",
-      "image_prompt",
-      "generation",
-      "caption",
-    ]);
-    for (const stage of [
-      "post_plan",
-      "image_plan",
-      "image_prompt",
-      "caption",
-    ] as const) {
-      expect(await app.get(PostAgentPromptService).execution(stage)).toBeNull();
-    }
+  it("keeps saved existing Agent history readable and rejects save and restore", async () => {
+    const prompts = app.get(PostAgentPromptService);
     const model = (
       await request(app.getHttpServer())
         .post(`${base}/models`)
@@ -55,87 +38,44 @@ describe("post agent management", () => {
         .send({
           type: "llm",
           provider: "openai-compatible",
-          model: "shared-model",
+          model: "historical-model",
         })
         .expect(201)
     ).body;
-    expect(model.id).toMatch(/^[1-9][0-9]*$/);
-    const initial = defaults.find(
-      (v: { stage: string }) => v.stage === "post_plan",
-    );
-    expect(initial).toMatchObject({
-      id: null,
-      revision: 0,
-      systemPrompt: null,
-    });
-    expect(initial).not.toHaveProperty("defaultSystemPrompt");
-    const body = {
-      expectedRevision: 0,
+    const current = await prompts.current("post_plan");
+    const saved = await prompts.save("post_plan", {
+      expectedRevision: current.revision,
       aiModelId: model.id,
-      model: "overridden-model",
-      systemPrompt: "Write a plausible everyday post.",
-      outputSchema: initial.outputSchema,
-    };
-    const first = (
-      await request(app.getHttpServer())
-        .post(`${base}/post_plan/versions`)
-        .set(headers)
-        .send(body)
-        .expect(201)
-    ).body;
-    expect(first).toMatchObject({
-      revision: 1,
-      model: "overridden-model",
-      effectiveModel: "overridden-model",
-      provider: "openai-compatible",
-    });
-    const attempts = await Promise.all(
-      ["A", "B"].map((systemPrompt) =>
-        request(app.getHttpServer())
-          .post(`${base}/post_plan/versions`)
-          .set(headers)
-          .send({ ...body, expectedRevision: 1, systemPrompt, model: null }),
-      ),
-    );
-    expect(attempts.map((r) => r.status).sort()).toEqual([201, 409]);
-    const history = (
-      await request(app.getHttpServer())
-        .get(`${base}/post_plan/versions`)
-        .set(headers)
-        .expect(200)
-    ).body.items;
-    expect(history).toHaveLength(2);
-    expect(history[0].effectiveModel).toBe("shared-model");
-    expect(history[1].systemPrompt).toBe(body.systemPrompt);
-    const restored = (
-      await request(app.getHttpServer())
-        .post(`${base}/post_plan/versions/${first.id}/restore`)
-        .set(headers)
-        .send({ expectedRevision: 2 })
-        .expect(201)
-    ).body;
-    expect(restored).toMatchObject({
-      revision: 3,
-      systemPrompt: body.systemPrompt,
-      aiModelId: model.id,
-      effectiveModel: "overridden-model",
+      model: null,
+      systemPrompt: "Historical instructions",
+      outputSchema: current.outputSchema,
     });
     await request(app.getHttpServer())
-      .post(`${base}/caption/versions/${first.id}/restore`)
+      .get(`${base}/post_plan/versions`)
       .set(headers)
-      .send({ expectedRevision: 0 })
-      .expect(404);
-    const current = (
-      await request(app.getHttpServer()).get(base).set(headers).expect(200)
-    ).body.items;
-    expect(
-      current.find((v: { stage: string }) => v.stage === "post_plan"),
-    ).toMatchObject({ id: restored.id, effectiveModel: "overridden-model" });
+      .expect(200)
+      .expect((response) =>
+        expect(response.body.items).toEqual(
+          expect.arrayContaining([expect.objectContaining({ id: saved.id })]),
+        ),
+      );
     await request(app.getHttpServer())
-      .post(`${base}/post_plan/reset`)
+      .post(`${base}/post_plan/versions`)
       .set(headers)
-      .send({ expectedRevision: 3 })
-      .expect(404);
+      .send({
+        expectedRevision: saved.revision,
+        aiModelId: model.id,
+        model: null,
+        systemPrompt: "New instructions",
+        outputSchema: current.outputSchema,
+      })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post(`${base}/post_plan/versions/${saved.id}/restore`)
+      .set(headers)
+      .send({ expectedRevision: saved.revision })
+      .expect(400);
+    expect((await prompts.current("post_plan")).id).toBe(saved.id);
   });
 
   it("requires authentication, CSRF, a model reference and a compatible output schema/type", async () => {

@@ -28,7 +28,13 @@ import {
 type ReferenceRow = Omit<
   typeof characterVisualProfileReferences.$inferSelect,
   "embedding" | "embeddingModel" | "embeddedAt"
-> & { media: { url: string } };
+> & {
+  media: {
+    url: string;
+    storageKey?: string | null;
+    contentType?: string | null;
+  };
+};
 export type VisualProfileRow = typeof characterVisualProfiles.$inferSelect & {
   referenceMedia: ReferenceRow[];
 };
@@ -178,7 +184,11 @@ export class VisualProfileRepository {
         sortOrder: characterVisualProfileReferences.sortOrder,
         description: characterVisualProfileReferences.description,
         isActive: characterVisualProfileReferences.isActive,
-        media: { url: media.url },
+        media: {
+          url: media.url,
+          storageKey: media.storageKey,
+          contentType: media.contentType,
+        },
       })
       .from(characterVisualProfileReferences)
       .innerJoin(media, eq(media.id, characterVisualProfileReferences.mediaId))

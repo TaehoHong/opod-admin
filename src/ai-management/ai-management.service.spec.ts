@@ -66,11 +66,7 @@ function setup(config: AiManagementConfig | null = initial()) {
     settings,
     repository,
     data,
-    service: new AiManagementService(
-      settings,
-      models as never,
-      { all: jest.fn().mockResolvedValue({ items: [] }) } as never,
-    ),
+    service: new AiManagementService(settings, models as never),
   };
 }
 

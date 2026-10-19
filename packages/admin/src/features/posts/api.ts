@@ -4,6 +4,8 @@ import { toQuery, type CursorPage } from "../../shared/api/useCursorList";
 export type PostContentType = "feed" | "reel" | "story";
 
 export type PostWorkStage =
+  | "reference_select"
+  | "image_prompt"
   | "brief"
   | "plan"
   | "post_plan"
@@ -20,6 +22,7 @@ export type PostWorkFilter =
   "all" | "needs_action" | "agent" | "publish_waiting" | "published" | "failed";
 
 export type PostWorkItem = {
+  postGenerationAgent?: "existing" | "natural-v1" | "reference-v1";
   id: string;
   kind: "draft" | "post";
   draftId?: string;

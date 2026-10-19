@@ -82,6 +82,9 @@ export function fetchLlmLogs(params: {
   provider?: string;
   model?: string;
   cursor?: string;
+  requestId?: string;
+  generationJobId?: string;
+  limit?: string;
 }): Promise<CursorPage<LlmLogListItem>> {
   return apiRequest(`/llm-logs${toQuery(params)}`);
 }

@@ -766,3 +766,81 @@ describe("GenerationService", () => {
     );
   });
 });
+
+describe("reference generation handoff", () => {
+  const input = () => ({
+    draftId: "draft-reference",
+    characterId: "character-1",
+    promptRevision: "2",
+    shots: [
+      {
+        shotId: "shot-a",
+        sortOrder: 0,
+        prompt: "Image 1 source; Image 2 same woman",
+        negativePrompt: "blurry",
+        generation: {
+          id: "17",
+          revision: 1,
+          aiModelId: "4",
+          provider: "spicyapi",
+          effectiveModel: "alibaba/qwen-image-3.0-pro/edit",
+        },
+        generationParams: { aspect_ratio: "4:5" },
+        references: [
+          {
+            id: "30000000001",
+            role: "source" as const,
+            inputOrder: 1,
+            promptLabel: "Image 1",
+            sha256: "a".repeat(64),
+            media: {
+              url: "https://signed.test/source?token=temporary",
+              storageKey: "sources/a.png",
+            },
+          },
+          {
+            id: "03cbf3d9-dca6-4bc8-b2f4-416dc3c98e9f",
+            role: "character_identity" as const,
+            inputOrder: 2,
+            promptLabel: "Image 2",
+            sha256: "b".repeat(64),
+            media: { url: "", storageKey: "identities/a.png" },
+          },
+        ],
+      },
+    ],
+  });
+
+  it("reuses stable job IDs, freezes exact bindings without expiring URLs, and never queues", async () => {
+    const ensure = jest.fn().mockResolvedValue(undefined);
+    const repository = repositoryFake({ ensureReferenceDraftJobs: ensure });
+    const service = new GenerationService(repository);
+    const first = await service.ensureReferenceDraftJobs(input());
+    expect(await service.ensureReferenceDraftJobs(input())).toEqual(first);
+    expect(first.jobIds).toHaveLength(1);
+    expect(first.jobIds[0]).toMatch(/^[a-f\d-]{36}$/);
+    const snapshot = ensure.mock.calls[0][0][0].paramsJson._referenceAgent;
+    expect(
+      snapshot.references.map((value: { id: string }) => value.id),
+    ).toEqual(input().shots[0].references.map((value) => value.id));
+    expect(snapshot.prompt).toBe(input().shots[0].prompt);
+    expect(JSON.stringify(snapshot)).not.toContain("temporary");
+    expect(repository.confirmImageDraft).not.toHaveBeenCalled();
+    const changed = input();
+    changed.promptRevision = "3";
+    expect(
+      (await service.ensureReferenceDraftJobs(changed)).jobIds,
+    ).not.toEqual(first.jobIds);
+  });
+
+  it("rejects reference-order drift before persistence", async () => {
+    const ensure = jest.fn();
+    const repository = repositoryFake({ ensureReferenceDraftJobs: ensure });
+    const invalid = input();
+    invalid.shots[0].references[0].inputOrder = 2;
+    await expect(
+      new GenerationService(repository).ensureReferenceDraftJobs(invalid),
+    ).rejects.toThrow("binding/order");
+    expect(ensure).not.toHaveBeenCalled();
+  });
+});

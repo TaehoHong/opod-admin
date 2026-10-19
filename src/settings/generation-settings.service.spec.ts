@@ -855,3 +855,26 @@ it("keeps settings readable when the selected OpenAI image key is missing", asyn
     edit: null,
   });
 });
+
+describe("scheduled Agent selection", () => {
+  it("does not create an archived scheduler concept from AI assignments alone", async () => {
+    const service = makeService(repositoryMock());
+    jest.spyOn(service, "snapshotAiAssignments").mockResolvedValue({});
+    await expect(service.scheduledAgentConcept()).resolves.toBeUndefined();
+  });
+  it("requires natural scheduler opt-in and retains its pinned model assignments", async () => {
+    const { naturalAgentBundle } =
+      await import("../../test/natural-agent-fixture");
+    const service = makeService(repositoryMock());
+    const bundle = naturalAgentBundle();
+    jest.spyOn(service, "getNaturalAgentBundle").mockResolvedValue(bundle);
+    jest.spyOn(service, "snapshotAiAssignments").mockResolvedValue({});
+    await expect(service.scheduledAgentConcept()).resolves.toBeUndefined();
+    bundle.schedulerDefault = true;
+    await expect(service.scheduledAgentConcept()).resolves.toMatchObject({
+      postGenerationAgent: "natural-v1",
+      naturalAgentConfig: bundle,
+      aiModelAssignments: {},
+    });
+  });
+});

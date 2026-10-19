@@ -65,7 +65,7 @@ function registerHandlers(
         hashtags: [],
         status: "generating",
         attemptCount: 1,
-        conceptJson: concept,
+        conceptJson: { postGenerationAgent: "natural-v1", ...concept },
         shots: [],
         createdAt: "2026-08-13T00:00:00.000Z",
         updatedAt: "2026-08-13T01:15:00.000Z",
@@ -110,7 +110,7 @@ const publishConcept = {
   pipeline: { stage: "publish", state: "pending" },
 };
 
-it.each(["existing", "natural-v1"])(
+it.each(["natural-v1"])(
   "offers mode switching for %s at the current manual stage",
   async (agent) => {
     let submitted: unknown;
@@ -1007,3 +1007,76 @@ describe("post work stage screens", () => {
     expect(screen.queryByText("생성 이미지 평가")).not.toBeInTheDocument();
   });
 });
+
+it.each(["existing", undefined])(
+  "shows archived %s Agent outputs and records without execution controls",
+  async (agent) => {
+    let mutations = 0;
+    let requestedLog: string | undefined;
+    registerHandlers(
+      {
+        postGenerationAgent: agent,
+        mode: "auto",
+        pipelineVersion: "post-pipeline-v4",
+        pipeline: { stage: "caption", state: "pending" },
+        operatorRequest: "저장된 촬영 요청",
+        postPlanning: {
+          producerLogId: "old-plan-log",
+          output: { premise: "저장된 기획" },
+        },
+      },
+      { ...v3Item, postGenerationAgent: agent },
+      {
+        caption: "보관된 캡션",
+        shots: [{ ...publishShot(0), prompt: "Stored English prompt" }],
+      },
+    );
+    server.use(
+      http.post("/api/admin/v1/drafts/:path*", () => {
+        mutations += 1;
+        return HttpResponse.json({}, { status: 400 });
+      }),
+      http.get("/api/admin/v1/llm-logs/:id", ({ params }) => {
+        requestedLog = String(params.id);
+        return HttpResponse.json({
+          id: params.id,
+          status: "completed",
+          type: "admin.v3.post.plan",
+          requestJson: { storedRequest: "kept" },
+          responseJson: { preserved: true },
+          media: [],
+          redactedPaths: [],
+        });
+      }),
+    );
+    renderPage(<PostWorkPage workId="draft-1" stage="publish" />, {
+      path: "/posts/draft-1/publish",
+    });
+    expect(
+      await screen.findByText("보관된 작업 · 읽기 전용"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("보관된 캡션")).toBeInTheDocument();
+    expect(screen.getByAltText("컷 1 생성 이미지")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: /자동 진행|단계 실행|게시하기|재생성|캡션 저장|거절/,
+      }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "저장된 입력·산출물 전체" }));
+    expect(screen.getByText(/저장된 촬영 요청/)).toBeInTheDocument();
+    await userEvent
+      .setup()
+      .click(
+        screen.getByRole("button", { name: "게시글 기획 산출물·실행 기록" }),
+      );
+    await waitFor(() => expect(requestedLog).toBe("old-plan-log"));
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "입력 원본" }));
+    expect(screen.getByText(/"storedRequest": "kept"/)).toBeInTheDocument();
+    expect(mutations).toBe(0);
+  },
+);

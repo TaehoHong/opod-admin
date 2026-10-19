@@ -153,6 +153,444 @@ export class DraftsRepository {
       .then(([row]) => row ?? null);
   }
 
+  async findPublishedReferenceSources(characterId: string) {
+    const rows = await this.database.client
+      .select({ conceptJson: postDrafts.conceptJson })
+      .from(postDrafts)
+      .where(
+        and(
+          eq(postDrafts.characterId, characterId),
+          eq(postDrafts.status, "published"),
+        ),
+      );
+    const mediaIds = new Set<string>();
+    const sha256s = new Set<string>();
+    for (const row of rows) {
+      const concept = row.conceptJson as {
+        referenceSelection?: {
+          shots?: { mediaId?: unknown; sha256?: unknown }[];
+        };
+      } | null;
+      for (const shot of concept?.referenceSelection?.shots ?? []) {
+        if (typeof shot.mediaId === "string") mediaIds.add(shot.mediaId);
+        if (typeof shot.sha256 === "string") sha256s.add(shot.sha256);
+      }
+    }
+    return { mediaIds: [...mediaIds], sha256s: [...sha256s] };
+  }
+
+  async saveReferenceStage(input: {
+    draftId: string;
+    expectedConceptJson: unknown;
+    conceptJson: unknown;
+    status?: "generating" | "needs_review" | "failed";
+    caption?: string;
+    hashtags?: string[];
+    expectedOutputs?: { jobId: string; mediaId: string }[];
+  }): Promise<boolean> {
+    const concept = input.conceptJson as Record<string, unknown>;
+    const pipeline = concept.pipeline as Record<string, unknown>;
+    const nextState = pipeline?.state;
+    const status =
+      input.status ??
+      (nextState === "ready" || nextState === "pending"
+        ? "planned"
+        : nextState === "needs_input" || nextState === "failed"
+          ? "failed"
+          : "generating");
+    const conceptJson =
+      nextState === "ready"
+        ? { ...concept, pipeline: { ...pipeline, state: "pending" } }
+        : concept;
+    const rows = await this.database.client
+      .update(postDrafts)
+      .set({
+        conceptJson,
+        status,
+        leaseExpiresAt: null,
+        updatedAt: new Date(),
+        ...(input.caption !== undefined ? { caption: input.caption } : {}),
+        ...(input.hashtags !== undefined ? { hashtags: input.hashtags } : {}),
+      })
+      .where(
+        and(
+          eq(postDrafts.id, input.draftId),
+          inArray(postDrafts.status, ["generating", "regenerating"]),
+          sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+          sql`${postDrafts.conceptJson} = ${JSON.stringify(input.expectedConceptJson)}::jsonb`,
+          ...(input.expectedOutputs ?? []).map(
+            (output) => sql`exists (
+            select 1 from ${generationJobs} j
+            inner join ${generationJobOutputs} o on o.job_id = j.id
+            where j.id = ${output.jobId} and j.draft_id = ${input.draftId}
+            and j.status = 'completed' and o.media_id = ${output.mediaId} and o.selected = true
+          )`,
+          ),
+        ),
+      )
+      .returning({ id: postDrafts.id });
+    return rows.length > 0;
+  }
+
+  async restartReferenceDraft(input: {
+    draftId: string;
+    expectedRevision: string;
+    expectedConceptJson: unknown;
+    conceptJson: unknown;
+  }): Promise<boolean> {
+    return this.database.client.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`reference-execute:${input.draftId.toLowerCase()}`}, 0))`,
+      );
+      const [draft] = await tx
+        .select({ id: postDrafts.id })
+        .from(postDrafts)
+        .where(eq(postDrafts.id, input.draftId))
+        .for("update");
+      if (!draft) return false;
+      const [updated] = await tx
+        .update(postDrafts)
+        .set({
+          status: "planned",
+          conceptJson: input.conceptJson,
+          caption: "",
+          hashtags: [],
+          errorMessage: null,
+          leaseExpiresAt: null,
+          attemptCount: 0,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(postDrafts.id, input.draftId),
+            sql`${postDrafts.status} not in ('published', 'rejected')`,
+            sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+            sql`(${postDrafts.leaseExpiresAt} is null or ${postDrafts.leaseExpiresAt} < clock_timestamp())`,
+            sql`date_trunc('milliseconds', ${postDrafts.updatedAt}) = ${input.expectedRevision}::timestamptz`,
+            sql`${postDrafts.conceptJson} = ${JSON.stringify(input.expectedConceptJson)}::jsonb`,
+            sql`not exists (select 1 from ${generationJobs} j where j.draft_id = ${input.draftId} and j.status in ('queued', 'running') and coalesce(${postDrafts.conceptJson}#>'{generationBuild,jobIds}', '[]'::jsonb) ? j.id::text)`,
+          ),
+        )
+        .returning({ id: postDrafts.id });
+      return !!updated;
+    });
+  }
+
+  listReferencePublicationsDue(now: Date, limit: number, retryBefore?: Date) {
+    return this.database.client
+      .select({ id: postDrafts.id })
+      .from(postDrafts)
+      .where(
+        and(
+          eq(postDrafts.status, "approved"),
+          eq(postDrafts.draftType, "post"),
+          sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+          sql`(${postDrafts.conceptJson}->>'mode') is distinct from 'manual'`,
+          sql`(${postDrafts.scheduledAt} is null or ${postDrafts.scheduledAt} <= ${now})`,
+          sql`(${postDrafts.leaseExpiresAt} is null or ${postDrafts.leaseExpiresAt} < clock_timestamp())`,
+          retryBefore
+            ? or(
+                isNull(postDrafts.errorMessage),
+                sql`${postDrafts.updatedAt} <= ${retryBefore}`,
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(postDrafts.scheduledAt, postDrafts.id)
+      .limit(limit);
+  }
+
+  async releaseReferencePublication(
+    draftId: string,
+    leaseExpiresAt: Date,
+    message: string,
+  ): Promise<void> {
+    await this.database.client
+      .update(postDrafts)
+      .set({
+        leaseExpiresAt: null,
+        errorMessage: message.slice(0, 500),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(postDrafts.id, draftId),
+          eq(postDrafts.status, "approved"),
+          sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+          eq(postDrafts.leaseExpiresAt, leaseExpiresAt),
+        ),
+      );
+  }
+
+  async pauseReferencePublicationConflict(input: {
+    draftId: string;
+    expectedConceptJson: unknown;
+    message: string;
+  }): Promise<boolean> {
+    const rows = await this.database.client
+      .update(postDrafts)
+      .set({
+        status: "needs_review",
+        errorMessage: input.message,
+        leaseExpiresAt: null,
+        updatedAt: new Date(),
+        conceptJson: sql`jsonb_set(jsonb_set(${postDrafts.conceptJson}, '{pipeline,state}', '"needs_input"'::jsonb), '{pipeline,blockers}', '["reference_source_conflict"]'::jsonb)`,
+      })
+      .where(
+        and(
+          eq(postDrafts.id, input.draftId),
+          eq(postDrafts.status, "approved"),
+          sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+          sql`${postDrafts.conceptJson} = ${JSON.stringify(input.expectedConceptJson)}::jsonb`,
+          sql`(${postDrafts.leaseExpiresAt} is null or ${postDrafts.leaseExpiresAt} < clock_timestamp())`,
+        ),
+      )
+      .returning({ id: postDrafts.id });
+    return rows.length > 0;
+  }
+
+  async claimReferencePublication(input: {
+    draftId: string;
+    leaseSeconds: number;
+    expectedConceptJson: unknown;
+    expectedOutputs: { jobId: string; mediaId: string }[];
+  }): Promise<DraftRow | null> {
+    if (!Number.isFinite(input.leaseSeconds) || input.leaseSeconds <= 0)
+      throw new Error("Invalid publication lease");
+    return this.database.client.transaction(async (tx) => {
+      const [owner] = await tx
+        .select({ characterId: postDrafts.characterId })
+        .from(postDrafts)
+        .where(eq(postDrafts.id, input.draftId));
+      if (!owner) return null;
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`reference-publish:${owner.characterId}`}, 0))`,
+      );
+      const [draft] = await tx
+        .select()
+        .from(postDrafts)
+        .where(eq(postDrafts.id, input.draftId))
+        .for("update");
+      if (
+        !draft ||
+        draft.status !== "approved" ||
+        draft.characterId !== owner.characterId
+      )
+        return null;
+      const concept = draft.conceptJson as {
+        postGenerationAgent?: string;
+        referenceSelection?: { shots?: { mediaId: string; sha256: string }[] };
+      } | null;
+      const sources = concept?.referenceSelection?.shots;
+      if (concept?.postGenerationAgent !== "reference-v1" || !sources?.length)
+        return null;
+      const reservations = await tx
+        .select({ id: postDrafts.id, conceptJson: postDrafts.conceptJson })
+        .from(postDrafts)
+        .where(
+          and(
+            eq(postDrafts.characterId, draft.characterId),
+            sql`${postDrafts.id} <> ${input.draftId}`,
+            or(
+              eq(postDrafts.status, "published"),
+              and(
+                eq(postDrafts.status, "approved"),
+                sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+                sql`${postDrafts.leaseExpiresAt} > clock_timestamp()`,
+              ),
+            ),
+          ),
+        );
+      const usedIds = new Set<string>();
+      const usedHashes = new Set<string>();
+      for (const row of reservations) {
+        const prior = row.conceptJson as typeof concept;
+        for (const source of prior?.referenceSelection?.shots ?? []) {
+          usedIds.add(source.mediaId);
+          usedHashes.add(source.sha256);
+        }
+      }
+      if (
+        sources.some(
+          (source) =>
+            usedIds.has(source.mediaId) || usedHashes.has(source.sha256),
+        )
+      )
+        throw new Error("reference_source_already_published_or_reserved");
+      const [claimed] = await tx
+        .update(postDrafts)
+        .set({
+          leaseExpiresAt: sql`date_trunc('milliseconds', clock_timestamp()) + make_interval(secs => ${input.leaseSeconds})`,
+        })
+        .where(
+          and(
+            eq(postDrafts.id, input.draftId),
+            eq(postDrafts.status, "approved"),
+            sql`(${postDrafts.leaseExpiresAt} is null or ${postDrafts.leaseExpiresAt} < clock_timestamp())`,
+            sql`${postDrafts.conceptJson} = ${JSON.stringify(input.expectedConceptJson)}::jsonb`,
+            ...input.expectedOutputs.map(
+              (output) =>
+                sql`exists (select 1 from ${generationJobs} j inner join ${generationJobOutputs} o on o.job_id = j.id where j.id = ${output.jobId} and j.draft_id = ${input.draftId} and j.status = 'completed' and j.output_media_id = ${output.mediaId} and o.media_id = ${output.mediaId} and o.selected = true)`,
+            ),
+          ),
+        )
+        .returning();
+      return claimed ?? null;
+    });
+  }
+
+  async claimReferenceDraft(input: {
+    leaseSeconds: number;
+    draftId?: string;
+    expectedStage?: string;
+    expectedRevision?: string;
+    expectedPromptRevision?: number;
+  }): Promise<string | undefined> {
+    return this.database.client.transaction(async (tx) => {
+      const [draft] = await tx
+        .select({ id: postDrafts.id, conceptJson: postDrafts.conceptJson })
+        .from(postDrafts)
+        .where(
+          and(
+            input.draftId
+              ? inArray(postDrafts.status, ["planned", "failed"])
+              : eq(postDrafts.status, "planned"),
+            eq(postDrafts.draftType, "post"),
+            sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+            input.draftId
+              ? sql`${postDrafts.conceptJson}#>>'{pipeline,state}' in ('pending','failed','needs_input')`
+              : sql`${postDrafts.conceptJson}#>>'{pipeline,state}' = 'pending'`,
+            sql`${postDrafts.conceptJson}#>>'{pipeline,stage}' in ('reference_select','image_prompt','generation','caption')`,
+            input.draftId
+              ? eq(postDrafts.id, input.draftId)
+              : sql`(${postDrafts.conceptJson}->>'mode') is distinct from 'manual'`,
+            input.expectedStage !== undefined
+              ? sql`${postDrafts.conceptJson}#>>'{pipeline,stage}' = ${input.expectedStage}`
+              : undefined,
+            input.expectedRevision !== undefined
+              ? sql`date_trunc('milliseconds', ${postDrafts.updatedAt}) = ${input.expectedRevision}::timestamptz`
+              : undefined,
+            input.expectedPromptRevision !== undefined
+              ? sql`${postDrafts.conceptJson}#>>'{promptBuild,revision}' = ${String(input.expectedPromptRevision)}`
+              : undefined,
+          ),
+        )
+        .orderBy(postDrafts.createdAt, postDrafts.id)
+        .limit(1)
+        .for("update", { of: postDrafts, skipLocked: true });
+      if (!draft) return undefined;
+      const concept = draft.conceptJson as Record<string, unknown>;
+      const pipeline = concept.pipeline as Record<string, unknown>;
+      await tx
+        .update(postDrafts)
+        .set({
+          status: "generating",
+          leaseExpiresAt: new Date(Date.now() + input.leaseSeconds * 1000),
+          updatedAt: new Date(),
+          conceptJson: {
+            ...concept,
+            pipeline: { ...pipeline, state: "running" },
+          },
+          errorMessage: null,
+        })
+        .where(eq(postDrafts.id, draft.id));
+      return draft.id;
+    });
+  }
+
+  async recoverExpiredReferenceLeases(): Promise<number> {
+    const rows = await this.database.client
+      .update(postDrafts)
+      .set({
+        status: "failed",
+        leaseExpiresAt: null,
+        errorMessage:
+          "Reference stage lease expired; inspect execution logs before retrying",
+        updatedAt: new Date(),
+        conceptJson: sql`jsonb_set(jsonb_set(${postDrafts.conceptJson}, '{pipeline,state}', '"failed"'::jsonb), '{pipeline,blockers}', '["reference_lease_expired"]'::jsonb)`,
+      })
+      .where(
+        and(
+          eq(postDrafts.status, "generating"),
+          lt(postDrafts.leaseExpiresAt, new Date()),
+          sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+        ),
+      )
+      .returning({ id: postDrafts.id });
+    return rows.length;
+  }
+
+  async restoreReferenceGeneration(
+    draftId: string,
+    expectedConceptJson: unknown,
+  ): Promise<boolean> {
+    const rows = await this.database.client
+      .update(postDrafts)
+      .set({
+        status: "generating",
+        errorMessage: null,
+        updatedAt: new Date(),
+        conceptJson: sql`jsonb_set(jsonb_set(${postDrafts.conceptJson}, '{pipeline,state}', '"running"'::jsonb), '{pipeline,blockers}', '[]'::jsonb)`,
+      })
+      .where(
+        and(
+          eq(postDrafts.id, draftId),
+          eq(postDrafts.status, "failed"),
+          isNull(postDrafts.leaseExpiresAt),
+          sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+          sql`${postDrafts.conceptJson}#>>'{pipeline,stage}' = 'generation'`,
+          sql`jsonb_array_length(coalesce(${postDrafts.conceptJson}->'generationBuild'->'jobIds', '[]'::jsonb)) > 0`,
+          sql`${postDrafts.conceptJson}#>>'{generationBuild,promptRevision}' = ${postDrafts.conceptJson}#>>'{promptBuild,revision}'`,
+          sql`${postDrafts.conceptJson} = ${JSON.stringify(expectedConceptJson)}::jsonb`,
+          sql`not exists (select 1 from ${generationJobs} j where j.draft_id = ${postDrafts.id}
+        and coalesce(${postDrafts.conceptJson}->'generationBuild'->'jobIds', '[]'::jsonb) ? j.id::text and j.status = 'failed')`,
+        ),
+      )
+      .returning({ id: postDrafts.id });
+    return rows.length > 0;
+  }
+
+  async listReferenceGenerationWaiting(limit: number, draftId?: string) {
+    return this.database.client
+      .select({ id: postDrafts.id })
+      .from(postDrafts)
+      .where(
+        and(
+          inArray(postDrafts.status, ["generating", "regenerating", "failed"]),
+          isNull(postDrafts.leaseExpiresAt),
+          sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+          sql`${postDrafts.conceptJson}#>>'{pipeline,stage}' = 'generation'`,
+          sql`${postDrafts.conceptJson}#>>'{pipeline,state}' in ('running', 'failed')`,
+          sql`jsonb_array_length(coalesce(${postDrafts.conceptJson}->'generationBuild'->'jobIds', '[]'::jsonb)) > 0`,
+          sql`(${postDrafts.status} <> 'failed' or not exists (select 1 from ${generationJobs} j
+            where j.draft_id = ${postDrafts.id} and j.status = 'failed'
+            and coalesce(${postDrafts.conceptJson}->'generationBuild'->'jobIds', '[]'::jsonb) ? j.id::text))`,
+          draftId ? eq(postDrafts.id, draftId) : undefined,
+        ),
+      )
+      .orderBy(postDrafts.updatedAt, postDrafts.id)
+      .limit(limit);
+  }
+
+  async failReferenceStage(draftId: string, message: string): Promise<void> {
+    await this.database.client
+      .update(postDrafts)
+      .set({
+        status: "failed",
+        leaseExpiresAt: null,
+        errorMessage: message.slice(0, 500),
+        updatedAt: new Date(),
+        conceptJson: sql`jsonb_set(${postDrafts.conceptJson}, '{pipeline,state}', '"failed"'::jsonb)`,
+      })
+      .where(
+        and(
+          eq(postDrafts.id, draftId),
+          eq(postDrafts.status, "generating"),
+          sql`${postDrafts.conceptJson}->>'postGenerationAgent' = 'reference-v1'`,
+        ),
+      );
+  }
+
   async findDraftJobs(draftId: string): Promise<DraftJobRow[]> {
     const jobs = await this.database.client
       .select({
@@ -392,6 +830,12 @@ export class DraftsRepository {
         and(
           eq(postDrafts.id, draftId),
           sql`${postDrafts.status} not in ('published', 'rejected')`,
+          sql`(${postDrafts.conceptJson}->>'postGenerationAgent' is distinct from 'reference-v1' or ${postDrafts.leaseExpiresAt} is null)`,
+          ...(concept.postGenerationAgent === "reference-v1"
+            ? [
+                sql`${postDrafts.conceptJson} = ${JSON.stringify(draft.conceptJson)}::jsonb`,
+              ]
+            : []),
         ),
       );
   }
@@ -417,6 +861,10 @@ export class DraftsRepository {
       .where(
         and(
           eq(postDrafts.id, draftId),
+          or(
+            sql`${postDrafts.conceptJson}->>'postGenerationAgent' is distinct from 'reference-v1'`,
+            isNull(postDrafts.leaseExpiresAt),
+          ),
           or(
             statuses.length ? inArray(postDrafts.status, statuses) : undefined,
             v4Stages.length ? v4PausedAt(v4Stages) : undefined,
@@ -654,6 +1102,35 @@ export class DraftsRepository {
 
   async selectShotOutput(jobId: string, mediaId: string): Promise<void> {
     await this.database.client.transaction(async (tx) => {
+      const [owner] = await tx
+        .select({ draftId: generationJobs.draftId })
+        .from(generationJobs)
+        .where(eq(generationJobs.id, jobId));
+      if (owner?.draftId) {
+        const locked = await tx
+          .update(postDrafts)
+          .set({ updatedAt: new Date() })
+          .where(
+            and(
+              eq(postDrafts.id, owner.draftId),
+              or(
+                sql`${postDrafts.conceptJson}->>'postGenerationAgent' is distinct from 'reference-v1'`,
+                and(
+                  isNull(postDrafts.leaseExpiresAt),
+                  inArray(postDrafts.status, [
+                    "generating",
+                    "needs_review",
+                    "approved",
+                    "failed",
+                  ]),
+                ),
+              ),
+            ),
+          )
+          .returning({ id: postDrafts.id });
+        if (!locked.length)
+          throw new Error("Draft output is locked for publication");
+      }
       await tx
         .update(generationJobOutputs)
         .set({ selected: false })
@@ -704,10 +1181,45 @@ export class DraftsRepository {
     outputId: string,
     filterPreset: string,
   ): Promise<void> {
-    await this.database.client
-      .update(generationJobOutputs)
-      .set({ filterPreset })
-      .where(eq(generationJobOutputs.id, outputId));
+    await this.database.client.transaction(async (tx) => {
+      const [owner] = await tx
+        .select({ draftId: generationJobs.draftId })
+        .from(generationJobs)
+        .innerJoin(
+          generationJobOutputs,
+          eq(generationJobOutputs.jobId, generationJobs.id),
+        )
+        .where(eq(generationJobOutputs.id, outputId));
+      if (owner?.draftId) {
+        const locked = await tx
+          .update(postDrafts)
+          .set({ updatedAt: new Date() })
+          .where(
+            and(
+              eq(postDrafts.id, owner.draftId),
+              or(
+                sql`${postDrafts.conceptJson}->>'postGenerationAgent' is distinct from 'reference-v1'`,
+                and(
+                  isNull(postDrafts.leaseExpiresAt),
+                  inArray(postDrafts.status, [
+                    "generating",
+                    "needs_review",
+                    "approved",
+                    "failed",
+                  ]),
+                ),
+              ),
+            ),
+          )
+          .returning({ id: postDrafts.id });
+        if (!locked.length)
+          throw new Error("Draft output is locked for publication");
+      }
+      await tx
+        .update(generationJobOutputs)
+        .set({ filterPreset })
+        .where(eq(generationJobOutputs.id, outputId));
+    });
   }
   async recordActionLog(input: {
     characterId: string;

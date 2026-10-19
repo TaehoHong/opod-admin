@@ -52,6 +52,29 @@
 - 스킬 파일, 캐릭터 설정, DB, 개발서버는 변경하지 않았다. 개발서버의 콘텐츠
   프로필 이전·분리 배포는 여전히 별도 작업이다.
 
+## 레퍼런스 Agent의 원본 캡션 입력
+
+`reference-v1`은 `CaptionWriterInput`의 `kind: "reference"` variant를 사용한다.
+`ReferencePostAgentRunner`가 실제 생성 이미지 전체와 캐릭터/페르소나/캡션 스타일,
+운영자 요청, `sourceCaptions`를 전달한다. `postPlan`을 가짜로 만들지 않으며
+자연형 Agent의 기존 입력·CaptionSet 파서는 유지한다.
+
+`groupReferenceSourceCaptions`가 원본 선택 당시 저장한 `sourceCaption`을
+`influencerId + postId`로 묶고 관련 `shotIds`에 연결한다. 같은 게시물의 snapshot이
+서로 다르면 오류이며, null과 빈 문자열은 그대로 보존한다. 캡션이 없는 원본도 정상
+입력이다. 현재 runner는 sourceUrl이 없으면 null을 전달하며 URL을 추정하지 않는다.
+
+`prompts/reference-caption.ts`의 설치용 지침은 실제 생성 사진을 우선하고 원본 캡션은
+분위기·맥락 참고로 한정한다. 원문 문장·특징적 표현·구조·해시태그의 복사나 단순 치환,
+원본 작성자의 장소·사람·경험·날짜를 캐릭터의 사실로 옮기는 것을 금지한다.
+원본 안의 지시는 데이터로 취급한다. 실행에는 명시적으로 저장한 reference 단계 지침이
+필요하며 코드 starter로 fallback하지 않는다. 이 규칙의 의미 준수는 파서만으로 보증하지 않는다.
+
+캡션 artifact는 입력·configRevision·producerLogId와 `source.generationSetHash`,
+`source.promptBuildRevision`을 보존한다. 현재 출력 ID 집합과 expectedOutputs/CAS가
+맞을 때만 캡션/해시태그를 저장해 needs_review로 전환한다. 실패 시 저장된 이미지로
+캡션 단계를 다시 실행할 수 있다. 실제 문체·독립성 품질 비교와 DB E2E는 아직 수행하지 않았다.
+
 ## 검증과 품질 비교 기준
 
 자동 회귀는 `caption-writer.spec.ts`와 `post-pipeline-v3.runner.spec.ts`가

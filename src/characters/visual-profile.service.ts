@@ -19,6 +19,8 @@ const TEST_SCENE_MAX_LENGTH = 1000;
 type VisualProfileReference = {
   mediaId: string;
   url: string;
+  storageKey?: string | null;
+  contentType?: string | null;
   sortOrder: number;
   isActive: boolean;
   // 비전 LLM 캡션 — 기획 LLM의 샷별 레퍼런스 선별에 쓰인다. 빈 값 = 캡셔닝 전.
@@ -322,6 +324,8 @@ export class VisualProfileService {
       referenceMedia: profile.referenceMedia.map((reference) => ({
         mediaId: reference.mediaId,
         url: reference.media.url,
+        storageKey: reference.media.storageKey,
+        contentType: reference.media.contentType,
         sortOrder: reference.sortOrder,
         isActive: reference.isActive,
         description: reference.description,

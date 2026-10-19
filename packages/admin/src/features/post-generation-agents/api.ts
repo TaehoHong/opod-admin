@@ -120,3 +120,47 @@ export const saveNaturalAgent = (body: {
     method: "POST",
     body,
   });
+
+export const REFERENCE_STAGES = [
+  "reference_select",
+  "image_prompt",
+  "caption",
+] as const;
+export type ReferenceStage = (typeof REFERENCE_STAGES)[number];
+export type ReferenceStageInput = { aiModelId: string; systemPrompt: string };
+export type ReferenceStarters = Record<
+  ReferenceStage,
+  { systemPrompt: string; outputSchema: unknown }
+>;
+export type ReferenceConfig = {
+  revision: string | null;
+  selection: { batchSize: 12; maxAttempts: number };
+  stages?: Record<
+    ReferenceStage,
+    ReferenceStageInput & {
+      provider: string;
+      model: string;
+      outputSchema: unknown;
+    }
+  >;
+  generation?: {
+    id: string;
+    revision: number;
+    aiModelId: string;
+    provider: string;
+    effectiveModel: string;
+  };
+};
+export const fetchReferenceAgent = () =>
+  apiRequest<{ current: ReferenceConfig; starters?: ReferenceStarters }>(
+    "/post-generation-agents/reference/config",
+  );
+export const saveReferenceAgent = (body: {
+  expectedRevision: string | null;
+  maxAttempts: number;
+  stages?: Record<ReferenceStage, ReferenceStageInput>;
+}) =>
+  apiRequest<ReferenceConfig>("/post-generation-agents/reference/config", {
+    method: "POST",
+    body,
+  });

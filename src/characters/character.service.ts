@@ -1,4 +1,9 @@
 import {
+  postPersonaRole,
+  projectPostPersonaContext,
+} from "../post-production/post-persona-context";
+import type { ReferenceCaptionContext } from "../post-production/reference-post-agent.runner";
+import {
   BadRequestException,
   Injectable,
   NotFoundException,
@@ -263,6 +268,77 @@ export class CharacterService {
       status: "inactive",
       reason: input.reason,
     });
+  }
+
+  async getReferenceCaptionContext(
+    characterId: string,
+  ): Promise<ReferenceCaptionContext> {
+    const character =
+      await this.characters.findReferenceCaptionCharacter(characterId);
+    if (!character) throw new BadRequestException("Character not found");
+    const sources = await this.characters.findPersonas(characterId);
+    const personas = await Promise.all(
+      sources.map(async (source) =>
+        source.schemaVersion === 2
+          ? this.characters.findPersonaStructure(characterId, source.id)
+          : source,
+      ),
+    );
+    const projected = projectPostPersonaContext({
+      personas,
+      memories: [],
+      query: "",
+      bio: character.bio,
+      interests: character.interests,
+    });
+    if (projected.status !== "ready")
+      throw new BadRequestException("invalid_persona_structure");
+    const entries = projected.personas.filter(
+      (entry) => entry.content.trim() && entry.kind !== "example",
+    );
+    const roles = [
+      "identity",
+      "personality",
+      "background",
+      "lifestyle",
+      "motivation",
+      "judgment",
+      "tension",
+      "relationship",
+    ];
+    const reserved = new Set([
+      ...roles,
+      "voice",
+      "content_style",
+      "capture_style",
+      "boundaries",
+      "greeting",
+      "examples",
+      "example",
+    ]);
+    const take = (role: string) =>
+      entries.filter((entry) => postPersonaRole(entry) === role);
+    return {
+      character: {
+        name: character.displayName,
+        bio: character.bio,
+        interests: character.interests,
+        defaultContentLanguage: character.contentLanguage,
+      },
+      persona: {
+        characterContext: entries.filter((entry) =>
+          roles.includes(postPersonaRole(entry)),
+        ),
+        writingProfile: {
+          contentStyle: take("content_style"),
+          voice: take("voice"),
+        },
+        boundaries: take("boundaries"),
+        additionalContext: entries.filter(
+          (entry) => !reserved.has(postPersonaRole(entry)),
+        ),
+      },
+    };
   }
 
   async getCharacter(characterId: string): Promise<AdminCharacterDetail> {

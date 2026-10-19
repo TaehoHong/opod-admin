@@ -11,7 +11,7 @@ import { isRecord } from "../shared/utils/value-utils";
 
 // V4 ⑥ 캡션 Agent — 생성 이미지를 보고 캡션·해시태그를 쓴다.
 // 설계 정본 docs/post-creation-agent-architecture-v3.md §20.5.
-export type CaptionWriterInput = {
+export type LegacyCaptionWriterInput = {
   contentProfile?: Pick<
     CharacterContentProfile,
     "accountConcept" | "captionStyle" | "constraints"
@@ -53,6 +53,60 @@ export type CaptionWriterInput = {
   operatorNote?: string;
 };
 
+export type ReferenceSourceCaption = {
+  influencerId: string;
+  postId: string;
+  sourceUrl: string | null;
+  shotIds: string[];
+  caption: string | null;
+};
+
+export type ReferenceCaptionWriterInput = Pick<
+  LegacyCaptionWriterInput,
+  | "contentProfile"
+  | "character"
+  | "persona"
+  | "operatorRequest"
+  | "operatorNote"
+> & {
+  kind: "reference";
+  generatedShots: { shotId: string; sortOrder: number; mediaId: string }[];
+  sourceCaptions: ReferenceSourceCaption[];
+};
+export type CaptionWriterInput =
+  LegacyCaptionWriterInput | ReferenceCaptionWriterInput;
+
+export function groupReferenceSourceCaptions(
+  sources: {
+    influencerId: string;
+    postId: string;
+    sourceUrl: string | null;
+    shotId: string;
+    sourceCaption: string | null;
+  }[],
+): ReferenceSourceCaption[] {
+  const groups = new Map<string, ReferenceSourceCaption>();
+  for (const source of sources) {
+    const key = JSON.stringify([source.influencerId, source.postId]);
+    const existing = groups.get(key);
+    if (existing) {
+      if (existing.caption !== source.sourceCaption)
+        throw new Error("source caption snapshot conflict");
+      if (!existing.shotIds.includes(source.shotId))
+        existing.shotIds.push(source.shotId);
+    } else {
+      groups.set(key, {
+        influencerId: source.influencerId,
+        postId: source.postId,
+        sourceUrl: source.sourceUrl,
+        shotIds: [source.shotId],
+        caption: source.sourceCaption,
+      });
+    }
+  }
+  return [...groups.values()];
+}
+
 export type CaptionSet = {
   status: "ready";
   caption: string;
@@ -79,7 +133,10 @@ export class CaptionWriterAgent {
   ): Promise<{ output: CaptionSet; producerLogId: string | null }> {
     const settings = requireAgentPromptSettings(this.client.agentSettings);
     const result = await this.client.run({
-      logType: LLM_LOG_TYPE.captionWriteV4,
+      logType:
+        "kind" in input && input.kind === "reference"
+          ? LLM_LOG_TYPE.referencePostCaption
+          : LLM_LOG_TYPE.captionWriteV4,
       schemaName: "opod_caption_set_v2",
       schema: settings.outputSchema,
       systemPrompt: settings.systemPrompt,
@@ -101,6 +158,29 @@ export async function captionUserContent(
   images: CaptionShotImage[],
   readBytes: MediaBytesReader,
 ): Promise<unknown[]> {
+  if ("kind" in input && input.kind === "reference") {
+    if (
+      images.length !== input.generatedShots.length ||
+      new Set(images.map((image) => image.mediaId)).size !== images.length ||
+      input.generatedShots.some(
+        (shot) =>
+          !images.some(
+            (image) =>
+              image.mediaId === shot.mediaId &&
+              image.sortOrder === shot.sortOrder,
+          ),
+      )
+    )
+      throw new Error("generated caption image mapping mismatch");
+    const shotIds = new Set(input.generatedShots.map((shot) => shot.shotId));
+    if (
+      shotIds.size !== input.generatedShots.length ||
+      input.sourceCaptions.some((source) =>
+        source.shotIds.some((id) => !shotIds.has(id)),
+      )
+    )
+      throw new Error("source caption shot mapping mismatch");
+  }
   const blocks: unknown[] = [{ type: "text", text: JSON.stringify(input) }];
   for (const image of [...images].sort((a, b) => a.sortOrder - b.sortOrder)) {
     const { bytes, contentType } = await readBytes(image.media);

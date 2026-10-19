@@ -1,3 +1,4 @@
+import { RestartReferenceDraftDto } from "./dto/restart-reference-draft.dto";
 import {
   BadRequestException,
   Body,
@@ -59,6 +60,14 @@ export class DraftsController {
   @Post()
   createDraft(@Body() body: CreateDraftDto) {
     return this.draftsService.createDraft(body);
+  }
+
+  @Post(":id/reference/restart")
+  restartReferenceDraft(
+    @Param("id") draftId: string,
+    @Body() body: RestartReferenceDraftDto,
+  ) {
+    return this.draftsService.restartReferenceDraft({ draftId, ...body });
   }
 
   @Post(":id/automation")
@@ -149,10 +158,11 @@ export class DraftsController {
     @Param("id") draftId: string,
     @Body() body: RunStageDto = {},
   ) {
-    const result = await this.draftWorker.planDraftNow(
-      draftId,
-      body.note?.trim() ? { operatorNote: body.note.trim() } : undefined,
-    );
+    const result = await this.draftWorker.planDraftNow(draftId, {
+      ...(body.note?.trim() ? { operatorNote: body.note.trim() } : {}),
+      expectedStage: body.expectedStage,
+      expectedRevision: body.expectedRevision,
+    });
     if (!result.planned) {
       await this.draftsService.getDraft(draftId); // 404를 400보다 먼저 구분한다.
       throw new BadRequestException(

@@ -49,6 +49,140 @@ describe("PostWorkspaceService", () => {
 
   beforeEach(() => jest.clearAllMocks());
 
+  it.each([
+    [undefined, "generating", "reference_select", 1],
+    ["reference_select", "generating", "reference_select", 1],
+    ["image_prompt", "generating", "image_prompt", 2],
+    ["generation", "generating", "generation", 3],
+    ["caption", "generating", "caption", 4],
+    ["caption", "regenerating", "generation", 3],
+    ["publish", "approved", "caption", 4],
+    ["memory", "published", "caption", 4],
+  ])(
+    "maps reference stage %s and status %s to its four-stage rail",
+    async (stage, status, currentStage, stageIndex) => {
+      repository.findDraft.mockResolvedValue({
+        ...draft,
+        status,
+        conceptJson: {
+          postGenerationAgent: "reference-v1",
+          pipelineVersion: "post-pipeline-v4",
+          mode: "manual",
+          pipeline: stage ? { stage, state: "pending" } : undefined,
+        },
+      } as never);
+      const item = await service.get("draft-1");
+      expect(item).toMatchObject({
+        postGenerationAgent: "reference-v1",
+        currentStage,
+        stageIndex,
+      });
+      expect(item.pipelineV3).toBeUndefined();
+    },
+  );
+
+  it.each([
+    "blocked",
+    "needs_input",
+    "needs_configuration",
+    "no_match",
+    "running",
+  ])(
+    "exposes reference state %s through the list read model",
+    async (state) => {
+      repository.findDrafts.mockResolvedValue([
+        {
+          ...draft,
+          conceptJson: {
+            postGenerationAgent: "reference-v1",
+            mode: "manual",
+            pipeline: { stage: "reference_select", state },
+          },
+        },
+      ] as never);
+      repository.findStandalonePosts.mockResolvedValue([]);
+      const page = await service.list({ filter: "all", limit: 20 });
+      if (state === "no_match") {
+        expect(page.items[0].statusDetail).toBe(
+          "선택 가능한 참조 이미지가 없습니다",
+        );
+      }
+      expect(page.items[0]).toMatchObject({
+        postGenerationAgent: "reference-v1",
+        currentStage: "reference_select",
+        operationalStatus:
+          state === "running" ? "agent_running" : "needs_action",
+      });
+    },
+  );
+
+  it("includes published reference drafts and excludes rejected drafts in the published list", async () => {
+    repository.findDrafts.mockResolvedValue([
+      {
+        ...draft,
+        id: "published-reference",
+        status: "published",
+        publishedPostId: "post-1",
+        conceptJson: { postGenerationAgent: "reference-v1" },
+      },
+      {
+        ...draft,
+        id: "rejected-reference",
+        status: "rejected",
+        conceptJson: { postGenerationAgent: "reference-v1" },
+      },
+    ] as never);
+    repository.findStandalonePosts.mockResolvedValue([]);
+    const page = await service.list({ filter: "published", limit: 20 });
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({
+      id: "published-reference",
+      currentStage: "caption",
+      stageIndex: 4,
+      operationalStatus: "completed",
+    });
+  });
+
+  it("ignores retired generation failures and thumbnails after reference reselection", async () => {
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      status: "planned",
+      conceptJson: {
+        postGenerationAgent: "reference-v1",
+        mode: "manual",
+        pipeline: { stage: "reference_select", state: "pending" },
+      },
+      jobs: [
+        {
+          ...draft.jobs[0],
+          status: "failed",
+          outputs: [
+            { mediaId: "old", selected: true, media: { url: "old-image" } },
+          ],
+        },
+      ],
+    } as never);
+    const item = await service.get("draft-1");
+    expect(item).toMatchObject({
+      currentStage: "reference_select",
+      operationalStatus: "needs_action",
+    });
+    expect(item.thumbnailUrl).toBeUndefined();
+  });
+
+  it("labels reference confirmation as caption confirmation", async () => {
+    repository.findDraft.mockResolvedValue({
+      ...draft,
+      status: "needs_review",
+      conceptJson: { postGenerationAgent: "reference-v1" },
+    } as never);
+    await expect(service.get("draft-1")).resolves.toMatchObject({
+      currentStage: "caption",
+      stageIndex: 4,
+      statusDetail: "캡션 확인 필요",
+    });
+  });
+
   it("returns production and engagement metrics for a draft-backed post", async () => {
     repository.findDraft.mockResolvedValue({
       ...draft,

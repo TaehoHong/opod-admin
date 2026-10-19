@@ -16,10 +16,7 @@ import { MemoryRetrievalService } from "./memory-retrieval.service";
 import { ReferenceRetrievalService } from "./reference-retrieval.service";
 import { resolveImageGenerationParams } from "../generation/image-generation-params";
 import { requestedImageAspectRatio } from "./generated-image-validation";
-import {
-  PostAgentPromptService,
-  postAgentStage,
-} from "../post-agent-prompts/post-agent-prompt.service";
+import { PostAgentPromptService } from "../post-agent-prompts/post-agent-prompt.service";
 import { CharacterContentProfile } from "../character-content-profiles/character-content-profile";
 import { CharacterContentProfileService } from "../character-content-profiles/character-content-profile.service";
 import { Injectable, Logger } from "@nestjs/common";
@@ -129,10 +126,11 @@ export class PostPipelineV3Runner {
     if (
       !draft ||
       draft.status !== "generating" ||
+      !isNaturalAgent(draft.conceptJson) ||
       !isPostPipelineV3(draft.conceptJson)
     )
       return;
-    const concept = draft.conceptJson as V3Concept;
+    const concept = draft.conceptJson as unknown as V3Concept;
     const stage = concept.pipeline.stage;
     try {
       const needsContext = ["post_plan", "image_plan", "caption"].includes(
@@ -185,12 +183,7 @@ export class PostPipelineV3Runner {
                   ? plannerSchemaWithStatusFirst(natural.schemas[stage])
                   : natural.schemas[stage as NaturalStage],
             }
-          : this.agentPrompts &&
-              ["post_plan", "image_plan", "image_prompt", "caption"].includes(
-                String(stage),
-              )
-            ? await this.agentPrompts.execution(postAgentStage(String(stage)))
-            : null;
+          : null;
       if (
         ["post_plan", "image_plan", "image_prompt", "caption"].includes(
           String(stage),
@@ -202,10 +195,7 @@ export class PostPipelineV3Runner {
         ]);
         return;
       }
-      const selected = pinnedAiSelection(
-        concept,
-        `${natural ? "natural" : "existing"}.${String(stage)}`,
-      );
+      const selected = pinnedAiSelection(concept, `natural.${String(stage)}`);
       const planner = selected
         ? await this.settings.resolveAiPlanner("", selected)
         : await this.settings.resolvePlannerSettings();
@@ -859,15 +849,10 @@ export class PostPipelineV3Runner {
 
   // 프롬프트·생성 단계가 쓸 이미지 모델 설정. 기획 단계도 같은 모델의 정책을 본다.
   private async generationTarget(concept: V3Concept) {
-    const selected = pinnedAiSelection(
-      concept,
-      `${isNaturalAgent(concept) ? "natural" : "existing"}.generation`,
-    );
-    const originalImageAgent = isNaturalAgent(concept)
-      ? validateNaturalBundle(concept.naturalAgentConfig).generation
-      : this.agentPrompts
-        ? await this.agentPrompts.execution("generation")
-        : null;
+    const selected = pinnedAiSelection(concept, "natural.generation");
+    const originalImageAgent = validateNaturalBundle(
+      concept.naturalAgentConfig,
+    ).generation;
     const imageAgent =
       selected && originalImageAgent
         ? {
@@ -1069,14 +1054,11 @@ export class PostPipelineV3Runner {
           prompt: shot.prompt,
           sortOrder: shot.sortOrder,
           paramsJson: {
-            ...(pinnedAiSelection(
-              concept,
-              `${isNaturalAgent(concept) ? "natural" : "existing"}.generation`,
-            )
+            ...(pinnedAiSelection(concept, "natural.generation")
               ? {
                   _aiSelection: pinnedAiSelection(
                     concept,
-                    `${isNaturalAgent(concept) ? "natural" : "existing"}.generation`,
+                    "natural.generation",
                   ),
                 }
               : {}),

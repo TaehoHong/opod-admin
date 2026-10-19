@@ -1,3 +1,5 @@
+import { ArchivedAgentWorkView } from "./ArchivedAgentWorkView";
+import { ReferenceAgentWorkView } from "./ReferenceAgentWorkView";
 import { setDraftAutomation } from "../drafts/api";
 import {
   Accordion,
@@ -144,6 +146,39 @@ export function PostWorkPage({
       />
     );
   }
+  if (draftId && draft.isPending) {
+    return <Loader aria-label="게시물 단계 불러오는 중" />;
+  }
+  if (draft.error) {
+    return (
+      <OperationErrorAlert
+        failure={operationFailure(draft.error, "단계를 불러오지 못했습니다.")}
+      />
+    );
+  }
+  if (
+    work.data.postGenerationAgent === "reference-v1" ||
+    draft.data?.conceptJson?.postGenerationAgent === "reference-v1"
+  ) {
+    return draft.data ? (
+      <ReferenceAgentWorkView
+        key={draft.data.id}
+        item={work.data}
+        draft={draft.data}
+        stage={stage}
+        automation={<DraftAutomationControl draft={draft.data} />}
+      />
+    ) : (
+      <Alert>초안이 없습니다.</Alert>
+    );
+  }
+  if (
+    draft.data &&
+    (draft.data.conceptJson?.postGenerationAgent ??
+      work.data.postGenerationAgent) !== "natural-v1"
+  ) {
+    return <ArchivedAgentWorkView item={work.data} draft={draft.data} />;
+  }
   if (stage && !isStage(stage)) {
     return (
       <Navigate
@@ -157,16 +192,6 @@ export function PostWorkPage({
       <Navigate
         to={`/posts/${encodeURIComponent(workId)}/${stage === "plan" ? "post_plan" : "prompt"}`}
         replace
-      />
-    );
-  }
-  if (draftId && draft.isPending) {
-    return <Loader aria-label="게시물 단계 불러오는 중" />;
-  }
-  if (draft.error) {
-    return (
-      <OperationErrorAlert
-        failure={operationFailure(draft.error, "단계를 불러오지 못했습니다.")}
       />
     );
   }

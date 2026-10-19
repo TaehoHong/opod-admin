@@ -9,8 +9,8 @@ import {
 
 export class CreateDraftDto {
   @IsOptional()
-  @IsIn(["existing", "natural-v1"])
-  postGenerationAgent?: "existing" | "natural-v1";
+  @IsIn(["natural-v1", "reference-v1"])
+  postGenerationAgent?: "existing" | "natural-v1" | "reference-v1";
 
   @IsOptional()
   @IsIn(["manual", "auto"])

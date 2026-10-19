@@ -7,6 +7,12 @@ import { ImagePlanReady } from "./image-planner";
 import { naturalSchemas } from "./natural-post-agent";
 import { canonicalJsonHash } from "./post-pipeline-v3";
 
+function userText(content: string | { type: string; text?: string }[]): string {
+  return typeof content === "string"
+    ? content
+    : content.find((part) => part.type === "text")!.text!;
+}
+
 function draft(
   conceptJson: Record<string, unknown>,
   overrides: Record<string, unknown> = {},
@@ -16,7 +22,12 @@ function draft(
     characterId: "character-1",
     status: "generating",
     attemptCount: 1,
-    conceptJson,
+    sharedContractFixture: !("postGenerationAgent" in conceptJson),
+    conceptJson: {
+      postGenerationAgent: "natural-v1",
+      naturalAgentConfig: naturalAgentBundle(),
+      ...conceptJson,
+    } as Record<string, unknown>,
     character: {
       displayName: "서린",
       bio: "카페를 좋아한다",
@@ -130,7 +141,9 @@ function setup(
       draftWorker: {
         maxShots: 3,
         maxAttempts: 3,
-        naturalPhotoReviewEnabled: options.naturalPhotoReviewEnabled,
+        naturalPhotoReviewEnabled:
+          options.naturalPhotoReviewEnabled ??
+          (currentDraft.sharedContractFixture ? false : undefined),
       },
     } as never,
     {
@@ -344,7 +357,7 @@ describe("PostPipelineV3Runner", () => {
     );
     await runner.runCurrentStage("draft-1");
     const input = JSON.parse(
-      JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+      userText(JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content),
     );
     expect(input).not.toHaveProperty("locations");
     expect(repository.findAvailableLocations).not.toHaveBeenCalled();
@@ -384,7 +397,9 @@ describe("PostPipelineV3Runner", () => {
       });
       await runner.runCurrentStage("draft-1");
       const input = JSON.parse(
-        JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+        userText(
+          JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+        ),
       );
       expect(input.persona.characterContext).toEqual([
         {
@@ -439,7 +454,7 @@ describe("PostPipelineV3Runner", () => {
     });
     await runner.runCurrentStage("draft-1");
     const input = JSON.parse(
-      JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+      userText(JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content),
     );
     expect(input.productionContext).toEqual({
       contentType: "feed",
@@ -786,8 +801,10 @@ describe("PostPipelineV3Runner", () => {
       await planning.runner.runCurrentStage("draft-1");
       expect(planning.repository.requeueOrFailV3).not.toHaveBeenCalled();
       const planningInput = JSON.parse(
-        JSON.parse(planning.fetchMock.mock.calls[0][1].body).messages[1]
-          .content,
+        userText(
+          JSON.parse(planning.fetchMock.mock.calls[0][1].body).messages[1]
+            .content,
+        ),
       );
       expect(planningInput.contentProfile.imageStyle).toBe(expectedStyle ?? "");
       expect(planningInput.characterVisualContext.visualStyle).toBeUndefined();
@@ -899,7 +916,9 @@ describe("PostPipelineV3Runner", () => {
       await runner.runCurrentStage("draft-1");
       expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
       const promptInput = JSON.parse(
-        JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+        userText(
+          JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+        ),
       );
       expect(promptInput.subjectContract.visualStyle).toBe(expectedStyle);
     },
@@ -970,11 +989,14 @@ describe("PostPipelineV3Runner", () => {
       planning.repository.persistV3Artifact.mock.calls[0][0].conceptJson;
     expect(concept.imagePlanning.locationExclusions).toEqual(["neon signs"]);
     const planningInput = JSON.parse(
-      JSON.parse(planning.fetchMock.mock.calls[0][1].body).messages[1].content,
+      userText(
+        JSON.parse(planning.fetchMock.mock.calls[0][1].body).messages[1]
+          .content,
+      ),
     );
     expect(planningInput.canvas).toEqual({ aspectRatio: 1.5 });
-    // 기본 edit 모델(nano-banana-pro/edit)의 컷당 레퍼런스 상한이 기획에 전달된다.
-    expect(planningInput.maxReferencesPerShot).toBe(3);
+    // 저장된 Sunburst 모델은 기획 계약보다 작은 참조 상한을 추가하지 않는다.
+    expect(planningInput.maxReferencesPerShot).toBeUndefined();
     expect(planningInput.characterVisualContext.exclusions).toEqual(["logos"]);
     expect(planningInput.locations[0].exclusions).toEqual(["neon signs"]);
     expect(planningInput.locations[1].exclusions).toEqual(["flowers"]);
@@ -1012,7 +1034,7 @@ describe("PostPipelineV3Runner", () => {
     const body = JSON.parse(
       prompting.fetchMock.mock.calls[0][1].body as string,
     );
-    const promptInput = JSON.parse(body.messages[1].content);
+    const promptInput = JSON.parse(userText(body.messages[1].content));
     expect(promptInput.canvas).toEqual({ aspectRatio: 1.5 });
     expect(promptInput.subjectContract.exclusionSources).toEqual([
       { source: "character", exclusions: ["logos"] },
@@ -1078,7 +1100,7 @@ describe("PostPipelineV3Runner", () => {
     const { runner, fetchMock } = setup(current, readyPostPlan());
     await runner.runCurrentStage("draft-1");
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    const input = JSON.parse(body.messages[1].content);
+    const input = JSON.parse(userText(body.messages[1].content));
     expect(input.contentProfile).toEqual({
       accountConcept: "",
       constraints: "",
@@ -1105,7 +1127,7 @@ describe("PostPipelineV3Runner", () => {
       const { runner, repository, fetchMock } = setup(current, readyPostPlan());
       await runner.runCurrentStage("draft-1");
       const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-      const input = JSON.parse(body.messages[1].content);
+      const input = JSON.parse(userText(body.messages[1].content));
       expect(input.productionContext).toEqual({
         contentType,
         mediaType: "image",
@@ -1142,7 +1164,7 @@ describe("PostPipelineV3Runner", () => {
       );
       await runner.runCurrentStage("draft-1");
       const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-      const input = JSON.parse(body.messages[1].content);
+      const input = JSON.parse(userText(body.messages[1].content));
       expect(input.contentProfile).toEqual({
         accountConcept: profile.accountConcept,
         constraints: profile.constraints,
@@ -1223,7 +1245,7 @@ describe("PostPipelineV3Runner", () => {
       expect.objectContaining({ actionType: "DRAFT_V3_POST_PLAN_READY" }),
     );
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    const input = JSON.parse(body.messages[1].content);
+    const input = JSON.parse(userText(body.messages[1].content));
     expect(input.persona.characterContext).toContainEqual(
       expect.objectContaining({
         sourceId: "source-v2",
@@ -1359,7 +1381,7 @@ describe("PostPipelineV3Runner", () => {
       const serialized =
         stage === "caption"
           ? body.messages[1].content[0].text
-          : body.messages[1].content;
+          : userText(body.messages[1].content);
       const input = JSON.parse(serialized);
       expect(input.contentProfile).toEqual({
         accountConcept: "운동 중심 일상",
@@ -1715,37 +1737,8 @@ describe("PostPipelineV3Runner", () => {
       { type: "episodic", content: "비 오는 날 우산을 샀다" },
     ]);
     expect(
-      paused.conceptJson.imagePlanning.input.recentVisualHistory[0],
-    ).toMatchObject({
-      publicationState: "unpublished",
-      premise: "창가에서 우산을 말린다",
-      shots: expect.arrayContaining([
-        {
-          sortOrder: 0,
-          visualPurpose: "젖은 날의 여운",
-          scene: "창가에 기대 우산을 내려다본다",
-          captureSetup: "맞은편 허리 높이",
-          visualDetails: {
-            expressionGaze: "우산을 내려다보는 무표정",
-            poseAction: "창틀에 기대 서 있다",
-            framing: "허벅지 위 크롭",
-            camera: "맞은편 허리 높이",
-          },
-          characterPresentation: "partial",
-          subjectCameraRelation: "unaware",
-        },
-      ]),
-    });
-    expect(
-      paused.conceptJson.imagePlanning.input.recentVisualHistory.flatMap(
-        (entry) => entry.shots,
-      ),
-    ).toHaveLength(12);
-    expect(repository.findRecentVisualPlanDrafts).toHaveBeenCalledWith(
-      "character-1",
-      "draft-1",
-      8,
-    );
+      paused.conceptJson.imagePlanning.input.recentVisualHistory,
+    ).toBeUndefined();
   });
 
   // ⑥ 캡션: 산출물 저장과 게시 컬럼 갱신이 한 CAS 트랜잭션이고, 다음 단계는
@@ -1984,79 +1977,12 @@ describe("saved post agent execution", () => {
     );
     expect(result.jobs[0].paramsJson._postAgent).toEqual({
       promptId: "17",
-      revision: 3,
-      aiModelId: "2",
+      revision: 1,
+      aiModelId: "3",
       provider: "openai",
       model: "gpt-image-2.5-sunburst",
     });
   });
-  it("sends the saved instruction/model/schema to the LLM and records the configuration in the artifact", async () => {
-    const current = draft({
-      pipelineVersion: "post-pipeline-v4",
-      pipeline: { stage: "post_plan", state: "running", imageCount: 1 },
-    });
-    const result = {
-      status: "ready",
-      accountFit: "Fits everyday account",
-      intent: {
-        premise: "A quiet afternoon",
-        primaryPurpose: "Daily record",
-        secondaryPurpose: null,
-      },
-      newMemoryCandidates: [],
-    };
-    const { runner, repository, fetchMock } = setup(current, result, {
-      savedAgent: true,
-    });
-    await runner.runCurrentStage("draft-1");
-    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(request.model).toBe("stage-model");
-    expect(request.messages[0].content).toBe("Saved system instruction");
-    expect(request.response_format.json_schema.schema).toEqual(
-      POST_AGENT_CONTRACTS.post_plan.outputSchema,
-    );
-    expect(
-      repository.persistV3Artifact.mock.calls[0][0].conceptJson.postPlanning
-        .agentConfig,
-    ).toMatchObject({
-      promptId: "7",
-      revision: 2,
-      aiModelId: "9",
-      provider: "openai-compatible",
-      model: "stage-model",
-    });
-  });
-});
-
-describe("required DB prompt settings", () => {
-  it.each(["post_plan", "image_plan", "image_prompt", "caption"])(
-    "pauses %s before any model call when no prompt is saved",
-    async (stage) => {
-      const { runner, repository, fetchMock, readMedia } = setup(
-        draft({
-          pipelineVersion: "post-pipeline-v4",
-          pipeline: { stage, state: "running", imageCount: 1 },
-        }),
-        undefined,
-        { missingAgent: true },
-      );
-      await runner.runCurrentStage("draft-1");
-      expect(repository.persistV3Paused).toHaveBeenCalledWith(
-        expect.objectContaining({
-          conceptJson: expect.objectContaining({
-            pipeline: expect.objectContaining({
-              stage,
-              state: "needs_configuration",
-              reasonCodes: [`${stage}_prompt_missing`],
-            }),
-          }),
-        }),
-      );
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(readMedia).not.toHaveBeenCalled();
-      expect(repository.requeueOrFailV3).not.toHaveBeenCalled();
-    },
-  );
 });
 
 describe("embedding reference retrieval integration", () => {
@@ -2082,7 +2008,7 @@ describe("embedding reference retrieval integration", () => {
       expect.objectContaining({ characterId: "character-1" }),
     );
     const input = JSON.parse(
-      JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content,
+      userText(JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content),
     );
     expect(input.identityReferences).toEqual([
       { id: "retrieved-id", description: "retrieved caption" },
@@ -2233,6 +2159,7 @@ describe("natural photo quality gate", () => {
     const current = captionStageDraft();
     return {
       ...current,
+      sharedContractFixture: false,
       conceptJson: {
         ...current.conceptJson,
         postGenerationAgent: "natural-v1",

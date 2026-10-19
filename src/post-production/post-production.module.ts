@@ -1,3 +1,14 @@
+import { DraftsModule } from "../drafts/drafts.module";
+import { DraftsService } from "../drafts/drafts.service";
+import { GenerationModule } from "../generation/generation.module";
+import { GenerationService } from "../generation/generation.service";
+import { InfluencersModule } from "../influencers/influencers.module";
+import { CharacterInfluencerService } from "../influencers/character-influencer.service";
+import { InfluencerMediaService } from "../influencers/influencer-media.service";
+import { InfluencerReferenceRetrievalService } from "./influencer-reference-retrieval.service";
+import { ReferencePostAgentRunner } from "./reference-post-agent.runner";
+import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
+import { ReferenceAgentGenerationConfig } from "./reference-agent-config";
 import { AiSelection } from "../settings/ai-management";
 import { CharacterService } from "../characters/character.service";
 import { MemoryRetrievalService } from "./memory-retrieval.service";
@@ -49,6 +60,9 @@ function storageEnv(config: S3Config | undefined) {
 @Module({
   imports: [
     CharactersModule,
+    DraftsModule,
+    GenerationModule,
+    InfluencersModule,
     LocationsModule,
     DatabaseModule,
     SettingsModule,
@@ -56,6 +70,84 @@ function storageEnv(config: S3Config | undefined) {
     PostAgentPromptsModule,
   ],
   providers: [
+    {
+      provide: InfluencerReferenceRetrievalService,
+      useFactory: (
+        links: CharacterInfluencerService,
+        media: InfluencerMediaService,
+        settings: GenerationSettingsService,
+        logs: LlmLogService,
+      ) =>
+        new InfluencerReferenceRetrievalService(links, media, settings, logs),
+      inject: [
+        CharacterInfluencerService,
+        InfluencerMediaService,
+        GenerationSettingsService,
+        LlmLogService,
+      ],
+    },
+    {
+      provide: ReferencePostAgentRunner,
+      useFactory: (
+        drafts: DraftsService,
+        generation: GenerationService,
+        profiles: CharacterContentProfileService,
+        visuals: VisualProfileService,
+        retrieval: InfluencerReferenceRetrievalService,
+        settings: GenerationSettingsService,
+        logs: LlmLogService,
+        config: AppConfigService,
+        characters: CharacterService,
+      ) =>
+        new ReferencePostAgentRunner(
+          drafts,
+          generation,
+          profiles,
+          visuals,
+          retrieval,
+          async (stage) => {
+            const transport = await settings.resolvePlannerSettings();
+            if (
+              stage.provider !== "openai-compatible" ||
+              !transport.apiUrl ||
+              !transport.apiKey
+            )
+              throw new Error("reference_llm_connection_not_configured");
+            return new StrictJsonAgentClient(
+              {
+                apiUrl: transport.apiUrl,
+                apiKey: transport.apiKey,
+                model: stage.model,
+              },
+              fetch,
+              logs,
+              {
+                systemPrompt: stage.systemPrompt,
+                outputSchema: stage.outputSchema,
+                metadata: {
+                  aiModelId: stage.aiModelId,
+                  provider: stage.provider,
+                  effectiveModel: stage.model,
+                },
+              },
+            );
+          },
+          createMediaBytesReader(config.s3),
+          settings,
+          (characterId) => characters.getReferenceCaptionContext(characterId),
+        ),
+      inject: [
+        DraftsService,
+        GenerationService,
+        CharacterContentProfileService,
+        VisualProfileService,
+        InfluencerReferenceRetrievalService,
+        GenerationSettingsService,
+        LlmLogService,
+        AppConfigService,
+        CharacterService,
+      ],
+    },
     {
       provide: MemoryRetrievalService,
       useFactory: (
@@ -133,7 +225,33 @@ function storageEnv(config: S3Config | undefined) {
       ) =>
         new GenerationWorkerService(
           jobs,
-          async (promptId, aiSelection?: AiSelection) => {
+          async (
+            promptId,
+            aiSelection?: AiSelection,
+            frozen?: ReferenceAgentGenerationConfig,
+          ) => {
+            if (frozen) {
+              const version = await agentPrompts.getVersion(
+                "generation",
+                frozen.id,
+              );
+              if (
+                !version ||
+                version.revision !== frozen.revision ||
+                version.aiModelId !== frozen.aiModelId ||
+                version.provider !== frozen.provider ||
+                version.effectiveModel !== frozen.effectiveModel
+              )
+                throw new Error("reference_generation_config_changed");
+              return resolveImageGenerationProviders(
+                await settings.resolveImageModelSettings(
+                  frozen.provider,
+                  frozen.effectiveModel,
+                ),
+                fetch,
+                llmLogs,
+              );
+            }
             if (aiSelection)
               return resolveImageGenerationProviders(
                 await settings.resolveAiImage(aiSelection),
@@ -172,6 +290,7 @@ function storageEnv(config: S3Config | undefined) {
               reel: ratios.reel.value,
             };
           },
+          createMediaBytesReader(config.s3),
         ),
       inject: [
         GenerationJobRepository,
@@ -190,6 +309,10 @@ function storageEnv(config: S3Config | undefined) {
         llmLogs: LlmLogService,
         config: AppConfigService,
         v3: PostPipelineV3Runner,
+        reference: ReferencePostAgentRunner,
+        draftService: DraftsService,
+        characters: CharacterService,
+        generationWorker: GenerationWorkerService,
       ) =>
         new DraftWorkerService(
           drafts,
@@ -229,6 +352,15 @@ function storageEnv(config: S3Config | undefined) {
           async () => (await settings.resolvePipelineV3()).enabled,
           (draftId, options) => v3.runCurrentStage(draftId, options),
           () => settings.scheduledAgentConcept(),
+          {
+            drafts: draftService,
+            runner: reference,
+            runQueuedJob: (jobId) => generationWorker.runJobNow(jobId),
+            assertCharacterActive: async (id) => {
+              if ((await characters.getCharacter(id)).status !== "active")
+                throw new Error("reference_character_inactive");
+            },
+          },
         ),
       inject: [
         DraftWorkerRepository,
@@ -236,6 +368,10 @@ function storageEnv(config: S3Config | undefined) {
         LlmLogService,
         AppConfigService,
         PostPipelineV3Runner,
+        ReferencePostAgentRunner,
+        DraftsService,
+        CharacterService,
+        GenerationWorkerService,
       ],
     },
   ],

@@ -1,3 +1,10 @@
+import {
+  activeReferenceDraftJob,
+  referenceJobExecutionLock,
+} from "./reference-job-condition";
+import { referenceGenerationMetadata } from "./reference-generation";
+import { isDeepStrictEqual } from "node:util";
+import { BadRequestException } from "@nestjs/common";
 import { Injectable } from "@nestjs/common";
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { AssertableMedia } from "../media/media.service";
@@ -159,6 +166,62 @@ export class GenerationRepository {
     };
   }
 
+  async ensureReferenceDraftJobs(
+    jobs: {
+      id: string;
+      characterId: string;
+      draftId: string;
+      sortOrder: number;
+      prompt: string;
+      paramsJson: GenerationParamsObject;
+    }[],
+  ): Promise<void> {
+    await this.database.client.transaction(async (tx) => {
+      await tx
+        .insert(generationJobs)
+        .values(
+          jobs.map((job) => ({
+            ...job,
+            mediaType: "image" as const,
+            status: "draft" as const,
+            candidateCount: 1,
+            inputPrompt: job.prompt,
+          })),
+        )
+        .onConflictDoNothing({ target: generationJobs.id });
+      const stored = await tx
+        .select()
+        .from(generationJobs)
+        .where(
+          inArray(
+            generationJobs.id,
+            jobs.map((job) => job.id),
+          ),
+        );
+      for (const job of jobs) {
+        const existing = stored.find((row) => row.id === job.id);
+        const params = existing?.paramsJson as Record<string, unknown> | null;
+        if (
+          !existing ||
+          existing.characterId !== job.characterId ||
+          existing.draftId !== job.draftId ||
+          existing.sortOrder !== job.sortOrder ||
+          existing.inputPrompt !== job.prompt ||
+          existing.candidateCount !== 1 ||
+          existing.mediaType !== "image" ||
+          !isDeepStrictEqual(
+            params?._referenceAgent,
+            job.paramsJson._referenceAgent,
+          ) ||
+          !isDeepStrictEqual(params?._postAgent, job.paramsJson._postAgent)
+        )
+          throw new BadRequestException(
+            "Reference generation job snapshot conflict",
+          );
+      }
+    });
+  }
+
   async createImageDraft(input: {
     characterId: string;
     inputPrompt: string;
@@ -204,24 +267,36 @@ export class GenerationRepository {
   }
 
   confirmImageDraft(jobId: string): Promise<boolean> {
-    return this.database.client.transaction(async (tx) => {
-      const [confirmed] = await tx
-        .update(generationJobs)
-        .set({ status: "queued" })
-        .where(
-          and(eq(generationJobs.id, jobId), eq(generationJobs.status, "draft")),
-        )
-        .returning({ characterId: generationJobs.characterId });
-      if (!confirmed) return false;
-      await tx.insert(characterActionLogs).values({
-        characterId: confirmed.characterId,
-        actionType: "GENERATION_DRAFT_CONFIRMED",
-        targetTable: "generation_jobs",
-        targetId: jobId,
-        reason: "generation draft confirmed",
-      });
-      return true;
-    });
+    return this.database.client.transaction(
+      async (tx) => {
+        const lock = await tx.execute<{ locked: boolean }>(
+          referenceJobExecutionLock(jobId),
+        );
+        if (lock.rows[0]?.locked === false) return false;
+
+        const [confirmed] = await tx
+          .update(generationJobs)
+          .set({ status: "queued" })
+          .where(
+            and(
+              eq(generationJobs.id, jobId),
+              eq(generationJobs.status, "draft"),
+              sql`(${generationJobs.paramsJson}->'_referenceAgent' is null or ${activeReferenceDraftJob})`,
+            ),
+          )
+          .returning({ characterId: generationJobs.characterId });
+        if (!confirmed) return false;
+        await tx.insert(characterActionLogs).values({
+          characterId: confirmed.characterId,
+          actionType: "GENERATION_DRAFT_CONFIRMED",
+          targetTable: "generation_jobs",
+          targetId: jobId,
+          reason: "generation draft confirmed",
+        });
+        return true;
+      },
+      { isolationLevel: "read committed" },
+    );
   }
 
   selectOutput(jobId: string, mediaId: string): Promise<OutputSelectionResult> {
@@ -395,31 +470,74 @@ export class GenerationRepository {
     source: GenerationJobRow,
     reason: string,
   ): Promise<GenerationJobRow> {
-    return this.database.client.transaction(async (tx) => {
-      const [created] = await tx
-        .insert(generationJobs)
-        .values({
+    return this.database.client.transaction(
+      async (tx) => {
+        if (referenceGenerationMetadata(source.paramsJson)) {
+          const lock = await tx.execute<{ locked: boolean }>(
+            referenceJobExecutionLock(source.id),
+          );
+          if (lock.rows[0]?.locked !== true)
+            throw new BadRequestException(
+              "Reference generation is being reset; retry after it completes",
+            );
+
+          const [retried] = await tx
+            .update(generationJobs)
+            .set({
+              status: "queued",
+              errorMessage: null,
+              leaseExpiresAt: null,
+              providerRequestId: null,
+              provider: null,
+              paramsJson: paramsWithoutProviderProgress(source.paramsJson),
+            })
+            .where(
+              and(
+                eq(generationJobs.id, source.id),
+                eq(generationJobs.status, "failed"),
+                activeReferenceDraftJob,
+              ),
+            )
+            .returning();
+          if (!retried)
+            throw new BadRequestException(
+              "Reference generation job is stale or no longer failed",
+            );
+          await tx.insert(characterActionLogs).values({
+            characterId: source.characterId,
+            actionType: "GENERATION_JOB_RETRIED",
+            targetTable: "generation_jobs",
+            targetId: source.id,
+            reason,
+          });
+          return { ...retried, outputMedia: null };
+        }
+        const [created] = await tx
+          .insert(generationJobs)
+          .values({
+            characterId: source.characterId,
+            mediaType: source.mediaType,
+            inputPrompt: source.inputPrompt,
+            prompt: source.prompt,
+            candidateCount: source.candidateCount,
+            ...(source.paramsJson != null
+              ? { paramsJson: paramsWithoutProviderProgress(source.paramsJson) }
+              : {}),
+            sortOrder: source.sortOrder,
+            originJobId: source.id,
+          })
+          .returning();
+        await tx.insert(characterActionLogs).values({
           characterId: source.characterId,
-          mediaType: source.mediaType,
-          inputPrompt: source.inputPrompt,
-          prompt: source.prompt,
-          candidateCount: source.candidateCount,
-          ...(source.paramsJson != null
-            ? { paramsJson: paramsWithoutProviderProgress(source.paramsJson) }
-            : {}),
-          sortOrder: source.sortOrder,
-          originJobId: source.id,
-        })
-        .returning();
-      await tx.insert(characterActionLogs).values({
-        characterId: source.characterId,
-        actionType: "GENERATION_JOB_RETRIED",
-        targetTable: "generation_jobs",
-        targetId: created.id,
-        reason,
-      });
-      return { ...created, outputMedia: null };
-    });
+          actionType: "GENERATION_JOB_RETRIED",
+          targetTable: "generation_jobs",
+          targetId: created.id,
+          reason,
+        });
+        return { ...created, outputMedia: null };
+      },
+      { isolationLevel: "read committed" },
+    );
   }
 
   async failJob(jobId: string, errorMessage: string): Promise<boolean> {
