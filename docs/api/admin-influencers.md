@@ -50,3 +50,10 @@ source_caption의 정본 추가 migration은 Backend `drizzle/20261019060222_ora
 - Backend: npm run test:e2e -- --runTestsByPath test/character-reference-links-migration.e2e-spec.ts test/drizzle-migrations.e2e-spec.ts
 - API e2e는 실제 DB/HTTP를 사용하고 S3 adapter·임베딩 외부 HTTP만 대체한다. 실제 공급자/S3 검증은 별도 필요.
 - npm run lint, npm run test, npm run build, npm run admin:check, npm run schema:check.
+
+## SNS reference library UI
+
+- `GET /influencers` supports optional `search` (username, up to 100 characters) and `characterId` (UUID) alongside cursor/limit. An unlinked character returns an empty result.
+- `POST /influencers` accepts `{ "url": "https://www.instagram.com/username/" }` and returns the existing or newly registered account. Authentication and CSRF requirements match media registration. Optional character linking uses the existing character-influencers API.
+- `GET /influencer-media` adds optional `characterId`, `assetType=image|video_thumbnail`, `analysisStatus=ready|missing`, `search` (description/post ID, up to 200 characters), and `order=newest|oldest`. Here ready means analysis exists, not embedding readiness. Defaults remain oldest-first for existing collectors. `influencer` provides account id/username/url/platform for each returned media item. Character and account filters intersect.
+- Manual UI upload uses the existing multipart endpoint with `analysis:null`. Files are registered sequentially; successful files are retained when others fail. Repeating the same file/identity uses the existing idempotency contract. No schema change or automatic vision call is introduced.

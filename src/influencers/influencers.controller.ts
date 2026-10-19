@@ -16,7 +16,7 @@ import { parsePageQuery } from "../shared/utils/page";
 import { InfluencerService } from "./influencer.service";
 import { InfluencerMediaApplicationService } from "./influencer-media-application.service";
 import { MAX_REFERENCE_BYTES } from "./influencer-media-store";
-import { parseMediaMetadata } from "./influencer-input";
+import { parseMediaMetadata, RegisterInfluencer } from "./influencer-input";
 @Controller("api/admin/v1")
 @UseGuards(AdminJwtGuard)
 export class InfluencersController {
@@ -27,9 +27,18 @@ export class InfluencersController {
   @Get("influencers") list(
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
+    @Query("search") search?: string,
+    @Query("characterId") characterId?: string,
   ) {
     const page = parsePageQuery(cursor, limit);
-    return this.influencers.list(page.cursor, page.limit);
+    return this.influencers.list(page.cursor, page.limit, search, characterId);
+  }
+  @Post("influencers")
+  async create(@Body() input: RegisterInfluencer) {
+    if (typeof input?.url !== "string" || input.url.length > 2048)
+      throw new BadRequestException("Instagram 계정 링크를 입력해 주세요.");
+    const row = await this.influencers.register(input.url);
+    return { ...row, id: String(row.id) };
   }
   @Get("influencer-media") mediaList(
     @Query() query: Parameters<InfluencerMediaApplicationService["list"]>[0],

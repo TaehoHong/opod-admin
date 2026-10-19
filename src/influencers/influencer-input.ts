@@ -47,6 +47,10 @@ export function instagramAccount(value: string) {
   };
 }
 
+export class RegisterInfluencer {
+  @IsString() @IsNotEmpty() @MaxLength(2048) url!: string;
+}
+
 export class ImageAnalysisContent {
   @IsString() @IsNotEmpty() @MaxLength(2000) description!: string;
   @IsOptional() @IsInt() @Min(0) @Max(100) personCount?: number | null;

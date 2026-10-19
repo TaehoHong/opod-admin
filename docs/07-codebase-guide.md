@@ -767,7 +767,11 @@ not change the output schema or frozen draft configuration.
 
 ### 수집 라이브러리 UI
 
-`features/influencers/InfluencerLibraryPage.tsx`가 `/sns-references/library`의 전체 계정 목록을 소유한다. 기존 SNS 목록에서 진입하고 캐릭터 연결을 해제한 계정도 조회한다. `InfluencerMediaModal`은 계정 목록과 기존 `CharacterReferenceLinksPanel`에서 함께 사용하며 계정 ID로 미디어를 조회한다. API owner는 같은 폴더의 api.ts이고, 공통 apiRequest/useCursorList/LoadMore/previewUrl/ZoomableImage를 재사용한다. 사진·영상 썸네일 구분, 분석 없음, 목록 추가 조회, 이미지 확대, 분석 상세와 원본 링크를 표시한다. URL 만료 시 새로고침으로 서명 URL을 다시 조회한다. `/sns-references/library`는 기존 서버 SPA 허용 경로에 포함된다. 이번 UI 변경은 사용자 요청에 따라 테스트를 작성·실행하지 않으며 배포용 타입 검사·빌드만 수행한다.
+`features/influencers/InfluencerLibraryPage.tsx`가 `/sns-references` 및 `/sns-references/library`의 미디어 리스트와 계정 탭을 소유한다. 작은 썸네일, 계정, 분석 요약, 종류, 분석 상태를 표시하며 상세 Modal에서 원본 확대와 이전·다음 이동을 제공한다. 캐릭터·계정·검색·종류·분석 상태는 URL에 보존한다. 다섯 필터는 한 flex 행에서 최소 너비까지 축소한 뒤 줄바꿈한다.
+
+`LibraryPicker`는 기존 고정 100개 `CharacterSelect`로 충족할 수 없는 서버 검색·cursor 추가 조회를 소유한다. 캐릭터 검색은 기존 character-reference-directory, 계정 검색은 influencers의 search/characterId를 사용한다. `MediaUploadModal`은 여러 파일을 한 게시물의 순차 슬라이드로 등록하며 결과와 실패 파일 재시도를 보존한다. `AccountModal`은 계정 등록과 선택적 캐릭터 연결을 기존 서비스로 처리한다. `apiRequest`가 JSON/multipart 분기와 세션·CSRF 헤더를 함께 소유한다. 원본 링크 검증, 이미지 검증·S3 저장·중복 및 임베딩 규칙은 기존 서버 owner를 유지한다. 미디어 업로드에는 `analysis:null`을 보내 비전/임베딩 호출 없이 미분석으로 등록한다. 로컬 파일 미리보기를 위해 이미지 CSP에 blob:을 허용한다.
+
+캐릭터 연결 관리의 기존 화면은 `/sns-references/connections`로 이동했다. 연결 변경은 해당 캐릭터만 바꾸며 공유 계정·미디어는 보존한다. UI 타입 검사와 배포 빌드 명령은 `npm --workspace @ai-sns/admin run typecheck`, `npm run build`다. 이번 작업은 사용자 지시로 테스트를 작성·실행하지 않았다.
 
 ## 레퍼런스 게시물 Agent 실행과 설정
 

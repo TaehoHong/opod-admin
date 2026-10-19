@@ -129,7 +129,7 @@ export const NAV_ITEMS = [
     id: "sns-references",
     label: "SNS 레퍼런스",
     group: "content",
-    Page: CharacterSnsPage,
+    Page: InfluencerLibraryPage,
   },
   { id: "locations", label: "장소", group: "content", Page: LocationsPage },
   { id: "posts", label: "게시물", group: "content", Page: PostsPage },
@@ -217,6 +217,10 @@ export function AppRoutes() {
         <Route
           path="sns-references/library"
           element={<InfluencerLibraryPage />}
+        />
+        <Route
+          path="sns-references/connections"
+          element={<CharacterSnsPage />}
         />
         <Route
           path="sns-references/:characterId"

@@ -46,18 +46,23 @@ export async function apiRequest<T>(
   options: RequestOptions = {},
 ): Promise<T> {
   const method = options.method ?? "GET";
+  const isMultipart = options.body instanceof FormData;
   const response = await fetch(`${API_BASE}${path}`, {
     method,
     credentials: "same-origin",
     headers: {
       [ADMIN_REQUEST_HEADER]: "1",
-      ...(options.body === undefined
+      ...(options.body === undefined || isMultipart
         ? {}
         : { "content-type": "application/json" }),
     },
     ...(options.body === undefined
       ? {}
-      : { body: JSON.stringify(options.body) }),
+      : {
+          body: isMultipart
+            ? (options.body as FormData)
+            : JSON.stringify(options.body),
+        }),
     ...(options.signal ? { signal: options.signal } : {}),
   });
 

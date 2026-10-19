@@ -45,7 +45,7 @@ export function CharacterSnsPage() {
 
   return (
     <DataPage
-      title="SNS 레퍼런스"
+      title="캐릭터 연결 관리"
       isPending={directory.isPending}
       error={directory.error}
       actions={
@@ -55,7 +55,7 @@ export function CharacterSnsPage() {
             to="/sns-references/library"
             variant="default"
           >
-            수집 라이브러리
+            미디어 라이브러리
           </Button>
           {directory.error ? (
             <Button variant="default" onClick={() => void directory.refetch()}>

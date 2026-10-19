@@ -8,6 +8,8 @@ import { LlmLogService } from "../llm-logs/llm-log.service";
 import { ReferenceEmbeddingClient } from "../shared/ai/reference-embedding";
 import { parseBigintId } from "../shared/utils/bigint-id";
 import { decodeCursor, pageFromRows } from "../shared/utils/page";
+import { isUUID } from "class-validator";
+import { CharacterInfluencerService } from "./character-influencer.service";
 import { InfluencerService } from "./influencer.service";
 import { InfluencerMediaService } from "./influencer-media.service";
 import {
@@ -24,6 +26,7 @@ import { InfluencerMediaRow } from "./influencer-media.repository";
 export class InfluencerMediaApplicationService {
   constructor(
     private readonly influencers: InfluencerService,
+    private readonly mappings: CharacterInfluencerService,
     private readonly media: InfluencerMediaService,
     private readonly store: InfluencerMediaStore,
     private readonly settings: GenerationSettingsService,
@@ -129,9 +132,14 @@ export class InfluencerMediaApplicationService {
   }
   async list(query: {
     influencerId?: string;
+    characterId?: string;
     postId?: string;
     slideIndex?: string;
     work?: string;
+    assetType?: string;
+    analysisStatus?: string;
+    search?: string;
+    order?: string;
     cursor?: string;
     limit?: string;
   }) {
@@ -139,6 +147,7 @@ export class InfluencerMediaApplicationService {
     const slideIndex =
       query.slideIndex === undefined ? undefined : Number(query.slideIndex);
     if (
+      (query.characterId && !isUUID(query.characterId)) ||
       !Number.isInteger(limit) ||
       limit < 1 ||
       limit > 100 ||
@@ -146,6 +155,13 @@ export class InfluencerMediaApplicationService {
         (!Number.isInteger(slideIndex) ||
           slideIndex < 1 ||
           slideIndex > 100)) ||
+      (query.assetType &&
+        !["image", "video_thumbnail"].includes(query.assetType)) ||
+      (query.analysisStatus &&
+        !["ready", "missing"].includes(query.analysisStatus)) ||
+      (query.order && !["newest", "oldest"].includes(query.order)) ||
+      (query.search !== undefined &&
+        (typeof query.search !== "string" || query.search.length > 200)) ||
       (query.work && !["analysis", "embedding"].includes(query.work))
     )
       throw new BadRequestException("Invalid media filters");
@@ -154,13 +170,23 @@ export class InfluencerMediaApplicationService {
       query.work === "embedding"
         ? (await this.settings.resolveChatSettings()).embeddingModel?.trim()
         : undefined;
+    const linkedIds = query.characterId
+      ? (await this.mappings.list([query.characterId])).map(
+          (row) => row.influencerId,
+        )
+      : undefined;
     const rows = await this.media.list({
+      influencerIds: linkedIds,
       influencerId: query.influencerId
         ? parseBigintId(query.influencerId, "Invalid influencer ID")
         : undefined,
       postId: query.postId,
       slideIndex,
       work: query.work,
+      assetType: query.assetType,
+      analysisStatus: query.analysisStatus,
+      search: query.search?.trim(),
+      order: query.order,
       after: after ? parseBigintId(after, "Invalid cursor") : undefined,
       limit: limit + 1,
       model,
@@ -188,10 +214,26 @@ export class InfluencerMediaApplicationService {
       })),
       limit,
     );
+    const accounts = new Map(
+      (
+        await this.influencers.byIds([
+          ...new Set(rows.map((row) => row.influencerId)),
+        ])
+      ).map((account) => [
+        String(account.id),
+        {
+          id: String(account.id),
+          username: account.username,
+          url: account.url,
+          platform: account.platform,
+        },
+      ]),
+    );
     return {
       items: await Promise.all(
         page.items.map(async (row) => ({
           ...row,
+          influencer: accounts.get(row.influencerId),
           imageUrl: await this.store.url(row.mediaKey),
         })),
       ),

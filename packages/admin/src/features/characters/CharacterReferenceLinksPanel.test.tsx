@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
+import { MemoryRouter } from "react-router-dom";
 import { AppProviders } from "../../app/providers";
 import { server } from "../../test/server";
 import { CharacterReferenceLinksPanel } from "./CharacterReferenceLinksPanel";
@@ -37,7 +38,9 @@ describe("character reference link editor", () => {
     );
     render(
       <AppProviders>
-        <CharacterReferenceLinksPanel characterId="character-1" />
+        <MemoryRouter>
+          <CharacterReferenceLinksPanel characterId="character-1" />
+        </MemoryRouter>
       </AppProviders>,
     );
     await screen.findByText("등록된 참조 링크가 없습니다.");
@@ -53,6 +56,10 @@ describe("character reference link editor", () => {
     expect(link).toHaveAttribute("href", initial.url);
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByRole("link", { name: "수집 미디어" })).toHaveAttribute(
+      "href",
+      "/sns-references?account=9007199254740993",
+    );
     await userEvent.click(screen.getByRole("button", { name: "수정" }));
     const input = screen.getByRole("textbox", { name: "참조 URL" });
     await userEvent.clear(input);
@@ -77,7 +84,9 @@ describe("character reference link editor", () => {
     );
     render(
       <AppProviders>
-        <CharacterReferenceLinksPanel characterId="character-1" />
+        <MemoryRouter>
+          <CharacterReferenceLinksPanel characterId="character-1" />
+        </MemoryRouter>
       </AppProviders>,
     );
     await userEvent.click(await screen.findByRole("button", { name: "수정" }));

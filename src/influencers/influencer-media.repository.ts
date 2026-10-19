@@ -2,8 +2,11 @@ import { ConflictException, Injectable } from "@nestjs/common";
 import {
   and,
   asc,
+  desc,
   eq,
   gt,
+  lt,
+  ilike,
   inArray,
   isNotNull,
   isNull,
@@ -18,6 +21,7 @@ import { influencerMedia } from "../core/database/schema";
 export type InfluencerMediaRow = typeof influencerMedia.$inferSelect;
 export type MediaWrite = typeof influencerMedia.$inferInsert;
 export type MediaFilter = {
+  influencerIds?: bigint[];
   influencerId?: bigint;
   postId?: string;
   slideIndex?: number;
@@ -25,6 +29,10 @@ export type MediaFilter = {
   limit: number;
   work?: string;
   model?: string;
+  assetType?: string;
+  analysisStatus?: string;
+  search?: string;
+  order?: string;
 };
 export type ReferenceMediaSearch = {
   influencerIds: bigint[];
@@ -237,6 +245,9 @@ export class InfluencerMediaRepository {
       .from(influencerMedia)
       .where(
         and(
+          input.influencerIds
+            ? inArray(influencerMedia.influencerId, input.influencerIds)
+            : undefined,
           input.influencerId
             ? eq(influencerMedia.influencerId, input.influencerId)
             : undefined,
@@ -244,7 +255,30 @@ export class InfluencerMediaRepository {
           input.slideIndex
             ? eq(influencerMedia.slideIndex, input.slideIndex)
             : undefined,
-          input.after ? gt(influencerMedia.id, input.after) : undefined,
+          input.after
+            ? (input.order === "newest" ? lt : gt)(
+                influencerMedia.id,
+                input.after,
+              )
+            : undefined,
+          input.assetType
+            ? eq(influencerMedia.assetType, input.assetType)
+            : undefined,
+          input.analysisStatus === "ready"
+            ? isNotNull(influencerMedia.analysis)
+            : undefined,
+          input.analysisStatus === "missing"
+            ? isNull(influencerMedia.analysis)
+            : undefined,
+          input.search
+            ? or(
+                ilike(influencerMedia.postId, `%${input.search}%`),
+                ilike(
+                  sql<string>`${influencerMedia.analysis}->>'description'`,
+                  `%${input.search}%`,
+                ),
+              )
+            : undefined,
           input.work === "analysis"
             ? isNull(influencerMedia.analysis)
             : undefined,
@@ -260,7 +294,7 @@ export class InfluencerMediaRepository {
             : undefined,
         ),
       )
-      .orderBy(asc(influencerMedia.id))
+      .orderBy((input.order === "newest" ? desc : asc)(influencerMedia.id))
       .limit(input.limit);
   }
 }

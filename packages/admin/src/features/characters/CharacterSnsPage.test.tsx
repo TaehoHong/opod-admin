@@ -35,12 +35,15 @@ const page = Array.from({ length: 20 }, (_, i) => ({
   publicId: `person_${i}`,
 }));
 
-function renderSnsRoutes(path = "/sns-references") {
+function renderSnsRoutes(path = "/sns-references/connections") {
   render(
     <AppProviders>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
-          <Route path="sns-references" element={<CharacterSnsPage />} />
+          <Route
+            path="sns-references/connections"
+            element={<CharacterSnsPage />}
+          />
           <Route
             path="sns-references/:characterId"
             element={<CharacterSnsDetailPage />}
@@ -212,7 +215,9 @@ describe("character SNS reference list and detail", () => {
         HttpResponse.json(first.referenceLinks),
       ),
     );
-    renderSnsRoutes("/sns-references?search=민&registration=registered");
+    renderSnsRoutes(
+      "/sns-references/connections?search=민&registration=registered",
+    );
     const table = within(
       await screen.findByRole("table", { name: "캐릭터별 SNS 레퍼런스" }),
     );
@@ -258,7 +263,7 @@ describe("character SNS reference list and detail", () => {
         });
       }),
     );
-    renderSnsRoutes("/sns-references?cursor=old-page");
+    renderSnsRoutes("/sns-references/connections?cursor=old-page");
     await screen.findByText("조건에 맞는 캐릭터가 없습니다.");
     await userEvent.type(
       screen.getByRole("textbox", { name: "캐릭터 검색" }),

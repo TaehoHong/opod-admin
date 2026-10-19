@@ -40,7 +40,7 @@ export function CharacterSnsDetailPage() {
           leftSection={<ArrowLeft size={16} aria-hidden />}
           disabled={busy}
           onClick={() =>
-            navigate(`/sns-references${location.search}`, {
+            navigate(`/sns-references/connections${location.search}`, {
               state: location.state,
             })
           }

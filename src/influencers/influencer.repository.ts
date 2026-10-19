@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { asc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, ilike, inArray } from "drizzle-orm";
 import { DatabaseService } from "../core/database/database.service";
 import { influencers } from "../core/database/schema";
 @Injectable()
@@ -31,11 +31,22 @@ export class InfluencerRepository {
           .where(inArray(influencers.id, ids))
       : Promise.resolve([]);
   }
-  list(after: bigint | undefined, limit: number) {
+  list(
+    after: bigint | undefined,
+    limit: number,
+    search?: string,
+    ids?: bigint[],
+  ) {
     return this.db.client
       .select()
       .from(influencers)
-      .where(after ? gt(influencers.id, after) : undefined)
+      .where(
+        and(
+          after ? gt(influencers.id, after) : undefined,
+          search ? ilike(influencers.username, `%${search}%`) : undefined,
+          ids ? inArray(influencers.id, ids) : undefined,
+        ),
+      )
       .orderBy(asc(influencers.id))
       .limit(limit);
   }
