@@ -779,6 +779,35 @@ export const characterPersonaCanonLinks = opod.table(
   ],
 );
 
+export const characterReferenceLinks = opod.table(
+  "character_reference_links",
+  {
+    // Reference links use BIGINT identity by explicit product decision.
+    id: bigint({ mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, {
+        name: "character_reference_links_character_id_fkey",
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    url: text().notNull(),
+    createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp("updated_at", { precision: 6, withTimezone: true })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull()
+      .$onUpdateFn(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("character_reference_links_character_url_key").on(
+      table.characterId,
+      table.url,
+    ),
+  ],
+);
+
 export const characterContentProfiles = opod.table(
   "character_content_profiles",
   {

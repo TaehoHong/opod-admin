@@ -36,6 +36,25 @@ GET /api/admin/v1/characters/:id
 The detail response includes the same `postCount` and `followerCount` fields in
 addition to existing `personas` and `memories`.
 
+## Reference links
+
+관리자 캐릭터 프로필의 모티브 SNS·참조 주소는 별도 `character_reference_links` 테이블에서 관리한다.
+
+| Method | Path | Result |
+| --- | --- | --- |
+| GET | `/api/admin/v1/characters/:characterId/reference-links` | 등록 순서의 링크 배열, 미등록은 `[]` |
+| POST | 동일 경로 | `{ "url": "https://example.com/reference" }` 등록, 201 |
+| PATCH | 동일 경로 뒤 `/:linkId` | `{ "url": "https://example.com/updated" }` 수정 |
+| DELETE | 동일 경로 뒤 `/:linkId` | 선택한 링크 삭제, `{ "id": "123" }` |
+
+각 링크 응답은 `{ id, characterId, url, createdAt, updatedAt }`다. `id`는 BIGINT IDENTITY를
+손실 없이 문자열로 반환하고 `characterId`는 기존 캐릭터 UUID다. 시각은 ISO 문자열이다.
+앞뒤 공백과 URL 표기를 정규화하며, 사용자 정보가 없는 2048자 이내 HTTP/HTTPS 주소만 저장한다.
+같은 캐릭터에 정규화된 URL이 중복되면 409, 잘못된 URL·ID는 400,
+없는 캐릭터 또는 다른 캐릭터의 링크 ID는 404다. 관리자 쿠키와 기존 CSRF 규칙을 적용한다.
+URL DB CHECK는 사용자 결정에 따라 두지 않는다. 새 테이블의 unique index와 FK는 유지한다.
+링크 열기는 새 탭의 `noopener noreferrer` 앵커로 제공한다.
+
 ## Profile image
 
 Profile images reuse upload-confirmed image rows from the media library. The

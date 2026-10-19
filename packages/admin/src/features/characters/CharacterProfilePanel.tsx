@@ -27,6 +27,7 @@ import { useCursorList } from "../../shared/api/useCursorList";
 import { previewUrl } from "../../shared/media/previewUrl";
 import { ImageLightbox } from "../../shared/ui/ZoomableImage";
 import classes from "./ProfileCrop.module.css";
+import { CharacterReferenceLinksPanel } from "./CharacterReferenceLinksPanel";
 import {
   clearCharacterProfileImage,
   deleteCharacter,
@@ -165,6 +166,10 @@ export function CharacterProfilePanel({
 
       <Stack>
         <ProfileImageForm characterId={character.id} />
+        <CharacterReferenceLinksPanel
+          key={character.id}
+          characterId={character.id}
+        />
         <CharacterStatusForm character={character} />
       </Stack>
     </SimpleGrid>

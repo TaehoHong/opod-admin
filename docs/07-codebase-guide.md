@@ -683,3 +683,11 @@ Qwen edit/t2i 요청에서 공통값과 컷별 제외를 쉼표 단위로 병합
 `image-model-policies.ts`의 Qwen v2와 `image-prompt-generator.ts`는 컷별 조건을
 문자열 또는 null로 받고 일반 제외를 강제하지 않는다. 회귀 owner는 provider/프롬프트
 parser spec, `SettingsPage.test.tsx`, `test/qwen-negative-settings.e2e-spec.ts`다.
+
+## Character reference links
+
+- `characters/character-reference-link.repository.ts`만 `character_reference_links` 테이블에 접근하고, 소유 `CharacterReferenceLinkService`만 이 Repository를 주입한다. 캐릭터 존재 확인은 기존 `CharacterService.requireActivityCharacter`를 거친다.
+- `CharacterReferenceLinksController`가 `/api/admin/v1/characters/:characterId/reference-links`의 GET/POST/PATCH/DELETE를 소유한다. 소속 캐릭터와 링크 ID를 함께 조건으로 사용하고 중복 URL은 409, 미존재는 404, 잘못된 주소/ID는 400으로 반환한다.
+- 링크 ID는 사용자 확정 BIGINT IDENTITY이며 JSON은 문자열이다. `shared/utils/bigint-id.ts`의 `parseBigintId`를 기존 `aiConfigId`와 함께 사용한다. URL 정규화·HTTP(S)·길이·사용자정보 제외 검증은 링크 Service가 소유한다. URL DB CHECK는 없다.
+- UI는 `features/characters/CharacterReferenceLinksPanel.tsx`와 프로필 탭이 소유하며 기존 Mantine 폼·오류 표시와 `previewUrl`을 재사용한다. 새 탭 링크는 `noopener noreferrer`로 연다. 참조 URL은 관리자 관리용이며 기존 제작/대화 입력을 변경하지 않는다.
+- 정본 DDL은 backend의 `drizzle/20261019002237_character_reference_links/migration.sql`, admin schema는 mirror다. 회귀는 `test/character-reference-links.e2e-spec.ts`, `CharacterReferenceLinksPanel.test.tsx`의 영속화·캐릭터 격리·중복·인증·BIGINT 정밀도·편집/삭제/열기 계약이다.

@@ -11,6 +11,9 @@ import {
 } from "../post-production/reference-captioner";
 import { CharactersController } from "./characters.controller";
 import { CharacterRepository } from "./character.repository";
+import { CharacterReferenceLinkRepository } from "./character-reference-link.repository";
+import { CharacterReferenceLinkService } from "./character-reference-link.service";
+import { CharacterReferenceLinksController } from "./character-reference-links.controller";
 import { CharacterService } from "./character.service";
 import { CharacterActionLogRepository } from "./character-action-log.repository";
 import { CharacterActionLogService } from "./character-action-log.service";
@@ -34,8 +37,10 @@ import { LlmLogService } from "../llm-logs/llm-log.service";
     SettingsModule,
     CharacterContentProfilesModule,
   ],
-  controllers: [CharactersController],
+  controllers: [CharactersController, CharacterReferenceLinksController],
   providers: [
+    CharacterReferenceLinkRepository,
+    CharacterReferenceLinkService,
     CharacterRepository,
     CharacterService,
     CharacterActionLogRepository,

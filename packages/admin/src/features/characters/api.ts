@@ -69,6 +69,44 @@ export type CharacterDetail = CharacterListItem & {
   memories: CharacterMemory[];
 };
 
+export type CharacterReferenceLink = {
+  id: string;
+  characterId: string;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export function fetchCharacterReferenceLinks(
+  characterId: string,
+): Promise<CharacterReferenceLink[]> {
+  return apiRequest(`${characterPath(characterId)}/reference-links`);
+}
+
+export function saveCharacterReferenceLink(
+  characterId: string,
+  url: string,
+  linkId?: string,
+): Promise<CharacterReferenceLink> {
+  return apiRequest(
+    `${characterPath(characterId)}/reference-links${linkId ? `/${encodeURIComponent(linkId)}` : ""}`,
+    {
+      method: linkId ? "PATCH" : "POST",
+      body: { url },
+    },
+  );
+}
+
+export function deleteCharacterReferenceLink(
+  characterId: string,
+  linkId: string,
+): Promise<{ id: string }> {
+  return apiRequest(
+    `${characterPath(characterId)}/reference-links/${encodeURIComponent(linkId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export type CharacterMetrics = {
   lastPostAt: string | null;
   postsLast7Days: number;
