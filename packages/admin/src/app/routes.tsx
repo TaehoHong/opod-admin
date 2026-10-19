@@ -28,6 +28,11 @@ const CharactersPage = lazy(() =>
     default: m.CharactersPage,
   })),
 );
+const CharacterSnsPage = lazy(() =>
+  import("../features/characters/CharacterSnsPage").then((m) => ({
+    default: m.CharacterSnsPage,
+  })),
+);
 const CharacterManagerPage = lazy(() =>
   import("../features/characters/CharacterManagerPage").then((m) => ({
     default: m.CharacterManagerPage,
@@ -109,6 +114,12 @@ export const NAV_ITEMS = [
     label: "캐릭터",
     group: "content",
     Page: CharactersPage,
+  },
+  {
+    id: "sns-references",
+    label: "SNS 레퍼런스",
+    group: "content",
+    Page: CharacterSnsPage,
   },
   { id: "locations", label: "장소", group: "content", Page: LocationsPage },
   { id: "posts", label: "게시물", group: "content", Page: PostsPage },

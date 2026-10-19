@@ -10,6 +10,7 @@ import {
   House,
   Heartbeat,
   ImageSquare,
+  LinkSimple,
   MapPin,
   Scroll,
   ShieldCheck,
@@ -48,6 +49,7 @@ import { NAV_GROUPS, NAV_ITEMS } from "./routes";
 const NAV_ICONS = {
   home: House,
   characters: UsersThree,
+  "sns-references": LinkSimple,
   locations: MapPin,
   posts: Article,
   media: ImageSquare,
