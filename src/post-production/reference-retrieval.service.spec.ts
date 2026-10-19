@@ -7,6 +7,22 @@ function fixture() {
     description: `caption-${i}`,
     embeddingModel: "fixture",
     indexed: true,
+    compositionAnalysis: {
+      version: "person-composition-v1",
+      model: "vision-fixture",
+      content: {
+        personCount: 1,
+        framing: "상반신",
+        faceDirection: "정면",
+        bodyDirection: "정면",
+        pose: "서 있음",
+        hands: null,
+        gaze: "카메라",
+        camera: "눈높이",
+        placement: "중앙",
+        occlusion: null,
+      },
+    },
   }));
   const ranked = sources.map((s) => ({
     id: s.mediaId,

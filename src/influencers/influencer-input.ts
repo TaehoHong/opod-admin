@@ -2,6 +2,11 @@ import { BadRequestException } from "@nestjs/common";
 import { plainToInstance, Type } from "class-transformer";
 export { compositionText } from "../shared/ai/image-composition";
 import {
+  COMPOSITION_FIELDS,
+  COMPOSITION_VERSION,
+  parseComposition,
+} from "../shared/ai/image-composition";
+import {
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -118,6 +123,16 @@ export function parseMediaMetadata(value: unknown): RegisterInfluencerMedia {
         !input.analysis.content.description.trim())
     )
       throw new Error();
+    if (input.analysis?.version === COMPOSITION_VERSION) {
+      parseComposition(
+        Object.fromEntries(
+          COMPOSITION_FIELDS.map((field) => [
+            field,
+            input.analysis!.content[field],
+          ]),
+        ),
+      );
+    }
     return input;
   } catch {
     throw new BadRequestException("Invalid media metadata");

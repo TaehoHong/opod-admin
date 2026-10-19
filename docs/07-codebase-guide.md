@@ -759,7 +759,7 @@ not change the output schema or frozen draft configuration.
 
 `src/influencers/`의 테이블별 Repository와 소유 Domain Service가 influencers/character_influencers/influencer_media를 담당한다. `CharacterReferenceLinkService`는 기존 캐릭터 화면의 coordinator로 새 Domain Service를 조합하며 직접 DB에 접근하지 않는다. 기존 directory의 referenceLinks 응답 형태를 유지하고, 실제 계정 관리 API는 `/api/admin/v1/characters/:id/influencers`다. 연결 변경·삭제는 해당 캐릭터만 바꾸며 공유 계정·미디어를 삭제하지 않는다.
 
-`InfluencerMediaApplicationService`는 multipart 파일·분석 등록을 조합한다. `influencer-input.ts`가 Instagram URL·분석 규격·구도 검색 텍스트 owner다. 이미지 검증과 조건부 S3 저장은 `InfluencerMediaStore`, 임베딩 호출은 기존 `ReferenceEmbeddingClient`와 `GenerationSettingsService.resolveChatSettings`를 사용한다. 서버 비전 호출은 없다. 원본 sourceCaption은 raw 문자열로 저장하며 media Repository의 게시물 단위 advisory lock 트랜잭션이 같은 influencerId + postId의 슬라이드 전파·상속을 소유한다. 누락/null은 보존, 빈 문자열은 확인된 빈 값이며 캡션만 바뀌면 벡터를 유지한다. 분석 변경 시 벡터를 무효화하고 snapshot 조건으로 늦은 결과 저장을 거부한다.
+`InfluencerMediaApplicationService`는 multipart 파일·분석 등록을 조합한다. `influencer-input.ts`가 Instagram URL·분석 규격·구도 검색 텍스트 owner다. 이미지 검증과 조건부 S3 저장은 `InfluencerMediaStore`, 임베딩 호출은 기존 `ReferenceEmbeddingClient`와 `GenerationSettingsService.resolveChatSettings`를 사용한다. 일반 파일 등록 API는 서버 비전 호출 없이 Work 분석을 저장한다. 기존 자료 정비와 원본별 비주얼 배정에서 누락된 촬영 분석을 채우는 owner는 아래 VisualCompositionService다. 원본 sourceCaption은 raw 문자열로 저장하며 media Repository의 게시물 단위 advisory lock 트랜잭션이 같은 influencerId + postId의 슬라이드 전파·상속을 소유한다. 누락/null은 보존, 빈 문자열은 확인된 빈 값이며 캡션만 바뀌면 벡터를 유지한다. 분석 변경 시 벡터를 무효화하고 snapshot 조건으로 늦은 결과 저장을 거부한다.
 
 정본 migration은 backend `drizzle/20261019042242_influencers/`이며 기존 참조 링크를 검증 이전 후 삭제한다. 배포 시 기존 코드와의 호환 전환이 필요하다. UI owner는 기존 CharacterReferenceLinksPanel/CharacterSnsPage/CharacterSnsDetailPage 및 api.ts이며 Mantine 컴포넌트를 유지한다.
 
@@ -804,6 +804,7 @@ nullable composition_analysis는 같은 person-composition-v1 규격을 쓰며 �
 `reference-visual-selection.ts`가 후보 ID·중복·수량을 검증한다. 인물 없는 원본은 비주얼을 붙이지 않는다.
 컷별 sourceComposition/visualReferences/visualMatching을 referenceSelection에 저장하고 원본 선택 화면에
 이미지와 선택 이유를 표시한다. 프롬프트 단계는 이 조합을 그대로 사용하며 전체 활성 이미지를 추가하지 않는다.
+이전 reference_model_limit_exceeded의 원인은 선택한 SNS 원본 수가 아니라 캐릭터 활성 비주얼 전부를 붙인 구현이었다. 생성 모델의 한도는 검토 후보 전체가 아닌 컷별 확정 조합에 적용한다.
 과거 초안에 배정 결과가 없으면 기존 원본을 유지하고 배정만 수행한다. 생성 worker는 기존 frozen snapshot을 유지한다.
 
 `GenerationSettingsService`가 `postAgent.reference-v1`의 설정과 원문 CAS를 소유한다.

@@ -57,3 +57,9 @@ source_caption의 정본 추가 migration은 Backend `drizzle/20261019060222_ora
 - `POST /influencers` accepts `{ "url": "https://www.instagram.com/username/" }` and returns the existing or newly registered account. Authentication and CSRF requirements match media registration. Optional character linking uses the existing character-influencers API.
 - `GET /influencer-media` adds optional `characterId`, `assetType=image|video_thumbnail`, `analysisStatus=ready|missing`, `search` (description/post ID, up to 200 characters), and `order=newest|oldest`. Here ready means analysis exists, not embedding readiness. Defaults remain oldest-first for existing collectors. `influencer` provides account id/username/url/platform for each returned media item. Character and account filters intersect.
 - Manual UI upload uses the existing multipart endpoint with `analysis:null`. Files are registered sequentially; successful files are retained when others fail. Repeating the same file/identity uses the existing idempotency contract. No schema change or automatic vision call is introduced.
+
+
+`analysis.version=person-composition-v1`의 content는 description 외에도 personCount(0~100 정수),
+framing/faceDirection/bodyDirection/pose/hands/gaze/camera/placement/occlusion 키를 모두 포함한다.
+판단할 수 없는 문자열 값은 null이다. 신규 버전의 필수 촬영 필드가 누락되면 파일 저장 전에 400으로 거부한다.
+이전 분석 버전의 등록 계약은 유지한다. 구도 임베딩은 같은 공통 필드만 사용하며 배경·의상·조명·정체성 설명은 제외한다.
