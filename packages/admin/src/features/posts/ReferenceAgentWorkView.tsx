@@ -180,10 +180,14 @@ export function ReferenceAgentWorkView({
         : stage === "caption"
           ? view.caption
           : undefined;
-  const identity = rows(
-    rows(record(view.prompt.input).shots).find((s) => s.shotId === shot?.shotId)
-      ?.references,
-  ).filter((r) => r.role === "character_identity");
+  const identity =
+    stage === "reference_select"
+      ? rows(shot?.visualReferences)
+      : rows(
+          rows(record(view.prompt.input).shots).find(
+            (s) => s.shotId === shot?.shotId,
+          )?.references,
+        ).filter((r) => r.role === "character_identity");
   const editableCaption = ["needs_review", "approved"].includes(draft.status);
   const image = (
     url: string | undefined | null,
@@ -353,6 +357,26 @@ export function ReferenceAgentWorkView({
             </div>
             {shot && (
               <>
+                <Text size="sm" fw={600}>
+                  이 컷에 사용할 캐릭터 비주얼
+                </Text>
+                {identity.length > 0 ? (
+                  <div className={styles.compare}>
+                    {identity.map((reference, i) => (
+                      <IdentityCard
+                        key={text(reference.id) || i}
+                        characterId={draft.characterId}
+                        reference={reference}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <Text size="sm" c="dimmed">
+                    {shot.sourceComposition?.content?.personCount === 0
+                      ? "인물이 없는 컷이므로 캐릭터 비주얼을 사용하지 않습니다."
+                      : "캐릭터 비주얼 선택 결과가 아직 없습니다."}
+                  </Text>
+                )}
                 <details>
                   <summary>선택 이유</summary>
                   <Text mt="sm" size="sm">
@@ -795,6 +819,9 @@ function IdentityCard({
       <Text size="sm" fw={600}>
         캐릭터 레퍼런스
       </Text>
+      {text(reference.reason) && (
+        <Text size="sm">{text(reference.reason)}</Text>
+      )}
       {image.data ? (
         <ZoomableImage
           src={image.data}

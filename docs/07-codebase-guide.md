@@ -789,6 +789,23 @@ runner에 전달한다. `DraftsModule`은 초안 소유 Service를, `GenerationM
 Agent가 원본 1~3장과 이유를 결정한다. 게시된 동일 캐릭터의 정확한 원본 ID 또는 SHA는
 제외하되 같은 구도·장소나 같은 게시물의 다른 이미지를 일괄 제외하지 않는다.
 
+`VisualCompositionService` (`src/characters/visual-composition.service.ts`)가 원본 선택 뒤
+컷별 캐릭터 비주얼 배정을 소유한다. SNS 분석과 character_visual_profile_references의
+nullable composition_analysis는 같은 person-composition-v1 규격을 쓰며 기존 description은 보존한다.
+공통 필드·검증·검색 텍스트 owner는 `shared/ai/image-composition.ts`이며 얼굴/몸 방향·구도·자세·손·시선·카메라·배치·가림만 임베딩한다.
+정체성·의상·배경·조명은 벡터 입력에 넣지 않는다. 캐릭터 비주얼의 기존 embedding 컬럼을 재사용하고
+분석 변경 시 벡터를 무효화한다. 저장은 description/analysis snapshot CAS로 늦은 결과를 거부한다.
+기존 `ReferenceRetrievalService.indexAll`도 촬영 분석 텍스트를 사용하며 미분석 캐릭터가 있으면 중단한다.
+`POST characters/:id/visual-profile/composition-index`는 활성 비주얼과 연결 SNS 미디어를 분석·색인하는
+명시적 유지보수 API다. 현재 버전은 재사용하고 실제 픽셀 분석·임베딩 호출을 로그에 남긴다.
+
+선택된 원본의 촬영 분석으로 해당 캐릭터의 활성 비주얼만 벡터 검색한다. 상위 6개 후보를
+원본과 함께 비전 LLM으로 비교해 생성 모델의 한도에서 원본 1장을 뺀 수량 이내로 선택한다.
+`reference-visual-selection.ts`가 후보 ID·중복·수량을 검증한다. 인물 없는 원본은 비주얼을 붙이지 않는다.
+컷별 sourceComposition/visualReferences/visualMatching을 referenceSelection에 저장하고 원본 선택 화면에
+이미지와 선택 이유를 표시한다. 프롬프트 단계는 이 조합을 그대로 사용하며 전체 활성 이미지를 추가하지 않는다.
+과거 초안에 배정 결과가 없으면 기존 원본을 유지하고 배정만 수행한다. 생성 worker는 기존 frozen snapshot을 유지한다.
+
 `GenerationSettingsService`가 `postAgent.reference-v1`의 설정과 원문 CAS를 소유한다.
 `GET/POST post-generation-agents/reference/config`에서 선택 횟수와 세 LLM 단계
 (`reference_select`, `image_prompt`, `caption`)의 지침·모델을 저장한다. 코드 starter는

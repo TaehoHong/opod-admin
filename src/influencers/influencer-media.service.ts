@@ -42,6 +42,21 @@ export class InfluencerMediaService {
   register(value: MediaWrite) {
     return this.repository.register(value);
   }
+  async saveComposition(
+    row: InfluencerMediaRow,
+    analysis: Record<string, string | number | null>,
+    model: string,
+    version: string,
+  ) {
+    const saved = await this.repository.saveComposition(
+      row,
+      analysis,
+      model,
+      version,
+    );
+    if (!saved) throw new ConflictException("analysis_changed");
+    return saved;
+  }
   list(input: MediaFilter) {
     return this.repository.list(input);
   }

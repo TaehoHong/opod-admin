@@ -268,3 +268,18 @@ Compiles `appearancePrompt, scene, stylePrompt` into one prompt and enqueues a
 queued image generation job for the worker. Returns
 `{ "jobId": "...", "prompt": "...", "status": "queued" }`. Requires at least
 one non-empty prompt part.
+
+
+### 캐릭터 비주얼 촬영 분석·색인
+
+`POST /api/admin/v1/characters/:id/visual-profile/composition-index` (관리자 인증, body 없음)은
+활성 비주얼의 누락된 `person-composition-v1` 분석과 임베딩을 채운다. 연결 SNS 미디어도 같은 기준으로
+분석·재색인한다. 실제 이미지 분석과 임베딩 호출이 발생하며, 현재 버전·모델의 결과는 재사용한다.
+응답은 `{ character: { analyzed, indexed, total, model }, sourceCount }`다. 항목별 결과를 즉시 저장하므로
+한 요청에서 최대 3장의 누락 분석을 처리한다. 중간 실패 후 다시 호출하면 완료한 항목은 재사용한다.
+`GET`의 동일 경로는 `{ model, total, analyzed, indexed }`로 활성 비주얼의 준비 상태를 반환한다.
+
+`GET .../visual-profile`의 referenceMedia에 nullable `compositionAnalysis: { version, model, content }`가 추가된다.
+content는 personCount와 framing/faceDirection/bodyDirection/pose/hands/gaze/camera/placement/occlusion이다.
+관찰할 수 없는 문자열 항목은 null이며 기존 정체성 description과 분리한다. 기존 임베딩 컬럼은 이 분석의
+검색 텍스트를 담는다. 설명·분석 변경과 경합한 늦은 저장은 409로 거부한다.

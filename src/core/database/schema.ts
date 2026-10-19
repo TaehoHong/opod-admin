@@ -915,6 +915,11 @@ export const characterVisualProfileReferences = opod.table(
       }),
     sortOrder: integer("sort_order").default(0).notNull(),
     description: text().default("").notNull(),
+    compositionAnalysis: jsonb("composition_analysis").$type<{
+      version: string;
+      model: string;
+      content: Record<string, string | number | null>;
+    }>(),
     embedding: vector({ dimensions: 1024 }),
     embeddingModel: text("embedding_model"),
     embeddedAt: timestamp("embedded_at", {

@@ -17,7 +17,11 @@ export type ReferencePromptImage = {
   media: ReferenceImage;
 };
 export type ReferenceImagePromptInput = ReferenceSelectionInput & {
-  shots: { shotId: string; references: ReferencePromptImage[] }[];
+  shots: {
+    shotId: string;
+    personCount?: number;
+    references: ReferencePromptImage[];
+  }[];
 };
 export type ReferencePromptShot = {
   shotId: string;
@@ -49,6 +53,9 @@ export class ReferenceImagePromptAgent {
       ...input,
       shots: input.shots.map((shot) => ({
         shotId: shot.shotId,
+        ...(shot.personCount !== undefined
+          ? { personCount: shot.personCount }
+          : {}),
         references: shot.references.map((reference) => ({
           id: reference.id,
           role: reference.role,
@@ -63,7 +70,10 @@ export class ReferenceImagePromptAgent {
     for (const shot of input.shots) {
       if (
         !shot.references.some((r) => r.role === "source") ||
-        !shot.references.some((r) => r.role === "character_identity") ||
+        (shot.personCount !== 0 &&
+          !shot.references.some((r) => r.role === "character_identity")) ||
+        (shot.personCount === 0 &&
+          shot.references.some((r) => r.role === "character_identity")) ||
         new Set(shot.references.map((r) => r.id)).size !==
           shot.references.length
       )

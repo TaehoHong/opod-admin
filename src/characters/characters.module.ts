@@ -31,6 +31,9 @@ import { CharacterSocialActivityPolicyService } from "./character-social-activit
 import { VisualProfileRepository } from "./visual-profile.repository";
 import { VisualProfileService } from "./visual-profile.service";
 import { LlmLogService } from "../llm-logs/llm-log.service";
+import { VisualCompositionService } from "./visual-composition.service";
+import { InfluencerMediaService } from "../influencers/influencer-media.service";
+import { CharacterInfluencerService } from "../influencers/character-influencer.service";
 
 @Module({
   imports: [
@@ -63,6 +66,33 @@ import { LlmLogService } from "../llm-logs/llm-log.service";
     CharacterSocialActivityJobService,
     CharacterSocialActivityJobRepository,
     VisualProfileRepository,
+    {
+      provide: VisualCompositionService,
+      useFactory: (
+        visuals: VisualProfileService,
+        media: InfluencerMediaService,
+        links: CharacterInfluencerService,
+        settings: GenerationSettingsService,
+        logs: LlmLogService,
+        config: AppConfigService,
+      ) =>
+        new VisualCompositionService(
+          visuals,
+          media,
+          links,
+          settings,
+          logs,
+          createMediaBytesReader(config.s3),
+        ),
+      inject: [
+        VisualProfileService,
+        InfluencerMediaService,
+        CharacterInfluencerService,
+        GenerationSettingsService,
+        LlmLogService,
+        AppConfigService,
+      ],
+    },
     {
       provide: VisualProfileService,
       // 캡셔닝 비전 LLM — 기획 LLM(planner.*) 설정을 호출 시마다 재해석한다.
@@ -98,6 +128,11 @@ import { LlmLogService } from "../llm-logs/llm-log.service";
       ],
     },
   ],
-  exports: [CharacterService, CharacterActionLogService, VisualProfileService],
+  exports: [
+    CharacterService,
+    CharacterActionLogService,
+    VisualProfileService,
+    VisualCompositionService,
+  ],
 })
 export class CharactersModule {}

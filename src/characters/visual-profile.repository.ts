@@ -5,6 +5,10 @@ import type {
 } from "../shared/ai/reference-embedding";
 import { Injectable } from "@nestjs/common";
 import {
+  CompositionAnalysis,
+  readCompositionAnalysis,
+} from "../shared/ai/image-composition";
+import {
   and,
   asc,
   desc,
@@ -12,6 +16,7 @@ import {
   isNotNull,
   ne,
   notInArray,
+  or,
   sql,
 } from "drizzle-orm";
 import type { AssertableMedia } from "../media/media.service";
@@ -63,8 +68,9 @@ export class VisualProfileRepository {
         ownerId: r.profileId,
         mediaId: r.mediaId,
         description: r.description,
+        compositionAnalysis: r.compositionAnalysis,
         embeddingModel: r.embeddingModel,
-        indexed: sql<boolean>`(${r.embedding} IS NOT NULL AND ${r.embeddedAt} IS NOT NULL AND public.vector_norm(${r.embedding}) > 0)`,
+        indexed: sql<boolean>`(${r.compositionAnalysis} IS NOT NULL AND ${r.embedding} IS NOT NULL AND ${r.embeddedAt} IS NOT NULL AND public.vector_norm(${r.embedding}) > 0)`,
       })
       .from(r)
       .innerJoin(
@@ -76,13 +82,49 @@ export class VisualProfileRepository {
         and(
           eq(r.isActive, true),
           isNotNull(media.uploadedAt),
-          ne(r.description, ""),
+          or(ne(r.description, ""), isNotNull(r.compositionAnalysis)),
           characterId
             ? eq(characterVisualProfiles.characterId, characterId)
             : undefined,
         ),
       )
-      .orderBy(asc(r.profileId), asc(r.sortOrder), asc(r.mediaId));
+      .orderBy(asc(r.profileId), asc(r.sortOrder), asc(r.mediaId))
+      .then((rows) =>
+        rows.map((row) => ({
+          ...row,
+          compositionAnalysis: readCompositionAnalysis(row.compositionAnalysis),
+        })),
+      );
+  }
+
+  async saveCompositionAnalysis(input: {
+    characterId: string;
+    mediaId: string;
+    description: string;
+    expectedAnalysis: unknown;
+    analysis: CompositionAnalysis;
+  }): Promise<boolean> {
+    const r = characterVisualProfileReferences;
+    const [row] = await this.database.client
+      .update(r)
+      .set({
+        compositionAnalysis: input.analysis,
+        embedding: null,
+        embeddingModel: null,
+        embeddedAt: null,
+      })
+      .where(
+        and(
+          eq(r.mediaId, input.mediaId),
+          eq(r.isActive, true),
+          eq(r.description, input.description),
+          sql`${r.compositionAnalysis} IS NOT DISTINCT FROM ${input.expectedAnalysis == null ? null : JSON.stringify(input.expectedAnalysis)}::jsonb`,
+          sql`EXISTS (SELECT 1 FROM ${characterVisualProfiles} WHERE ${characterVisualProfiles.id} = ${r.profileId} AND ${characterVisualProfiles.characterId} = ${input.characterId})`,
+          sql`EXISTS (SELECT 1 FROM ${media} WHERE ${media.id} = ${r.mediaId} AND ${media.uploadedAt} IS NOT NULL)`,
+        ),
+      )
+      .returning({ id: r.mediaId });
+    return Boolean(row);
   }
 
   async saveReferenceEmbedding(
@@ -101,6 +143,7 @@ export class VisualProfileRepository {
           eq(r.profileId, input.ownerId),
           eq(r.mediaId, input.mediaId),
           eq(r.description, input.description),
+          sql`${r.compositionAnalysis} IS NOT DISTINCT FROM ${input.compositionAnalysis == null ? null : JSON.stringify(input.compositionAnalysis)}::jsonb`,
           eq(r.isActive, true),
           sql`EXISTS (SELECT 1 FROM ${media} WHERE ${media.id} = ${r.mediaId} AND ${media.uploadedAt} IS NOT NULL)`,
         ),
@@ -134,7 +177,7 @@ export class VisualProfileRepository {
           eq(characterVisualProfiles.characterId, characterId),
           eq(r.isActive, true),
           isNotNull(media.uploadedAt),
-          ne(r.description, ""),
+          isNotNull(r.compositionAnalysis),
           eq(r.embeddingModel, model),
           isNotNull(r.embeddedAt),
           sql`public.vector_norm(${r.embedding}) > 0`,
@@ -183,6 +226,8 @@ export class VisualProfileRepository {
         mediaId: characterVisualProfileReferences.mediaId,
         sortOrder: characterVisualProfileReferences.sortOrder,
         description: characterVisualProfileReferences.description,
+        compositionAnalysis:
+          characterVisualProfileReferences.compositionAnalysis,
         isActive: characterVisualProfileReferences.isActive,
         media: {
           url: media.url,

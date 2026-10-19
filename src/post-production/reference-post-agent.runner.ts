@@ -3,7 +3,11 @@ export { currentReferenceOutputs } from "./reference-post-artifacts";
 import { GenerationSettingsService } from "../settings/generation-settings.service";
 import { resolveImageGenerationParams } from "../generation/image-generation-params";
 import { resolveImageModelPolicy } from "./image-model-policy";
-import { createHash } from "node:crypto";
+import {
+  VisualCompositionService,
+  MatchedCharacterVisual,
+} from "../characters/visual-composition.service";
+import { CompositionAnalysis } from "../shared/ai/image-composition";
 import type { DraftsService } from "../drafts/drafts.service";
 import { GenerationService } from "../generation/generation.service";
 import { CharacterContentProfileService } from "../character-content-profiles/character-content-profile.service";
@@ -42,6 +46,9 @@ type SelectionShot = {
   sha256: string;
   sourceCaption: string | null;
   reason: string;
+  sourceComposition?: CompositionAnalysis;
+  visualReferences?: MatchedCharacterVisual[];
+  visualMatching?: unknown;
 };
 type PromptArtifact = {
   revision: number;
@@ -71,6 +78,7 @@ export class ReferencePostAgentRunner {
     private readonly captionContext: (
       characterId: string,
     ) => Promise<ReferenceCaptionContext>,
+    private readonly compositions: VisualCompositionService,
   ) {}
 
   async runCurrentStage(draftId: string): Promise<void> {
@@ -175,6 +183,13 @@ export class ReferencePostAgentRunner {
             .find((selection) => selection.mediaId === source.mediaId)!.reason,
         }),
       );
+      const matchedShots = await this.matchVisuals(
+        draft.characterId,
+        shots,
+        config,
+        client,
+        context,
+      );
       await this.save(draftId, concept, {
         referenceSelection: {
           revision:
@@ -182,7 +197,7 @@ export class ReferencePostAgentRunner {
               ? concept.referenceRevision
               : 1,
           status: "selected",
-          shots,
+          shots: matchedShots,
           inputHash: canonicalJsonHash({ input, usedSources }),
           configRevision: config.revision,
           producerLogIds: logs,
@@ -199,37 +214,28 @@ export class ReferencePostAgentRunner {
         shots,
       );
       const visual = await this.visuals.getProfile(draft.characterId);
-      const identities = await Promise.all(
-        visual.referenceMedia
-          .filter((media) => media.isActive)
-          .sort((a, b) => a.sortOrder - b.sortOrder)
-          .map(async (media, index) => ({
-            id: `CHARACTER_${index + 1}`,
-            role: "character_identity" as const,
-            sha256: createHash("sha256")
-              .update(
-                (
-                  await this.readBytes({
-                    url: media.storageKey ? "" : media.url,
-                    storageKey: media.storageKey,
-                    contentType: media.contentType,
-                  })
-                ).bytes,
-              )
-              .digest("hex"),
-            media: {
-              url: media.storageKey ? "" : media.url,
-              storageKey: media.storageKey,
-              contentType: media.contentType,
-            },
-          })),
-      );
       const policy = resolveImageModelPolicy(config.generation.effectiveModel);
-      if (
-        !policy.supportsReferences ||
-        identities.length + 1 > policy.maxReferencesPerShot
+      if (!policy.supportsReferences)
+        throw new Error("reference_model_not_supported");
+      // Old drafts may already have selected sources but no character bindings.
+      const boundShots = shots.every(
+        (shot) =>
+          Array.isArray(shot.visualReferences) && shot.sourceComposition,
       )
-        throw new Error("reference_model_limit_exceeded");
+        ? shots
+        : await this.matchVisuals(
+            draft.characterId,
+            shots,
+            config,
+            await this.createClient(config.stages.reference_select),
+            context,
+          );
+      for (const shot of boundShots) {
+        if (1 + shot.visualReferences!.length > policy.maxReferencesPerShot)
+          throw new Error(
+            `reference_model_limit_exceeded: ${1 + shot.visualReferences!.length}/${policy.maxReferencesPerShot}`,
+          );
+      }
       const ratios = await this.settings.resolveAspectRatios();
       const generationParams = resolveImageGenerationParams(
         draft,
@@ -240,11 +246,11 @@ export class ReferencePostAgentRunner {
         },
         visual.providerConfig,
       );
-      if (!identities.length) throw new Error("character_identity_required");
       const promptInput: ReferenceImagePromptInput = {
         ...input,
-        shots: shots.map((shot, index) => ({
+        shots: boundShots.map((shot, index) => ({
           shotId: shot.shotId,
+          personCount: shot.sourceComposition!.content.personCount,
           references: [
             {
               id: `SOURCE_${index + 1}`,
@@ -252,7 +258,7 @@ export class ReferencePostAgentRunner {
               sha256: shot.sha256,
               media: { url: "", storageKey: sources[index].mediaKey },
             },
-            ...identities,
+            ...shot.visualReferences!,
           ].map((reference, order) => ({
             ...reference,
             inputOrder: order + 1,
@@ -265,6 +271,10 @@ export class ReferencePostAgentRunner {
         this.readBytes,
       ).build(promptInput, context);
       await this.save(draftId, concept, {
+        referenceSelection: {
+          ...record(concept.referenceSelection),
+          shots: boundShots,
+        },
         promptBuild: {
           revision:
             typeof concept.referenceRevision === "number"
@@ -469,6 +479,37 @@ export class ReferencePostAgentRunner {
         state: "ready",
       },
     });
+  }
+
+  private async matchVisuals(
+    characterId: string,
+    shots: SelectionShot[],
+    config: ConfiguredReferenceAgentConfig,
+    client: StrictJsonAgentClient,
+    context: { requestId: string; characterId: string },
+  ): Promise<SelectionShot[]> {
+    const policy = resolveImageModelPolicy(config.generation.effectiveModel);
+    if (!policy.supportsReferences)
+      throw new Error("reference_model_not_supported");
+    const sources = await this.retrieval.findReadSources(characterId, shots);
+    const bound: SelectionShot[] = [];
+    for (const [index, shot] of shots.entries()) {
+      const result = await this.compositions.match({
+        characterId,
+        source: sources[index],
+        maxReferences: policy.maxReferencesPerShot - 1,
+        slotPrefix: policy.referenceSlotPrefix,
+        client,
+        context,
+      });
+      bound.push({
+        ...shot,
+        sourceComposition: result.sourceAnalysis,
+        visualReferences: result.references,
+        visualMatching: result.trace,
+      });
+    }
+    return bound;
   }
 
   private save(draftId: string, expected: Concept, changes: Concept) {

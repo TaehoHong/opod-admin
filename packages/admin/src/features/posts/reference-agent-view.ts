@@ -19,6 +19,8 @@ export type ReferenceShot = {
   sha256: string;
   sourceCaption: string | null;
   reason: string;
+  visualReferences?: Record<string, unknown>[];
+  sourceComposition?: { content?: { personCount?: number } };
   url?: string;
 };
 export function record(value: unknown): Record<string, unknown> {

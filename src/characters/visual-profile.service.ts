@@ -11,6 +11,10 @@ import {
   type VisualProfileRow,
 } from "./visual-profile.repository";
 import { ReferenceCaptioner } from "../post-production/reference-captioner";
+import {
+  CompositionAnalysis,
+  parseComposition,
+} from "../shared/ai/image-composition";
 
 const PROMPT_MAX_LENGTH = 4000;
 const REFERENCE_MAX_COUNT = 20;
@@ -25,6 +29,11 @@ type VisualProfileReference = {
   isActive: boolean;
   // 비전 LLM 캡션 — 기획 LLM의 샷별 레퍼런스 선별에 쓰인다. 빈 값 = 캡셔닝 전.
   description: string;
+  compositionAnalysis?: {
+    version: string;
+    model: string;
+    content: Record<string, string | number | null>;
+  } | null;
 };
 
 type CaptionReferencesResult = {
@@ -61,11 +70,24 @@ export class VisualProfileService {
   }
   saveReferenceEmbedding(input: ReferenceEmbeddingWrite) {
     assertReferenceEmbedding(input.embedding);
-    if (!input.model.trim() || !input.description.trim())
+    if (
+      !input.model.trim() ||
+      (!input.description.trim() && !input.compositionAnalysis)
+    )
       throw new BadRequestException(
         "Reference embedding requires a model and caption",
       );
     return this.visualProfiles.saveReferenceEmbedding(input);
+  }
+  saveCompositionAnalysis(input: {
+    characterId: string;
+    mediaId: string;
+    description: string;
+    expectedAnalysis: unknown;
+    analysis: CompositionAnalysis;
+  }) {
+    parseComposition(input.analysis.content);
+    return this.visualProfiles.saveCompositionAnalysis(input);
   }
   searchReferenceEmbeddings(
     characterId: string,
@@ -329,6 +351,7 @@ export class VisualProfileService {
         sortOrder: reference.sortOrder,
         isActive: reference.isActive,
         description: reference.description,
+        compositionAnalysis: reference.compositionAnalysis,
       })),
       updatedAt: profile.updatedAt.toISOString(),
     };

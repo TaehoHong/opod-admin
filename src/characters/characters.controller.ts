@@ -40,6 +40,7 @@ import { CharacterProfileImageService } from "./character-profile-image.service"
 import { PostingPolicyService } from "./posting-policy.service";
 import { CharacterSocialActivityApplicationService } from "./character-social-activity-application.service";
 import { VisualProfileService } from "./visual-profile.service";
+import { VisualCompositionService } from "./visual-composition.service";
 
 @Controller("api/admin/v1/characters")
 @UseGuards(AdminJwtGuard)
@@ -52,6 +53,7 @@ export class CharactersController {
     private readonly profileImageService: CharacterProfileImageService,
     private readonly contentProfiles: CharacterContentProfileService,
     private readonly actionLogs: CharacterActionLogService,
+    private readonly visualComposition: VisualCompositionService,
   ) {}
 
   @Get()
@@ -302,6 +304,20 @@ export class CharactersController {
   @Post(":id/visual-profile/captions")
   captionVisualProfileReferences(@Param("id") characterId: string) {
     return this.visualProfileService.captionReferences(characterId);
+  }
+
+  @Post(":id/visual-profile/composition-index")
+  indexVisualProfileComposition(
+    @Param("id", ParseUUIDPipe) characterId: string,
+  ) {
+    return this.visualComposition.prepareLibrary(characterId);
+  }
+
+  @Get(":id/visual-profile/composition-index")
+  visualProfileCompositionStatus(
+    @Param("id", ParseUUIDPipe) characterId: string,
+  ) {
+    return this.visualComposition.status(characterId);
   }
 
   @Post(":id/visual-profile/test-generation")

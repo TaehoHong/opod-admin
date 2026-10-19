@@ -16,6 +16,7 @@ import { CharacterService } from "../characters/character.service";
 import { MemoryRetrievalService } from "./memory-retrieval.service";
 import { CharactersModule } from "../characters/characters.module";
 import { VisualProfileService } from "../characters/visual-profile.service";
+import { VisualCompositionService } from "../characters/visual-composition.service";
 import { LocationsModule } from "../locations/locations.module";
 import { LocationsService } from "../locations/locations.service";
 import { ReferenceRetrievalService } from "./reference-retrieval.service";
@@ -101,6 +102,7 @@ function storageEnv(config: S3Config | undefined) {
         logs: LlmLogService,
         config: AppConfigService,
         characters: CharacterService,
+        compositions: VisualCompositionService,
       ) =>
         new ReferencePostAgentRunner(
           drafts,
@@ -138,6 +140,7 @@ function storageEnv(config: S3Config | undefined) {
           createMediaBytesReader(config.s3),
           settings,
           (characterId) => characters.getReferenceCaptionContext(characterId),
+          compositions,
         ),
       inject: [
         DraftsService,
@@ -149,6 +152,7 @@ function storageEnv(config: S3Config | undefined) {
         LlmLogService,
         AppConfigService,
         CharacterService,
+        VisualCompositionService,
       ],
     },
     {

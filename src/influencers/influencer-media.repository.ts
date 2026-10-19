@@ -195,10 +195,31 @@ export class InfluencerMediaRepository {
   private analysisSnapshot(row: InfluencerMediaRow) {
     return and(
       eq(influencerMedia.id, row.id),
-      sql`${influencerMedia.analysis} = ${JSON.stringify(row.analysis)}::jsonb`,
-      eq(influencerMedia.analysisModel, row.analysisModel!),
-      eq(influencerMedia.analysisVersion, row.analysisVersion!),
+      sql`${influencerMedia.analysis} IS NOT DISTINCT FROM ${row.analysis == null ? null : JSON.stringify(row.analysis)}::jsonb`,
+      sql`${influencerMedia.analysisModel} IS NOT DISTINCT FROM ${row.analysisModel}`,
+      sql`${influencerMedia.analysisVersion} IS NOT DISTINCT FROM ${row.analysisVersion}`,
     );
+  }
+  async saveComposition(
+    row: InfluencerMediaRow,
+    analysis: Record<string, string | number | null>,
+    model: string,
+    version: string,
+  ) {
+    const [saved] = await this.db.client
+      .update(influencerMedia)
+      .set({
+        analysis,
+        analysisModel: model,
+        analysisVersion: version,
+        embedding: null,
+        embeddingModel: null,
+      })
+      .where(
+        and(this.analysisSnapshot(row), eq(influencerMedia.sha256, row.sha256)),
+      )
+      .returning();
+    return saved;
   }
   async prepareEmbedding(row: InfluencerMediaRow, model: string) {
     const [current] = await this.db.client

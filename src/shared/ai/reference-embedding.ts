@@ -4,6 +4,7 @@ import {
   LlmLogService,
   LlmLogType,
 } from "../../llm-logs/llm-log.service";
+import type { CompositionAnalysis } from "./image-composition";
 
 export const REFERENCE_EMBEDDING_DIMENSIONS = 1024;
 export type ReferenceEmbeddingSource = {
@@ -12,6 +13,7 @@ export type ReferenceEmbeddingSource = {
   description: string;
   embeddingModel: string | null;
   indexed: boolean;
+  compositionAnalysis?: CompositionAnalysis | null;
 };
 export type RankedReference = {
   id: string;
@@ -24,6 +26,7 @@ export type ReferenceEmbeddingWrite = {
   description: string;
   embedding: number[];
   model: string;
+  compositionAnalysis?: CompositionAnalysis | null;
 };
 
 export function assertReferenceEmbedding(

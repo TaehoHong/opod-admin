@@ -68,7 +68,8 @@ describe("reference generation aggregation", () => {
     };
     const runner = new ReferencePostAgentRunner(
       drafts as unknown as DraftsService,
-      ...(Array(8).fill(undefined) as [
+      ...(Array(9).fill(undefined) as [
+        never,
         never,
         never,
         never,
@@ -151,6 +152,7 @@ describe("reference stage orchestration", () => {
       jest.fn(),
       {} as never,
       jest.fn(),
+      {} as never,
     );
     return { runner, drafts, generation, retrieval, client };
   }
@@ -204,7 +206,8 @@ it("recovers partially confirmed accepted generation jobs without restarting com
   const runner = new ReferencePostAgentRunner(
     drafts as never,
     generation as never,
-    ...(Array(7).fill(undefined) as [
+    ...(Array(8).fill(undefined) as [
+      never,
       never,
       never,
       never,
@@ -243,7 +246,8 @@ it("recovers a failed aggregate after its failed shot was requeued", async () =>
   const runner = new ReferencePostAgentRunner(
     drafts as never,
     generation as never,
-    ...(Array(7).fill(undefined) as [
+    ...(Array(8).fill(undefined) as [
+      never,
       never,
       never,
       never,
@@ -277,7 +281,8 @@ it.each(["published", "approved", "rejected"])(
     const runner = new ReferencePostAgentRunner(
       drafts as never,
       generation as never,
-      ...(Array(7).fill(undefined) as [
+      ...(Array(8).fill(undefined) as [
+        never,
         never,
         never,
         never,
@@ -293,21 +298,36 @@ it.each(["published", "approved", "rejected"])(
   },
 );
 
-it("reads identity hash bytes from the private S3 key before building prompts", async () => {
+it("uses persisted per-shot visual bindings instead of loading all active identities", async () => {
   const readBytes = jest
     .fn()
-    .mockRejectedValue(new Error("stop after identity read"));
+    .mockRejectedValue(new Error("stop after source read"));
+  const match = jest.fn();
   const concept = {
     postGenerationAgent: "reference-v1",
     pipeline: { stage: "image_prompt" },
     referenceAgentConfig: {
       revision: "saved",
       stages: { image_prompt: {} },
-      generation: {},
+      generation: { effectiveModel: "alibaba/qwen-image-3.0-pro/edit" },
     },
     referenceSelection: {
       shots: [
-        { mediaId: "12", sha256: "hash", shotId: "SHOT_01", sortOrder: 0 },
+        {
+          mediaId: "12",
+          sha256: "hash",
+          shotId: "SHOT_01",
+          sortOrder: 0,
+          sourceComposition: { content: { personCount: 1 } },
+          visualReferences: [
+            {
+              id: "CHARACTER_1",
+              role: "character_identity",
+              sha256: "chosen-hash",
+              media: { url: "", storageKey: "identity/chosen.png" },
+            },
+          ],
+        },
       ],
     },
   };
@@ -324,34 +344,31 @@ it("reads identity hash bytes from the private S3 key before building prompts", 
     {} as never,
     { get: jest.fn().mockResolvedValue({}) } as never,
     {
-      getProfile: jest.fn().mockResolvedValue({
-        referenceMedia: [
-          {
-            isActive: true,
-            sortOrder: 0,
-            url: "https://private.invalid/signed?token=expires",
-            storageKey: "identity/private.png",
-            contentType: "image/png",
-          },
-        ],
-      }),
+      getProfile: jest
+        .fn()
+        .mockResolvedValue({ providerConfig: {}, referenceMedia: [] }),
     } as never,
     {
       findReadSources: jest
         .fn()
         .mockResolvedValue([{ mediaKey: "source/key" }]),
     } as never,
-    async () => ({}) as never,
+    async () =>
+      ({ agentSettings: { systemPrompt: "saved", outputSchema: {} } }) as never,
     readBytes,
-    {} as never,
+    {
+      resolveAspectRatios: jest.fn().mockResolvedValue({
+        feed: { value: "4:5" },
+        reel: { value: "9:16" },
+        story: { value: "9:16" },
+      }),
+    } as never,
     jest.fn(),
+    { match } as never,
   );
   await expect(runner.runCurrentStage("draft")).rejects.toThrow(
-    "stop after identity read",
+    "stop after source read",
   );
-  expect(readBytes).toHaveBeenCalledWith({
-    url: "",
-    storageKey: "identity/private.png",
-    contentType: "image/png",
-  });
+  expect(match).not.toHaveBeenCalled();
+  expect(readBytes).toHaveBeenCalledWith({ url: "", storageKey: "source/key" });
 });

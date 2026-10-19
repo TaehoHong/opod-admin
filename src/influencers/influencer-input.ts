@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import { plainToInstance, Type } from "class-transformer";
+export { compositionText } from "../shared/ai/image-composition";
 import {
   IsIn,
   IsInt,
@@ -55,11 +56,14 @@ export class ImageAnalysisContent {
   @IsString() @IsNotEmpty() @MaxLength(2000) description!: string;
   @IsOptional() @IsInt() @Min(0) @Max(100) personCount?: number | null;
   @IsOptional() @IsString() @MaxLength(1000) framing?: string | null;
+  @IsOptional() @IsString() @MaxLength(1000) faceDirection?: string | null;
+  @IsOptional() @IsString() @MaxLength(1000) bodyDirection?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) pose?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) hands?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) gaze?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) camera?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) placement?: string | null;
+  @IsOptional() @IsString() @MaxLength(1000) occlusion?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) background?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) wardrobe?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) lighting?: string | null;
@@ -129,11 +133,14 @@ export function normalizedAnalysis(
     "description",
     "personCount",
     "framing",
+    "faceDirection",
+    "bodyDirection",
     "pose",
     "hands",
     "gaze",
     "camera",
     "placement",
+    "occlusion",
     "background",
     "wardrobe",
     "lighting",
@@ -142,24 +149,4 @@ export function normalizedAnalysis(
     result[key] = typeof value === "string" ? value.trim() : (value ?? null);
   }
   return result;
-}
-export function compositionText(content: Record<string, unknown>): string {
-  const fields = [
-    "personCount",
-    "framing",
-    "pose",
-    "hands",
-    "gaze",
-    "camera",
-    "placement",
-  ];
-  const parts = fields
-    .filter(
-      (key) =>
-        content[key] !== null &&
-        content[key] !== undefined &&
-        content[key] !== "",
-    )
-    .map((key) => `${key}: ${String(content[key])}`);
-  return parts.length ? parts.join("\n") : String(content.description);
 }

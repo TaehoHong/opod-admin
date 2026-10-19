@@ -3,6 +3,7 @@ import { VisualProfileService } from "../characters/visual-profile.service";
 import { LocationsService } from "../locations/locations.service";
 import { GenerationSettingsService } from "../settings/generation-settings.service";
 import { LlmLogService } from "../llm-logs/llm-log.service";
+import { compositionText } from "../shared/ai/image-composition";
 import {
   RankedReference,
   ReferenceEmbeddingClient,
@@ -55,6 +56,10 @@ export class ReferenceRetrievalService {
       this.visual.listReferenceEmbeddingSources(),
       this.locations.listReferenceEmbeddingSources(),
     ]);
+    if (identity.some((source) => !source.compositionAnalysis))
+      throw new ReferenceRetrievalError(
+        "character_composition_analysis_required",
+      );
     const sources = [
       ...identity.map((source) => ({ ...source, kind: "identity" as const })),
       ...location.map((source) => ({ ...source, kind: "location" as const })),
@@ -63,7 +68,11 @@ export class ReferenceRetrievalService {
     for (let offset = 0; offset < sources.length; offset += 4) {
       const batch = sources.slice(offset, offset + 4);
       const vectors = await client.embed(
-        batch.map((source) => source.description),
+        batch.map((source) =>
+          source.compositionAnalysis
+            ? compositionText(source.compositionAnalysis.content)
+            : source.description,
+        ),
         {
           inputMediaIds: batch.map((source) => source.mediaId),
           metadata: {
