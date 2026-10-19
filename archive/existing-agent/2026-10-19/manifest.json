@@ -1,0 +1,147 @@
+[
+  {
+    "path": "src/drafts/drafts.service.ts",
+    "snapshot": "source/src/drafts/drafts.service.ts.snapshot",
+    "sha256": "90b610b2f5ae3d41286f0cac3fad13476ebe9d6c6a7d18dcdd8590e43c4da6ef"
+  },
+  {
+    "path": "src/drafts/dto/create-draft.dto.ts",
+    "snapshot": "source/src/drafts/dto/create-draft.dto.ts.snapshot",
+    "sha256": "dd693d3df11943cb6a4da438efe7ff1d56717305acd0c97cface7b1888f6669c"
+  },
+  {
+    "path": "src/drafts/draft-worker.service.ts",
+    "snapshot": "source/src/drafts/draft-worker.service.ts.snapshot",
+    "sha256": "2bc57af457e0cbd3b04e1f9048f7a0c8f534bfcaf4389b886ee3b2a4584e44d6"
+  },
+  {
+    "path": "src/drafts/draft-worker.repository.ts",
+    "snapshot": "source/src/drafts/draft-worker.repository.ts.snapshot",
+    "sha256": "f79aa5927426b71b40902e9e480b0b90b14cbb5513d219f882f28f156b5784a3"
+  },
+  {
+    "path": "src/post-production/post-pipeline-v3.runner.ts",
+    "snapshot": "source/src/post-production/post-pipeline-v3.runner.ts.snapshot",
+    "sha256": "cb346582b9a5fd7fb91f04095b43b1d57e410d3a5e01dcee0e7f6666023ca1a0"
+  },
+  {
+    "path": "src/generation/generation-job.repository.ts",
+    "snapshot": "source/src/generation/generation-job.repository.ts.snapshot",
+    "sha256": "267b2e866cea9849598de9f78e47ce1ed57cd73ad16d08dd2c446fbe584501bf"
+  },
+  {
+    "path": "packages/admin/src/features/post-generation-agents/PostAgentsPage.tsx",
+    "snapshot": "source/packages/admin/src/features/post-generation-agents/PostAgentsPage.tsx.snapshot",
+    "sha256": "471d320659274ab5a94c1d3545ce3e9185f09dc460403c735647fbc7b1bc055c"
+  },
+  {
+    "path": "packages/admin/src/features/post-generation-agents/PostAgentsPage.test.tsx",
+    "snapshot": "source/packages/admin/src/features/post-generation-agents/PostAgentsPage.test.tsx.snapshot",
+    "sha256": "99160762dcb3e8ed21cf05e56461b32200533b47856fc2e339bacb259c44c82a"
+  },
+  {
+    "path": "packages/admin/src/features/post-generation-agents/api.ts",
+    "snapshot": "source/packages/admin/src/features/post-generation-agents/api.ts.snapshot",
+    "sha256": "f80ba16f9367c480372342e8b2c55fc0901506468170c2bdf8e8bef45249488e"
+  },
+  {
+    "path": "packages/admin/src/features/post-generation-agents/NaturalAgentPanel.tsx",
+    "snapshot": "source/packages/admin/src/features/post-generation-agents/NaturalAgentPanel.tsx.snapshot",
+    "sha256": "a6a500a868342edcecd2c69a528a0e598ed39705cfe23da82c13b44a357075f8"
+  },
+  {
+    "path": "packages/admin/src/features/posts/PostBriefCreatePage.tsx",
+    "snapshot": "source/packages/admin/src/features/posts/PostBriefCreatePage.tsx.snapshot",
+    "sha256": "ca08514ebc589ce7effe8fa4fc3aa348a27c8e04d3525d3c447a34ea61cfe0bb"
+  },
+  {
+    "path": "packages/admin/src/features/posts/PostBriefCreatePage.test.tsx",
+    "snapshot": "source/packages/admin/src/features/posts/PostBriefCreatePage.test.tsx.snapshot",
+    "sha256": "a0a4da999b3537fa3fdf2111c3d09c77dddfefdf0894415417e2a0163f6fafe9"
+  },
+  {
+    "path": "packages/admin/src/features/drafts/api.ts",
+    "snapshot": "source/packages/admin/src/features/drafts/api.ts.snapshot",
+    "sha256": "f383ea4f7fefb4869f0f6202805e282f24c730462445550f465d23d1cd11df7d"
+  },
+  {
+    "path": "src/settings/ai-management.ts",
+    "snapshot": "source/src/settings/ai-management.ts.snapshot",
+    "sha256": "2794c3646461d91d2b91115aea4bd7fa28a68b8cdcf407408f2b8abdaf5bb0af"
+  },
+  {
+    "path": "src/administration/admin.controller.ts",
+    "snapshot": "source/src/administration/admin.controller.ts.snapshot",
+    "sha256": "f61cff0124c154e193a65408f2a2a6cbd3aacef091a2f75f5ff5b9374d7e6fab"
+  },
+  {
+    "path": "src/ai-management/ai-management.service.ts",
+    "snapshot": "source/src/ai-management/ai-management.service.ts.snapshot",
+    "sha256": "09ee6fed6fb4ba27ca08fda6a4830a3781bdc0de9eeaa54edf41a170403e723a"
+  },
+  {
+    "path": "src/drafts/drafts.service.spec.ts",
+    "snapshot": "source/src/drafts/drafts.service.spec.ts.snapshot",
+    "sha256": "89b872d89f9f70da6f77b2cfb30b2d500b5ade9d1be5799105f24929b347cf62"
+  },
+  {
+    "path": "src/drafts/draft-worker.service.spec.ts",
+    "snapshot": "source/src/drafts/draft-worker.service.spec.ts.snapshot",
+    "sha256": "7b98f2df9d059aa5730bcd459388570fe9b9fe9922b22e357c2c8163bd4332f3"
+  },
+  {
+    "path": "src/post-production/post-pipeline-v3.runner.spec.ts",
+    "snapshot": "source/src/post-production/post-pipeline-v3.runner.spec.ts.snapshot",
+    "sha256": "ba957fe9d193bf1d0da707fa0f23677b6d430b1191125f95c8bbac053f5d3d53"
+  },
+  {
+    "path": "src/administration/admin.controller.spec.ts",
+    "snapshot": "source/src/administration/admin.controller.spec.ts.snapshot",
+    "sha256": "ed2feaef71626e3032d5ba665926013e99e1326f29eb024c7ae2d183e18fbbf8"
+  },
+  {
+    "path": "test/natural-post-agent.e2e-spec.ts",
+    "snapshot": "source/test/natural-post-agent.e2e-spec.ts.snapshot",
+    "sha256": "bb1242ba6df9747818fa765e8fa8354103faa5670c70148a6bfcf23cf37241e4"
+  },
+  {
+    "path": "test/post-generation-agents.e2e-spec.ts",
+    "snapshot": "source/test/post-generation-agents.e2e-spec.ts.snapshot",
+    "sha256": "bae03ac1efc0adf37b820b06de8151494af078cc67dbcdc072a1e9e573b50683"
+  },
+  {
+    "path": "test/planning-evidence.e2e-spec.ts",
+    "snapshot": "source/test/planning-evidence.e2e-spec.ts.snapshot",
+    "sha256": "d899087209a55624809572bab3b443150053c3cfc8481dda5345aaa444222e27"
+  },
+  {
+    "path": "src/ai-management/ai-management.module.ts",
+    "snapshot": "source/src/ai-management/ai-management.module.ts.snapshot",
+    "sha256": "39f0ed932f54f6fa3f071c46d5f600ca29ebb90e811085926235dec6f7574ab7"
+  },
+  {
+    "path": "src/ai-management/ai-management.service.spec.ts",
+    "snapshot": "source/src/ai-management/ai-management.service.spec.ts.snapshot",
+    "sha256": "36e840aba155eb1279176484dfa16309f67ea9a296f17ba8873dc2db98c5730d"
+  },
+  {
+    "path": "src/ai-management/ai-management.controller.spec.ts",
+    "snapshot": "source/src/ai-management/ai-management.controller.spec.ts.snapshot",
+    "sha256": "8f0181b84a0920d05f25c08efeb270ff96e41cf5384fecfa10665a5507fb9ccc"
+  },
+  {
+    "path": "packages/admin/src/features/posts/PostWorkPage.tsx",
+    "snapshot": "source/packages/admin/src/features/posts/PostWorkPage.tsx.snapshot",
+    "sha256": "769299bfdf886e4745b9a9116ff72895eb37ce5fd6a0e4c2b5a656271105ccf1"
+  },
+  {
+    "path": "packages/admin/src/features/posts/PostWorkPage.test.tsx",
+    "snapshot": "source/packages/admin/src/features/posts/PostWorkPage.test.tsx.snapshot",
+    "sha256": "76e371943d68b891e92b1d6ba7ea2812b7c5b840a5bedb5ed8a2ce9facac0395"
+  },
+  {
+    "path": "packages/admin/src/features/posts/PostsPage.test.tsx",
+    "snapshot": "source/packages/admin/src/features/posts/PostsPage.test.tsx.snapshot",
+    "sha256": "2b2fd54aeda0ed3f28a6d3864df089b70c507cf849d76f517bde7172b31e2720"
+  }
+]

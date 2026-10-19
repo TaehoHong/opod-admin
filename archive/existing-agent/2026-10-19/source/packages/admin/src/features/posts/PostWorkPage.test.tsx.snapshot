@@ -1,0 +1,1009 @@
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
+import { describe, expect, it } from "vitest";
+import { renderPage } from "../../test/renderPage";
+import { server } from "../../test/server";
+import { PostWorkPage } from "./PostWorkPage";
+
+const v3Item = {
+  id: "draft-1",
+  kind: "draft",
+  draftId: "draft-1",
+  characterId: "character-1",
+  contentType: "feed",
+  caption: "월요일 라인 체크",
+  currentStage: "post_plan",
+  stageIndex: 2,
+  operationalStatus: "needs_action",
+  statusDetail: "게시글 기획 실행 필요",
+  executionMode: "manual",
+  source: "manual",
+  createdAt: "2026-08-13T00:00:00.000Z",
+  updatedAt: "2026-08-13T01:15:00.000Z",
+  pipelineV3: {
+    version: "post-pipeline-v3",
+    stage: "image_plan",
+    state: "pending",
+    imageCount: 1,
+    reasonCodes: [],
+    nextAction: "현재 단계를 실행하세요.",
+    artifacts: {
+      postPlan: {
+        revision: 1,
+        status: "ready",
+        hash: "sha256:dc1916fe",
+        contractVersion: "post-plan-v1",
+        premise: "월요일에 붓기가 정리된 상태를 기록한다.",
+        primaryPurpose: "주간 라인 체크",
+        caption: "월요일 라인 체크,,\n이번 주도 편하게",
+        hashtags: ["라인체크", "애슬레저룩"],
+        captionLanguages: ["ko"],
+        memoryCandidates: [],
+      },
+    },
+  },
+};
+
+function registerHandlers(
+  concept: Record<string, unknown>,
+  item: Record<string, unknown> = v3Item,
+  draft: Record<string, unknown> = {},
+  evaluations: Record<string, unknown>[] = [],
+) {
+  server.use(
+    http.get("/api/admin/v1/post-work-items/:id", () =>
+      HttpResponse.json(item),
+    ),
+    http.get("/api/admin/v1/drafts/:id", () =>
+      HttpResponse.json({
+        id: "draft-1",
+        characterId: "character-1",
+        draftType: "post",
+        contentType: "feed",
+        caption: "월요일 라인 체크",
+        hashtags: [],
+        status: "generating",
+        attemptCount: 1,
+        conceptJson: concept,
+        shots: [],
+        createdAt: "2026-08-13T00:00:00.000Z",
+        updatedAt: "2026-08-13T01:15:00.000Z",
+        ...draft,
+      }),
+    ),
+    http.get("/api/admin/v1/drafts/:id/evaluations", () =>
+      HttpResponse.json({ items: evaluations }),
+    ),
+    http.get("/api/admin/v1/characters", () =>
+      HttpResponse.json({
+        items: [{ id: "character-1", publicId: "seorin", displayName: "서린" }],
+      }),
+    ),
+  );
+}
+
+function renderStage(
+  stage: string,
+  concept: Record<string, unknown>,
+  overrides: {
+    item?: Record<string, unknown>;
+    draft?: Record<string, unknown>;
+    evaluations?: Record<string, unknown>[];
+  } = {},
+) {
+  registerHandlers(
+    concept,
+    overrides.item ?? v3Item,
+    overrides.draft ?? {},
+    overrides.evaluations ?? [],
+  );
+  renderPage(<PostWorkPage workId="draft-1" stage={stage} />, {
+    path: `/posts/draft-1/${stage}`,
+    routes: ["posts/:workId/:stage"],
+  });
+}
+
+const publishConcept = {
+  pipelineVersion: "post-pipeline-v4",
+  mode: "manual",
+  pipeline: { stage: "publish", state: "pending" },
+};
+
+it.each(["existing", "natural-v1"])(
+  "offers mode switching for %s at the current manual stage",
+  async (agent) => {
+    let submitted: unknown;
+    registerHandlers(
+      { ...publishConcept, postGenerationAgent: agent },
+      {
+        ...v3Item,
+        currentStage: "publish",
+        pipelineV3: {
+          ...v3Item.pipelineV3,
+          version: "post-pipeline-v4",
+          stage: "publish",
+        },
+      },
+      { status: "planned" },
+    );
+    server.use(
+      http.post(
+        "/api/admin/v1/drafts/draft-1/automation",
+        async ({ request }) => {
+          submitted = await request.json();
+          return HttpResponse.json({
+            id: "draft-1",
+            characterId: "character-1",
+            contentType: "feed",
+            status: "planned",
+            caption: "",
+            hashtags: [],
+            conceptJson: {
+              ...publishConcept,
+              postGenerationAgent: agent,
+              mode: "auto",
+            },
+            shots: [],
+          });
+        },
+      ),
+    );
+    renderPage(<PostWorkPage workId="draft-1" stage="publish" />, {
+      path: "/posts/draft-1/publish",
+    });
+    const button = await screen.findByRole("button", {
+      name: "자동 진행 시작",
+    });
+    expect(submitted).toBeUndefined();
+    await userEvent.setup().click(button);
+    await waitFor(() => expect(submitted).toEqual({ enabled: true }));
+  },
+);
+
+function publishShot(sortOrder: number) {
+  return {
+    sortOrder,
+    jobId: `job-${sortOrder}`,
+    status: "completed",
+    outputs: [
+      {
+        mediaId: `media-${sortOrder}`,
+        url: `https://cdn.test/${sortOrder}.png`,
+        selected: true,
+      },
+    ],
+  };
+}
+
+function renderPublish(draft: Record<string, unknown> = {}) {
+  renderStage("publish", publishConcept, {
+    item: {
+      ...v3Item,
+      currentStage: "publish",
+      pipelineV3: {
+        ...v3Item.pipelineV3,
+        version: "post-pipeline-v4",
+        stage: "publish",
+        imageCount: 2,
+        artifacts: { captionBuild: { stale: true } },
+      },
+    },
+    draft: {
+      status: "planned",
+      caption: "현재 게시할 문장\n줄바꿈 유지",
+      hashtags: ["기록"],
+      shots: [publishShot(1), publishShot(0)],
+      ...draft,
+    },
+  });
+}
+
+describe("publish confirmation", () => {
+  it("previews the actual caption and ordered photos, and only publishes after confirmation", async () => {
+    let calls = 0;
+    let finish!: () => void;
+    server.use(
+      http.post("/api/admin/v1/drafts/:id/publish", async () => {
+        calls++;
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return HttpResponse.json({
+          id: "draft-1",
+          status: "published",
+          caption: "게시됨",
+          hashtags: [],
+        });
+      }),
+    );
+    renderPublish();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "지금 게시" }));
+    let dialog = within(
+      await screen.findByRole("dialog", { name: "게시 전 최종 확인" }),
+    );
+    expect(await dialog.findByText("서린")).toBeInTheDocument();
+    expect(dialog.getByText("OPOD 피드 · 사진 2장")).toBeInTheDocument();
+    expect(dialog.getByText("현재 게시할 문장 줄바꿈 유지")).toHaveTextContent(
+      "현재 게시할 문장",
+    );
+    expect(dialog.getByText("#기록")).toBeInTheDocument();
+    expect(
+      dialog.getAllByRole("img").map((image) => image.getAttribute("src")),
+    ).toEqual(["https://cdn.test/0.png", "https://cdn.test/1.png"]);
+    expect(
+      dialog.getByText("사진 변경 후 캡션을 확인해 주세요"),
+    ).toBeInTheDocument();
+    expect(calls).toBe(0);
+    await user.click(dialog.getByRole("button", { name: "돌아가기" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(calls).toBe(0);
+    await user.click(screen.getByRole("button", { name: "지금 게시" }));
+    dialog = within(await screen.findByRole("dialog"));
+    const confirm = dialog.getByRole("button", { name: "확인하고 게시" });
+    await user.dblClick(confirm);
+    await waitFor(() => expect(calls).toBe(1));
+    expect(confirm).toBeDisabled();
+    expect(dialog.getByRole("button", { name: "돌아가기" })).toBeDisabled();
+    finish();
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("keeps the preview open with a retryable error when publishing fails", async () => {
+    server.use(
+      http.post("/api/admin/v1/drafts/:id/publish", () =>
+        HttpResponse.json({ message: "게시 요청 실패" }, { status: 500 }),
+      ),
+    );
+    renderPublish();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "지금 게시" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    await user.click(dialog.getByRole("button", { name: "확인하고 게시" }));
+    expect(await dialog.findByText("게시 요청 실패")).toBeInTheDocument();
+    expect(dialog.getByRole("button", { name: "확인하고 게시" })).toBeEnabled();
+    expect(dialog.getByRole("button", { name: "돌아가기" })).toBeEnabled();
+  });
+
+  it("closes only the enlarged photo on Escape and keeps confirmation open", async () => {
+    renderPublish();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "지금 게시" }));
+    const confirm = await screen.findByRole("dialog", {
+      name: "게시 전 최종 확인",
+    });
+    await user.click(
+      within(confirm).getByRole("button", {
+        name: "게시 예정 이미지 1 크게 보기",
+      }),
+    );
+    await screen.findByRole("dialog", {
+      name: "게시 예정 이미지 1",
+    });
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", {
+          name: "게시 예정 이미지 1",
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(confirm).toBeVisible();
+    expect(
+      within(confirm).getByRole("button", { name: "확인하고 게시" }),
+    ).toBeEnabled();
+  });
+
+  it.each([
+    { name: "empty", shots: [] },
+    { name: "missing", shots: [publishShot(0)] },
+    {
+      name: "unfinished",
+      shots: [publishShot(0), { ...publishShot(1), status: "running" }],
+    },
+  ])("prevents confirmation when photos are $name", async ({ shots }) => {
+    renderPublish({ shots });
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "지금 게시" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(
+      dialog.getByText("게시할 사진이 준비되지 않았습니다"),
+    ).toBeInTheDocument();
+    expect(
+      dialog.getByRole("button", { name: "확인하고 게시" }),
+    ).toBeDisabled();
+  });
+});
+
+describe("post work stage screens", () => {
+  it("opens on the read-focused operations overview with integrated metrics", async () => {
+    registerHandlers(
+      {
+        pipelineVersion: "post-pipeline-v3",
+        source: "manual",
+        mode: "manual",
+      },
+      v3Item,
+      { status: "planned" },
+    );
+    server.use(
+      http.get("/api/admin/v1/post-work-items/:id/metrics", () =>
+        HttpResponse.json({
+          productionStartedAt: "2026-08-13T00:00:00.000Z",
+          lastChangedAt: "2026-08-13T01:15:00.000Z",
+          publishedAt: null,
+          draftAttemptCount: 2,
+          generationJobCount: 3,
+          failedGenerationJobCount: 1,
+          generationAttemptCount: 4,
+          commentCount: 0,
+          reactionCount: 0,
+        }),
+      ),
+    );
+
+    renderPage(<PostWorkPage workId="draft-1" />, {
+      path: "/posts/draft-1",
+      routes: ["posts/:workId"],
+    });
+
+    expect(
+      await screen.findByRole("link", { name: /운영 개요/ }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("2/8")).toBeInTheDocument();
+    expect(await screen.findByText("1건 실패")).toBeInTheDocument();
+    expect(screen.getByText("3개 작업 · 4회 시도")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "현재 단계 열기" }),
+    ).toHaveAttribute("href", "/posts/draft-1/post_plan");
+    expect(
+      screen.queryByRole("button", { name: "요청 저장" }),
+    ).not.toBeInTheDocument();
+  });
+
+  // V3는 운영자 요청을 operatorRequest에 저장한다. V2 필드만 읽으면 운영자가
+  // 입력한 요청이 화면에서 사라지고, 이후 단계에서 대조할 기준이 없어진다.
+  it("shows the V3 operator request on the brief stage", async () => {
+    renderStage("brief", {
+      pipelineVersion: "post-pipeline-v3",
+      source: "manual",
+      mode: "manual",
+      operatorRequest: "비 오는 날 창가에서 필름 카메라를 닦는 장면",
+    });
+
+    expect(
+      await screen.findByText("비 오는 날 창가에서 필름 카메라를 닦는 장면"),
+    ).toBeInTheDocument();
+  });
+
+  it("still shows the legacy scene hint on the brief stage", async () => {
+    renderStage(
+      "brief",
+      { source: "manual", mode: "manual", sceneHint: "노을 지는 골목" },
+      // V2 초안에는 pipelineV3가 없다.
+      { item: { ...v3Item, pipelineV3: undefined } },
+    );
+
+    expect(await screen.findByText("노을 지는 골목")).toBeInTheDocument();
+  });
+
+  // 백엔드가 V2 초안의 operatorRequest 수정을 거부한다. 입력란을 띄우면 운영자가
+  // 고칠 수 있다고 믿고 저장을 눌러 400을 받는다.
+  it("offers the operator request editor on V3 only", async () => {
+    renderStage(
+      "brief",
+      { source: "manual", mode: "manual", sceneHint: "노을 지는 골목" },
+      { item: { ...v3Item, pipelineV3: undefined } },
+    );
+
+    expect(await screen.findByText("노을 지는 골목")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "요청 저장" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("lets the operator rewrite the request while a stage is waiting", async () => {
+    renderStage(
+      "brief",
+      {
+        pipelineVersion: "post-pipeline-v3",
+        source: "manual",
+        mode: "manual",
+        operatorRequest: "비 오는 날 창가",
+      },
+      { draft: { status: "planned" } },
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "요청 저장" }),
+    ).toBeInTheDocument();
+    expect(screen.getByDisplayValue("비 오는 날 창가")).toBeInTheDocument();
+  });
+
+  // 실행 중에 바꾸면 저장된 요청과 실제 사용된 입력이 어긋난다. 백엔드도
+  // 거부하므로 화면이 먼저 이유를 말한다.
+  it("explains why the request is locked while the agent runs", async () => {
+    renderStage(
+      "brief",
+      {
+        pipelineVersion: "post-pipeline-v3",
+        source: "manual",
+        mode: "manual",
+        operatorRequest: "비 오는 날 창가",
+      },
+      { draft: { status: "generating" } },
+    );
+
+    expect(await screen.findByText("비 오는 날 창가")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "요청 저장" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the post plan caption, hashtags and memory verdict", async () => {
+    renderStage("post_plan", {
+      pipelineVersion: "post-pipeline-v3",
+      source: "manual",
+      mode: "manual",
+      operatorRequest: null,
+    });
+
+    // 단계 레일에도 같은 문구가 있으므로 단계 본문으로 범위를 좁힌다.
+    const body = within(await screen.findByRole("region"));
+    expect(body.getByText(/월요일 라인 체크,,/)).toBeInTheDocument();
+    expect(body.getByText("#라인체크")).toBeInTheDocument();
+    expect(body.getByText("#애슬레저룩")).toBeInTheDocument();
+    // 빈 후보 배열은 "표시할 게 없음"이 아니라 "새 기억을 남기지 않는다"는 판정이다.
+    expect(body.getByText("없음")).toBeInTheDocument();
+    // 게시글 기획은 이미 지나간 단계이므로 완료로 표시되어야 한다.
+    expect(body.getByText("완료")).toBeInTheDocument();
+    expect(
+      body.queryByRole("button", { name: "게시글 기획 다시 실행" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the exact problem, cause, next action and technical detail for a failed stage", async () => {
+    renderStage(
+      "post_plan",
+      { pipelineVersion: "post-pipeline-v4", source: "manual", mode: "manual" },
+      {
+        draft: { status: "failed", errorMessage: "raw provider response" },
+        item: {
+          ...v3Item,
+          operationalStatus: "failed",
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            version: "post-pipeline-v4",
+            stage: "post_plan",
+            state: "failed",
+            failure: {
+              code: "provider_http_error",
+              stage: "post_plan",
+              problem: "AI 제공자가 요청을 거부했습니다.",
+              cause: "AI 제공자가 HTTP 429 오류를 반환했습니다.",
+              nextAction: "설정을 확인한 뒤 현재 단계를 다시 실행하세요.",
+              technicalDetail: "structured agent failed (429): quota exhausted",
+              occurredAt: "2026-08-20T00:00:00.000Z",
+              retryable: true,
+            },
+          },
+        },
+      },
+    );
+
+    expect(
+      await screen.findByText("AI 제공자가 요청을 거부했습니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/AI 제공자가 HTTP 429 오류를 반환했습니다/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/설정을 확인한 뒤 현재 단계를 다시 실행하세요/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/quota exhausted/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "게시글 기획 실행" }),
+    ).toBeInTheDocument();
+  });
+
+  // 게시 트랜잭션(`selectedPublishedMemories`)은 selected이면서 현재 PostPlan
+  // 해시에서 나온 후보만 저장한다. 화면이 그 규칙과 어긋나면 운영자는 세계관에
+  // 없는 사실을 있다고 믿고 다음 기획을 판단한다.
+  it("marks memory candidates by the same rule the publish path uses", async () => {
+    renderStage(
+      "memory",
+      { pipelineVersion: "post-pipeline-v3", source: "manual", mode: "manual" },
+      {
+        draft: { status: "published" },
+        item: {
+          ...v3Item,
+          currentStage: "memory",
+          stageIndex: 8,
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            stage: "memory",
+            state: "ready",
+            memoryCandidates: [
+              {
+                key: "memory-1",
+                type: "routine",
+                content: "월요일마다 라인 체크를 한다",
+                selected: true,
+                stale: false,
+              },
+              {
+                key: "memory-2",
+                type: "fact",
+                content: "새 필름 카메라를 샀다",
+                selected: false,
+                stale: false,
+              },
+              {
+                key: "memory-old",
+                type: "event",
+                content: "이전 기획의 잔여 후보",
+                selected: true,
+                stale: true,
+              },
+            ],
+          },
+        },
+      },
+    );
+
+    const body = within(await screen.findByRole("region"));
+    expect(body.getByText("저장됨")).toBeInTheDocument();
+    expect(body.getByText("제외됨")).toBeInTheDocument();
+    // selected여도 기획을 다시 돌렸으면 저장되지 않는다.
+    expect(body.getByText("무효")).toBeInTheDocument();
+    expect(body.getAllByText("저장됨")).toHaveLength(1);
+  });
+
+  it("shows the planning input snapshot the agent actually received", async () => {
+    renderStage(
+      "post_plan",
+      { pipelineVersion: "post-pipeline-v3", source: "manual", mode: "manual" },
+      {
+        item: {
+          ...v3Item,
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            artifacts: {
+              postPlan: {
+                ...v3Item.pipelineV3.artifacts.postPlan,
+                agentInput: {
+                  contentProfile: {
+                    accountConcept: "실행 당시 계정 컨셉",
+                    constraints: "협찬 표현 금지",
+                  },
+                  snapshot: { operatorRequest: "이번 게시글 요청" },
+                },
+                planningInput: {
+                  persona: [
+                    {
+                      group: "voice",
+                      title: "말투",
+                      content: "짧게 끊어 쓰고 이모지를 쓰지 않는다",
+                    },
+                  ],
+                  memories: [
+                    { type: "routine", content: "주말마다 필름을 현상한다" },
+                  ],
+                  recentPosts: [],
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    // Spoiler도 region을 만들므로 여기서는 문구로 직접 찾는다.
+    expect(
+      await screen.findByText(
+        "페르소나 블록 1개 · 메모리 1건 · 최근 게시물 0건",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("짧게 끊어 쓰고 이모지를 쓰지 않는다"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("실행 당시 계정 컨셉")).toBeInTheDocument();
+    expect(screen.getByText("협찬 표현 금지")).toBeInTheDocument();
+    expect(screen.getByText("제작 지침 전달됨")).toBeInTheDocument();
+  });
+
+  it("keeps the post planning agent input out of the brief", async () => {
+    renderStage(
+      "brief",
+      { pipelineVersion: "post-pipeline-v4" },
+      {
+        item: {
+          ...v3Item,
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            artifacts: {
+              postPlan: {
+                ...v3Item.pipelineV3.artifacts.postPlan,
+                planningInput: { persona: [], memories: [], recentPosts: [] },
+              },
+            },
+          },
+        },
+      },
+    );
+    await screen.findByRole("heading", { name: "① 브리프" });
+    expect(screen.queryByText("Agent가 본 입력")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["image_plan", "imagePlan", "imageStyle", "실행 당시 사진 스타일"],
+    ["caption", "captionBuild", "captionStyle", "실행 당시 캡션 스타일"],
+  ])(
+    "shows %s's own saved production guidance",
+    async (stage, key, field, value) => {
+      renderStage(
+        stage,
+        { pipelineVersion: "post-pipeline-v4" },
+        {
+          item: {
+            ...v3Item,
+            pipelineV3: {
+              ...v3Item.pipelineV3,
+              version: "post-pipeline-v4",
+              artifacts: {
+                postPlan: {
+                  ...v3Item.pipelineV3.artifacts.postPlan,
+                  agentInput: {
+                    contentProfile: { accountConcept: "이전 단계의 컨셉" },
+                    snapshot: {},
+                  },
+                },
+                [key]: {
+                  revision: 1,
+                  status: "ready",
+                  caption: "생성 캡션",
+                  hashtags: [],
+                  captionLanguages: [],
+                  agentInput: {
+                    contentProfile: {
+                      accountConcept: "이 단계의 컨셉",
+                      [field]: value,
+                      constraints: "",
+                    },
+                    snapshot: { operatorRequest: "이 단계의 요청" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      );
+      expect(await screen.findByText(value)).toBeInTheDocument();
+      expect(screen.getByText("이 단계의 컨셉")).toBeInTheDocument();
+      expect(screen.getByText("지정 없음")).toBeInTheDocument();
+      expect(screen.queryByText("이전 단계의 컨셉")).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    [{ accountConcept: "", constraints: "" }, "제작 지침 없이 실행"],
+    [undefined, "제작 지침 기록 없음"],
+  ])(
+    "distinguishes empty guidance from missing history",
+    async (contentProfile, label) => {
+      renderStage(
+        "post_plan",
+        { pipelineVersion: "post-pipeline-v4" },
+        {
+          item: {
+            ...v3Item,
+            pipelineV3: {
+              ...v3Item.pipelineV3,
+              artifacts: {
+                postPlan: {
+                  ...v3Item.pipelineV3.artifacts.postPlan,
+                  agentInput: { contentProfile, snapshot: {} },
+                },
+              },
+            },
+          },
+        },
+      );
+      expect(await screen.findByText(label)).toBeInTheDocument();
+    },
+  );
+
+  it("shows the prompt generation package on the prompt stage", async () => {
+    renderStage(
+      "prompt",
+      { pipelineVersion: "post-pipeline-v4" },
+      {
+        item: {
+          ...v3Item,
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            artifacts: {
+              promptBuild: {
+                revision: 1,
+                shotCount: 1,
+                agentInput: {
+                  snapshot: {
+                    subjectContract: { visualStyle: "저장된 사진 스타일" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+    await screen.findByText("프롬프트 생성 입력 패키지");
+    await userEvent.click(
+      screen.getByRole("button", { name: "저장된 전체 입력" }),
+    );
+    expect(screen.getByText(/저장된 사진 스타일/)).toBeInTheDocument();
+  });
+
+  it("shows how the planned subject relates to the camera", async () => {
+    renderStage(
+      "image_plan",
+      { pipelineVersion: "post-pipeline-v4", source: "manual", mode: "manual" },
+      {
+        item: {
+          ...v3Item,
+          currentStage: "image_plan",
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            version: "post-pipeline-v4",
+            artifacts: {
+              imagePlan: {
+                revision: 1,
+                status: "ready",
+                hash: "sha256:image",
+                contractVersion: "image-plan-v3",
+                shots: [
+                  {
+                    sortOrder: 0,
+                    scene: "창가에 서서 빗물을 턴다",
+                    subjectCameraRelation: "aware_unposed",
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    );
+
+    expect(await screen.findByText("카메라 관계")).toBeInTheDocument();
+    expect(screen.getByText("렌즈 인지 · 비연출")).toBeInTheDocument();
+  });
+
+  // V4(검수 없음): 레일 ⑥이 검수가 아니라 캡션이다. v3 초안(배포 전 것)은 그대로
+  // 검수 레일이어야 한다 — 두 초안이 같은 화면에서 다른 레일을 보인다.
+  it("shows the caption stage instead of review on the V4 rail only", async () => {
+    renderStage(
+      "caption",
+      {
+        pipelineVersion: "post-pipeline-v4",
+        source: "manual",
+        mode: "manual",
+        pipeline: { stage: "caption", state: "pending" },
+      },
+      {
+        item: {
+          ...v3Item,
+          currentStage: "caption",
+          stageIndex: 6,
+          statusDetail: "캡션 생성 필요",
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            version: "post-pipeline-v4",
+            stage: "caption",
+            artifacts: {},
+          },
+        },
+        draft: { status: "planned", caption: "" },
+      },
+    );
+
+    // 버전 배지도 실제 값에서 뽑아야 한다 — 문구에 박아두면 V4 초안이 V3로
+    // 보이고, 운영자가 "V3로 돌고 있나?"를 의심하게 된다(실제로 났던 오해).
+    expect(await screen.findByText("Agent V4")).toBeInTheDocument();
+    const rail = within(
+      await screen.findByRole("navigation", { name: "게시물 생성 단계" }),
+    );
+    expect(rail.getByText("⑥ 캡션")).toBeInTheDocument();
+    expect(rail.queryByText(/검수/)).not.toBeInTheDocument();
+    // 컷이 없으니 실행 조건은 알려주되, 산출물 없음도 함께 말한다.
+    expect(
+      screen.getByRole("button", { name: "캡션 생성" }),
+    ).toBeInTheDocument();
+  });
+
+  // ⑥ 캡션 화면: Agent 원본(참고)과 게시 캡션(컬럼, 편집)이 함께 있고 어느 쪽이
+  // 게시되는지 라벨로 갈린다. stale이면 계보 자리에 경고가 뜨되 "무효"라고
+  // 말하지 않는다 — 게시는 막히지 않는다.
+  it("shows the caption artifact next to the editable publish caption", async () => {
+    renderStage(
+      "caption",
+      {
+        pipelineVersion: "post-pipeline-v4",
+        source: "manual",
+        mode: "manual",
+        pipeline: { stage: "publish", state: "pending" },
+      },
+      {
+        item: {
+          ...v3Item,
+          caption: "필라테스 끝나고 한 컷,, 오늘도 완룟",
+          currentStage: "publish",
+          stageIndex: 7,
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            version: "post-pipeline-v4",
+            stage: "publish",
+            artifacts: {
+              captionBuild: {
+                revision: 2,
+                hash: "sha256:caption",
+                contractVersion: "caption-set-v1",
+                promptVersion: "caption-writer-v1",
+                caption: "필라테스 끝나고 한 컷,, 오늘도 완룟",
+                hashtags: ["필라테스"],
+                captionLanguages: ["ko"],
+                operatorNote: "이모지 빼고",
+                stale: true,
+                matchesColumn: false,
+              },
+            },
+          },
+        },
+        draft: {
+          status: "planned",
+          caption: "필라테스 끝나고 한 컷 — 오늘도 완료",
+          hashtags: ["필라테스"],
+        },
+      },
+    );
+
+    expect(await screen.findByText("Agent 원본")).toBeInTheDocument();
+    expect(screen.getByText("게시 캡션")).toBeInTheDocument();
+    expect(screen.getByText("운영자 수정본")).toBeInTheDocument();
+    expect(screen.getByText(/프롬프트 caption-writer-v1/)).toBeInTheDocument();
+    expect(
+      screen.getByText("이전 이미지 기준으로 작성됐습니다"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("무효")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "캡션 다시 생성" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "게시 캡션 저장" }),
+    ).toBeInTheDocument();
+    // 편집 폼은 게시 컬럼 값으로 채워진다(원본이 아니라).
+    expect(
+      screen.getByDisplayValue("필라테스 끝나고 한 컷 — 오늘도 완료"),
+    ).toBeInTheDocument();
+  });
+
+  // 계약 v2 PostPlan에는 캡션이 없다 — ② 카드는 전제를 리드로 보이고 캡션 줄이
+  // 없어야 한다. v1 artifact(위 테스트)는 계속 캡션을 보인다.
+  it("renders a v2 post plan without a caption line", async () => {
+    renderStage(
+      "post_plan",
+      {
+        pipelineVersion: "post-pipeline-v4",
+        source: "manual",
+        mode: "manual",
+      },
+      {
+        item: {
+          ...v3Item,
+          caption: "",
+          pipelineV3: {
+            ...v3Item.pipelineV3,
+            version: "post-pipeline-v4",
+            artifacts: {
+              postPlan: {
+                revision: 1,
+                status: "ready",
+                hash: "sha256:v2",
+                contractVersion: "post-plan-v2",
+                promptVersion: "post-planner-v2",
+                premise: "필라테스 다녀와 현관 거울 앞에 섰다.",
+                primaryPurpose: "운동 후 기록",
+                memoryCandidates: [],
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const body = within(await screen.findByRole("region"));
+    expect(
+      body.getByText("필라테스 다녀와 현관 거울 앞에 섰다."),
+    ).toBeInTheDocument();
+    expect(body.queryByText("캡션")).not.toBeInTheDocument();
+    // 제목은 캡션이 없으니 전제(가제)로.
+    expect(
+      screen.getByRole("heading", {
+        name: /필라테스 다녀와 현관 거울 앞에 섰다\. \(가제\)/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  // 생성 이미지 평가는 그 산출물이 있는 ⑤에 붙는다. ⑥ 캡션에 두면 평가 대상과
+  // 자리가 어긋나고, 캡션이 평가받는 것으로 오독된다.
+  it("puts the generated-image evaluation on the generation stage, not the caption stage", async () => {
+    const imageEvaluation = {
+      id: "eval-image",
+      draftId: "draft-1",
+      kind: "image",
+      attempt: 1,
+      status: "completed",
+      rubricVersion: "v1",
+      contentLanguage: "ko",
+      createdAt: "2026-08-16T01:00:00.000Z",
+      overallScore: 0,
+      scoresJson: {
+        result: {
+          verdict: "pass",
+          shots: [
+            {
+              sortOrder: 0,
+              dimensions: {
+                scene_fidelity: { applicable: true, score: 5 },
+                reference_adherence: { applicable: true, score: 4 },
+              },
+              issues: [
+                {
+                  dimension: "reference_adherence",
+                  severity: "minor",
+                  detail: "벤치가 신발장 앞이 아니라 뒤에 있다",
+                },
+              ],
+            },
+          ],
+          setDimensions: {},
+          setIssues: [],
+        },
+      },
+    };
+    const v4Concept = {
+      pipelineVersion: "post-pipeline-v4",
+      source: "manual",
+      mode: "manual",
+      pipeline: { stage: "caption", state: "pending" },
+    };
+    const v4Item = {
+      ...v3Item,
+      currentStage: "caption",
+      stageIndex: 6,
+      pipelineV3: {
+        ...v3Item.pipelineV3,
+        version: "post-pipeline-v4",
+        stage: "caption",
+        artifacts: {},
+      },
+    };
+
+    renderStage("caption", v4Concept, {
+      item: v4Item,
+      draft: { status: "planned", caption: "" },
+      evaluations: [imageEvaluation],
+    });
+
+    // 레일에도 같은 문구가 있으므로 단계 본문으로 범위를 좁힌다.
+    const body = within(await screen.findByRole("region"));
+    expect(body.getByText("⑥ 캡션")).toBeInTheDocument();
+    expect(screen.queryByText("생성 이미지 평가")).not.toBeInTheDocument();
+  });
+});
