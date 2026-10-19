@@ -83,6 +83,9 @@ export function AgentEditor({
     model: config.model ?? "",
     systemPrompt: config.systemPrompt ?? "",
   });
+  const [dirty, setDirty] = useState(
+    () => JSON.stringify(initial.values) !== JSON.stringify(clean.current),
+  );
   const isImage = config.stage === "generation";
   const [preview, setPreview] = useState<AgentConfig | null>(null);
   const [confirmation, setConfirmation] = useState<"restore" | null>(null);
@@ -96,6 +99,7 @@ export function AgentEditor({
     },
     onValuesChange: (values) => {
       const dirty = JSON.stringify(values) !== JSON.stringify(clean.current);
+      setDirty(dirty);
       onDirtyChange(dirty);
       try {
         if (dirty)
@@ -126,6 +130,7 @@ export function AgentEditor({
     form.resetDirty(values);
     setExpectedRevision(saved.revision);
     setOutputSchema(saved.outputSchema);
+    setDirty(false);
     onDirtyChange(false);
     try {
       sessionStorage.removeItem(storageKey(config.stage));
@@ -219,6 +224,11 @@ export function AgentEditor({
             data={options}
             key={form.key("aiModelId")}
             {...form.getInputProps("aiModelId")}
+            onChange={(value) => {
+              if (value !== form.getValues().aiModelId)
+                form.setFieldValue("model", "");
+              form.setFieldValue("aiModelId", value ?? "");
+            }}
             disabled={busy}
           />
           <TextInput
@@ -328,7 +338,7 @@ export function AgentEditor({
             <Button
               type="submit"
               loading={save.isPending}
-              disabled={restore.isPending}
+              disabled={restore.isPending || !dirty}
             >
               저장하고 적용
             </Button>

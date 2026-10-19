@@ -65,7 +65,7 @@ settings owner가 담당하고 모델 목록에는 저장하지 않는다. 현�
 openai-compatible, 이미지 adapter는 openai/fal/opod-flux/spicyapi다.
 단계별 현재값은 최대 revision이며 저장·복원은 새 행을 추가한다.
 PostAgentPromptRepository는 단계 advisory transaction lock과 expectedRevision으로
-첫 저장을 포함한 동시 변경을 막는다. 출력 규격은 실제 LLM 요청에 보내는 schema이며,
+첫 저장을 포함한 동시 변경을 막는다. 잠금 안에서 현재 버전과 동일한 저장은 기존 행을 반환해 중복 이력을 만들지 않는다. 출력 규격은 실제 LLM 요청에 보내는 schema이며,
 현재 parser 계약과 같아야 저장·복원·실행된다. generation 행의 지침/schema는 NULL이다.
 `PostAgentPromptService.execution`은 이 검증 뒤 post_plan/image_plan의 각 union
 분기에서 status만 첫 속성으로 옮긴 새 전송 스키마를 만든다. JSONB 조회 순서가
@@ -87,7 +87,7 @@ agentConfig가 적용 설정을 기록한다. 기존 metadata 없는 잡은 기�
 추가할 때 React route와 서버의 허용 경로를 함께 반영한다.
 기존 Mantine theme/DataPage를 사용하고 활성 Agent 번들 편집, 모델 등록·선택,
 읽기 전용 출력 규격, 공통 generation 이력 조회·복원, 미설정 표시와 입력 임시 보관/전환 보호,
-409에서 최신값 확인 후 입력 유지 재편집을 제공한다.
+409에서 최신값 확인 후 입력 유지 재편집을 제공한다. 레퍼런스 탭은 공통 generation과 Agent에 고정된 모델을 구분해 표시하며, 탐색 횟수만 저장할 때도 미저장 단계 입력의 dirty 기준을 유지한다.
 회귀 owner는 `test/post-generation-agents.e2e-spec.ts`,
 `post-pipeline-v3.runner.spec.ts`, `generation-worker.service.spec.ts`,
 `generation-settings.service.spec.ts`, `PostAgentsPage.test.tsx`이며

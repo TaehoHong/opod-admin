@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { Injectable } from "@nestjs/common";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { DatabaseService } from "../core/database/database.service";
@@ -57,6 +58,14 @@ export class PostAgentPromptRepository {
         .orderBy(desc(postAgentPrompts.revision))
         .limit(1);
       if ((current?.revision ?? 0) !== expectedRevision) return null;
+      if (
+        current &&
+        current.aiModelId === input.aiModelId &&
+        current.model === input.model &&
+        current.systemPrompt === input.systemPrompt &&
+        isDeepStrictEqual(current.outputSchema, input.outputSchema)
+      )
+        return current;
       const [row] = await tx
         .insert(postAgentPrompts)
         .values({ ...input, stage, revision: expectedRevision + 1 })

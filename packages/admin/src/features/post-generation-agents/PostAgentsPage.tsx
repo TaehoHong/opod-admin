@@ -144,6 +144,7 @@ export function PostAgentsPage() {
           </Tabs.Panel>
           <Tabs.Panel value="reference" pt="lg">
             <ReferenceAgentPanel
+              generation={generation}
               onDirtyChange={setReferenceDirty}
               onConfigureGeneration={() => setGenerationOpen(true)}
             />
@@ -181,7 +182,11 @@ export function PostAgentsPage() {
               config={generation}
               models={models.items}
               onDirtyChange={setGenerationDirty}
-              onSaved={() => void agents.refetch()}
+              onSaved={() => {
+                setGenerationDirty(false);
+                setGenerationOpen(false);
+                void agents.refetch();
+              }}
             />
           ) : null}
         </Stack>

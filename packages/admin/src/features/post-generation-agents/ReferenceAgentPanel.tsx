@@ -11,7 +11,7 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCursorList } from "../../shared/api/useCursorList";
 import { LoadMore } from "../../shared/ui/DataPage";
 import {
@@ -23,6 +23,7 @@ import {
   fetchReferenceAgent,
   saveReferenceAgent,
   REFERENCE_STAGES,
+  type AgentConfig,
   type ReferenceConfig,
   type ReferenceStarters,
   type ReferenceStage,
@@ -36,6 +37,7 @@ const labels: Record<ReferenceStage, string> = {
 type Props = {
   onDirtyChange: (dirty: boolean) => void;
   onConfigureGeneration?: () => void;
+  generation?: AgentConfig;
 };
 export function ReferenceAgentPanel(props: Props) {
   const query = useQuery({
@@ -71,10 +73,15 @@ function ReferenceSettings({
   starters,
   onDirtyChange,
   onConfigureGeneration,
+  generation,
 }: Props & { initial: ReferenceConfig; starters?: ReferenceStarters }) {
   const client = useQueryClient();
   const models = useCursorList(["post-agent-models"], fetchModels);
   const revision = useRef(initial.revision);
+  const [summary, setSummary] = useState<Record<string, string>>({});
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const [latest, setLatest] = useState<ReferenceConfig | null>(null);
+  const sharedGeneration = generation?.id ? generation : initial.generation;
   const valuesFor = (config: ReferenceConfig) => ({
     maxAttempts: String(config.selection.maxAttempts),
     stages: Object.fromEntries(
@@ -121,15 +128,10 @@ function ReferenceSettings({
       if (stages) apply(config);
       else {
         revision.current = config.revision;
-        form.setInitialValues({
-          ...form.getInitialValues(),
-          maxAttempts: String(config.selection.maxAttempts),
-        });
-        form.resetDirty({
-          ...form.getInitialValues(),
-          maxAttempts: String(config.selection.maxAttempts),
-        });
+        form.resetDirty(valuesFor(config));
       }
+      setSummary({});
+      setLatest(null);
       client.setQueryData(["reference-post-agent"], {
         current: config,
         starters,
@@ -139,7 +141,9 @@ function ReferenceSettings({
   const reload = useMutation({
     mutationFn: fetchReferenceAgent,
     onSuccess: (data) => {
-      apply(data.current);
+      revision.current = data.current.revision;
+      form.resetDirty(valuesFor(data.current));
+      setLatest(data.current);
       client.setQueryData(["reference-post-agent"], data);
       save.reset();
     },
@@ -154,7 +158,14 @@ function ReferenceSettings({
         errors[`stages.${stage}.systemPrompt`] = "시스템 지침을 입력하세요.";
     }
     form.setErrors(errors);
-    if (!Object.keys(errors).length) save.mutate(values.stages);
+    if (!sharedGeneration?.id)
+      errors.generation = "이미지 생성 모델을 먼저 저장하세요.";
+    setSummary(errors);
+    if (Object.keys(errors).length) {
+      requestAnimationFrame(() => summaryRef.current?.focus());
+      return;
+    }
+    save.mutate(values.stages);
   };
   const options = models.items
     .filter((model) => model.type === "llm")
@@ -162,6 +173,14 @@ function ReferenceSettings({
       value: model.id,
       label: `${model.provider} / ${model.model}`,
     }));
+  for (const stage of REFERENCE_STAGES) {
+    const model = initial.stages?.[stage];
+    if (model && !options.some((option) => option.value === model.aiModelId))
+      options.push({
+        value: model.aiModelId,
+        label: `${model.provider} / ${model.model}`,
+      });
+  }
   return (
     <form
       onSubmit={(event) => {
@@ -170,6 +189,10 @@ function ReferenceSettings({
       }}
     >
       <Stack gap="lg">
+        <Text size="sm" c="dimmed">
+          세 단계의 모델과 지침을 확인하고 하단의 설정 저장을 누르세요. 저장한
+          설정은 새 작업부터 적용됩니다.
+        </Text>
         {!initial.stages ? (
           <Alert color="attention">
             지침 초안입니다. 각 단계의 모델과 지침을 확인하고 저장해야 실행에
@@ -210,7 +233,10 @@ function ReferenceSettings({
                   <Group>
                     <Button
                       variant="default"
-                      onClick={() => save.mutate(undefined)}
+                      onClick={() => {
+                        setSummary({});
+                        save.mutate(undefined);
+                      }}
                       loading={save.isPending}
                       disabled={
                         !form.isDirty("maxAttempts") || reload.isPending
@@ -259,13 +285,26 @@ function ReferenceSettings({
           <Stack>
             <Title order={3}>이미지 생성 모델</Title>
             <Text size="sm">
-              {initial.generation
-                ? `${initial.generation.provider} / ${initial.generation.effectiveModel} · 저장 버전 ${initial.generation.revision}`
-                : "저장된 이미지 생성 모델이 없습니다."}
+              {sharedGeneration?.id
+                ? `공통 설정: ${sharedGeneration.provider} / ${sharedGeneration.effectiveModel} · 버전 ${sharedGeneration.revision}`
+                : "공통 이미지 생성 모델을 먼저 설정하세요."}
             </Text>
             <Text size="sm" c="dimmed">
-              설정 저장 시 공통 이미지 생성 모델의 현재 버전을 함께 저장합니다.
+              하단의 설정 저장을 누르면 이 이미지 모델을 레퍼런스 Agent에
+              적용합니다. 이미지 모델 설정 창의 저장만으로는 Agent 설정이
+              완료되지 않습니다.
             </Text>
+            {initial.generation ? (
+              <Text size="sm">
+                현재 Agent에 적용: {initial.generation.provider} /{" "}
+                {initial.generation.effectiveModel} · 버전{" "}
+                {initial.generation.revision}
+              </Text>
+            ) : (
+              <Text size="sm" c="attention.8">
+                레퍼런스 Agent에는 아직 적용되지 않았습니다.
+              </Text>
+            )}
             {onConfigureGeneration ? (
               <Button variant="default" onClick={onConfigureGeneration}>
                 이미지 생성 모델 설정
@@ -283,14 +322,14 @@ function ReferenceSettings({
             />
             <Text size="sm">
               입력을 유지했습니다. 다른 곳에서 설정을 변경했다면 최신 설정을
-              다시 불러온 뒤 편집하세요.
+              확인한 뒤 다시 저장하세요.
             </Text>
             <Button
               variant="default"
               onClick={() => reload.mutate()}
               loading={reload.isPending}
             >
-              최신 설정 다시 불러오기
+              최신 설정 확인 · 입력 유지
             </Button>
           </Stack>
         ) : null}
@@ -302,7 +341,48 @@ function ReferenceSettings({
             )}
           />
         ) : null}
-        {save.isSuccess ? <Alert color="teal">저장했습니다.</Alert> : null}
+        {latest ? (
+          <Alert color="attention">
+            최신 저장 버전을 확인했습니다. 편집 중인 모델과 지침은 유지했습니다.
+            내용을 확인한 뒤 다시 저장하세요.
+          </Alert>
+        ) : null}
+        {Object.keys(summary).length ? (
+          <Alert
+            color="red"
+            role="alert"
+            title="저장 전에 확인해 주세요"
+            ref={summaryRef}
+            tabIndex={-1}
+          >
+            <Stack gap="xs">
+              {Object.entries(summary).map(([field, message]) => (
+                <Button
+                  key={field}
+                  variant="default"
+                  onClick={() =>
+                    field === "generation"
+                      ? onConfigureGeneration?.()
+                      : form.getInputNode(field)?.focus()
+                  }
+                >
+                  {field.startsWith("stages.")
+                    ? `${labels[field.split(".")[1] as ReferenceStage]}: ${message}`
+                    : message}
+                </Button>
+              ))}
+            </Stack>
+          </Alert>
+        ) : null}
+        {save.isSuccess ? (
+          <Alert color="teal">
+            {save.variables
+              ? dirty
+                ? "저장 후 수정한 내용이 있습니다. 다시 저장해야 적용됩니다."
+                : "저장했습니다."
+              : "탐색 설정을 저장했습니다. 편집 중인 모델과 지침은 별도로 설정 저장을 눌러 적용하세요."}
+          </Alert>
+        ) : null}
         <Group>
           <Button
             type="submit"
