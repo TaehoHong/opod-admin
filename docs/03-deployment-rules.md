@@ -150,3 +150,13 @@ worktree 상태를 확인한다.
 - 실제 분석·재색인 작업으로 활성 비주얼 35/35를 준비했다. 별도 SNS 수집이 병행되어 최종 조회 시 38/38이 person-composition-v1이고 임베딩 미완료는 0이었다. 비주얼 설명 해시도 보존됐다. 이는 해당 시점 조회 결과다.
 - 기존 임베딩 컬럼을 공통 촬영 분석 텍스트로 재색인했다. 원본 선택 이후 컷별 벡터 후보와 비전 선택으로 사용할 비주얼만 고정하며, 이후 프롬프트·생성은 같은 조합을 쓴다.
 - 타입 검사·lint·format·build·schema mirror 검사, DB metadata와 API 상태 조회를 통과했다. 사용자 지시로 테스트·실제 게시물 단계 실행·이미지 생성은 하지 않았다.
+
+
+### 2026-10-20 레퍼런스 생성 후 상세 조회 오류 수정
+
+- Admin 코드 `aca0157`, 이미지 `opod-admin:fix-aca0157`을 main 푸시 후 개발 배포했다.
+- 원인: 생성 worker가 논리 참조 이름을 `_shot.execution.referenceMediaIds`에 기록하고 상세 조회가 이를 media UUID로 조회했다. 기존 서버의 실제 Domain Service에서 SQLSTATE `22P02`를 재현했다.
+- 신규 실행은 논리 `referenceIds`와 실제 UUID `referenceMediaIds`를 구분한다. reference 상세는 전용 artifact를 사용해 과거 기록도 읽는다. 기존 자연형 Agent 경로는 유지한다.
+- 실제 실패 초안을 같은 Domain Service로 읽기 전용 재조회해 완료 결과 1개·선택 결과 1개와 참조 이름 보존을 확인했다. 이미지 재생성·DB 행 수정·DDL은 수행하지 않았다.
+- 서버 77 suites/866 tests, build/lint/format 통과. 두 회귀 테스트 묶음은 수정 전의 실제 실패 조건을 재현하고 수정 후 통과했다. 생성 공급자는 테스트 대역이며 실제 유료 생성은 실행하지 않았다.
+- Sol 6.1 subagent가 worker 기록과 회귀 테스트를 구현했고 메인 에이전트가 상세 조회·통합 검증·배포·실제 조회를 확인했다. health는 `status=ok,database=up`이었다.
