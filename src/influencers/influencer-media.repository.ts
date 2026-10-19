@@ -41,19 +41,44 @@ export class InfluencerMediaRepository {
   }
   async register(value: MediaWrite) {
     return this.db.client.transaction(async (tx) => {
+      // Serialize every slide of a post, including the first insert with no row to lock.
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([String(value.influencerId), value.postId])}, 0))`,
+      );
+      const post = and(
+        eq(influencerMedia.influencerId, value.influencerId),
+        eq(influencerMedia.postId, value.postId),
+      );
+      let sourceCaption = value.sourceCaption;
+      if (sourceCaption === undefined || sourceCaption === null) {
+        const [known] = await tx
+          .select({ sourceCaption: influencerMedia.sourceCaption })
+          .from(influencerMedia)
+          .where(and(post, isNotNull(influencerMedia.sourceCaption)))
+          .limit(1);
+        sourceCaption = known?.sourceCaption ?? null;
+      }
       const inserted = await tx
         .insert(influencerMedia)
-        .values(value)
+        .values({ ...value, sourceCaption })
         .onConflictDoNothing()
         .returning();
-      if (inserted.length) return { row: inserted[0], created: true };
-      const [row] = await tx
+      if (inserted.length) {
+        if (value.sourceCaption !== undefined && value.sourceCaption !== null)
+          await tx.update(influencerMedia).set({ sourceCaption }).where(post);
+        return { row: inserted[0], created: true };
+      }
+      let [row] = await tx
         .select()
         .from(influencerMedia)
         .where(this.identity(value))
         .for("update");
       if (row.sha256 !== value.sha256 || row.assetType !== value.assetType)
         throw new ConflictException("media_identity_conflict");
+      if (value.sourceCaption !== undefined && value.sourceCaption !== null) {
+        await tx.update(influencerMedia).set({ sourceCaption }).where(post);
+        row = { ...row, sourceCaption };
+      }
       if (
         value.analysis &&
         (!isDeepStrictEqual(row.analysis, value.analysis) ||

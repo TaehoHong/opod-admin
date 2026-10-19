@@ -28,11 +28,15 @@ metadata:
 
 analysis는 생략/null 가능. 포함 시 model/version/content.description 필수. 기타 content 값은 null/생략 가능. 정규화 시 생략 필드는 null. 클라이언트 mediaKey/sha256/embedding은 받지 않는다. 이미지 최대30MiB,4천만 픽셀,단일 JPEG/PNG/WebP; metadata 최대20000바이트. 원본 파일을 변환하지 않는다.
 
-신규201/재요청200. 응답 id/created/mediaKey/sha256/analysisStatus 및 embedding{status,model,error}. 분석 없으면 not_requested, 성공ready, 임베딩 실패failed. 분석·파일은 보존하며 같은 분석 포함 요청으로 재시도한다. 오류 이유는 기존 LLM 로그에 기록하며 응답에 공급자 원문·키를 노출하지 않는다.
+sourceCaption은 선택적 string/null이다. 누락/null은 기존 캡션을 보존하며 빈 문자열은 확인된 빈 캡션이다. 공백·줄바꿈을 그대로 저장한다. POST 응답과 GET items는 sourceCaption을 항상 포함하고 미확인은 null이다. 같은 influencerId + postId의 모든 슬라이드에 명시적 문자열을 반영하며 새 슬라이드는 알려진 캡션을 상속한다. 미디어 Repository 트랜잭션의 게시물 단위 advisory lock으로 동시 등록을 직렬화하고 마지막으로 성공한 명시적 저장을 유지한다. 식별자 충돌이면 캡션 변경도 롤백한다. 캡션만 바뀌면 구도 임베딩을 유지한다. 캡션 자체의 별도 길이 제한은 없으며 기존 multipart metadata 20000바이트와 파서 20000 JavaScript 코드 단위 제한을 유지한다.
+
+신규201/재요청200. 응답 id/created/mediaKey/sha256/sourceCaption/analysisStatus 및 embedding{status,model,error}. 분석 없으면 not_requested, 성공ready, 임베딩 실패failed. 분석·파일은 보존하며 같은 분석 포함 요청으로 재시도한다. 오류 이유는 기존 LLM 로그에 기록하며 응답에 공급자 원문·키를 노출하지 않는다.
 
 같은 계정·게시물·슬라이드의 해시/assetType이 다르면409. 분석 없는 요청은 기존 분석 보존. 분석·모델·버전 변경은 벡터 무효화. 서버는 구조화된 구도 필드로 텍스트를 만들고, 전부 비었을 때 description을 사용한다. 검색 벡터1024는 기존 ReferenceEmbeddingClient 규격이다. 분석 snapshot 및 대상 embeddingModel을 조건으로 저장해 늦은 결과의 덮어쓰기를 막는다. 같은 분석의 동시 실행은 외부 호출이 중복될 수 있지만 미디어 행은 하나이며, 별도 queue/lease 테이블은 없다.
 
 S3: pod/reference-library/instagram/v3/accounts/{influencerId}/posts/{postId}/{slideIndex}-{sha256}.{format}. 조건부 업로드와 HEAD 검증. 파일 저장 성공 뒤 DB 실패 시 동일 요청으로 복구. 기존 v1/v2 객체는 삭제하지 않는다. 동일 식별자에 서로 다른 파일이 동시 요청되면 DB에서 한 자료만 승인되며 미참조 S3 객체가 남을 수 있다. 자동 삭제하지 않는다.
+
+source_caption의 정본 추가 migration은 Backend `drizzle/20261019060222_orange_warlock/migration.sql`이다. nullable text 한 컬럼만 추가하며 Admin은 schema mirror를 유지한다.
 
 ## Migration and rollout
 

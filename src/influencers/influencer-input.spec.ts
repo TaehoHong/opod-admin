@@ -29,6 +29,30 @@ describe("influencer inputs", () => {
       ),
     ).toThrow();
   });
+  const metadata = {
+    influencerId: "1",
+    postId: "ABC",
+    postUrl: "https://instagram.com/p/ABC/",
+    slideIndex: 1,
+    assetType: "image",
+  };
+  it.each([undefined, null, "", "  raw\ncaption  "])(
+    "preserves raw optional source caption %p",
+    (sourceCaption) => {
+      expect(
+        parseMediaMetadata(JSON.stringify({ ...metadata, sourceCaption }))
+          .sourceCaption,
+      ).toBe(sourceCaption);
+    },
+  );
+  it.each([1, false, [], {}])(
+    "rejects non-string source caption %p",
+    (sourceCaption) => {
+      expect(() =>
+        parseMediaMetadata(JSON.stringify({ ...metadata, sourceCaption })),
+      ).toThrow("Invalid media metadata");
+    },
+  );
   it("uses pose geometry rather than wardrobe or background for embedding", () => {
     expect(
       compositionText({

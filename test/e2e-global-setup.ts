@@ -137,6 +137,15 @@ export default async function globalSetup(): Promise<void> {
         await client.query("ROLLBACK");
         throw error;
       }
+      await client.query(
+        readFileSync(
+          join(
+            __dirname,
+            "../../opod-service-backend/drizzle/20261019060222_orange_warlock/migration.sql",
+          ),
+          "utf8",
+        ),
+      );
     } finally {
       await client.end();
     }

@@ -816,6 +816,7 @@ export const influencerMedia = opod.table(
       .notNull()
       .references(() => influencers.id, { onDelete: "restrict" }),
     postId: text("post_id").notNull(),
+    sourceCaption: text("source_caption"),
     postUrl: text("post_url").notNull(),
     slideIndex: integer("slide_index").notNull(),
     assetType: text("asset_type").notNull(),

@@ -206,6 +206,163 @@ describe("influencer media upload and analysis", () => {
       domain.saveEmbedding(old, "test-1024", [1, ...Array(1023).fill(0)]),
     ).rejects.toThrow("analysis_changed");
   });
+  it("shares raw captions across sibling slides, preserves null retries and embedding, and records confirmed empty", async () => {
+    const body = metadata("CAPTION1", true);
+    const raw = "  original caption\n#tag  ";
+    const first = await upload({ ...body, sourceCaption: raw }).expect(201);
+    expect(first.body.sourceCaption).toBe(raw);
+    const inherited = await upload({
+      ...body,
+      slideIndex: 2,
+      sourceCaption: null,
+    }).expect(201);
+    expect(inherited.body.sourceCaption).toBe(raw);
+    const preserved = await upload({ ...body, analysis: null }).expect(200);
+    expect(preserved.body.sourceCaption).toBe(raw);
+    const nullRetry = await upload({
+      ...body,
+      analysis: null,
+      sourceCaption: null,
+    }).expect(200);
+    expect(nullRetry.body.sourceCaption).toBe(raw);
+    const rawList = await request(app.getHttpServer())
+      .get(endpoint)
+      .query({ influencerId, postId: "CAPTION1" })
+      .set(headers)
+      .expect(200);
+    expect(
+      rawList.body.items.map(
+        (row: { sourceCaption: string }) => row.sourceCaption,
+      ),
+    ).toEqual([raw, raw]);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const domain = app.get(InfluencerMediaService);
+    const before = (await domain.find({
+      influencerId: BigInt(influencerId),
+      postId: "CAPTION1",
+      slideIndex: 1,
+    }))!;
+    const cleared = await upload({
+      ...body,
+      analysis: null,
+      slideIndex: 2,
+      sourceCaption: "",
+    }).expect(200);
+    expect(cleared.body.sourceCaption).toBe("");
+    await upload({ ...body, analysis: null, slideIndex: 3 }).expect(201);
+    const after = (await domain.find({
+      influencerId: BigInt(influencerId),
+      postId: "CAPTION1",
+      slideIndex: 1,
+    }))!;
+    expect(after.embedding).toEqual(before.embedding);
+    expect(after.embeddingModel).toBe(before.embeddingModel);
+    const list = await request(app.getHttpServer())
+      .get(endpoint)
+      .query({ influencerId, postId: "CAPTION1" })
+      .set(headers)
+      .expect(200);
+    expect(
+      list.body.items.map(
+        (row: { sourceCaption: string }) => row.sourceCaption,
+      ),
+    ).toEqual(["", "", ""]);
+    const unknown = await upload(metadata("CAPTION_UNKNOWN")).expect(201);
+    expect(unknown.body.sourceCaption).toBeNull();
+    const unknownList = await request(app.getHttpServer())
+      .get(endpoint)
+      .query({ influencerId, postId: "CAPTION_UNKNOWN" })
+      .set(headers)
+      .expect(200);
+    expect(unknownList.body.items[0].sourceCaption).toBeNull();
+  });
+  it("serializes concurrent sibling caption saves and rolls back identity conflicts", async () => {
+    const domain = app.get(InfluencerMediaService);
+    await upload({
+      ...metadata("CAPTION_FIXTURE"),
+      sourceCaption: "initial",
+    }).expect(201);
+    const original = (await domain.find({
+      influencerId: BigInt(influencerId),
+      postId: "CAPTION_FIXTURE",
+      slideIndex: 1,
+    }))!;
+    const write = {
+      influencerId: original.influencerId,
+      postId: "CAPTION_RACE",
+      postUrl: "https://www.instagram.com/p/CAPTION_RACE/",
+      slideIndex: original.slideIndex,
+      assetType: original.assetType,
+      mediaKey: original.mediaKey,
+      sha256: original.sha256,
+    };
+    const results = await Promise.all([
+      domain.register({ ...write, slideIndex: 1, sourceCaption: "first" }),
+      domain.register({ ...write, slideIndex: 2, sourceCaption: "second" }),
+      domain.register({ ...write, slideIndex: 3, sourceCaption: null }),
+    ]);
+    expect(results).toHaveLength(3);
+    const rows = await domain.list({
+      influencerId: BigInt(influencerId),
+      postId: "CAPTION_RACE",
+      limit: 100,
+    });
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows.map((row) => row.sourceCaption)).size).toBe(1);
+    expect(["first", "second"]).toContain(rows[0].sourceCaption);
+    await expect(
+      domain.register({
+        ...write,
+        sourceCaption: "must roll back",
+        sha256: "different",
+      }),
+    ).rejects.toThrow("media_identity_conflict");
+    const unchanged = await domain.list({
+      influencerId: BigInt(influencerId),
+      postId: "CAPTION_RACE",
+      limit: 100,
+    });
+    expect(unchanged.map((row) => row.sourceCaption)).toEqual(
+      rows.map((row) => row.sourceCaption),
+    );
+    await domain.register({ ...write, sourceCaption: "last successful" });
+    await domain.register({
+      ...write,
+      postId: "OTHER_POST",
+      sourceCaption: "other post",
+    });
+    const otherAccount = await request(app.getHttpServer())
+      .post("/api/admin/v1/characters")
+      .set(headers)
+      .send({ publicId: randomUUID(), displayName: "Other media", bio: "test" })
+      .expect(201);
+    const account = await request(app.getHttpServer())
+      .post(`/api/admin/v1/characters/${otherAccount.body.id}/influencers`)
+      .set(headers)
+      .send({ url: "https://instagram.com/other_media_fixture/" })
+      .expect(201);
+    await domain.register({
+      ...write,
+      influencerId: BigInt(account.body.id),
+      sourceCaption: "other account",
+    });
+    const final = await domain.list({
+      influencerId: BigInt(influencerId),
+      postId: "CAPTION_RACE",
+      limit: 100,
+    });
+    expect(final.map((row) => row.sourceCaption)).toEqual(
+      Array(3).fill("last successful"),
+    );
+  });
+  it("retains the multipart metadata byte limit for multibyte source captions", async () => {
+    const body = {
+      ...metadata("CAPTION_LIMIT"),
+      sourceCaption: "가".repeat(7000),
+    };
+    expect(JSON.stringify(body).length).toBeLessThan(20000);
+    await upload(body).expect(400);
+  });
   it("rejects unauthenticated, malformed, unsupported and forged media requests", async () => {
     await request(app.getHttpServer()).get(endpoint).expect(401);
     await request(app.getHttpServer())

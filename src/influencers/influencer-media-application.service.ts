@@ -51,6 +51,7 @@ export class InfluencerMediaApplicationService {
     const saved = await this.media.register({
       ...identity,
       postUrl: input.postUrl,
+      sourceCaption: input.sourceCaption,
       assetType: input.assetType,
       mediaKey: key,
       sha256: image.sha256,
@@ -65,6 +66,7 @@ export class InfluencerMediaApplicationService {
     const result = {
       id: String(saved.row.id),
       created: saved.created,
+      sourceCaption: saved.row.sourceCaption,
       mediaKey: saved.row.mediaKey,
       sha256: saved.row.sha256,
       analysisStatus: saved.row.analysis ? "saved" : "missing",
@@ -167,6 +169,7 @@ export class InfluencerMediaApplicationService {
       rows.map((row) => ({
         postId: row.postId,
         postUrl: row.postUrl,
+        sourceCaption: row.sourceCaption,
         slideIndex: row.slideIndex,
         assetType: row.assetType,
         mediaKey: row.mediaKey,

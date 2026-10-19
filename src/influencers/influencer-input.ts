@@ -71,6 +71,7 @@ export class ImageAnalysis {
 export class RegisterInfluencerMedia {
   @IsString() @Matches(/^[1-9][0-9]*$/) influencerId!: string;
   @IsString() @Matches(/^[A-Za-z0-9_-]{1,100}$/) postId!: string;
+  @IsOptional() @IsString() sourceCaption?: string | null;
   @IsString() @MaxLength(2048) postUrl!: string;
   @IsInt() @Min(1) @Max(100) slideIndex!: number;
   @IsIn(["image", "video_thumbnail"]) assetType!: "image" | "video_thumbnail";
