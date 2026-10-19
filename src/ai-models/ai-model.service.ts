@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { IMAGE_MODEL_POLICIES } from "../../prompts/image-model-policies";
-import { SPICYAPI_IMAGE_MODELS } from "../generation/providers/spicyapi-image.provider";
+import { SPICYAPI_IMAGE_MODELS } from "../generation/providers/spicyapi-image-models";
 import { decodeCursor, PageInput, pageFromRows } from "../shared/utils/page";
 import { AiModelRepository } from "./ai-model.repository";
 import { aiConfigId } from "./ai-model-id";

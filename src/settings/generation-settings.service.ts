@@ -34,7 +34,7 @@ import {
 import {
   SPICYAPI_API_BASE,
   spicyApiImageModels,
-} from "../generation/providers/spicyapi-image.provider";
+} from "../generation/providers/spicyapi-image-models";
 
 // admin_settings 키. 프로바이더 설정이 늘면 네임스페이스만 추가한다.
 // generation.* = 이미지 생성(fal), planner.* = 기획 LLM(OpenAI-compatible).

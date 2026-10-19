@@ -188,3 +188,14 @@ UI 테스트는 선택한 Agent의 생성 요청과 설정 충돌 시 입력 보
 검증 owner는 post-planner/image-planner/image-model-policy/runner spec,
 NaturalAgentPanel 테스트와 `test/natural-post-agent.e2e-spec.ts`다. 계약 및 저장 검증은
 실제 LLM의 의미 준수나 이미지 자연스러움을 보장하지 않으며 별도 생성 평가가 필요하다.
+
+## 사진 검수 실행 스위치
+
+`NATURAL_PHOTO_REVIEW_ENABLED=false`이면 natural-v1의 4번 자연스러움 검수와
+5번 요구사항 검수 LLM 호출을 함께 생략한다. 미설정 기본값은 true다.
+게시물 기획·이미지 기획·프롬프트·이미지 생성·캡션의 역할과 저장 지침은 유지한다.
+캡션 실행 시 현재 이미지와 기획·프롬프트·설정·운영자 요청을 기준으로
+`photoReview.status=skipped`, `reason=disabled`를 기록하며 통과 판정을 만들지 않는다.
+게시 시에도 이 기준과 캡션의 이미지 일치 조건을 검사한다. 다시 활성화하면 skipped
+기록으로는 게시할 수 없고 캡션 단계를 재실행해 두 검수를 통과해야 한다.
+이 스위치는 자동 워커나 스케줄러를 켜지 않는다.
