@@ -36,7 +36,7 @@ const labels: Record<ReferenceStage, string> = {
 };
 type Props = {
   onDirtyChange: (dirty: boolean) => void;
-  onConfigureGeneration?: () => void;
+  onManageModels?: () => void;
   generation?: AgentConfig;
 };
 export function ReferenceAgentPanel(props: Props) {
@@ -72,7 +72,7 @@ function ReferenceSettings({
   initial,
   starters,
   onDirtyChange,
-  onConfigureGeneration,
+  onManageModels,
   generation,
 }: Props & { initial: ReferenceConfig; starters?: ReferenceStarters }) {
   const client = useQueryClient();
@@ -81,9 +81,10 @@ function ReferenceSettings({
   const [summary, setSummary] = useState<Record<string, string>>({});
   const summaryRef = useRef<HTMLDivElement>(null);
   const [latest, setLatest] = useState<ReferenceConfig | null>(null);
-  const sharedGeneration = generation?.id ? generation : initial.generation;
   const valuesFor = (config: ReferenceConfig) => ({
     maxAttempts: String(config.selection.maxAttempts),
+    generationAiModelId:
+      config.generation?.aiModelId ?? generation?.aiModelId ?? "",
     stages: Object.fromEntries(
       REFERENCE_STAGES.map((stage) => [
         stage,
@@ -122,7 +123,12 @@ function ReferenceSettings({
       saveReferenceAgent({
         expectedRevision: revision.current,
         maxAttempts: Number(form.getValues().maxAttempts),
-        ...(stages ? { stages } : {}),
+        ...(stages
+          ? {
+              stages,
+              generationAiModelId: form.getValues().generationAiModelId,
+            }
+          : {}),
       }),
     onSuccess: (config, stages) => {
       if (stages) apply(config);
@@ -157,9 +163,9 @@ function ReferenceSettings({
       if (!values.stages[stage].systemPrompt.trim())
         errors[`stages.${stage}.systemPrompt`] = "시스템 지침을 입력하세요.";
     }
+    if (!values.generationAiModelId)
+      errors.generationAiModelId = "이미지 생성 모델을 선택하세요.";
     form.setErrors(errors);
-    if (!sharedGeneration?.id)
-      errors.generation = "이미지 생성 모델을 먼저 저장하세요.";
     setSummary(errors);
     if (Object.keys(errors).length) {
       requestAnimationFrame(() => summaryRef.current?.focus());
@@ -179,6 +185,22 @@ function ReferenceSettings({
       options.push({
         value: model.aiModelId,
         label: `${model.provider} / ${model.model}`,
+      });
+  }
+  const imageOptions = models.items
+    .filter((model) => model.type === "image")
+    .map((model) => ({
+      value: model.id,
+      label: `${model.provider} / ${model.model}`,
+    }));
+  for (const model of [initial.generation, generation]) {
+    if (
+      model?.aiModelId &&
+      !imageOptions.some((option) => option.value === model.aiModelId)
+    )
+      imageOptions.push({
+        value: model.aiModelId,
+        label: `${model.provider} / ${model.effectiveModel}`,
       });
   }
   return (
@@ -284,32 +306,45 @@ function ReferenceSettings({
         <Paper p="lg" withBorder>
           <Stack>
             <Title order={3}>이미지 생성 모델</Title>
-            <Text size="sm">
-              {sharedGeneration?.id
-                ? `공통 설정: ${sharedGeneration.provider} / ${sharedGeneration.effectiveModel} · 버전 ${sharedGeneration.revision}`
-                : "공통 이미지 생성 모델을 먼저 설정하세요."}
-            </Text>
-            <Text size="sm" c="dimmed">
-              하단의 설정 저장을 누르면 이 이미지 모델을 레퍼런스 Agent에
-              적용합니다. 이미지 모델 설정 창의 저장만으로는 Agent 설정이
-              완료되지 않습니다.
-            </Text>
+            <Select
+              label="이미지 생성 모델"
+              placeholder="이미지 모델 선택"
+              description="이 Agent에서 사용할 이미지 모델을 선택하세요. 하단 설정 저장으로 지침과 함께 적용합니다."
+              withAsterisk
+              searchable
+              allowDeselect={false}
+              data={imageOptions}
+              disabled={
+                models.isPending ||
+                !!models.error ||
+                save.isPending ||
+                reload.isPending
+              }
+              key={form.key("generationAiModelId")}
+              {...form.getInputProps("generationAiModelId")}
+            />
             {initial.generation ? (
-              <Text size="sm">
-                현재 Agent에 적용: {initial.generation.provider} /{" "}
-                {initial.generation.effectiveModel} · 버전{" "}
-                {initial.generation.revision}
+              <Text size="sm" c="dimmed">
+                현재 적용: {initial.generation.provider} /{" "}
+                {initial.generation.effectiveModel}
               </Text>
-            ) : (
-              <Text size="sm" c="attention.8">
-                레퍼런스 Agent에는 아직 적용되지 않았습니다.
-              </Text>
-            )}
-            {onConfigureGeneration ? (
-              <Button variant="default" onClick={onConfigureGeneration}>
-                이미지 생성 모델 설정
-              </Button>
             ) : null}
+            <Group>
+              <Button
+                type="submit"
+                loading={save.isPending}
+                disabled={
+                  reload.isPending || models.isPending || !!models.error
+                }
+              >
+                이미지 모델과 설정 저장
+              </Button>
+              {onManageModels ? (
+                <Button variant="default" onClick={onManageModels}>
+                  모델 등록·관리
+                </Button>
+              ) : null}
+            </Group>
           </Stack>
         </Paper>
         {save.error ? (
@@ -360,11 +395,7 @@ function ReferenceSettings({
                 <Button
                   key={field}
                   variant="default"
-                  onClick={() =>
-                    field === "generation"
-                      ? onConfigureGeneration?.()
-                      : form.getInputNode(field)?.focus()
-                  }
+                  onClick={() => form.getInputNode(field)?.focus()}
                 >
                   {field.startsWith("stages.")
                     ? `${labels[field.split(".")[1] as ReferenceStage]}: ${message}`

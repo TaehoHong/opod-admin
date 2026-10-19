@@ -191,7 +191,14 @@ export class GenerationService {
         prompt: shot.prompt,
         paramsJson: {
           _referenceAgent: snapshot,
-          _postAgent: { promptId: shot.generation.id },
+          _postAgent:
+            shot.generation.source === "model"
+              ? {
+                  aiModelId: shot.generation.aiModelId,
+                  provider: shot.generation.provider,
+                  model: shot.generation.effectiveModel,
+                }
+              : { promptId: shot.generation.id },
         },
       };
     });

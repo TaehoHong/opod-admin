@@ -12,12 +12,13 @@ export type ReferenceAgentStageConfig = {
   outputSchema: Record<string, unknown>;
 };
 export type ReferenceAgentGenerationConfig = {
-  id: string;
-  revision: number;
   aiModelId: string;
   provider: string;
   effectiveModel: string;
-};
+} & (
+  | { source: "model"; id?: never; revision?: never }
+  | { source?: undefined; id: string; revision: number }
+);
 export type ReferenceAgentConfig = {
   revision: string | null;
   selection: { batchSize: 12; maxAttempts: number };

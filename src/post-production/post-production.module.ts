@@ -1,3 +1,5 @@
+import { AiModelsModule } from "../ai-models/ai-models.module";
+import { AiModelService } from "../ai-models/ai-model.service";
 import { DraftsModule } from "../drafts/drafts.module";
 import { DraftsService } from "../drafts/drafts.service";
 import { GenerationModule } from "../generation/generation.module";
@@ -59,6 +61,7 @@ function storageEnv(config: S3Config | undefined) {
 // 두지 않는다 — 추후 별도 이미지 분리 시 엔트리포인트만 추가하면 되는 구조 유지.
 @Module({
   imports: [
+    AiModelsModule,
     CharactersModule,
     DraftsModule,
     GenerationModule,
@@ -222,6 +225,7 @@ function storageEnv(config: S3Config | undefined) {
         llmLogs: LlmLogService,
         config: AppConfigService,
         agentPrompts: PostAgentPromptService,
+        models: AiModelService,
       ) =>
         new GenerationWorkerService(
           jobs,
@@ -231,18 +235,28 @@ function storageEnv(config: S3Config | undefined) {
             frozen?: ReferenceAgentGenerationConfig,
           ) => {
             if (frozen) {
-              const version = await agentPrompts.getVersion(
-                "generation",
-                frozen.id,
-              );
-              if (
-                !version ||
-                version.revision !== frozen.revision ||
-                version.aiModelId !== frozen.aiModelId ||
-                version.provider !== frozen.provider ||
-                version.effectiveModel !== frozen.effectiveModel
-              )
-                throw new Error("reference_generation_config_changed");
+              if (frozen.source === "model") {
+                const model = await models.get(frozen.aiModelId);
+                if (
+                  model.type !== "image" ||
+                  model.provider !== frozen.provider ||
+                  model.model !== frozen.effectiveModel
+                )
+                  throw new Error("reference_generation_config_changed");
+              } else {
+                const version = await agentPrompts.getVersion(
+                  "generation",
+                  frozen.id,
+                );
+                if (
+                  !version ||
+                  version.revision !== frozen.revision ||
+                  version.aiModelId !== frozen.aiModelId ||
+                  version.provider !== frozen.provider ||
+                  version.effectiveModel !== frozen.effectiveModel
+                )
+                  throw new Error("reference_generation_config_changed");
+              }
               return resolveImageGenerationProviders(
                 await settings.resolveImageModelSettings(
                   frozen.provider,
@@ -298,6 +312,7 @@ function storageEnv(config: S3Config | undefined) {
         LlmLogService,
         AppConfigService,
         PostAgentPromptService,
+        AiModelService,
       ],
     },
     {

@@ -14,6 +14,7 @@ import {
   REFERENCE_AGENT_STAGES,
   ReferenceAgentStage,
   ReferenceAgentStageConfig,
+  ReferenceAgentGenerationConfig,
 } from "../post-production/reference-agent-config";
 import { BadRequestException } from "@nestjs/common";
 import { NATURAL_AGENT_STARTERS } from "../../prompts/natural-post-agent";
@@ -96,6 +97,10 @@ export class PostGenerationAgentsController {
   @Post("reference/config") async saveReferenceConfig(
     @Body() body: SaveReferenceAgentDto,
   ) {
+    if (body.stages === undefined && body.generationAiModelId !== undefined)
+      throw new BadRequestException(
+        "이미지 모델은 단계 설정과 함께 저장하세요.",
+      );
     if (body.stages === undefined)
       return this.settings.saveReferenceAgentSettings(
         body.maxAttempts,
@@ -120,14 +125,34 @@ export class PostGenerationAgentsController {
       throw new BadRequestException(
         "레퍼런스 Agent의 모든 단계 지침과 모델을 입력하세요.",
       );
-    const generation = await this.prompts.execution("generation");
-    if (
-      !generation?.id ||
-      !generation.aiModelId ||
-      !generation.provider ||
-      !generation.effectiveModel
-    )
-      throw new BadRequestException("이미지 생성 모델을 먼저 저장하세요.");
+    let generation: ReferenceAgentGenerationConfig;
+    if (body.generationAiModelId !== undefined) {
+      const model = await this.models.get(body.generationAiModelId);
+      if (model.type !== "image")
+        throw new BadRequestException("이미지 생성 모델을 선택하세요.");
+      generation = {
+        source: "model",
+        aiModelId: model.id,
+        provider: model.provider,
+        effectiveModel: model.model,
+      };
+    } else {
+      const shared = await this.prompts.execution("generation");
+      if (
+        !shared?.id ||
+        !shared.aiModelId ||
+        !shared.provider ||
+        !shared.effectiveModel
+      )
+        throw new BadRequestException("이미지 생성 모델을 선택하세요.");
+      generation = {
+        id: shared.id,
+        revision: shared.revision,
+        aiModelId: shared.aiModelId,
+        provider: shared.provider,
+        effectiveModel: shared.effectiveModel,
+      };
+    }
     const schemas = {
       reference_select: REFERENCE_SELECTION_JSON_SCHEMA,
       image_prompt: REFERENCE_IMAGE_PROMPT_JSON_SCHEMA,
@@ -164,13 +189,7 @@ export class PostGenerationAgentsController {
           ReferenceAgentStage,
           ReferenceAgentStageConfig
         >,
-        generation: {
-          id: generation.id,
-          revision: generation.revision,
-          aiModelId: generation.aiModelId,
-          provider: generation.provider,
-          effectiveModel: generation.effectiveModel,
-        },
+        generation,
       },
     );
   }

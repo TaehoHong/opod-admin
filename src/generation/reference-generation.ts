@@ -50,11 +50,12 @@ export function freezeReferenceShot(
     !shot.prompt.trim() ||
     !Number.isInteger(shot.sortOrder) ||
     shot.sortOrder < 0 ||
-    !shot.generation.id ||
+    (shot.generation.source !== "model" && !shot.generation.id) ||
     !shot.generation.aiModelId ||
     !shot.generation.provider ||
     !shot.generation.effectiveModel ||
-    !Number.isInteger(shot.generation.revision) ||
+    (shot.generation.source !== "model" &&
+      !Number.isInteger(shot.generation.revision)) ||
     !isRecord(shot.generationParams) ||
     typeof shot.generationParams.aspect_ratio !== "string" ||
     !shot.generationParams.aspect_ratio.trim() ||
@@ -125,8 +126,9 @@ export function freezeReferenceShot(
     negativePrompt: shot.negativePrompt,
     references,
     generation: {
-      id: shot.generation.id,
-      revision: shot.generation.revision,
+      ...(shot.generation.source === "model"
+        ? { source: "model" as const }
+        : { id: shot.generation.id, revision: shot.generation.revision }),
       aiModelId: shot.generation.aiModelId,
       provider: shot.generation.provider,
       effectiveModel: shot.generation.effectiveModel,

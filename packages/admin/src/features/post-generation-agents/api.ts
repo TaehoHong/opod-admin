@@ -144,8 +144,9 @@ export type ReferenceConfig = {
     }
   >;
   generation?: {
-    id: string;
-    revision: number;
+    source?: "model";
+    id?: string;
+    revision?: number;
     aiModelId: string;
     provider: string;
     effectiveModel: string;
@@ -159,6 +160,7 @@ export const saveReferenceAgent = (body: {
   expectedRevision: string | null;
   maxAttempts: number;
   stages?: Record<ReferenceStage, ReferenceStageInput>;
+  generationAiModelId?: string;
 }) =>
   apiRequest<ReferenceConfig>("/post-generation-agents/reference/config", {
     method: "POST",

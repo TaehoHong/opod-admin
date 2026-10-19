@@ -146,7 +146,7 @@ export function PostAgentsPage() {
             <ReferenceAgentPanel
               generation={generation}
               onDirtyChange={setReferenceDirty}
-              onConfigureGeneration={() => setGenerationOpen(true)}
+              onManageModels={() => setModelManager(true)}
             />
           </Tabs.Panel>
         </Tabs>

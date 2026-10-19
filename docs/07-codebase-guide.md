@@ -87,7 +87,7 @@ agentConfig가 적용 설정을 기록한다. 기존 metadata 없는 잡은 기�
 추가할 때 React route와 서버의 허용 경로를 함께 반영한다.
 기존 Mantine theme/DataPage를 사용하고 활성 Agent 번들 편집, 모델 등록·선택,
 읽기 전용 출력 규격, 공통 generation 이력 조회·복원, 미설정 표시와 입력 임시 보관/전환 보호,
-409에서 최신값 확인 후 입력 유지 재편집을 제공한다. 레퍼런스 탭은 공통 generation과 Agent에 고정된 모델을 구분해 표시하며, 탐색 횟수만 저장할 때도 미저장 단계 입력의 dirty 기준을 유지한다.
+409에서 최신값 확인 후 입력 유지 재편집을 제공한다. 레퍼런스 탭은 이미지 모델을 직접 선택해 지침과 함께 저장하며, 탐색 횟수만 저장할 때도 미저장 단계 입력의 dirty 기준을 유지한다.
 회귀 owner는 `test/post-generation-agents.e2e-spec.ts`,
 `post-pipeline-v3.runner.spec.ts`, `generation-worker.service.spec.ts`,
 `generation-settings.service.spec.ts`, `PostAgentsPage.test.tsx`이며
@@ -792,8 +792,11 @@ Agent가 원본 1~3장과 이유를 결정한다. 게시된 동일 캐릭터의 
 `GenerationSettingsService`가 `postAgent.reference-v1`의 설정과 원문 CAS를 소유한다.
 `GET/POST post-generation-agents/reference/config`에서 선택 횟수와 세 LLM 단계
 (`reference_select`, `image_prompt`, `caption`)의 지침·모델을 저장한다. 코드 starter는
-명시적 설치용이며 실행 fallback이 아니다. 이미지 모델은 공통 generation 저장 버전을
-설정 저장 시 복사한다. 초안 생성은 명시적 reference 선택과 완전한 설정을 요구하며
+명시적 설치용이며 실행 fallback이 아니다. UI는 generationAiModelId를 단계 설정과
+함께 보내며 서버가 이미지 유형을 검증해 source=model snapshot으로 같은 설정 CAS에
+저장한다. 공통 generation 버전을 변경하지 않는다. GenerationWorkerService 조립부는
+AiModelService를 통해 선택 모델을 검증한다. 이전 공통 generation ID·revision을
+고정한 작업은 PostAgentPromptService의 버전 조회·검증을 유지한다. 초안 생성은 명시적 reference 선택과 완전한 설정을 요구하며
 `referenceAgentConfig` 전체를 고정한다. 계약은 [Agent 관리 API](api/admin-post-generation-agents.md)에 기록한다.
 
 이미지 프롬프트는 원본과 캐릭터 정체성 픽셀·SHA·역할·모델별 label 순서를 보존한다.

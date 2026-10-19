@@ -418,7 +418,7 @@ export class GenerationSettingsService {
           !isRecord(value.outputSchema)
         );
       }) ||
-      !config.generation.id ||
+      (config.generation.source !== "model" && !config.generation.id) ||
       !config.generation.aiModelId ||
       !config.generation.provider ||
       !config.generation.effectiveModel

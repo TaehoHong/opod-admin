@@ -101,9 +101,11 @@ snapshot을 실행한다. 기존 LLM 단계 설정으로 fallback하지 않는�
   stages가 있으면 `reference_select`, `image_prompt`, `caption`을 모두 전달하며
   각 값은 `{ aiModelId, systemPrompt }`다. 모델은 LLM이어야 하고 지침은 비공백
   50,000자 이하다. outputSchema/provider/model은 서버가 모델 목록·고정 parser 계약으로 정한다.
-- 단계 설정 저장에는 공통 `generation`의 저장 모델 버전이 필요하다. 해당 버전의
-  `{ id, revision, aiModelId, provider, effectiveModel }`을 reference 설정에 복사한다.
-  stages를 생략하면 탐색 횟수만 변경하고 이미 저장한 단계·이미지 모델을 보존한다.
+- UI는 stages와 함께 `generationAiModelId`를 전달한다. 서버는 이미지 모델 유형을
+  검증하고 `{ source: "model", aiModelId, provider, effectiveModel }`을 같은 reference
+  설정 CAS에 저장한다. 공통 generation 버전을 만들거나 변경하지 않는다.
+  이전 클라이언트가 이 필드를 생략하면 기존 공통 generation 버전을 복사하는 계약을
+  유지한다. stages를 생략하면 탐색 횟수만 변경하며, 이때 generationAiModelId는 받지 않는다.
 - 저장 결과는 새 UUID revision과 `selection`, 선택적 `stages`, `generation`이다.
   stale revision이나 최초 저장 경쟁은 원문 compare-and-set으로 HTTP 409다.
   잘못된 횟수·모델·지침·누락 단계는 400이다. 키·URL은 반환하지 않는다.
@@ -133,10 +135,13 @@ queued/running 이미지 잡, 게시/거절된 초안은 거부한다. `referenc
 
 ### 관리 화면의 저장 구분
 
-레퍼런스 탭은 공통 이미지 모델의 현재 버전과 해당 Agent에 고정된 버전을 함께
-표시한다. 공통 모델 설정 저장 후 레퍼런스 설정을 저장해야 신규 reference 초안에
-그 버전이 적용된다. 단계 모델·지침 누락은 저장 버튼 근처 오류 요약에서 해당 입력으로
-이동할 수 있다. 탐색 횟수만 저장하거나 최신 설정을 확인해도 편집 중인 단계 값은
-유지하며, 단계 저장은 최신 확인한 revision을 기준으로 수행한다.
-이미지 모델 선택을 바꾸면 이전 모델명 override를 비우고, 변경 없는 공통 설정의
-저장 버튼은 비활성화한다.
+레퍼런스 탭의 이미지 생성 모델 영역에서 이미지 모델을 직접 선택하고
+`이미지 모델과 설정 저장`을 누르면 지침·단계 모델·이미지 모델이 한 요청으로 저장된다.
+하단 `설정 저장`도 같은 요청을 사용한다. 저장한 모델은 신규 작업에 고정되며,
+기존 공통 generation 버전으로 만든 작업은 이전 버전 조회·검증 경로를 유지한다.
+새 선택은 AiModelService에서 고정된 ID·유형·공급자·모델명을 확인한 뒤 실행한다.
+단계 모델·지침 누락은 저장 버튼 근처 오류 요약에서 해당 입력으로 이동할 수 있다.
+탐색 횟수만 저장하거나 최신 설정을 확인해도 편집 중인 단계 값은 유지하며,
+단계 저장은 최신 확인한 revision을 기준으로 수행한다.
+공통 이미지 모델 편집기에서 모델을 바꾸면 이전 override를 비우며, 변경 없는
+공통 설정은 새 이력을 추가하지 않는다.

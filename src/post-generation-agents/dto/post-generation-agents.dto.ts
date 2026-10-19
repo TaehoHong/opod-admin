@@ -60,5 +60,9 @@ export class SaveReferenceAgentDto {
   @IsString()
   expectedRevision!: string | null;
   @IsInt() @Min(1) @Max(3) maxAttempts!: number;
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @Matches(/^[1-9][0-9]*$/)
+  generationAiModelId?: string;
   @ValidateIf(() => false) stages?: unknown;
 }
