@@ -206,6 +206,8 @@ function shotMeta(paramsJson: unknown): ShotMeta {
   if (typeof paramsJson !== "object" || paramsJson === null) {
     return { present: false };
   }
+  // Reference jobs use their frozen source/identity bindings; their labels are not media UUIDs.
+  if ("_referenceAgent" in paramsJson) return { present: false };
   const shot = (paramsJson as Record<string, unknown>)._shot;
   if (typeof shot !== "object" || shot === null) {
     return { present: false };

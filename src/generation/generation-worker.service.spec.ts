@@ -1800,9 +1800,42 @@ describe("frozen reference image execution", () => {
     );
     expect(repository.persistSuccess).toHaveBeenCalledTimes(1);
     expect(
+      repository.recordProviderSubmission.mock.calls[0][0].paramsJson._shot
+        .execution,
+    ).toEqual({
+      route: "edit",
+      referenceIds: ["30000000001", "03cbf3d9-dca6-4bc8-b2f4-416dc3c98e9f"],
+      referenceMediaIds: ["03cbf3d9-dca6-4bc8-b2f4-416dc3c98e9f"],
+      outputAspectRatio: 0.8,
+    });
+    expect(
       repository.recordProviderSubmission.mock.calls[0][0].paramsJson
         ._referenceAgent.prompt,
     ).toBe(snapshot().prompt);
+  });
+
+  it("persists ordered logical reference IDs separately from database media IDs", async () => {
+    const metadata = snapshot();
+    metadata.references[0].id = "SOURCE_1";
+    metadata.references[1].id = "CHARACTER_1";
+    const { repository, provider, service } = setup(metadata);
+    await service.runJobNow("job-1");
+    await service.onModuleDestroy();
+    expect(
+      provider.submit.mock.calls[0][0].references.map(
+        (reference: { id: string }) => reference.id,
+      ),
+    ).toEqual(["SOURCE_1", "CHARACTER_1"]);
+    expect(
+      repository.recordProviderSubmission.mock.calls[0][0].paramsJson._shot
+        .execution,
+    ).toEqual({
+      route: "edit",
+      referenceIds: ["SOURCE_1", "CHARACTER_1"],
+      referenceMediaIds: [],
+      outputAspectRatio: 0.8,
+    });
+    expect(repository.persistSuccess).toHaveBeenCalledTimes(1);
   });
 
   it("resumes an existing provider request without another paid submission", async () => {

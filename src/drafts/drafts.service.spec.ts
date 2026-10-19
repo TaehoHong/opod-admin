@@ -329,6 +329,56 @@ describe("DraftsService", () => {
     });
   });
 
+  it.each([
+    { referenceMediaIds: ["SOURCE_1", "CHARACTER_1", "CHARACTER_2"] },
+    { referenceMediaIds: [], referenceIds: ["SOURCE_1", "CHARACTER_1"] },
+  ])(
+    "reads saved reference outputs without resolving logical IDs as media UUIDs: %j",
+    async (execution) => {
+      const repository = repositoryFake({
+        findDraft: jest.fn().mockResolvedValue({
+          ...draftRow,
+          conceptJson: {
+            postGenerationAgent: "reference-v1",
+            generationBuild: { jobIds: [selectedJob.id] },
+          },
+        }),
+        findDraftJobs: jest.fn().mockResolvedValue([
+          {
+            ...selectedJob,
+            paramsJson: {
+              _referenceAgent: {
+                references: [{ id: "SOURCE_1", role: "source" }],
+              },
+              _shot: { execution: { route: "edit", ...execution } },
+            },
+          },
+        ]),
+        findMediaUrls: jest
+          .fn()
+          .mockRejectedValue(new Error("invalid input syntax for type uuid")),
+      });
+
+      const result = await makeService(repository).getDraft(draftRow.id);
+
+      expect(result.shots).toMatchObject([
+        {
+          jobId: "job-1",
+          status: "completed",
+          outputs: [
+            {
+              mediaId: "media-1",
+              url: "https://cdn.local/a.png",
+              selected: true,
+            },
+          ],
+        },
+      ]);
+      expect(result.shots?.[0].generationTrace).toBeUndefined();
+      expect(repository.findMediaUrls).not.toHaveBeenCalled();
+    },
+  );
+
   it("returns live provider progress for a running draft shot", async () => {
     const repository = repositoryFake({
       findDraft: jest.fn().mockResolvedValue(draftRow),

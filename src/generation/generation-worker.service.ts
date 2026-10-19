@@ -89,6 +89,7 @@ function v3Metadata(paramsJson: unknown): Record<string, unknown> | null {
 type ShotExecution = {
   route: "t2i" | "edit";
   referenceMediaIds: string[];
+  referenceIds?: string[];
   outputAspectRatio: number | null;
 };
 
@@ -439,12 +440,15 @@ export class GenerationWorkerService implements OnModuleInit, OnModuleDestroy {
       requestId = submitted.requestId;
       job.providerRequestId = requestId;
       job.provider = provider.name;
-      const referenceMediaIds = request.references.map(
-        (reference) => reference.id,
-      );
+      const referenceIds = request.references.map((reference) => reference.id);
       const paramsJson = withShotExecution(job.paramsJson, {
-        route: referenceMediaIds.length > 0 ? "edit" : "t2i",
-        referenceMediaIds,
+        route: request.references.length > 0 ? "edit" : "t2i",
+        ...(referenceGenerationMetadata(job.paramsJson)
+          ? {
+              referenceIds,
+              referenceMediaIds: this.requestInputMediaIds.get(request) ?? [],
+            }
+          : { referenceMediaIds: referenceIds }),
         outputAspectRatio: requestedImageAspectRatio(request.extraParams),
       });
       job.paramsJson = paramsJson;

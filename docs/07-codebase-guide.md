@@ -821,7 +821,12 @@ AiModelService를 통해 선택 모델을 검증한다. 이전 공통 generation
 `GenerationService.ensureReferenceDraftJobs`가 prompt revision별 컷 잡을 재사용하고
 `_referenceAgent` snapshot에 prompt/negative·참조·모델·생성 파라미터를 고정한다.
 worker는 현재 프로필로 입력을 다시 만들지 않고 snapshot을 검증하며, 저장된 외부
-provider ID로 이어서 조회한다. negative 전용 필드가 없는 모델은 해당 provider가 본문에
+provider ID로 이어서 조회한다. reference 실행 기록은 논리 참조 이름을 `_shot.execution.referenceIds`에 저장하고,
+`referenceMediaIds`에는 실제 media UUID만 둔다. `DraftsService`는 `_referenceAgent` 잡을 기존
+UUID 참조 표시 경로에서 제외하고 전용 artifact로 표시하므로, 옛 실행 기록에 `SOURCE_1` 등의
+이름이 referenceMediaIds에 남아 있어도 저장된 결과를 재생성 없이 조회한다.
+회귀는 drafts.service.spec.ts와 generation-worker.service.spec.ts가 보호한다.
+negative 전용 필드가 없는 모델은 해당 provider가 본문에
 병합하며 원래 prompt/negative와 전송 요청은 로그에서 구분한다. `reference-post-artifacts.ts`의 `currentReferenceOutputs`가 현재 잡 ID 집합·shotId·
 prompt revision과 단일 선택 완료 출력을 함께 검사한다. 맞는 출력만 캡션으로 넘기며
 실패 컷 재시도가 완료 컷을 새로 만들지 않는다.
