@@ -92,6 +92,16 @@ describe("reference Agent settings HTTP contract", () => {
     expect(initial.body).toMatchObject({
       current: { revision: null, selection: { batchSize: 12, maxAttempts: 1 } },
     });
+    const selectionStarter =
+      initial.body.starters.reference_select.systemPrompt;
+    expect(selectionStarter).toContain(
+      "너는 캐릭터 SNS 게시물의 참조 이미지를 선택하는 Agent다.",
+    );
+    expect(selectionStarter).toContain("생성 컷 수 범위: 1~3장");
+    expect(selectionStarter).toContain(
+      "장소, 포즈, 구도, 의상, 분위기가 반복된다는 이유로 감점하지 않는다.",
+    );
+    expect(selectionStarter).not.toContain("character_influencers");
     expect(values.size).toBe(0);
     values.set("postAgent.natural-v1", "preserved");
     const saved = await request(app.getHttpServer())
