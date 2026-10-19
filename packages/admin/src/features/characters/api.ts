@@ -73,14 +73,12 @@ export type CharacterReferenceLink = {
   id: string;
   characterId: string;
   url: string;
-  createdAt: string;
-  updatedAt: string;
 };
 
 export function fetchCharacterReferenceLinks(
   characterId: string,
 ): Promise<CharacterReferenceLink[]> {
-  return apiRequest(`${characterPath(characterId)}/reference-links`);
+  return apiRequest(`${characterPath(characterId)}/influencers`);
 }
 
 export type CharacterReferenceDirectoryItem = Pick<
@@ -106,7 +104,7 @@ export function saveCharacterReferenceLink(
   linkId?: string,
 ): Promise<CharacterReferenceLink> {
   return apiRequest(
-    `${characterPath(characterId)}/reference-links${linkId ? `/${encodeURIComponent(linkId)}` : ""}`,
+    `${characterPath(characterId)}/influencers${linkId ? `/${encodeURIComponent(linkId)}` : ""}`,
     {
       method: linkId ? "PATCH" : "POST",
       body: { url },
@@ -119,7 +117,7 @@ export function deleteCharacterReferenceLink(
   linkId: string,
 ): Promise<{ id: string }> {
   return apiRequest(
-    `${characterPath(characterId)}/reference-links/${encodeURIComponent(linkId)}`,
+    `${characterPath(characterId)}/influencers/${encodeURIComponent(linkId)}`,
     { method: "DELETE" },
   );
 }

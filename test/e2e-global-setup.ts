@@ -121,6 +121,22 @@ export default async function globalSetup(): Promise<void> {
           "utf8",
         ),
       );
+      await client.query("BEGIN");
+      try {
+        await client.query(
+          readFileSync(
+            join(
+              __dirname,
+              "../../opod-service-backend/drizzle/20261019042242_influencers/migration.sql",
+            ),
+            "utf8",
+          ),
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      }
     } finally {
       await client.end();
     }

@@ -779,31 +779,62 @@ export const characterPersonaCanonLinks = opod.table(
   ],
 );
 
-export const characterReferenceLinks = opod.table(
-  "character_reference_links",
+export const influencers = opod.table(
+  "influencers",
   {
-    // Reference links use BIGINT identity by explicit product decision.
     id: bigint({ mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
-    characterId: uuid("character_id")
-      .notNull()
-      .references(() => characters.id, {
-        name: "character_reference_links_character_id_fkey",
-        onDelete: "cascade",
-        onUpdate: "cascade",
-      }),
+    platform: text().notNull(),
+    username: text().notNull(),
     url: text().notNull(),
-    createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp("updated_at", { precision: 6, withTimezone: true })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull()
-      .$onUpdateFn(() => new Date()),
   },
   (table) => [
-    uniqueIndex("character_reference_links_character_url_key").on(
-      table.characterId,
-      table.url,
+    uniqueIndex("influencers_platform_username_key").on(
+      table.platform,
+      table.username,
+    ),
+  ],
+);
+
+export const characterInfluencers = opod.table(
+  "character_influencers",
+  {
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    influencerId: bigint("influencer_id", { mode: "bigint" })
+      .notNull()
+      .references(() => influencers.id, { onDelete: "restrict" }),
+  },
+  (table) => [primaryKey({ columns: [table.characterId, table.influencerId] })],
+);
+
+export const influencerMedia = opod.table(
+  "influencer_media",
+  {
+    id: bigint({ mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
+    influencerId: bigint("influencer_id", { mode: "bigint" })
+      .notNull()
+      .references(() => influencers.id, { onDelete: "restrict" }),
+    postId: text("post_id").notNull(),
+    postUrl: text("post_url").notNull(),
+    slideIndex: integer("slide_index").notNull(),
+    assetType: text("asset_type").notNull(),
+    mediaKey: text("media_key").notNull(),
+    sha256: text().notNull(),
+    analysis: jsonb().$type<Record<string, string | number | null>>(),
+    analysisModel: text("analysis_model"),
+    analysisVersion: text("analysis_version"),
+    embedding: vector({ dimensions: 1024 }),
+    embeddingModel: text("embedding_model"),
+    createdAt: timestamp("created_at", { precision: 6, withTimezone: true })
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("influencer_media_source_key").on(
+      table.influencerId,
+      table.postId,
+      table.slideIndex,
     ),
   ],
 );

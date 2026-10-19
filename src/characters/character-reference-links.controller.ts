@@ -13,7 +13,7 @@ import { AdminJwtGuard } from "../auth/admin-jwt.guard";
 import { CharacterReferenceLinkService } from "./character-reference-link.service";
 import { SaveCharacterReferenceLinkDto } from "./dto/save-character-reference-link.dto";
 
-@Controller("api/admin/v1/characters/:characterId/reference-links")
+@Controller("api/admin/v1/characters/:characterId/influencers")
 @UseGuards(AdminJwtGuard)
 export class CharacterReferenceLinksController {
   constructor(private readonly links: CharacterReferenceLinkService) {}

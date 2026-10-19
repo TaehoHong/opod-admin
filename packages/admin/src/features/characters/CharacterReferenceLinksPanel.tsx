@@ -234,6 +234,7 @@ function ReferenceLinkForm({
           autoFocus
           label="참조 URL"
           placeholder="https://www.instagram.com/account/"
+          description="Instagram 계정 프로필 링크를 입력하세요. 삭제하면 이 캐릭터의 연결만 해제됩니다."
           key={form.key("url")}
           {...form.getInputProps("url")}
         />

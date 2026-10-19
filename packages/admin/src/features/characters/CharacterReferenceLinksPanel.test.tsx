@@ -6,13 +6,11 @@ import { server } from "../../test/server";
 import { CharacterReferenceLinksPanel } from "./CharacterReferenceLinksPanel";
 import type { CharacterReferenceLink } from "./api";
 
-const endpoint = "/api/admin/v1/characters/:characterId/reference-links";
+const endpoint = "/api/admin/v1/characters/:characterId/influencers";
 const initial: CharacterReferenceLink = {
   id: "9007199254740993",
   characterId: "character-1",
-  url: "https://example.com/motif",
-  createdAt: "2026-10-19T00:00:00.000Z",
-  updatedAt: "2026-10-19T00:00:00.000Z",
+  url: "https://www.instagram.com/example/",
 };
 
 describe("character reference link editor", () => {
@@ -58,10 +56,10 @@ describe("character reference link editor", () => {
     await userEvent.click(screen.getByRole("button", { name: "수정" }));
     const input = screen.getByRole("textbox", { name: "참조 URL" });
     await userEvent.clear(input);
-    await userEvent.type(input, "https://example.org/updated");
+    await userEvent.type(input, "https://www.instagram.com/updated/");
     await userEvent.click(screen.getByRole("button", { name: "저장" }));
     await screen.findByRole("link", {
-      name: "https://example.org/updated 새 탭에서 열기",
+      name: "https://www.instagram.com/updated/ 새 탭에서 열기",
     });
     await userEvent.click(screen.getByRole("button", { name: "삭제" }));
     await screen.findByText("참조 링크를 삭제했습니다.");

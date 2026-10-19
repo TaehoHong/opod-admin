@@ -8,7 +8,8 @@ import { ADMIN_REQUEST_HEADER } from "../src/auth/admin-session";
 import { DatabaseService } from "../src/core/database/database.service";
 import {
   characters,
-  characterReferenceLinks,
+  characterInfluencers,
+  influencers,
 } from "../src/core/database/schema";
 
 describe("SNS reference directory with 125 characters", () => {
@@ -45,10 +46,30 @@ describe("SNS reference directory with 125 characters", () => {
     };
     const db = app.get(DatabaseService);
     await db.client.insert(characters).values(fixtures);
-    await db.client.insert(characterReferenceLinks).values([
-      { characterId: fixtures[0].id, url: "https://example.com/last" },
-      { characterId: fixtures[0].id, url: "https://example.org/second" },
-      { characterId: fixtures[124].id, url: "https://example.com/first" },
+    const accounts = await db.client
+      .insert(influencers)
+      .values([
+        {
+          platform: "instagram",
+          username: "directory_last",
+          url: "https://www.instagram.com/directory_last/",
+        },
+        {
+          platform: "instagram",
+          username: "directory_second",
+          url: "https://www.instagram.com/directory_second/",
+        },
+        {
+          platform: "instagram",
+          username: "directory_first",
+          url: "https://www.instagram.com/directory_first/",
+        },
+      ])
+      .returning();
+    await db.client.insert(characterInfluencers).values([
+      { characterId: fixtures[0].id, influencerId: accounts[0].id },
+      { characterId: fixtures[0].id, influencerId: accounts[1].id },
+      { characterId: fixtures[124].id, influencerId: accounts[2].id },
     ]);
   });
 
@@ -76,7 +97,7 @@ describe("SNS reference directory with 125 characters", () => {
     expect(first.body.items).toHaveLength(20);
     expect(first.body.items[0].id).toBe(fixtures[124].id);
     expect(first.body.items[0].referenceLinks[0].url).toBe(
-      "https://example.com/first",
+      "https://www.instagram.com/directory_first/",
     );
     const second = await request(app.getHttpServer())
       .get(endpoint)
@@ -98,7 +119,10 @@ describe("SNS reference directory with 125 characters", () => {
       found.body.items[0].referenceLinks.map(
         (link: { url: string }) => link.url,
       ),
-    ).toEqual(["https://example.com/last", "https://example.org/second"]);
+    ).toEqual([
+      "https://www.instagram.com/directory_last/",
+      "https://www.instagram.com/directory_second/",
+    ]);
     expect(found.body.nextCursor).toBeUndefined();
     const handle = await request(app.getHttpServer())
       .get(endpoint)

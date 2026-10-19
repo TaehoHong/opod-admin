@@ -1,100 +1,60 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { parseBigintId } from "../shared/utils/bigint-id";
+import { InfluencerService } from "../influencers/influencer.service";
+import { CharacterInfluencerService } from "../influencers/character-influencer.service";
 import { CharacterService } from "./character.service";
-import {
-  CharacterReferenceLinkRepository,
-  CharacterReferenceLinkRow,
-} from "./character-reference-link.repository";
 
 @Injectable()
 export class CharacterReferenceLinkService {
   constructor(
-    private readonly links: CharacterReferenceLinkRepository,
+    private readonly influencers: InfluencerService,
+    private readonly mappings: CharacterInfluencerService,
     private readonly characters: CharacterService,
   ) {}
-
   async list(characterId: string) {
     await this.characters.requireActivityCharacter(characterId);
-    return (await this.links.list(characterId)).map(toLink);
+    return this.listForCharacters([characterId]);
   }
-
+  async listForCharacters(characterIds: string[]) {
+    const mappings = await this.mappings.list(characterIds);
+    const accounts = new Map(
+      (
+        await this.influencers.byIds(mappings.map((row) => row.influencerId))
+      ).map((row) => [String(row.id), row]),
+    );
+    return mappings
+      .map((mapping) => ({
+        ...accounts.get(String(mapping.influencerId))!,
+        id: String(mapping.influencerId),
+        characterId: mapping.characterId,
+      }))
+      .sort((a, b) =>
+        BigInt(a.id) < BigInt(b.id) ? -1 : BigInt(a.id) > BigInt(b.id) ? 1 : 0,
+      );
+  }
   async create(characterId: string, url: string) {
     await this.characters.requireActivityCharacter(characterId);
-    return this.handleDuplicate(async () =>
-      toLink(await this.links.create(characterId, this.normalizeUrl(url))),
-    );
+    const account = await this.influencers.register(url);
+    await this.mappings.add(characterId, account.id);
+    return { ...account, id: String(account.id), characterId };
   }
-
-  async listForCharacters(characterIds: string[]) {
-    if (!characterIds.length) return [];
-    return (await this.links.listForCharacters(characterIds)).map(toLink);
-  }
-
   async update(characterId: string, linkId: string, url: string) {
-    const id = parseBigintId(linkId, "참조 링크 ID가 올바르지 않습니다.");
     await this.characters.requireActivityCharacter(characterId);
-    return this.handleDuplicate(async () => {
-      const row = await this.links.update(
-        characterId,
-        id,
-        this.normalizeUrl(url),
-      );
-      if (!row) throw new NotFoundException("참조 링크를 찾을 수 없습니다.");
-      return toLink(row);
-    });
-  }
-
-  async delete(characterId: string, linkId: string) {
-    const id = parseBigintId(linkId, "참조 링크 ID가 올바르지 않습니다.");
-    await this.characters.requireActivityCharacter(characterId);
-    const row = await this.links.delete(characterId, id);
-    if (!row) throw new NotFoundException("참조 링크를 찾을 수 없습니다.");
-    return { id: String(row.id) };
-  }
-
-  private normalizeUrl(value: string) {
-    try {
-      const url = new URL(value.trim());
-      if (
-        (url.protocol === "https:" || url.protocol === "http:") &&
-        !url.username &&
-        !url.password &&
-        url.href.length <= 2048
+    const oldId = parseBigintId(linkId, "Invalid influencer ID");
+    if (
+      !(await this.mappings.list([characterId])).some(
+        (row) => row.influencerId === oldId,
       )
-        return url.href;
-    } catch {
-      // Report the same input error for malformed and unsupported URLs.
-    }
-    throw new BadRequestException(
-      "2048자 이내의 HTTP 또는 HTTPS 주소를 입력해 주세요.",
-    );
+    )
+      throw new NotFoundException("Reference account not found");
+    const account = await this.influencers.register(url);
+    await this.mappings.replace(characterId, oldId, account.id);
+    return { ...account, id: String(account.id), characterId };
   }
-
-  private async handleDuplicate<T>(operation: () => Promise<T>): Promise<T> {
-    try {
-      return await operation();
-    } catch (error) {
-      let cause: unknown = error;
-      while (cause && typeof cause === "object") {
-        if ("code" in cause && cause.code === "23505")
-          throw new ConflictException("이미 등록된 참조 링크입니다.");
-        cause = "cause" in cause ? cause.cause : undefined;
-      }
-      throw error;
-    }
+  async delete(characterId: string, linkId: string) {
+    await this.characters.requireActivityCharacter(characterId);
+    const id = parseBigintId(linkId, "Invalid influencer ID");
+    await this.mappings.remove(characterId, id);
+    return { id: String(id) };
   }
-}
-
-function toLink(row: CharacterReferenceLinkRow) {
-  return {
-    ...row,
-    id: String(row.id),
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  };
 }

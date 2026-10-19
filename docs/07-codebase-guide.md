@@ -755,12 +755,12 @@ not change the output schema or frozen draft configuration.
 `assertNaturalPublishable`→`DraftWorkerService`다. 생략 기록과 재활성화 경계는
 [natural-post-agent.md](natural-post-agent.md)의 사진 검수 실행 스위치를 참고한다.
 
-## Character reference links
+## Influencer reference library
 
-- `characters/character-reference-link.repository.ts`만 `character_reference_links` 테이블에 접근하고, 소유 `CharacterReferenceLinkService`만 이 Repository를 주입한다. 캐릭터 존재 확인은 기존 `CharacterService.requireActivityCharacter`를 거친다.
-- `CharacterReferenceLinksController`가 `/api/admin/v1/characters/:characterId/reference-links`의 GET/POST/PATCH/DELETE를 소유한다. 소속 캐릭터와 링크 ID를 함께 조건으로 사용하고 중복 URL은 409, 미존재는 404, 잘못된 주소/ID는 400으로 반환한다.
-- 링크 ID는 사용자 확정 BIGINT IDENTITY이며 JSON은 문자열이다. `shared/utils/bigint-id.ts`의 `parseBigintId`를 기존 `aiConfigId`와 함께 사용한다. URL 정규화·HTTP(S)·길이·사용자정보 제외 검증은 링크 Service가 소유한다. URL DB CHECK는 없다.
-- UI는 `features/characters/CharacterReferenceLinksPanel.tsx`와 프로필 탭이 소유하며 기존 Mantine 폼·오류 표시와 `previewUrl`을 재사용한다. 새 탭 링크는 `noopener noreferrer`로 연다. 참조 URL은 관리자 관리용이며 기존 제작/대화 입력을 변경하지 않는다.
-- `features/characters/CharacterSnsPage.tsx`의 `/sns-references`는 서버 검색·등록 상태 필터와 20명 단위 페이지네이션을 사용하는 캐릭터 테이블이다. 행 클릭 또는 이름 링크로 `/sns-references/:characterId`의 `CharacterSnsDetailPage.tsx`에 진입한다. 검색 조건·cursor는 URL, 이전 cursor 이력은 route state로 상세와 목록 사이에 전달한다. 상세는 기존 `CharacterReferenceLinksPanel`을 재사용해 한 캐릭터의 모든 링크를 독립 항목으로 표시하고 추가·수정·삭제한다. 편집·저장 중에는 상세의 목록 이동 버튼을 비활성화한다. 상세 주소 직접 진입·새로고침은 기존 캐릭터 조회와 SPA 허용 경로를 사용한다. 프로필과 상세의 링크 변경은 directory query도 무효화한다. `CharacterSnsPage.test.tsx`가 행·키보드 진입, 복수 링크, 부모별 등록, 목록 복귀 시 검색·페이지 유지, 직접 진입을 검증한다.
-- `GET /api/admin/v1/character-reference-directory`는 `CharacterReferenceDirectoryController` → `CharacterReferenceDirectoryApplicationService` → `CharacterService` / `CharacterReferenceLinkService`로 조회한다. 기존 테이블 소유 Repository를 통해 이름·핸들 후보와 링크를 50명 단위로 읽고, 등록 상태를 적용한 뒤 cursor 페이지를 만든다. 캐릭터별 HTTP 조회와 게시물·팔로워 집계는 하지 않는다. 선택적 등록 상태 필터는 후보 batch를 순회할 수 있으므로 DB 호출 수가 항상 고정됐다는 뜻은 아니다. `test/character-reference-directory.e2e-spec.ts`가 125명 DB 데이터에서 검색·필터·페이지 경계·인증을 검증한다.
-- 정본 DDL은 backend의 `drizzle/20261019002237_character_reference_links/migration.sql`, admin schema는 mirror다. 회귀는 `test/character-reference-links.e2e-spec.ts`, `CharacterReferenceLinksPanel.test.tsx`의 영속화·캐릭터 격리·중복·인증·BIGINT 정밀도·편집/삭제/열기 계약이다.
+`src/influencers/`의 테이블별 Repository와 소유 Domain Service가 influencers/character_influencers/influencer_media를 담당한다. `CharacterReferenceLinkService`는 기존 캐릭터 화면의 coordinator로 새 Domain Service를 조합하며 직접 DB에 접근하지 않는다. 기존 directory의 referenceLinks 응답 형태를 유지하고, 실제 계정 관리 API는 `/api/admin/v1/characters/:id/influencers`다. 연결 변경·삭제는 해당 캐릭터만 바꾸며 공유 계정·미디어를 삭제하지 않는다.
+
+`InfluencerMediaApplicationService`는 multipart 파일·분석 등록을 조합한다. `influencer-input.ts`가 Instagram URL·분석 규격·구도 검색 텍스트 owner다. 이미지 검증과 조건부 S3 저장은 `InfluencerMediaStore`, 임베딩 호출은 기존 `ReferenceEmbeddingClient`와 `GenerationSettingsService.resolveChatSettings`를 사용한다. 서버 비전 호출은 없다. 분석 변경 시 벡터를 무효화하고 snapshot 조건으로 늦은 결과 저장을 거부한다.
+
+정본 migration은 backend `drizzle/20261019042242_influencers/`이며 기존 참조 링크를 검증 이전 후 삭제한다. 배포 시 기존 코드와의 호환 전환이 필요하다. UI owner는 기존 CharacterReferenceLinksPanel/CharacterSnsPage/CharacterSnsDetailPage 및 api.ts이며 Mantine 컴포넌트를 유지한다.
+
+계약·이전·복구·검증 명령은 [Admin 인플루언서 API](api/admin-influencers.md), 테스트 owner는 `test/influencer-media.e2e-spec.ts`, `test/character-reference-links.e2e-spec.ts`, `test/character-reference-directory.e2e-spec.ts`, `src/influencers/influencer-input.spec.ts` 및 기존 UI 테스트다. 실제 S3/임베딩 공급자와 개발 배포는 별도 확인해야 한다.

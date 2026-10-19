@@ -11,7 +11,7 @@ import {
 } from "../post-production/reference-captioner";
 import { CharactersController } from "./characters.controller";
 import { CharacterRepository } from "./character.repository";
-import { CharacterReferenceLinkRepository } from "./character-reference-link.repository";
+import { InfluencersModule } from "../influencers/influencers.module";
 import { CharacterReferenceLinkService } from "./character-reference-link.service";
 import { CharacterReferenceLinksController } from "./character-reference-links.controller";
 import { CharacterReferenceDirectoryController } from "./character-reference-directory.controller";
@@ -35,6 +35,7 @@ import { LlmLogService } from "../llm-logs/llm-log.service";
 @Module({
   imports: [
     DatabaseModule,
+    InfluencersModule,
     AdminAuthModule,
     SettingsModule,
     CharacterContentProfilesModule,
@@ -46,7 +47,7 @@ import { LlmLogService } from "../llm-logs/llm-log.service";
   ],
   providers: [
     CharacterReferenceDirectoryApplicationService,
-    CharacterReferenceLinkRepository,
+
     CharacterReferenceLinkService,
     CharacterRepository,
     CharacterService,

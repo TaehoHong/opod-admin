@@ -19,8 +19,6 @@ const first: CharacterReferenceDirectoryItem = {
       id: "9007199254740993",
       characterId: "character-1",
       url: "https://example.com/minseo",
-      createdAt: "2026-10-19T00:00:00.000Z",
-      updatedAt: "2026-10-19T00:00:00.000Z",
     },
   ],
 };
@@ -65,7 +63,7 @@ describe("character SNS reference list and detail", () => {
   it("returns to the character list after a reference error and opens another character", async () => {
     server.use(
       http.get(endpoint, () => HttpResponse.json({ items: [first, second] })),
-      http.get("/api/admin/v1/characters/:id/reference-links", ({ params }) =>
+      http.get("/api/admin/v1/characters/:id/influencers", ({ params }) =>
         params.id === first.id
           ? HttpResponse.json({ message: "참조 조회 오류" }, { status: 503 })
           : HttpResponse.json([]),
@@ -98,7 +96,7 @@ describe("character SNS reference list and detail", () => {
           items: [{ ...first, referenceLinks: references }, second],
         }),
       ),
-      http.get("/api/admin/v1/characters/:id/reference-links", ({ params }) =>
+      http.get("/api/admin/v1/characters/:id/influencers", ({ params }) =>
         HttpResponse.json(params.id === first.id ? references : []),
       ),
     );
@@ -154,11 +152,11 @@ describe("character SNS reference list and detail", () => {
           items: [{ ...first, referenceLinks: references }, second],
         }),
       ),
-      http.get("/api/admin/v1/characters/:id/reference-links", () =>
+      http.get("/api/admin/v1/characters/:id/influencers", () =>
         HttpResponse.json(references),
       ),
       http.post(
-        "/api/admin/v1/characters/:id/reference-links",
+        "/api/admin/v1/characters/:id/influencers",
         async ({ params, request }) => {
           const body = (await request.json()) as { url: string };
           created.push({ characterId: params.id, ...body });
@@ -210,7 +208,7 @@ describe("character SNS reference list and detail", () => {
             : { items: page, nextCursor: "next-page" },
         );
       }),
-      http.get("/api/admin/v1/characters/:id/reference-links", () =>
+      http.get("/api/admin/v1/characters/:id/influencers", () =>
         HttpResponse.json(first.referenceLinks),
       ),
     );
@@ -283,7 +281,7 @@ describe("character SNS reference list and detail", () => {
   it("opens a character's detail directly and allows cancelling an edit before returning to the list", async () => {
     server.use(
       http.get(endpoint, () => HttpResponse.json({ items: [first] })),
-      http.get("/api/admin/v1/characters/character-1/reference-links", () =>
+      http.get("/api/admin/v1/characters/character-1/influencers", () =>
         HttpResponse.json(first.referenceLinks),
       ),
     );
