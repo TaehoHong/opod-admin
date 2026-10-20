@@ -851,7 +851,15 @@ publication lease를 잡는다. 원본 충돌은 게시를 보류한다. 이 SQL
 실제 DB 잠금·중복 게시 방지는 DB E2E가 보류되어 아직 검증 완료로 주장하지 않는다.
 
 `PostWorkspaceService`와 `ReferenceAgentWorkView`가 네 단계의 결과·실행·실패 컷 재시도·
-승인/게시를 연결한다. 다음 버튼은 화면 이동이다.
+승인/게시를 연결한다. `현재 단계로`는 화면 이동이며 `캡션 단계로 계속`은 기존 aggregate를 호출한 뒤 캡션 화면으로 이동한다.
+상세 UI는 저장된 단계 산출물·현재 잡 집합으로 완료/진행/실패/미실행을 표시하고,
+열람 중인 단계와 실제 현재 작업을 구분한다. 생성 잡 전체가 완료됐으면 초안이 아직
+generating이어도 생성 완료로 안내한다. 실패 상세가 없으면 원인을 추측하지 않고
+실행 기록과 재실행 경로를 안내한다. 원본·결과는 나란히 확대 표시하고, 캐릭터 참조는
+번호/입력 슬롯과 펼칠 수 있는 선택 목적으로 구분한다. 프롬프트·캡션은 autosize Textarea를 사용한다.
+`DataPage`의 선택적 compact header와 `DraftAutomationControl`의 compact 표시는
+레퍼런스 상세에서만 사용하며 다른 화면의 기본 레이아웃과 실행 정책을 유지한다.
+회귀 owner는 `ReferenceAgentWorkView.test.tsx`, `PostWorkPage.test.tsx`, `DataPage.test.tsx`다.
 `POST drafts/:id/reference/restart`는 draft.updatedAt 기반 expectedRevision과
 `target: reference_select|generation`을 받는다. 원본 재선택은 후속 artifact를 비우고,
 같은 입력 전체 재생성은 원본·prompt/negative·참조·설정을 보존한 채 prompt revision을

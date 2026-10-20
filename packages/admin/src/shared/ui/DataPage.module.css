@@ -40,6 +40,20 @@
   gap: var(--mantine-spacing-xs);
 }
 
+.compact {
+  align-items: center;
+  padding-bottom: var(--mantine-spacing-sm);
+}
+
+.compact .kicker {
+  display: none;
+}
+
+.compact .title {
+  font-size: var(--mantine-h3-font-size);
+  letter-spacing: normal;
+}
+
 .state {
   min-height: 116px;
   border-style: dashed;

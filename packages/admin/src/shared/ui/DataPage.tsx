@@ -27,6 +27,7 @@ export function DataPage({
   isEmpty,
   emptyLabel = "표시할 항목이 없습니다.",
   children,
+  compact = false,
 }: {
   title: string;
   actions?: ReactNode;
@@ -36,10 +37,11 @@ export function DataPage({
   isEmpty?: boolean;
   emptyLabel?: string;
   children: ReactNode;
+  compact?: boolean;
 }) {
   return (
-    <Stack className={classes.page} gap="xl">
-      <header className={classes.header}>
+    <Stack className={classes.page} gap={compact ? "md" : "xl"}>
+      <header className={`${classes.header} ${compact ? classes.compact : ""}`}>
         <div className={classes.titleBlock}>
           <div className={classes.kicker}>OPOD operations</div>
           <Title className={classes.title} order={1}>

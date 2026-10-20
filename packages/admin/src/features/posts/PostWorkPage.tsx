@@ -166,7 +166,7 @@ export function PostWorkPage({
         item={work.data}
         draft={draft.data}
         stage={stage}
-        automation={<DraftAutomationControl draft={draft.data} />}
+        automation={<DraftAutomationControl draft={draft.data} compact />}
       />
     ) : (
       <Alert>초안이 없습니다.</Alert>
@@ -1171,7 +1171,13 @@ function BriefStage({ item, draft }: { item: PostWorkItem; draft: Draft }) {
   );
 }
 
-function DraftAutomationControl({ draft }: { draft: Draft }) {
+function DraftAutomationControl({
+  draft,
+  compact = false,
+}: {
+  draft: Draft;
+  compact?: boolean;
+}) {
   const update = useDraftMutation(draft.id, (enabled: boolean) =>
     setDraftAutomation(draft.id, enabled),
   );
@@ -1181,45 +1187,68 @@ function DraftAutomationControl({ draft }: { draft: Draft }) {
     (draft.status === "failed" ||
       (draft.conceptJson?.pipeline?.state !== undefined &&
         !["pending", "ready"].includes(draft.conceptJson.pipeline.state)));
-  return (
+  const button = (
+    <Button
+      size={compact ? "xs" : "sm"}
+      variant="default"
+      disabled={
+        blockedResume ||
+        draft.conceptJson?.pipeline?.state === "running" ||
+        ![
+          "planned",
+          "generating",
+          "regenerating",
+          "needs_review",
+          "approved",
+          "failed",
+        ].includes(draft.status)
+      }
+      loading={update.isPending}
+      onClick={() => update.mutate(!automatic)}
+    >
+      {automatic ? "수동 진행으로 전환" : "자동 진행 시작"}
+    </Button>
+  );
+  const error = update.error ? (
+    <OperationErrorAlert
+      failure={operationFailure(
+        update.error,
+        "자동 진행 정책을 변경하지 못했습니다.",
+      )}
+    />
+  ) : null;
+  return compact ? (
+    <Group gap="xs">
+      {button}
+      <details>
+        <summary>진행 안내</summary>
+        <Text size="sm" maw={360} mt="xs">
+          수동 진행은 단계마다 대기합니다. 자동 진행은 다음 단계부터 연속으로
+          실행합니다. 실행 중인 사진 생성은 진행 방식을 바꿔도 완료됩니다.
+        </Text>
+        {blockedResume && (
+          <Text size="sm" mt="xs">
+            현재 단계가 실행 중이거나 확인이 필요해 자동 진행을 시작할 수
+            없습니다. 작업 상태 안내를 확인해 주세요.
+          </Text>
+        )}
+      </details>
+      {error}
+    </Group>
+  ) : (
     <Stack gap="xs">
       <Text size="sm">
         수동 진행에서는 각 단계가 끝나면 대기합니다. 자동 진행으로 전환하면 다음
         단계부터 이어서 실행합니다. 이미 시작한 사진 생성은 완료됩니다.
       </Text>
-      <Button
-        variant="default"
-        disabled={
-          blockedResume ||
-          draft.conceptJson?.pipeline?.state === "running" ||
-          ![
-            "planned",
-            "generating",
-            "regenerating",
-            "needs_review",
-            "approved",
-            "failed",
-          ].includes(draft.status)
-        }
-        loading={update.isPending}
-        onClick={() => update.mutate(!automatic)}
-      >
-        {automatic ? "수동 진행으로 전환" : "자동 진행 시작"}
-      </Button>
-      {blockedResume ? (
+      {button}
+      {blockedResume && (
         <Text size="sm">
           입력·사진 검수를 보완하고 현재 단계를 다시 실행한 뒤 자동 진행을
           재개하세요.
         </Text>
-      ) : null}
-      {update.error ? (
-        <OperationErrorAlert
-          failure={operationFailure(
-            update.error,
-            "자동 진행 정책을 변경하지 못했습니다.",
-          )}
-        />
-      ) : null}
+      )}
+      {error}
     </Stack>
   );
 }

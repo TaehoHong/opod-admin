@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -69,6 +69,113 @@ describe("reference detail", () => {
       ),
     ),
   );
+  it("distinguishes completed generation from the earlier stage being viewed", () => {
+    renderPage(
+      <ReferenceAgentWorkView
+        item={{
+          ...item,
+          currentStage: "generation",
+          statusDetail: "Agent 진행 중",
+        }}
+        draft={{
+          ...draft,
+          status: "generating",
+          shots: [
+            {
+              sortOrder: 1,
+              jobId: "done",
+              status: "completed",
+              prompt: "",
+              outputs: [],
+            },
+          ],
+        }}
+        stage="reference_select"
+      />,
+    );
+    expect(screen.getByRole("status", { name: "작업 상태" })).toHaveTextContent(
+      "이미지 생성 완료",
+    );
+    const stages = screen.getByRole("navigation", {
+      name: "레퍼런스 Agent 단계",
+    });
+    expect(
+      within(stages).getByRole("link", { name: /원본 선택/ }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(
+      within(stages).getByRole("link", { name: /이미지 생성/ }),
+    ).toHaveTextContent("완료");
+    expect(
+      within(stages).getByRole("link", { name: /캡션/ }),
+    ).toHaveTextContent("미실행");
+    expect(screen.queryByText("Agent 진행 중")).not.toBeInTheDocument();
+  });
+  it("explains an unrecorded failure and links to the current stage records", () => {
+    renderPage(
+      <ReferenceAgentWorkView
+        item={{ ...item, operationalStatus: "failed" }}
+        draft={{
+          ...draft,
+          status: "failed",
+          caption: "",
+          conceptJson: { postGenerationAgent: "reference-v1" },
+        }}
+        stage="reference_select"
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "서버에 상세 오류가 저장되지 않았습니다",
+    );
+    expect(
+      screen.getByRole("link", { name: "실행 기록 확인" }),
+    ).toHaveAttribute("href", "#reference-execution-records");
+    expect(
+      screen.getByRole("button", { name: "원본 선택 실행" }),
+    ).toBeEnabled();
+  });
+  it("shows a running stage even when a saved result from that stage exists", () => {
+    renderPage(
+      <ReferenceAgentWorkView
+        item={item}
+        draft={{
+          ...draft,
+          status: "planned",
+          conceptJson: {
+            ...draft.conceptJson,
+            pipeline: { stage: "reference_select", state: "running" },
+          },
+        }}
+        stage="reference_select"
+      />,
+    );
+    const stages = screen.getByRole("navigation", {
+      name: "레퍼런스 Agent 단계",
+    });
+    expect(
+      within(stages).getByRole("link", { name: /원본 선택/ }),
+    ).toHaveTextContent("진행 중");
+    expect(
+      screen.getByRole("button", { name: "원본 선택 실행" }),
+    ).toBeDisabled();
+  });
+  it("explains why caption editing is unavailable before its stage runs", () => {
+    renderPage(
+      <ReferenceAgentWorkView
+        item={{ ...item, currentStage: "generation" }}
+        draft={{ ...draft, status: "generating", caption: "" }}
+        stage="caption"
+      />,
+    );
+    expect(
+      screen.getByText(
+        "이미지 생성 단계를 완료한 뒤 캡션을 실행할 수 있습니다.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "캡션" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "게시 미리보기" }),
+    ).toBeDisabled();
+  });
   it("renders reference route before legacy stage validation and executes only the current stage", async () => {
     server.use(
       http.get("/api/admin/v1/post-work-items/:id", () =>
@@ -515,10 +622,10 @@ describe("reference detail", () => {
       />,
     );
     expect(
-      screen.getByRole("button", { name: "생성 결과 확인" }),
+      screen.getByRole("button", { name: "캡션 단계로 계속" }),
     ).toBeEnabled();
     await userEvent.click(
-      screen.getByRole("button", { name: "생성 결과 확인" }),
+      screen.getByRole("button", { name: "캡션 단계로 계속" }),
     );
     await waitFor(() => expect(requests).toEqual(["aggregate"]));
   });
@@ -554,7 +661,7 @@ describe("reference detail", () => {
       />,
     );
     expect(
-      screen.queryByRole("button", { name: "생성 결과 확인" }),
+      screen.queryByRole("button", { name: "캡션 단계로 계속" }),
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "이미지 생성 실행" }),
