@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { REFERENCE_IMAGE_PROMPT_IMAGE_MAPPING } from "../../prompts/reference-image-prompt";
 import { LLM_LOG_TYPE, LlmLogContext } from "../llm-logs/llm-log.service";
 import {
   StrictJsonAgentClient,
@@ -51,6 +52,7 @@ export class ReferenceImagePromptAgent {
       throw new Error("invalid requested shots");
     const textInput = {
       ...input,
+      imageMapping: REFERENCE_IMAGE_PROMPT_IMAGE_MAPPING,
       shots: input.shots.map((shot) => ({
         shotId: shot.shotId,
         ...(shot.personCount !== undefined
@@ -61,13 +63,13 @@ export class ReferenceImagePromptAgent {
           role: reference.role,
           inputOrder: reference.inputOrder,
           promptLabel: reference.promptLabel,
+          imageId: "",
         })),
       })),
     };
-    const userContent: unknown[] = [
-      { type: "text", text: JSON.stringify(textInput) },
-    ];
-    for (const shot of input.shots) {
+    const userContent: unknown[] = [];
+    const imageIds = new Map<string, string>();
+    for (const [shotIndex, shot] of input.shots.entries()) {
       if (
         !shot.references.some((r) => r.role === "source") ||
         (shot.personCount !== 0 &&
@@ -86,15 +88,18 @@ export class ReferenceImagePromptAgent {
         )
           throw new Error("invalid reference mapping");
         const { bytes, contentType } = await this.readBytes(reference.media);
-        if (
-          reference.sha256 &&
-          createHash("sha256").update(bytes).digest("hex") !== reference.sha256
-        )
+        const sha256 = createHash("sha256").update(bytes).digest("hex");
+        if (reference.sha256 && sha256 !== reference.sha256)
           throw new Error(`reference image hash mismatch: ${reference.id}`);
+        const existingImageId = imageIds.get(sha256);
+        const imageId = existingImageId ?? `INPUT_IMAGE_${imageIds.size + 1}`;
+        textInput.shots[shotIndex].references[index].imageId = imageId;
+        if (existingImageId) continue;
+        imageIds.set(sha256, imageId);
         userContent.push(
           {
             type: "text",
-            text: `${shot.shotId} / ${reference.id} / ${reference.promptLabel} / ${reference.role}`,
+            text: imageId,
           },
           {
             type: "image_url",
@@ -106,6 +111,7 @@ export class ReferenceImagePromptAgent {
         );
       }
     }
+    userContent.unshift({ type: "text", text: JSON.stringify(textInput) });
     const result = await this.client.run({
       logType: LLM_LOG_TYPE.referencePostImagePrompt,
       schemaName: "opod_reference_image_prompt_v1",
