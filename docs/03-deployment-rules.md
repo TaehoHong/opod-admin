@@ -169,3 +169,11 @@ worktree 상태를 확인한다.
 - 선택된 캐릭터 참조를 먼저, 원본을 마지막으로 전달한다. 얼굴과 체형 모두를 강제하지 않으며 얼굴→원본, 체형→원본, 얼굴·체형→원본, 인물 비노출 원본 전용을 지원한다. 기존 frozen 작업의 순서는 그대로 유지한다. 저장 설정은 새 초안에 고정되며 기존 초안 설정을 일괄 변경하지 않았다.
 - 최종 77 suites/873 tests, lint/format/build 통과. 배포된 입력 검증에서도 네 조합과 기존 원본 우선 입력을 확인했고 health는 `status=ok,database=up`이었다. 생성 공급자 호출은 테스트 대역으로 검증했으며 배포 후 유료 생성·게시는 실행하지 않았다.
 - 설정 변경 전후와 검증 영수증은 로컬 `content-work/reference-agent-v2-deployment-20261020/`에 회수했다. DB schema와 캐릭터 데이터는 변경하지 않았다.
+
+### 2026-10-20 원본 선택 ID 전용 출력과 저장 지침 적용
+
+- 실행 코드 `55240c4fe2c11cadb5279ae6a3d38909e3e156a6`, 이미지 `opod-admin:source-selection-55240c4`를 커밋 archive에서 빌드해 개발서버 Admin에 적용했다. 직전 `3b92362` 이미지도 `opod-admin:before-source-selection-55240c4`로 보존했다.
+- 사용자 확정 원문을 reference_select의 starter와 개발 DB 저장 지침에 적용했다. 성공은 `selections[{mediaId}]`만 반환하고, 선택 불가는 빈 selections와 shortfallReason을 요구한다. 새 원본 shot에는 선택 이유를 저장하지 않는다. 과거 reason 포함 응답·저장 shot의 표시 호환과 캐릭터 비주얼 배정 이유는 유지했다.
+- `GenerationSettingsService`의 revision CAS로 systemPrompt와 outputSchema만 교체했다. 저장 revision `097ef2dd-b21f-4dd1-a055-569be24e05c9`, 지침 SHA-256 `d83fa303bc25ecafbf67e85153f3a8f31d72b074d617cd0eb20e9fa863c83566`이다. controller의 current/starters 일치, ID 전용 parser 실행, 다른 단계·모델·자연형·자동화 설정 보존을 읽기 검증했다. 새 초안부터 적용하며 기존 초안을 일괄 갱신하지 않았다.
+- 단위 77 suites/874 tests, 관련 실제 PostgreSQL E2E 7 tests, 원본 결과 UI 25 tests, 타입 검사·lint·format·build를 통과했다. E2E의 LLM 전송은 테스트 대역이다. 전체 admin:check는 수정하지 않은 ReferenceAgentPanel.test.tsx의 기존 저장 안내 문구/이미지 모델 fixture 불일치 2건으로 실패했다(146 passed/2 failed). 해당 파일만 실행해도 재현되며 범위 밖 테스트·화면은 수정하지 않았다.
+- health `status=ok,database=up`, 재시작 횟수 0을 확인했다. 배포 후 유료 생성·게시·DB schema 변경은 하지 않았다. 설정 전후 백업과 검증 영수증은 `content-work/source-selection-deployment-20261020/`에 회수했다.
