@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { StrictJsonAgentClient } from "../shared/ai/strict-json-agent";
 import { ReferenceSelectionAgent } from "./reference-selection-agent";
+import { REFERENCE_SELECTION_JSON_SCHEMA } from "../../prompts/reference-selection";
 const bytes = Buffer.from("source pixels");
 const candidate = {
   mediaId: "9007199254740993",
@@ -23,7 +24,11 @@ function setup(value: unknown) {
     { apiUrl: "https://example.test", apiKey: "test", model: "injected" },
     fetchFn,
     undefined,
-    { systemPrompt: "saved", outputSchema: {}, metadata: {} },
+    {
+      systemPrompt: "saved",
+      outputSchema: REFERENCE_SELECTION_JSON_SCHEMA,
+      metadata: {},
+    },
   );
   return {
     fetchFn,
@@ -36,12 +41,20 @@ function setup(value: unknown) {
 it("binds the exact candidate ID to pixels and validates the selected result", async () => {
   const decision = {
     status: "selected",
-    selections: [{ mediaId: candidate.mediaId, reason: "observed pose" }],
+    selections: [{ mediaId: candidate.mediaId }],
     shortfallReason: "",
   };
   const { agent, fetchFn } = setup(decision);
   expect((await agent.select(input, [candidate])).output).toEqual(decision);
   const request = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+  expect(
+    request.response_format.json_schema.schema.properties.selections.items
+      .required,
+  ).toEqual(["mediaId"]);
+  expect(
+    request.response_format.json_schema.schema.properties.selections.items
+      .properties,
+  ).not.toHaveProperty("reason");
   expect(request.messages[1].content.slice(1)).toEqual([
     { type: "text", text: `Candidate mediaId ${candidate.mediaId}` },
     {

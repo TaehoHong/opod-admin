@@ -1,4 +1,7 @@
-import { selectReferences } from "./reference-selection";
+import {
+  parseReferenceSelectionDecision,
+  selectReferences,
+} from "./reference-selection";
 
 const candidate = (mediaId: string, sha256 = `hash-${mediaId}`) => ({
   mediaId,
@@ -12,11 +15,23 @@ const noMatch = {
 };
 const selected = (...ids: string[]) => ({
   status: "selected",
-  selections: ids.map((mediaId) => ({ mediaId, reason: "Suitable pose" })),
+  selections: ids.map((mediaId) => ({ mediaId })),
   shortfallReason: "",
 });
 
 describe("selectReferences", () => {
+  it("reads legacy selections with reasons while returning only selected IDs", () => {
+    expect(
+      parseReferenceSelectionDecision(
+        {
+          status: "selected",
+          selections: [{ mediaId: "1", reason: "Legacy reason" }],
+          shortfallReason: "",
+        },
+        [candidate("1")],
+      ),
+    ).toEqual(selected("1"));
+  });
   it("spends at most one model call by default after no_match", async () => {
     const retrieveCandidates = jest
       .fn()

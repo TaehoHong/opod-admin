@@ -7,7 +7,7 @@ export interface ReferenceCandidate {
 
 export type ReferenceSelectionDecision = {
   status: "selected" | "no_match";
-  selections: { mediaId: string; reason: string }[];
+  selections: { mediaId: string }[];
   shortfallReason: string;
 };
 
@@ -105,12 +105,7 @@ export function parseReferenceSelectionDecision(
   const selectedIds = new Set<string>();
   const selectedHashes = new Set<string>();
   const selections = value.selections.map((selection: unknown) => {
-    if (
-      !isRecord(selection) ||
-      typeof selection.mediaId !== "string" ||
-      typeof selection.reason !== "string" ||
-      !selection.reason.trim()
-    ) {
+    if (!isRecord(selection) || typeof selection.mediaId !== "string") {
       throw new Error("invalid reference selection entry");
     }
     const candidate = candidates.find(
@@ -127,7 +122,7 @@ export function parseReferenceSelectionDecision(
     }
     selectedIds.add(candidate.mediaId);
     selectedHashes.add(candidate.sha256);
-    return { mediaId: selection.mediaId, reason: selection.reason };
+    return { mediaId: selection.mediaId };
   });
   return {
     status: value.status,

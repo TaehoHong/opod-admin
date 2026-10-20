@@ -96,6 +96,10 @@ snapshot을 실행한다. 기존 LLM 단계 설정으로 fallback하지 않는�
 - `GET /reference/config`는 `{ current, starters }`를 반환한다. 미저장 current는
   `{ revision: null, selection: { batchSize: 12, maxAttempts: 1 } }`이며 읽기로 저장하지 않는다.
   starters는 세 LLM 단계의 `systemPrompt`와 읽기 전용 `outputSchema`다.
+- 원본 선택의 성공 출력은 `{ status: "selected", selections: [{ mediaId }], shortfallReason: "" }`다.
+  선택 불가는 `{ status: "no_match", selections: [], shortfallReason: "사유" }`다.
+  새 선택 schema는 reason 필드를 포함하지 않는다. 과거 snapshot의 reason 포함 응답은
+  ID만 읽어 호환하고, 과거 shot에 저장된 이유는 기존 상세 화면에서 계속 표시한다.
 - `POST /reference/config` body는 `expectedRevision`(첫 저장 null), 정수
   `maxAttempts`(1~3), 선택적 `stages`다. batchSize는 서버 상수 12다.
   stages가 있으면 `reference_select`, `image_prompt`, `caption`을 모두 전달하며

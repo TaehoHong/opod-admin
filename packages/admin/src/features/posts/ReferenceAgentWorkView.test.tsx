@@ -69,6 +69,44 @@ describe("reference detail", () => {
       ),
     ),
   );
+  it("shows source results without a selection-reason placeholder", () => {
+    const concept = draft.conceptJson as {
+      referenceSelection: { shots: Record<string, unknown>[] };
+    };
+    renderPage(
+      <ReferenceAgentWorkView
+        item={item}
+        draft={{
+          ...draft,
+          conceptJson: {
+            ...concept,
+            referenceSelection: {
+              ...concept.referenceSelection,
+              shots: concept.referenceSelection.shots.map((shot) => ({
+                ...shot,
+                reason: undefined,
+              })),
+            },
+          },
+        }}
+        stage="reference_select"
+      />,
+    );
+    expect(screen.queryByText("선택 이유")).not.toBeInTheDocument();
+    expect(screen.queryByText("선택 이유가 없습니다.")).not.toBeInTheDocument();
+    expect(screen.getByText("원본 캡션 보기")).toBeInTheDocument();
+  });
+  it("keeps historical source reasons readable", () => {
+    renderPage(
+      <ReferenceAgentWorkView
+        item={item}
+        draft={draft}
+        stage="reference_select"
+      />,
+    );
+    expect(screen.getByText("선택 이유")).toBeInTheDocument();
+    expect(screen.getByText("이유 1")).toBeInTheDocument();
+  });
   it("distinguishes completed generation from the earlier stage being viewed", () => {
     renderPage(
       <ReferenceAgentWorkView

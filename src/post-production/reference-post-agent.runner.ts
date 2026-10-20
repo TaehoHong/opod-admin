@@ -45,7 +45,6 @@ type SelectionShot = {
   mediaKey: string;
   sha256: string;
   sourceCaption: string | null;
-  reason: string;
   sourceComposition?: CompositionAnalysis;
   visualReferences?: MatchedCharacterVisual[];
   visualMatching?: unknown;
@@ -178,9 +177,6 @@ export class ReferencePostAgentRunner {
           ...source,
           shotId: `SHOT_${String(index + 1).padStart(2, "0")}`,
           sortOrder: index,
-          reason: selected.attempts
-            .flatMap((attempt) => attempt.decision?.selections ?? [])
-            .find((selection) => selection.mediaId === source.mediaId)!.reason,
         }),
       );
       const matchedShots = await this.matchVisuals(

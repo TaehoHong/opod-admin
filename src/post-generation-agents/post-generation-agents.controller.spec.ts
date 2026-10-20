@@ -95,11 +95,14 @@ describe("reference Agent settings HTTP contract", () => {
     const selectionStarter =
       initial.body.starters.reference_select.systemPrompt;
     expect(selectionStarter).toContain(
-      "너는 캐릭터 SNS 게시물의 참조 이미지를 선택하는 Agent다.",
+      "너는 캐릭터 SNS 게시물에 사용할 원본 사진을 선택하는 Agent다.",
     );
-    expect(selectionStarter).toContain("생성 컷 수 범위: 1~3장");
+    expect(
+      initial.body.starters.reference_select.outputSchema.properties.selections
+        .items.required,
+    ).toEqual(["mediaId"]);
     expect(selectionStarter).toContain(
-      "장소, 포즈, 구도, 의상, 분위기가 반복된다는 이유로 감점하지 않는다.",
+      "장소·포즈·옷차림이 비슷하다는 이유로 감점하거나,",
     );
     expect(selectionStarter).not.toContain("character_influencers");
     expect(values.size).toBe(0);

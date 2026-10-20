@@ -5,6 +5,8 @@ import { PostAgentPromptService } from "../src/post-agent-prompts/post-agent-pro
 import { AppModule } from "../src/app.module";
 import { ADMIN_REQUEST_HEADER } from "../src/auth/admin-session";
 import { StrictJsonAgentClient } from "../src/shared/ai/strict-json-agent";
+import { ReferenceSelectionAgent } from "../src/post-production/reference-selection-agent";
+import { createHash } from "node:crypto";
 
 const base = "/api/admin/v1/post-generation-agents";
 describe("post agent management", () => {
@@ -27,6 +29,121 @@ describe("post agent management", () => {
   });
   afterAll(async () => {
     await app?.close();
+  });
+
+  it("persists ID-only reference selection schema and sends it to the Agent", async () => {
+    const llm = (
+      await request(app.getHttpServer())
+        .post(`${base}/models`)
+        .set(headers)
+        .send({
+          type: "llm",
+          provider: "openai-compatible",
+          model: "reference-selector-fixture",
+        })
+        .expect(201)
+    ).body;
+    const image = (
+      await request(app.getHttpServer())
+        .post(`${base}/models`)
+        .set(headers)
+        .send({
+          type: "image",
+          provider: "spicyapi",
+          model: "alibaba/qwen-image-3.0-pro/edit",
+        })
+        .expect(201)
+    ).body;
+    const before = (
+      await request(app.getHttpServer())
+        .get(`${base}/reference/config`)
+        .set(headers)
+        .expect(200)
+    ).body;
+    await request(app.getHttpServer())
+      .post(`${base}/reference/config`)
+      .set(headers)
+      .send({
+        expectedRevision: before.current.revision,
+        maxAttempts: 1,
+        generationAiModelId: image.id,
+        stages: {
+          reference_select: {
+            aiModelId: llm.id,
+            systemPrompt: "Choose source IDs only",
+          },
+          image_prompt: {
+            aiModelId: llm.id,
+            systemPrompt: "Build image prompt",
+          },
+          caption: { aiModelId: llm.id, systemPrompt: "Write caption" },
+        },
+      })
+      .expect(201);
+    const view = (
+      await request(app.getHttpServer())
+        .get(`${base}/reference/config`)
+        .set(headers)
+        .expect(200)
+    ).body;
+    const saved = view.current.stages.reference_select;
+    expect(saved.outputSchema.properties.selections.items).toEqual({
+      type: "object",
+      properties: { mediaId: { type: "string" } },
+      required: ["mediaId"],
+      additionalProperties: false,
+    });
+    expect(saved.outputSchema).toEqual(
+      view.starters.reference_select.outputSchema,
+    );
+    const decision = {
+      status: "selected",
+      selections: [{ mediaId: "13" }],
+      shortfallReason: "",
+    };
+    const fetchFn = jest.fn(async (...args: Parameters<typeof fetch>) => {
+      void args;
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(decision) } }],
+        }),
+      );
+    });
+    const bytes = Buffer.from("fixture source pixels");
+    const client = new StrictJsonAgentClient(
+      { apiUrl: "https://example.test", apiKey: "fixture", model: saved.model },
+      fetchFn,
+      undefined,
+      {
+        systemPrompt: saved.systemPrompt,
+        outputSchema: saved.outputSchema,
+        metadata: {},
+      },
+    );
+    const agent = new ReferenceSelectionAgent(client, async () => ({
+      bytes,
+      contentType: "image/png",
+    }));
+    const result = await agent.select(
+      {
+        character: {
+          concept: "daily",
+          imageStyle: "phone photos",
+          constraints: "",
+        },
+      },
+      [
+        {
+          mediaId: "13",
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          media: { url: "https://example.test/source" },
+        },
+      ],
+    );
+    expect(result.output).toEqual(decision);
+    const sent = JSON.parse(String(fetchFn.mock.calls[0][1]?.body));
+    expect(sent.messages[0].content).toBe("Choose source IDs only");
+    expect(sent.response_format.json_schema.schema).toEqual(saved.outputSchema);
   });
 
   it("keeps saved existing Agent history readable and rejects save and restore", async () => {

@@ -554,12 +554,14 @@ export function ReferenceAgentWorkView({
                         : "캐릭터 비주얼 선택 결과가 아직 없습니다."}
                     </Text>
                   )}
-                  <details>
-                    <summary>선택 이유</summary>
-                    <Text mt="sm" size="sm">
-                      {shot.reason || "선택 이유가 없습니다."}
-                    </Text>
-                  </details>
+                  {shot.reason && (
+                    <details>
+                      <summary>선택 이유</summary>
+                      <Text mt="sm" size="sm">
+                        {shot.reason}
+                      </Text>
+                    </details>
+                  )}
                   <details>
                     <summary>원본 캡션 보기</summary>
                     <Text mt="sm" size="sm" className={styles.preserve}>

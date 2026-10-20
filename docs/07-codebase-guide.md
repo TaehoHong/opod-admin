@@ -786,7 +786,12 @@ runner에 전달한다. `DraftsModule`은 초안 소유 Service를, `GenerationM
 준비된 이미지 후보만 조회한다. `reference-selection.ts`는 회당 최대 12장·기본 1회·
 설정 최대 3회를 실행하고 ID·SHA 중복을 제거한다. 유효한 no_match일 때만 추가 탐색하며
 성공·후보 소진·오류에서 멈춘다. 실제 후보 픽셀을 `ReferenceSelectionAgent`에 전달하고
-Agent가 원본 1~3장과 이유를 결정한다. 게시된 동일 캐릭터의 정확한 원본 ID 또는 SHA는
+Agent가 원본 1~3장의 ID를 결정한다. 성공 응답은 `selections[{mediaId}]`만 반환하며
+선택 이유를 요구하거나 새 shot에 저장하지 않는다. `no_match`는 빈 selections와
+선택 불가 사유인 shortfallReason을 요구한다. 이전 응답에 reason이 있어도 parser는
+ID만 사용하며, 과거 shot에 저장된 원본 선택 이유는 UI에서 계속 읽을 수 있다.
+새 shot에 이유가 없으면 선택 이유 영역을 표시하지 않는다. 캐릭터 비주얼 배정 이유는
+별도 계약으로 유지한다. 게시된 동일 캐릭터의 정확한 원본 ID 또는 SHA는
 제외하되 같은 구도·장소나 같은 게시물의 다른 이미지를 일괄 제외하지 않는다.
 
 `VisualCompositionService` (`src/characters/visual-composition.service.ts`)가 원본 선택 뒤
