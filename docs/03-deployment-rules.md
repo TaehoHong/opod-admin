@@ -177,3 +177,10 @@ worktree 상태를 확인한다.
 - `GenerationSettingsService`의 revision CAS로 systemPrompt와 outputSchema만 교체했다. 저장 revision `097ef2dd-b21f-4dd1-a055-569be24e05c9`, 지침 SHA-256 `d83fa303bc25ecafbf67e85153f3a8f31d72b074d617cd0eb20e9fa863c83566`이다. controller의 current/starters 일치, ID 전용 parser 실행, 다른 단계·모델·자연형·자동화 설정 보존을 읽기 검증했다. 새 초안부터 적용하며 기존 초안을 일괄 갱신하지 않았다.
 - 단위 77 suites/874 tests, 관련 실제 PostgreSQL E2E 7 tests, 원본 결과 UI 25 tests, 타입 검사·lint·format·build를 통과했다. E2E의 LLM 전송은 테스트 대역이다. 전체 admin:check는 수정하지 않은 ReferenceAgentPanel.test.tsx의 기존 저장 안내 문구/이미지 모델 fixture 불일치 2건으로 실패했다(146 passed/2 failed). 해당 파일만 실행해도 재현되며 범위 밖 테스트·화면은 수정하지 않았다.
 - health `status=ok,database=up`, 재시작 횟수 0을 확인했다. 배포 후 유료 생성·게시·DB schema 변경은 하지 않았다. 설정 전후 백업과 검증 영수증은 `content-work/source-selection-deployment-20261020/`에 회수했다.
+
+### 2026-10-20 이미지 프롬프트 중복 첨부·60초 타임아웃 수정
+
+- 코드 커밋 `324746c`(사진 중복 제거), `f54814e`(구조화 LLM 타임아웃 제거)를 main에 푸시했다. 실행 커밋 `f54814ec53520ce02144dcbffca5a2891f9ccdd1`의 Git archive로 Linux/amd64 이미지 `opod-admin:image-dedup-f54814e`를 빌드하고 개발 Admin에 적용했다.
+- 17:04 KST 기동 후 이미지 revision 일치, 재시작 횟수 0, health `status=ok,database=up`을 확인했다. 직전 이미지는 `opod-admin:before-image-dedup-f54814e`로 보존했다.
+- 로컬 단위 77 suites/876 tests, lint·format·build 통과. 배포된 Node.js 26.7.0 코드에서 합성 픽셀과 테스트 공급자로 3컷의 참조 9개가 이미지 5장으로 전송되고, 컷별 매핑·생성용 이미지 번호 유지 및 LLM 요청의 timeout signal 제거를 확인했다.
+- 원본 실패 로그 2490과 이전 2489는 같은 초안의 이미지 프롬프트 단계에서 각각 60.054초·60.056초에 애플리케이션의 60초 중단으로 실패했다. 공급자 내부 지연 원인과 실제 LLM 결과 품질은 이번 검증 범위에 포함하지 않는다. 유료 생성·게시·DB schema/저장 설정 변경은 수행하지 않았다.
