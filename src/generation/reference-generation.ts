@@ -62,19 +62,16 @@ export function freezeReferenceShot(
     requestedImageAspectRatio(shot.generationParams) === null ||
     Object.keys(shot.generationParams).some((key) => key.startsWith("_")) ||
     shot.references.length === 0 ||
-    shot.references[0]?.role !== "source" ||
+    !shot.references.some((reference) => reference.role === "source") ||
     shot.references.length > 10
   )
     throw new BadRequestException("Invalid reference generation snapshot");
-  let identitySeen = false;
   const ids = new Set<string>();
   const references = shot.references.map((reference, index) => {
-    if (reference.role === "character_identity") identitySeen = true;
     if (
       !reference.id ||
       ids.has(reference.id) ||
       !["source", "character_identity"].includes(reference.role) ||
-      (identitySeen && reference.role === "source") ||
       reference.inputOrder !== index + 1 ||
       !reference.promptLabel.trim() ||
       !/^[a-f0-9]{64}$/i.test(reference.sha256)

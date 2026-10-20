@@ -1838,6 +1838,36 @@ describe("frozen reference image execution", () => {
     expect(repository.persistSuccess).toHaveBeenCalledTimes(1);
   });
 
+  it("submits identity-first snapshots in their frozen order with identity primary", async () => {
+    const metadata = snapshot();
+    metadata.references.reverse();
+    metadata.references[0].inputOrder = 1;
+    metadata.references[0].promptLabel = "Image 1";
+    metadata.references[1].inputOrder = 2;
+    metadata.references[1].promptLabel = "Image 2";
+    metadata.prompt = "Image 1 same person; Image 2 composition";
+    const { provider, service } = setup(metadata);
+    await service.runJobNow("job-1");
+    await service.onModuleDestroy();
+    expect(provider.submit).toHaveBeenCalledTimes(1);
+    expect(provider.submit.mock.calls[0][0]).toMatchObject({
+      prompt: metadata.prompt,
+      references: [
+        {
+          role: "identity",
+          primary: true,
+          description: "Image 1",
+          url: "https://signed.test/identities/a.png",
+        },
+        {
+          role: "composition",
+          description: "Image 2",
+          url: "https://signed.test/sources/a.png",
+        },
+      ],
+    });
+  });
+
   it("resumes an existing provider request without another paid submission", async () => {
     const { repository, provider, service } = setup();
     repository.findForProcessing.mockResolvedValue(

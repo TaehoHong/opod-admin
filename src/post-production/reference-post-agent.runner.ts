@@ -252,13 +252,13 @@ export class ReferencePostAgentRunner {
           shotId: shot.shotId,
           personCount: shot.sourceComposition!.content.personCount,
           references: [
+            ...shot.visualReferences!,
             {
               id: `SOURCE_${index + 1}`,
               role: "source" as const,
               sha256: shot.sha256,
               media: { url: "", storageKey: sources[index].mediaKey },
             },
-            ...shot.visualReferences!,
           ].map((reference, order) => ({
             ...reference,
             inputOrder: order + 1,

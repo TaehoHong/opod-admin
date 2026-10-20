@@ -843,4 +843,40 @@ describe("reference generation handoff", () => {
     ).rejects.toThrow("binding/order");
     expect(ensure).not.toHaveBeenCalled();
   });
+
+  it("freezes identity-first references without reordering their prompt labels", async () => {
+    const ensure = jest.fn();
+    const request = input();
+    request.shots[0].references.reverse();
+    request.shots[0].references[0].inputOrder = 1;
+    request.shots[0].references[0].promptLabel = "Image 1";
+    request.shots[0].references[1].inputOrder = 2;
+    request.shots[0].references[1].promptLabel = "Image 2";
+    request.shots[0].prompt = "Image 1 same woman; Image 2 source";
+    await new GenerationService(
+      repositoryFake({ ensureReferenceDraftJobs: ensure }),
+    ).ensureReferenceDraftJobs(request);
+    expect(ensure.mock.calls[0][0][0].paramsJson._referenceAgent).toMatchObject(
+      {
+        prompt: "Image 1 same woman; Image 2 source",
+        references: [
+          { role: "character_identity", inputOrder: 1, promptLabel: "Image 1" },
+          { role: "source", inputOrder: 2, promptLabel: "Image 2" },
+        ],
+      },
+    );
+  });
+
+  it("rejects reference snapshots without a source before persistence", async () => {
+    const ensure = jest.fn();
+    const request = input();
+    request.shots[0].references.shift();
+    request.shots[0].references[0].inputOrder = 1;
+    await expect(
+      new GenerationService(
+        repositoryFake({ ensureReferenceDraftJobs: ensure }),
+      ).ensureReferenceDraftJobs(request),
+    ).rejects.toThrow("Invalid reference generation snapshot");
+    expect(ensure).not.toHaveBeenCalled();
+  });
 });

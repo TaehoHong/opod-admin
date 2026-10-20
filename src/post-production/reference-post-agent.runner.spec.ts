@@ -3,6 +3,7 @@ import {
   ReferencePostAgentRunner,
 } from "./reference-post-agent.runner";
 import { DraftsService } from "../drafts/drafts.service";
+import { createHash } from "node:crypto";
 
 type Jobs = Awaited<
   ReturnType<DraftsService["getReferenceDraftState"]>
@@ -299,9 +300,32 @@ it.each(["published", "approved", "rejected"])(
 );
 
 it("uses persisted per-shot visual bindings instead of loading all active identities", async () => {
+  const bytes = Buffer.from("reference pixels");
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
   const readBytes = jest
     .fn()
-    .mockRejectedValue(new Error("stop after source read"));
+    .mockResolvedValue({ bytes, contentType: "image/png" });
+  const saveReferenceStage = jest.fn().mockResolvedValue(true);
+  const client = {
+    agentSettings: { systemPrompt: "saved", outputSchema: {} },
+    run: jest.fn().mockResolvedValue({
+      producerLogId: "prompt-log",
+      value: {
+        status: "ready",
+        blockedReason: null,
+        shots: [
+          {
+            shotId: "SHOT_01",
+            referenceIds: ["CHARACTER_1", "SOURCE_1"],
+            preserve: "framing",
+            adjust: "new setting and clothing",
+            prompt: "Image 1 identity; Image 2 scene",
+            negativePrompt: "",
+          },
+        ],
+      },
+    }),
+  };
   const match = jest.fn();
   const concept = {
     postGenerationAgent: "reference-v1",
@@ -315,7 +339,7 @@ it("uses persisted per-shot visual bindings instead of loading all active identi
       shots: [
         {
           mediaId: "12",
-          sha256: "hash",
+          sha256,
           shotId: "SHOT_01",
           sortOrder: 0,
           sourceComposition: { content: { personCount: 1 } },
@@ -323,7 +347,7 @@ it("uses persisted per-shot visual bindings instead of loading all active identi
             {
               id: "CHARACTER_1",
               role: "character_identity",
-              sha256: "chosen-hash",
+              sha256,
               media: { url: "", storageKey: "identity/chosen.png" },
             },
           ],
@@ -333,6 +357,7 @@ it("uses persisted per-shot visual bindings instead of loading all active identi
   };
   const runner = new ReferencePostAgentRunner(
     {
+      saveReferenceStage,
       getReferenceDraftState: jest.fn().mockResolvedValue({
         draft: {
           characterId: "character",
@@ -342,7 +367,13 @@ it("uses persisted per-shot visual bindings instead of loading all active identi
       }),
     } as never,
     {} as never,
-    { get: jest.fn().mockResolvedValue({}) } as never,
+    {
+      get: jest.fn().mockResolvedValue({
+        accountConcept: "personal account",
+        imageStyle: "smartphone photos",
+        constraints: "",
+      }),
+    } as never,
     {
       getProfile: jest
         .fn()
@@ -353,8 +384,7 @@ it("uses persisted per-shot visual bindings instead of loading all active identi
         .fn()
         .mockResolvedValue([{ mediaKey: "source/key" }]),
     } as never,
-    async () =>
-      ({ agentSettings: { systemPrompt: "saved", outputSchema: {} } }) as never,
+    async () => client as never,
     readBytes,
     {
       resolveAspectRatios: jest.fn().mockResolvedValue({
@@ -366,9 +396,20 @@ it("uses persisted per-shot visual bindings instead of loading all active identi
     jest.fn(),
     { match } as never,
   );
-  await expect(runner.runCurrentStage("draft")).rejects.toThrow(
-    "stop after source read",
-  );
+  await runner.runCurrentStage("draft");
   expect(match).not.toHaveBeenCalled();
-  expect(readBytes).toHaveBeenCalledWith({ url: "", storageKey: "source/key" });
+  expect(client.run.mock.calls[0][0].input.shots[0].references).toEqual([
+    {
+      id: "CHARACTER_1",
+      role: "character_identity",
+      inputOrder: 1,
+      promptLabel: "Image 1",
+    },
+    { id: "SOURCE_1", role: "source", inputOrder: 2, promptLabel: "Image 2" },
+  ]);
+  expect(
+    saveReferenceStage.mock.calls[0][0].conceptJson.promptBuild.input.shots[0].references.map(
+      (reference: { id: string }) => reference.id,
+    ),
+  ).toEqual(["CHARACTER_1", "SOURCE_1"]);
 });

@@ -322,8 +322,8 @@ export class VisualCompositionService {
         return {
           id: `CHARACTER_${index + 1}`,
           role: "character_identity" as const,
-          inputOrder: index + 2,
-          promptLabel: `${input.slotPrefix} ${index + 2}`,
+          inputOrder: index + 1,
+          promptLabel: `${input.slotPrefix} ${index + 1}`,
           sha256: createHash("sha256").update(bytes).digest("hex"),
           media: candidate.media,
           mediaId: candidate.mediaId,

@@ -817,7 +817,17 @@ AiModelService를 통해 선택 모델을 검증한다. 이전 공통 generation
 고정한 작업은 PostAgentPromptService의 버전 조회·검증을 유지한다. 초안 생성은 명시적 reference 선택과 완전한 설정을 요구하며
 `referenceAgentConfig` 전체를 고정한다. 계약은 [Agent 관리 API](api/admin-post-generation-agents.md)에 기록한다.
 
-이미지 프롬프트는 원본과 캐릭터 정체성 픽셀·SHA·역할·모델별 label 순서를 보존한다.
+이미지 프롬프트는 원본의 촬영 구도와 장소·옷차림의 시각적 성격을 관찰하고,
+공간의 형태·배치와 의상·소품을 구체적으로 재구성한다. 관찰한 상태를 노출 제한 같은
+추가 의무로 확대하지 않는다. `prompts/reference-image-prompt.ts`가 starter 지침을 소유하며,
+실행에는 저장된 image_prompt 지침을 사용한다. `StrictJsonAgentClient`는 각 호출에
+해당 단계의 system/user만 전달하고 이전 대화나 다른 단계의 메시지 이력을 붙이지 않는다.
+새 컷은 선택된 캐릭터 참조를 먼저, 원본을 마지막으로 전달하며 픽셀·SHA·역할·
+모델별 label 순서를 프롬프트와 생성 snapshot에 보존한다. 비주얼 선택은 얼굴 주 기준을
+먼저, 체형 등 보완 기준을 뒤에 반환하도록 지시한다. `reference-generation.ts`는 원본 필수와
+ID·SHA·inputOrder 검증을 유지하면서 기존 원본 우선 snapshot도 재정렬 없이 허용한다.
+순서 전달 회귀는 reference-post-agent.runner.spec.ts, generation.service.spec.ts와
+generation-worker.service.spec.ts가 보호한다. 자연형 Agent 지침과 기존 초안의 frozen 입력은 변경하지 않는다.
 `GenerationService.ensureReferenceDraftJobs`가 prompt revision별 컷 잡을 재사용하고
 `_referenceAgent` snapshot에 prompt/negative·참조·모델·생성 파라미터를 고정한다.
 worker는 현재 프로필로 입력을 다시 만들지 않고 snapshot을 검증하며, 저장된 외부
