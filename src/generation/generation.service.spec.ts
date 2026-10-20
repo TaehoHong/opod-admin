@@ -879,4 +879,26 @@ describe("reference generation handoff", () => {
     ).rejects.toThrow("Invalid reference generation snapshot");
     expect(ensure).not.toHaveBeenCalled();
   });
+
+  it("freezes source-only scene shots without adding character references", async () => {
+    const ensure = jest.fn();
+    const request = input();
+    request.shots[0].references.pop();
+    request.shots[0].prompt = "Image 1 scene";
+    await new GenerationService(
+      repositoryFake({ ensureReferenceDraftJobs: ensure }),
+    ).ensureReferenceDraftJobs(request);
+    expect(
+      ensure.mock.calls[0][0][0].paramsJson._referenceAgent.references,
+    ).toEqual([
+      {
+        id: "30000000001",
+        role: "source",
+        inputOrder: 1,
+        promptLabel: "Image 1",
+        sha256: "a".repeat(64),
+        media: { url: "", storageKey: "sources/a.png" },
+      },
+    ]);
+  });
 });

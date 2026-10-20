@@ -824,7 +824,9 @@ AiModelService를 통해 선택 모델을 검증한다. 이전 공통 generation
 해당 단계의 system/user만 전달하고 이전 대화나 다른 단계의 메시지 이력을 붙이지 않는다.
 새 컷은 선택된 캐릭터 참조를 먼저, 원본을 마지막으로 전달하며 픽셀·SHA·역할·
 모델별 label 순서를 프롬프트와 생성 snapshot에 보존한다. 비주얼 선택은 얼굴 주 기준을
-먼저, 체형 등 보완 기준을 뒤에 반환하도록 지시한다. `reference-generation.ts`는 원본 필수와
+먼저, 체형 등 보완 기준을 뒤에 반환하도록 지시하되 얼굴·체형 둘 다를 필수로 붙이지 않는다.
+컷에 따라 얼굴→원본, 체형→원본, 얼굴·체형→원본을 사용하고 인물 비노출 컷은 원본만 사용한다.
+`reference-generation.ts`는 원본 필수와
 ID·SHA·inputOrder 검증을 유지하면서 기존 원본 우선 snapshot도 재정렬 없이 허용한다.
 순서 전달 회귀는 reference-post-agent.runner.spec.ts, generation.service.spec.ts와
 generation-worker.service.spec.ts가 보호한다. 자연형 Agent 지침과 기존 초안의 frozen 입력은 변경하지 않는다.

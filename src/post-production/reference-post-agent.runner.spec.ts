@@ -299,117 +299,143 @@ it.each(["published", "approved", "rejected"])(
   },
 );
 
-it("uses persisted per-shot visual bindings instead of loading all active identities", async () => {
-  const bytes = Buffer.from("reference pixels");
-  const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const readBytes = jest
-    .fn()
-    .mockResolvedValue({ bytes, contentType: "image/png" });
-  const saveReferenceStage = jest.fn().mockResolvedValue(true);
-  const client = {
-    agentSettings: { systemPrompt: "saved", outputSchema: {} },
-    run: jest.fn().mockResolvedValue({
-      producerLogId: "prompt-log",
-      value: {
-        status: "ready",
-        blockedReason: null,
-        shots: [
-          {
-            shotId: "SHOT_01",
-            referenceIds: ["CHARACTER_1", "SOURCE_1"],
-            preserve: "framing",
-            adjust: "new setting and clothing",
-            prompt: "Image 1 identity; Image 2 scene",
-            negativePrompt: "",
-          },
-        ],
-      },
-    }),
-  };
-  const match = jest.fn();
-  const concept = {
-    postGenerationAgent: "reference-v1",
-    pipeline: { stage: "image_prompt" },
-    referenceAgentConfig: {
-      revision: "saved",
-      stages: { image_prompt: {} },
-      generation: { effectiveModel: "alibaba/qwen-image-3.0-pro/edit" },
-    },
-    referenceSelection: {
-      shots: [
-        {
-          mediaId: "12",
-          sha256,
-          shotId: "SHOT_01",
-          sortOrder: 0,
-          sourceComposition: { content: { personCount: 1 } },
-          visualReferences: [
+it.each([
+  {
+    kind: "face",
+    personCount: 1,
+    characterIds: ["FACE"],
+    expectedIds: ["FACE", "SOURCE_1"],
+    prompt: "Image 1 face; Image 2 scene",
+  },
+  {
+    kind: "body",
+    personCount: 1,
+    characterIds: ["BODY"],
+    expectedIds: ["BODY", "SOURCE_1"],
+    prompt: "Image 1 body; Image 2 scene",
+  },
+  {
+    kind: "face-and-body",
+    personCount: 1,
+    characterIds: ["FACE", "BODY"],
+    expectedIds: ["FACE", "BODY", "SOURCE_1"],
+    prompt: "Image 1 face; Image 2 body; Image 3 scene",
+  },
+  {
+    kind: "source-only",
+    personCount: 0,
+    characterIds: [],
+    expectedIds: ["SOURCE_1"],
+    prompt: "Image 1 scene",
+  },
+])(
+  "uses only persisted per-shot $kind references without adding identities",
+  async ({ kind, personCount, characterIds, expectedIds, prompt }) => {
+    const bytes = Buffer.from("reference pixels");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const readBytes = jest
+      .fn()
+      .mockResolvedValue({ bytes, contentType: "image/png" });
+    const saveReferenceStage = jest.fn().mockResolvedValue(true);
+    const client = {
+      agentSettings: { systemPrompt: "saved", outputSchema: {} },
+      run: jest.fn().mockResolvedValue({
+        producerLogId: "prompt-log",
+        value: {
+          status: "ready",
+          blockedReason: null,
+          shots: [
             {
-              id: "CHARACTER_1",
-              role: "character_identity",
-              sha256,
-              media: { url: "", storageKey: "identity/chosen.png" },
+              shotId: "SHOT_01",
+              referenceIds: expectedIds,
+              preserve: "framing",
+              adjust: "new setting and clothing",
+              prompt,
+              negativePrompt: "",
             },
           ],
         },
-      ],
-    },
-  };
-  const runner = new ReferencePostAgentRunner(
-    {
-      saveReferenceStage,
-      getReferenceDraftState: jest.fn().mockResolvedValue({
-        draft: {
-          characterId: "character",
-          status: "generating",
-          conceptJson: concept,
-        },
       }),
-    } as never,
-    {} as never,
-    {
-      get: jest.fn().mockResolvedValue({
-        accountConcept: "personal account",
-        imageStyle: "smartphone photos",
-        constraints: "",
-      }),
-    } as never,
-    {
-      getProfile: jest
-        .fn()
-        .mockResolvedValue({ providerConfig: {}, referenceMedia: [] }),
-    } as never,
-    {
-      findReadSources: jest
-        .fn()
-        .mockResolvedValue([{ mediaKey: "source/key" }]),
-    } as never,
-    async () => client as never,
-    readBytes,
-    {
-      resolveAspectRatios: jest.fn().mockResolvedValue({
-        feed: { value: "4:5" },
-        reel: { value: "9:16" },
-        story: { value: "9:16" },
-      }),
-    } as never,
-    jest.fn(),
-    { match } as never,
-  );
-  await runner.runCurrentStage("draft");
-  expect(match).not.toHaveBeenCalled();
-  expect(client.run.mock.calls[0][0].input.shots[0].references).toEqual([
-    {
-      id: "CHARACTER_1",
-      role: "character_identity",
-      inputOrder: 1,
-      promptLabel: "Image 1",
-    },
-    { id: "SOURCE_1", role: "source", inputOrder: 2, promptLabel: "Image 2" },
-  ]);
-  expect(
-    saveReferenceStage.mock.calls[0][0].conceptJson.promptBuild.input.shots[0].references.map(
-      (reference: { id: string }) => reference.id,
-    ),
-  ).toEqual(["CHARACTER_1", "SOURCE_1"]);
-});
+    };
+    const match = jest.fn();
+    const concept = {
+      postGenerationAgent: "reference-v1",
+      pipeline: { stage: "image_prompt" },
+      referenceAgentConfig: {
+        revision: "saved",
+        stages: { image_prompt: {} },
+        generation: { effectiveModel: "alibaba/qwen-image-3.0-pro/edit" },
+      },
+      referenceSelection: {
+        shots: [
+          {
+            mediaId: "12",
+            sha256,
+            shotId: "SHOT_01",
+            sortOrder: 0,
+            sourceComposition: { content: { personCount } },
+            visualReferences: characterIds.map((id) => ({
+              id,
+              role: "character_identity",
+              sha256,
+              media: { url: "", storageKey: `identity/${kind}.png` },
+            })),
+          },
+        ],
+      },
+    };
+    const runner = new ReferencePostAgentRunner(
+      {
+        saveReferenceStage,
+        getReferenceDraftState: jest.fn().mockResolvedValue({
+          draft: {
+            characterId: "character",
+            status: "generating",
+            conceptJson: concept,
+          },
+        }),
+      } as never,
+      {} as never,
+      {
+        get: jest.fn().mockResolvedValue({
+          accountConcept: "personal account",
+          imageStyle: "smartphone photos",
+          constraints: "",
+        }),
+      } as never,
+      {
+        getProfile: jest
+          .fn()
+          .mockResolvedValue({ providerConfig: {}, referenceMedia: [] }),
+      } as never,
+      {
+        findReadSources: jest
+          .fn()
+          .mockResolvedValue([{ mediaKey: "source/key" }]),
+      } as never,
+      async () => client as never,
+      readBytes,
+      {
+        resolveAspectRatios: jest.fn().mockResolvedValue({
+          feed: { value: "4:5" },
+          reel: { value: "9:16" },
+          story: { value: "9:16" },
+        }),
+      } as never,
+      jest.fn(),
+      { match } as never,
+    );
+    await runner.runCurrentStage("draft");
+    expect(match).not.toHaveBeenCalled();
+    expect(
+      client.run.mock.calls[0][0].input.shots[0].references.map(
+        (reference: { id: string }) => reference.id,
+      ),
+    ).toEqual(expectedIds);
+    expect(
+      saveReferenceStage.mock.calls[0][0].conceptJson.promptBuild.input.shots[0].references.map(
+        (reference: { id: string }) => reference.id,
+      ),
+    ).toEqual(expectedIds);
+  },
+);

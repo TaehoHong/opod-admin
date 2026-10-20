@@ -160,3 +160,12 @@ worktree 상태를 확인한다.
 - 실제 실패 초안을 같은 Domain Service로 읽기 전용 재조회해 완료 결과 1개·선택 결과 1개와 참조 이름 보존을 확인했다. 이미지 재생성·DB 행 수정·DDL은 수행하지 않았다.
 - 서버 77 suites/866 tests, build/lint/format 통과. 두 회귀 테스트 묶음은 수정 전의 실제 실패 조건을 재현하고 수정 후 통과했다. 생성 공급자는 테스트 대역이며 실제 유료 생성은 실행하지 않았다.
 - Sol 6.1 subagent가 worker 기록과 회귀 테스트를 구현했고 메인 에이전트가 상세 조회·통합 검증·배포·실제 조회를 확인했다. health는 `status=ok,database=up`이었다.
+
+### 2026-10-20 레퍼런스 이미지 프롬프트 재구성 지침 적용
+
+- 실행 코드 `a4930ec9b386e45c0fe6fd18b4a28d6540494645`, 이미지 `opod-admin:reference-v2-a4930ec`를 해당 커밋의 archive에서 빌드해 개발서버 Admin에 적용했다. 이전 이미지는 `opod-admin:before-reference-v2-a4930ec`로 보존했다.
+- 원본의 장소·옷차림의 시각적 성격을 관찰하고 공간·의상·소품을 재구성하는 지침을 starter와 저장된 reference image_prompt에 반영했다. 관찰 상태를 요청에 없는 노출 제한 등으로 확대하지 않는다.
+- 저장은 `GenerationSettingsService.saveReferenceAgentSettings`의 revision CAS를 사용했다. 변경 후 설정 revision은 `28b1c27c-5a90-47b0-af49-28e3390c6035`, systemPrompt SHA-256은 `ffefe53d8c18a2baab46e8b579df555415ffcf1c9533d795800c48be2ad2914a`다. 다른 단계·모델·schema·선택 설정과 자연형 설정의 보존을 읽기 검증했다.
+- 선택된 캐릭터 참조를 먼저, 원본을 마지막으로 전달한다. 얼굴과 체형 모두를 강제하지 않으며 얼굴→원본, 체형→원본, 얼굴·체형→원본, 인물 비노출 원본 전용을 지원한다. 기존 frozen 작업의 순서는 그대로 유지한다. 저장 설정은 새 초안에 고정되며 기존 초안 설정을 일괄 변경하지 않았다.
+- 최종 77 suites/873 tests, lint/format/build 통과. 배포된 입력 검증에서도 네 조합과 기존 원본 우선 입력을 확인했고 health는 `status=ok,database=up`이었다. 생성 공급자 호출은 테스트 대역으로 검증했으며 배포 후 유료 생성·게시는 실행하지 않았다.
+- 설정 변경 전후와 검증 영수증은 로컬 `content-work/reference-agent-v2-deployment-20261020/`에 회수했다. DB schema와 캐릭터 데이터는 변경하지 않았다.
