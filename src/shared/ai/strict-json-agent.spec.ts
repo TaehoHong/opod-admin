@@ -138,3 +138,35 @@ describe("StrictJsonAgentClient token-limit field", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+it("does not impose a sixty-second deadline on structured LLM requests", async () => {
+  jest.useFakeTimers();
+  const timeout = jest
+    .spyOn(AbortSignal, "timeout")
+    .mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new Error("timeout")), ms);
+      return controller.signal;
+    });
+  try {
+    const fetchFn = jest.fn(
+      (_url: unknown, options?: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          options?.signal?.addEventListener("abort", () =>
+            reject(options.signal?.reason),
+          );
+          setTimeout(() => resolve(ok({ completed: true })), 120_000);
+        }),
+    );
+    const result = new StrictJsonAgentClient(
+      config,
+      fetchFn as typeof fetch,
+    ).run(request);
+    void result.catch(() => {});
+    await jest.advanceTimersByTimeAsync(120_000);
+    await expect(result).resolves.toMatchObject({ value: { completed: true } });
+  } finally {
+    timeout.mockRestore();
+    jest.useRealTimers();
+  }
+});

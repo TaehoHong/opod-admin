@@ -9,8 +9,6 @@ import {
 } from "../../llm-logs/llm-log.service";
 import { contentFromChatCompletion } from "../../post-production/content-planner";
 
-const HTTP_TIMEOUT_MS = 60_000;
-
 export type StrictJsonAgentConfig = {
   apiUrl: string;
   apiKey: string;
@@ -120,7 +118,6 @@ export class StrictJsonAgentClient {
             "content-type": "application/json",
           },
           body: JSON.stringify(requestJson),
-          signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
         });
       if (!this.llmLogs) {
         return { response: await call(), producerLogId: null };

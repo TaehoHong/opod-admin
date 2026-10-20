@@ -827,6 +827,7 @@ AiModelService를 통해 선택 모델을 검증한다. 이전 공통 generation
 추가 의무로 확대하지 않는다. `prompts/reference-image-prompt.ts`가 starter 지침을 소유하며,
 실행에는 저장된 image_prompt 지침을 사용한다. `StrictJsonAgentClient`는 각 호출에
 해당 단계의 system/user만 전달하고 이전 대화나 다른 단계의 메시지 이력을 붙이지 않는다.
+구조화 LLM 요청에는 애플리케이션의 60초 강제 중단을 적용하지 않는다.
 `ReferenceImagePromptAgent`는 실제 픽셀 SHA-256별로 이미지를 한 번만 첨부하고,
 컷별 참조의 imageId로 첨부를 연결한다. 생성용 inputOrder·promptLabel·referenceIds는
 컷별 순서를 유지한다. 원본·캐릭터 참조의 해시 검증은 중복 여부와 무관하게 수행한다.
