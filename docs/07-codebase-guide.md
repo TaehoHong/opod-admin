@@ -177,6 +177,7 @@ SpicyAPI 구현은 factory를 역참조하지 않는다. SpicyAPI 모델 목록�
 `spicyapi-image.provider.ts`는 외부 통신·로그·멱등성·폴링·결과 크롭을 소유하며,
 요청 조립은 `spicyapi-image-request.ts`로 위임한다. 공통 네거티브는 이 경계에서
 한 번 합치며 Agent 출력이나 저장된 컷별 조건을 덮어쓰지 않는다.
+Qwen edit/t2i 요청은 사용자 결정으로 `enable_prompt_expansion: true`를 전송한다.
 
 수동 게시 최종 확인은 `packages/admin/src/features/posts/PostWorkPage.tsx`의
 `PublishStage` / `PublishPreview`가 소유한다. `지금 게시`는 확인 팝업을 열고,

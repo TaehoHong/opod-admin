@@ -213,7 +213,7 @@ describe("SpicyAPI image provider", () => {
           aspect_ratio: "3:4",
           resolution: "1k",
           num_outputs: 1,
-          enable_prompt_expansion: false,
+          enable_prompt_expansion: true,
           seed: 7,
         },
       });

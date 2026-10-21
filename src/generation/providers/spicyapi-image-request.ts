@@ -22,7 +22,7 @@ export type SpicyApiRequestBody = {
     resolution: "1k" | "2k";
     // Qwen만 받는 입력
     num_outputs?: 1;
-    enable_prompt_expansion?: false;
+    enable_prompt_expansion?: true;
     negative_prompt?: string;
     seed?: number;
     // Seedream만 받는 입력
@@ -31,7 +31,7 @@ export type SpicyApiRequestBody = {
 };
 
 // 다른 provider의 파라미터와 내부 metadata는 보내지 않는다. 입력 오류는 과금 전
-// terminal 실패다. 프롬프트를 다시 쓰는 단계(Qwen 확장, Seedream thinking)는 끈다.
+// terminal 실패다. Qwen 프롬프트 확장은 켜고 Seedream thinking은 끈다.
 export function spicyApiRequestBody(
   request: ImageGenerationRequest,
   model: string,
@@ -121,7 +121,7 @@ export function spicyApiRequestBody(
         ? { enable_thinking: false as const }
         : {
             num_outputs: 1 as const,
-            enable_prompt_expansion: false as const,
+            enable_prompt_expansion: true as const,
             ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
             ...(seed !== undefined ? { seed: seed as number } : {}),
           }),
