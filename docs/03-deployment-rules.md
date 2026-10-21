@@ -184,3 +184,12 @@ worktree 상태를 확인한다.
 - 17:04 KST 기동 후 이미지 revision 일치, 재시작 횟수 0, health `status=ok,database=up`을 확인했다. 직전 이미지는 `opod-admin:before-image-dedup-f54814e`로 보존했다.
 - 로컬 단위 77 suites/876 tests, lint·format·build 통과. 배포된 Node.js 26.7.0 코드에서 합성 픽셀과 테스트 공급자로 3컷의 참조 9개가 이미지 5장으로 전송되고, 컷별 매핑·생성용 이미지 번호 유지 및 LLM 요청의 timeout signal 제거를 확인했다.
 - 원본 실패 로그 2490과 이전 2489는 같은 초안의 이미지 프롬프트 단계에서 각각 60.054초·60.056초에 애플리케이션의 60초 중단으로 실패했다. 공급자 내부 지연 원인과 실제 LLM 결과 품질은 이번 검증 범위에 포함하지 않는다. 유료 생성·게시·DB schema/저장 설정 변경은 수행하지 않았다.
+
+
+### 2026-10-21 게시물별 SpicyAPI 프롬프트 확장 스위치
+
+- 코드 `e566dfa`를 main에 푸시하고 해당 Git archive로 빌드한 `opod-admin:prompt-expansion-e566dfa`를 개발 Admin에 배포했다. 실행 revision 일치, 재시작 횟수 0, health `status=ok,database=up`을 확인했다.
+- 레퍼런스 Agent 이미지 생성 단계의 SpicyAPI Qwen 스위치는 기본 ON이다. 최초 생성·전체 재생성의 모든 컷에 선택값을 고정하며 기존 작업 재개·실패 컷 단순 재시도는 저장된 입력을 유지한다. Seedream과 전역 설정은 변경하지 않았다.
+- Sol 6.1 subagent가 UI와 초안 API/저장을 구현했고 메인이 공급자 요청·독립 검토·통합 검증·배포를 수행했다. 기존 작업 재개 시 옵션을 생략하는 회귀도 포함했다.
+- 서버 78 suites/899 tests, 최종 관련 UI 32 tests, build/lint/format을 통과했다. 전체 admin:check는 이번 변경과 무관한 ReferenceAgentPanel.test.tsx의 기존 저장 안내 문구 검증 2건으로 실패했고, 해당 파일 단독 실행에서도 재현했다. 범위 밖 테스트는 수정하지 않았다.
+- 배포 코드에서 ON/OFF·값 없는 이전 입력의 기본 ON·Seedream 필드 생략을 검증했다. 실제 유료 생성·게시·DB schema 변경은 하지 않았다. 실제 DB 동시성 E2E는 로컬 Docker 중단 상태로 보류했다. Mac 잠금으로 배포 후 브라우저 시각 검증은 수행하지 못했다.
