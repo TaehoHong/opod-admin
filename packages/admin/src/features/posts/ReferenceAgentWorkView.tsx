@@ -6,6 +6,7 @@ import {
   CopyButton,
   Group,
   Stack,
+  Switch,
   Text,
   Textarea,
   TextInput,
@@ -13,7 +14,7 @@ import {
 } from "@mantine/core";
 import { Check, Copy, WarningCircle } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { CharacterName } from "../../shared/ui/EntityName";
 import { DataPage } from "../../shared/ui/DataPage";
@@ -67,6 +68,26 @@ export function ReferenceAgentWorkView({
   const [caption, setCaption] = useState<string>();
   const [hashtags, setHashtags] = useState<string>();
   const [preview, setPreview] = useState(false);
+  const [promptExpansionOverride, setPromptExpansionOverride] = useState<{
+    draftId: string;
+    enabled: boolean;
+  }>();
+  useEffect(() => setPromptExpansionOverride(undefined), [draft.id]);
+  const generationConfig = record(
+    record(draft.conceptJson?.referenceAgentConfig).generation,
+  );
+  const supportsPromptExpansion =
+    generationConfig.provider === "spicyapi" &&
+    /^alibaba\/qwen-image-3\.0(?:-pro)?\/edit$/.test(
+      text(generationConfig.effectiveModel),
+    );
+  const savedPromptExpansion = record(
+    record(draft.conceptJson?.promptBuild).generationParams,
+  ).enable_prompt_expansion;
+  const enablePromptExpansion =
+    promptExpansionOverride?.draftId === draft.id
+      ? promptExpansionOverride.enabled
+      : savedPromptExpansion !== false;
   const active = REFERENCE_STAGES.find((s) => s.id === stage);
   const current =
     REFERENCE_STAGES.find((s) => s.id === item.currentStage)?.id ??
@@ -75,8 +96,16 @@ export function ReferenceAgentWorkView({
   const terminal = ["needs_review", "approved", "published"].includes(
     draft.status,
   );
+  const acceptedJobIds = record(draft.conceptJson?.generationBuild).jobIds;
+  const hasAcceptedJobs =
+    Array.isArray(acceptedJobIds) && acceptedJobIds.length > 0;
   const execute = useDraftMutation(draft.id, () =>
     runDraftStage(draft.id, "plan", {
+      ...(current === "generation" &&
+      supportsPromptExpansion &&
+      !hasAcceptedJobs
+        ? { enablePromptExpansion }
+        : {}),
       expectedStage: current,
       expectedRevision: draft.updatedAt,
     }),
@@ -106,6 +135,9 @@ export function ReferenceAgentWorkView({
     (target) =>
       restartReferenceDraft(draft.id, {
         target,
+        ...(target === "generation" && supportsPromptExpansion
+          ? { enablePromptExpansion }
+          : {}),
         expectedRevision: draft.updatedAt,
       }),
   );
@@ -411,6 +443,24 @@ export function ReferenceAgentWorkView({
             <Title order={2} size="h3">
               {active.label}
             </Title>
+            {stage === "generation" && supportsPromptExpansion && (
+              <Switch
+                role="switch"
+                aria-label="프롬프트 확장"
+                label="프롬프트 확장"
+                checked={enablePromptExpansion}
+                disabled={
+                  restartDisabled ||
+                  !!currentJobs?.some((shot) => shot.status !== "completed")
+                }
+                onChange={(event) =>
+                  setPromptExpansionOverride({
+                    draftId: draft.id,
+                    enabled: event.currentTarget.checked,
+                  })
+                }
+              />
+            )}
             {view.shots.length === 1 && (
               <Text size="sm" c="ink.6">
                 사진 1 / 1

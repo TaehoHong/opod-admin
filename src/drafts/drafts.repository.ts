@@ -445,6 +445,7 @@ export class DraftsRepository {
     expectedStage?: string;
     expectedRevision?: string;
     expectedPromptRevision?: number;
+    enablePromptExpansion?: boolean;
   }): Promise<string | undefined> {
     return this.database.client.transaction(async (tx) => {
       const [draft] = await tx
@@ -481,6 +482,18 @@ export class DraftsRepository {
       if (!draft) return undefined;
       const concept = draft.conceptJson as Record<string, unknown>;
       const pipeline = concept.pipeline as Record<string, unknown>;
+      const prompt = (concept.promptBuild ?? {}) as Record<string, unknown>;
+      const generation = (concept.generationBuild ?? {}) as Record<
+        string,
+        unknown
+      >;
+      if (
+        input.enablePromptExpansion !== undefined &&
+        (typeof input.enablePromptExpansion !== "boolean" ||
+          pipeline.stage !== "generation" ||
+          (Array.isArray(generation.jobIds) && generation.jobIds.length > 0))
+      )
+        return undefined;
       await tx
         .update(postDrafts)
         .set({
@@ -489,6 +502,20 @@ export class DraftsRepository {
           updatedAt: new Date(),
           conceptJson: {
             ...concept,
+            ...(input.enablePromptExpansion !== undefined
+              ? {
+                  promptBuild: {
+                    ...prompt,
+                    generationParams: {
+                      ...((prompt.generationParams ?? {}) as Record<
+                        string,
+                        unknown
+                      >),
+                      enable_prompt_expansion: input.enablePromptExpansion,
+                    },
+                  },
+                }
+              : {}),
             pipeline: { ...pipeline, state: "running" },
           },
           errorMessage: null,

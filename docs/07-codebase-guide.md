@@ -177,7 +177,13 @@ SpicyAPI 구현은 factory를 역참조하지 않는다. SpicyAPI 모델 목록�
 `spicyapi-image.provider.ts`는 외부 통신·로그·멱등성·폴링·결과 크롭을 소유하며,
 요청 조립은 `spicyapi-image-request.ts`로 위임한다. 공통 네거티브는 이 경계에서
 한 번 합치며 Agent 출력이나 저장된 컷별 조건을 덮어쓰지 않는다.
-Qwen edit/t2i 요청은 사용자 결정으로 `enable_prompt_expansion: true`를 전송한다.
+Qwen edit/t2i 요청은 잡의 `generationParams.enable_prompt_expansion` boolean을 전송하며
+미설정 기본값은 true다. `ReferenceAgentWorkView`의 이미지 생성 단계 스위치가 최초 실행의
+`RunStageDto.enablePromptExpansion` 또는 전체 재생성의 동명 옵션을 전달한다.
+초기 claim은 기존 초안 행 잠금·단계/updatedAt 검사 안에서 옵션과 실행 상태를 함께 저장한다.
+수락된 잡이 있으면 초기 옵션 변경을 거부한다. 전체 재생성은 기존 revision 증가와 캡션 무효화
+경로에서 옵션을 바꾸고 새 잡을 만든다. 실행 중 잡과 실패 컷 retry의 snapshot은 유지한다.
+전역 설정은 추가하지 않으며 Seedream에는 확장 필드를 전송하지 않는다.
 
 수동 게시 최종 확인은 `packages/admin/src/features/posts/PostWorkPage.tsx`의
 `PublishStage` / `PublishPreview`가 소유한다. `지금 게시`는 확인 팝업을 열고,

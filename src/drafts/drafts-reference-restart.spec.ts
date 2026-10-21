@@ -9,7 +9,13 @@ function fixture() {
   const concept = {
     postGenerationAgent: "reference-v1",
     mode: "manual",
-    referenceAgentConfig: { revision: "frozen" },
+    referenceAgentConfig: {
+      revision: "frozen",
+      generation: {
+        provider: "spicyapi",
+        effectiveModel: "alibaba/qwen-image-3.0-pro/edit",
+      },
+    },
     referenceRevision: 3,
     referenceSelection: { shots: [{ mediaId: "12" }] },
     promptBuild: {
@@ -116,6 +122,56 @@ describe("reference restart", () => {
     expect(saved).not.toHaveProperty("captionBuild");
     expect(saved.referenceSelection).toEqual(f.concept.referenceSelection);
   });
+  it("regeneration saves false while preserving all other frozen inputs", async () => {
+    const f = fixture();
+    await f.service.restartReferenceDraft({
+      draftId: "draft",
+      target: "generation",
+      expectedRevision: timestamp,
+      enablePromptExpansion: false,
+    });
+    const saved =
+      f.repository.restartReferenceDraft.mock.calls[0][0].conceptJson;
+    expect(saved.promptBuild).toEqual({
+      ...f.concept.promptBuild,
+      revision: 4,
+      generationParams: { aspect_ratio: "4:5", enable_prompt_expansion: false },
+    });
+    expect(saved).not.toHaveProperty("generationBuild");
+    expect(saved).not.toHaveProperty("captionBuild");
+  });
+  it.each(["reference_select", "wrong-model", "null"])(
+    "rejects invalid expansion option %s before saving",
+    async (scenario) => {
+      const f = fixture();
+      if (scenario === "wrong-model")
+        f.concept.referenceAgentConfig.generation.effectiveModel =
+          "bytedance/seedream-5.0-pro/edit";
+      await expect(
+        f.service.restartReferenceDraft({
+          draftId: "draft",
+          target:
+            scenario === "reference_select" ? "reference_select" : "generation",
+          expectedRevision: timestamp,
+          enablePromptExpansion: scenario === "null" ? (null as never) : false,
+        }),
+      ).rejects.toThrow("Prompt expansion");
+      expect(f.repository.restartReferenceDraft).not.toHaveBeenCalled();
+    },
+  );
+  it.each([false, true, "false", null])(
+    "validates supplied expansion boolean %s",
+    (value) => {
+      const errors = validateSync(
+        Object.assign(new RestartReferenceDraftDto(), {
+          target: "generation",
+          expectedRevision: timestamp,
+          enablePromptExpansion: value,
+        }),
+      );
+      expect(errors.length).toBe(typeof value === "boolean" ? 0 : 1);
+    },
+  );
   it.each(["published", "rejected"])(
     "blocks terminal %s drafts",
     async (status) => {

@@ -160,6 +160,7 @@ export class DraftsController {
   ) {
     const result = await this.draftWorker.planDraftNow(draftId, {
       ...(body.note?.trim() ? { operatorNote: body.note.trim() } : {}),
+      enablePromptExpansion: body.enablePromptExpansion,
       expectedStage: body.expectedStage,
       expectedRevision: body.expectedRevision,
     });

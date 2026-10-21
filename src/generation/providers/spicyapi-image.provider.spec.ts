@@ -117,6 +117,54 @@ function imageBytes(result: unknown): Buffer {
 }
 
 describe("SpicyAPI image provider", () => {
+  it.each([
+    ["edit", false],
+    ["edit", true],
+    ["t2i", false],
+    ["t2i", true],
+  ] as const)(
+    "sends the saved prompt expansion value on %s: %s",
+    async (route, enabled) => {
+      const fetchFn = jest.fn().mockResolvedValue(accepted());
+      await createSpicyApiImageProviders(config, fetchFn)[route].submit(
+        request({
+          references: route === "edit" ? [reference("face")] : [],
+          extraParams: {
+            aspect_ratio: "4:5",
+            enable_prompt_expansion: enabled,
+          },
+        }),
+      );
+      expect(
+        JSON.parse(fetchFn.mock.calls[0][1].body).input.enable_prompt_expansion,
+      ).toBe(enabled);
+    },
+  );
+
+  it("rejects a non-boolean Qwen expansion value before creating a paid task", async () => {
+    const fetchFn = jest.fn();
+    await expect(
+      createSpicyApiImageProviders(config, fetchFn).edit.submit(
+        request({
+          extraParams: { enable_prompt_expansion: "false" },
+        }),
+      ),
+    ).rejects.toThrow("prompt expansion must be a boolean");
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("does not send a Qwen expansion option to Seedream", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(accepted());
+    await createSpicyApiImageProviders(seedream, fetchFn).edit.submit(
+      request({
+        extraParams: { enable_prompt_expansion: false },
+      }),
+    );
+    expect(JSON.parse(fetchFn.mock.calls[0][1].body).input).not.toHaveProperty(
+      "enable_prompt_expansion",
+    );
+  });
+
   it.each(["edit", "t2i"] as const)(
     "combines the saved Qwen common negative with shot exclusions on %s without duplicates",
     async (route) => {

@@ -97,6 +97,29 @@ describe("reference draft worker routing", () => {
     );
     expect(runQueuedJob.mock.calls).toEqual([["queued"]]);
   });
+  it("passes false to the claim before the runner reads generation settings", async () => {
+    const { service, drafts, runner } = setup("generation");
+    let persisted: boolean | undefined;
+    jest
+      .spyOn(drafts, "claimReferenceDraftNow")
+      .mockImplementation(async (_id, _lease, guard) => {
+        persisted = (
+          guard as typeof guard & { enablePromptExpansion?: boolean }
+        ).enablePromptExpansion;
+        return true;
+      });
+    jest.spyOn(runner, "runCurrentStage").mockImplementation(async () => {
+      expect(persisted).toBe(false);
+    });
+    await expect(
+      service.planDraftNow("draft", {
+        expectedStage: "generation",
+        expectedRevision: "2026-10-19T00:00:00.000Z",
+        enablePromptExpansion: false,
+      }),
+    ).resolves.toEqual({ planned: true });
+    expect(persisted).toBe(false);
+  });
   it("does not trigger manual job callbacks during automatic ticks", async () => {
     const { service, drafts, runQueuedJob } = setup("generation");
     drafts.claimReferenceDraft.mockResolvedValueOnce("draft");

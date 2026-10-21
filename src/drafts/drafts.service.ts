@@ -1,3 +1,7 @@
+import {
+  spicyApiImageModels,
+  spicyApiFamily,
+} from "../generation/providers/spicyapi-image-models";
 import { currentReferenceOutputs } from "../post-production/reference-post-artifacts";
 import { generationSetHash } from "../post-production/post-pipeline-v3";
 import {
@@ -347,6 +351,7 @@ export class DraftsService {
     draftId: string;
     target: "reference_select" | "generation";
     expectedRevision: string;
+    enablePromptExpansion?: boolean;
   }) {
     if (
       !["reference_select", "generation"].includes(input.target) ||
@@ -369,6 +374,12 @@ export class DraftsService {
         "Reference draft changed; reload before restarting",
       );
     const concept = this.record(draft.conceptJson);
+    if (input.enablePromptExpansion !== undefined)
+      this.assertReferencePromptExpansion(
+        concept,
+        input.target,
+        input.enablePromptExpansion,
+      );
     const acceptedIds = this.record(concept.generationBuild).jobIds;
     if (
       Array.isArray(acceptedIds) &&
@@ -405,7 +416,18 @@ export class DraftsService {
         throw new BadRequestException(
           "Saved reference generation input is required",
         );
-      updated.promptBuild = { ...prompt, revision };
+      updated.promptBuild = {
+        ...prompt,
+        revision,
+        ...(input.enablePromptExpansion !== undefined
+          ? {
+              generationParams: {
+                ...this.record(prompt.generationParams),
+                enable_prompt_expansion: input.enablePromptExpansion,
+              },
+            }
+          : {}),
+      };
     }
     delete updated.generationBuild;
     delete updated.captionBuild;
@@ -1383,8 +1405,17 @@ export class DraftsService {
       expectedStage?: string;
       expectedRevision?: string;
       expectedPromptRevision?: number;
+      enablePromptExpansion?: boolean;
     },
   ): Promise<boolean> {
+    if (expected?.enablePromptExpansion !== undefined) {
+      const { draft } = await this.getReferenceDraftState(draftId);
+      this.assertReferencePromptExpansion(
+        this.record(draft.conceptJson),
+        expected.expectedStage,
+        expected.enablePromptExpansion,
+      );
+    }
     return Boolean(
       await this.repository.claimReferenceDraft({
         draftId,
@@ -1392,6 +1423,31 @@ export class DraftsService {
         ...expected,
       }),
     );
+  }
+
+  private assertReferencePromptExpansion(
+    concept: Record<string, unknown>,
+    stage: string | undefined,
+    value: unknown,
+  ): void {
+    const generation = this.record(
+      this.record(concept.referenceAgentConfig).generation,
+    );
+    const model = generation.effectiveModel;
+    const supported =
+      typeof model === "string" &&
+      generation.provider === "spicyapi" &&
+      Boolean(spicyApiImageModels(model)) &&
+      spicyApiFamily(model).kind === "qwen";
+    if (
+      typeof value !== "boolean" ||
+      concept.postGenerationAgent !== "reference-v1" ||
+      stage !== "generation" ||
+      !supported
+    )
+      throw new BadRequestException(
+        "Prompt expansion requires SpicyAPI Qwen reference generation",
+      );
   }
 
   recoverExpiredReferenceLeases() {

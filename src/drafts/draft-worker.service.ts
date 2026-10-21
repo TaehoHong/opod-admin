@@ -159,6 +159,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     draftId: string,
     options?: {
       operatorNote?: string;
+      enablePromptExpansion?: boolean;
       expectedStage?: string;
       expectedRevision?: string;
       expectedPromptRevision?: number;
@@ -195,6 +196,10 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       }
       return { planned: true };
     }
+    if (options?.enablePromptExpansion !== undefined)
+      throw new BadRequestException(
+        "Prompt expansion requires reference generation",
+      );
     if (this.runV3Stage) {
       const claimedV3 = await this.repository.claimV3DraftNow(
         draftId,

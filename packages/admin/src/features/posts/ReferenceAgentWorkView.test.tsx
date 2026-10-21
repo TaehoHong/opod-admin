@@ -58,6 +58,15 @@ const draft: Draft = {
     },
   },
 };
+const qwenConcept = {
+  ...draft.conceptJson,
+  referenceAgentConfig: {
+    generation: {
+      provider: "spicyapi",
+      effectiveModel: "alibaba/qwen-image-3.0-pro/edit",
+    },
+  },
+};
 describe("reference detail", () => {
   beforeEach(() =>
     server.use(
@@ -69,6 +78,230 @@ describe("reference detail", () => {
       ),
     ),
   );
+  it("resets the unsaved choice when changing drafts", async () => {
+    function DraftSwitcher() {
+      const [id, setId] = useState("r1");
+      return (
+        <>
+          <button onClick={() => setId(id === "r1" ? "r2" : "r1")}>
+            다른 게시물
+          </button>
+          <ReferenceAgentWorkView
+            item={{ ...item, id, currentStage: "generation" }}
+            draft={{
+              ...draft,
+              id,
+              status: "planned",
+              conceptJson: qwenConcept,
+            }}
+            stage="generation"
+          />
+        </>
+      );
+    }
+    renderPage(<DraftSwitcher />);
+    await userEvent.click(
+      screen.getByRole("switch", { name: "프롬프트 확장" }),
+    );
+    expect(
+      screen.getByRole("switch", { name: "프롬프트 확장" }),
+    ).not.toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: "다른 게시물" }));
+    expect(screen.getByRole("switch", { name: "프롬프트 확장" })).toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: "다른 게시물" }));
+    expect(screen.getByRole("switch", { name: "프롬프트 확장" })).toBeChecked();
+  });
+  it("defaults prompt expansion on and submits off for initial generation", async () => {
+    let body: unknown;
+    server.use(
+      http.post("/api/admin/v1/drafts/r1/plan", async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json(draft);
+      }),
+    );
+    renderPage(
+      <ReferenceAgentWorkView
+        item={{ ...item, currentStage: "generation" }}
+        draft={{ ...draft, status: "planned", conceptJson: qwenConcept }}
+        stage="generation"
+      />,
+    );
+    const toggle = screen.getByRole("switch", { name: "프롬프트 확장" });
+    expect(toggle).toBeChecked();
+    await userEvent.click(toggle);
+    await userEvent.click(
+      screen.getByRole("button", { name: "이미지 생성 실행" }),
+    );
+    await waitFor(() =>
+      expect(body).toMatchObject({
+        expectedStage: "generation",
+        enablePromptExpansion: false,
+      }),
+    );
+  });
+  it("shows persisted off and uses it for full regeneration", async () => {
+    let body: unknown;
+    server.use(
+      http.post(
+        "/api/admin/v1/drafts/r1/reference/restart",
+        async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json(draft);
+        },
+      ),
+    );
+    renderPage(
+      <ReferenceAgentWorkView
+        item={{ ...item, currentStage: "caption" }}
+        draft={{
+          ...draft,
+          conceptJson: {
+            ...qwenConcept,
+            promptBuild: {
+              generationParams: { enable_prompt_expansion: false },
+            },
+          },
+          shots: [
+            {
+              sortOrder: 1,
+              jobId: "done",
+              status: "completed",
+              prompt: "",
+              outputs: [],
+            },
+          ],
+        }}
+        stage="generation"
+      />,
+    );
+    expect(
+      screen.getByRole("switch", { name: "프롬프트 확장" }),
+    ).not.toBeChecked();
+    await userEvent.click(
+      screen.getByRole("button", { name: "이미지 다시 생성" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "다시 시작" }),
+    );
+    await waitFor(() =>
+      expect(body).toMatchObject({
+        target: "generation",
+        enablePromptExpansion: false,
+      }),
+    );
+  });
+  it.each(["running", "failed"])(
+    "locks prompt expansion for an accepted %s job",
+    (status) => {
+      renderPage(
+        <ReferenceAgentWorkView
+          item={{ ...item, currentStage: "generation" }}
+          draft={{
+            ...draft,
+            status: "planned",
+            conceptJson: qwenConcept,
+            shots: [
+              {
+                sortOrder: 1,
+                jobId: "accepted",
+                status,
+                prompt: "",
+                outputs: [],
+              },
+            ],
+          }}
+          stage="generation"
+        />,
+      );
+      expect(
+        screen.getByRole("switch", { name: "프롬프트 확장" }),
+      ).toBeDisabled();
+    },
+  );
+  it("resumes accepted generation jobs without changing the frozen input", async () => {
+    let body: unknown;
+    server.use(
+      http.post("/api/admin/v1/drafts/r1/plan", async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json(draft);
+      }),
+    );
+    renderPage(
+      <ReferenceAgentWorkView
+        item={{ ...item, currentStage: "generation" }}
+        draft={{
+          ...draft,
+          status: "planned",
+          conceptJson: {
+            ...qwenConcept,
+            generationBuild: { jobIds: ["accepted"] },
+          },
+          shots: [
+            {
+              sortOrder: 1,
+              jobId: "accepted",
+              status: "failed",
+              prompt: "",
+              outputs: [],
+            },
+          ],
+        }}
+        stage="generation"
+      />,
+    );
+    expect(
+      screen.getByRole("switch", { name: "프롬프트 확장" }),
+    ).toBeDisabled();
+    await userEvent.click(
+      screen.getByRole("button", { name: "이미지 생성 실행" }),
+    );
+    await waitFor(() =>
+      expect(body).toEqual({
+        expectedStage: "generation",
+        expectedRevision: "",
+      }),
+    );
+  });
+  it("omits prompt expansion for other generation models", async () => {
+    let body: unknown;
+    server.use(
+      http.post("/api/admin/v1/drafts/r1/plan", async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json(draft);
+      }),
+    );
+    renderPage(
+      <ReferenceAgentWorkView
+        item={{ ...item, currentStage: "generation" }}
+        draft={{
+          ...draft,
+          status: "planned",
+          conceptJson: {
+            ...qwenConcept,
+            referenceAgentConfig: {
+              generation: {
+                provider: "spicyapi",
+                effectiveModel: "bytedance/seedream-5.0-pro/edit",
+              },
+            },
+          },
+        }}
+        stage="generation"
+      />,
+    );
+    expect(
+      screen.queryByRole("switch", { name: "프롬프트 확장" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "이미지 생성 실행" }),
+    );
+    await waitFor(() =>
+      expect(body).toEqual({
+        expectedStage: "generation",
+        expectedRevision: "",
+      }),
+    );
+  });
   it("shows source results without a selection-reason placeholder", () => {
     const concept = draft.conceptJson as {
       referenceSelection: { shots: Record<string, unknown>[] };

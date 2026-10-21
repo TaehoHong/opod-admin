@@ -131,6 +131,15 @@ queued/running 이미지 잡, 게시/거절된 초안은 거부한다. `referenc
 두 경우 caption/generation artifact와 기존 승인을 무효화하고 해당 단계 pending으로
 되돌린다. 실패한 컷만 retry하는 API와 구분하며 UI는 확인 Modal 이후 요청한다.
 
+SpicyAPI Qwen의 게시물별 프롬프트 확장은 이미지 생성 단계에서 선택한다.
+최초 `POST drafts/:id/plan`에는 `expectedStage: "generation"`, `expectedRevision`과 함께
+선택적 `enablePromptExpansion: boolean`을 보낼 수 있다. `POST drafts/:id/reference/restart`도
+`target: "generation"`일 때 같은 필드를 받는다. null·문자열은 400이며 다른 Agent·단계·모델에는
+사용할 수 없다. 초기 실행은 이미 수락된 generationBuild.jobIds가 있으면 옵션 변경을 거부한다.
+값은 promptBuild.generationParams.enable_prompt_expansion에 저장되고 모든 컷의 잡 입력에 고정된다.
+생략하면 기존 저장값을 유지하고, 저장값도 없으면 true다. 전체 재생성은 다른 생성 입력을 보존하면서
+이 옵션을 변경할 수 있다. 실패 컷의 단순 재시도는 기존 입력 그대로이며 전역 설정은 바꾸지 않는다.
+
 코드 owner는 `ReferencePostAgentRunner`, `GenerationSettingsService`,
 `PostGenerationAgentsController`이며 Repository 변경은 소유 Domain Service를 통해 수행한다.
 기존 Agent 원문은 `archive/existing-agent/2026-10-19/`에 보관한다. 자연형 Agent와
