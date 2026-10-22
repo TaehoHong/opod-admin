@@ -200,3 +200,10 @@ worktree 상태를 확인한다.
 - 요청 문구가 없는 초안에 runner가 `operatorRequest: undefined`를 넣어 정상 캡션 응답 뒤 inputHash 계산이 실패했다. 선택 필드를 생략하도록 수정하고 canonicalJsonHash의 엄격한 검증은 유지했다. 요청 문구 유무별 회귀 테스트로 수정 전 실패·수정 후 성공을 확인했다.
 - 서버 78 suites/901 tests와 lint/format/build를 통과했다. 로컬 포트 사용 제한으로 실패한 HTTP 테스트는 권한 확보 후 같은 명령으로 전체 통과했다. 기존 실패 초안과 성공 로그 2549를 배포된 runner·공용 LLM 파서로 재생해 캡션 artifact 조립과 해시 계산을 확인했다. 외부 호출·저장은 테스트 대역으로 차단했으며 기존 실패 초안은 변경하지 않았다.
 - 기본 빌드의 npm audit 외부 조회가 지연되어 해당 임시 빌드만 중단했다. 동일 커밋 archive의 임시 Dockerfile에서 prune에 `--offline --no-audit --no-fund`만 추가해 설치된 의존성을 정리했다. 앱 빌드는 같은 캐시 레이어를 사용했고 저장소 Dockerfile·의존성 버전·DB schema는 변경하지 않았다. 유료 생성·게시는 실행하지 않았다.
+
+### 2026-10-22 원본의 일상 맥락을 활용하는 캡션 지침 적용
+
+- 사용자 승인 지침을 `prompts/reference-caption.ts`와 운영 reference caption 설정에 동일하게 적용했다. 설정 CAS revision은 `5b33f940-fc5b-4f23-94c0-6833e407bf53`, 지침 SHA-256은 `52d9a4263f986324d9c3c90916972cbf531578489c2686466891a7d1e5691378`이다. 선택·이미지 프롬프트·이미지 생성 설정·캡션 모델·schema는 보존했다.
+- `CaptionWriterAgent`와 저장된 gpt-6.1-sol 설정으로 서린 초안 `01a15d42-de31-742e-aa28-c79cd8dd553d`의 기존 입력·이미지 2장만 사용해 캡션을 재생성했다. 성공 로그는 `2551`이며 원본 캡션과 새 지침의 실제 전달을 확인했다. 새 결과는 기존 `DraftsService.updateDraft` 편집 경로로 저장하고 새 로그 ID·설정 revision을 액션 로그 사유에 기록했다. 기존 frozen captionBuild는 이전 실행 기록으로 보존했다. 게시·이미지 재생성은 하지 않았다.
+- 코드 `e0f57d0`을 main에 푸시하고 `opod-admin:casual-caption-e0f57d0`로 개발 Admin에 배포했다. 이전과 같은 임시 오프라인 prune 옵션을 사용했으며 저장소 Dockerfile은 변경하지 않았다. 실행 revision 일치, 재시작 0, health `status=ok,database=up`과 기본 지침·운영 지침·로그 2551의 system 입력 일치를 검증했다.
+- 기존 서버 78 suites/901 tests와 lint/format/build를 통과했다. 단순 지침 문구 일치를 고정하는 새 테스트는 추가하지 않았다. 저장된 새 캡션과 needs_review 상태, 기존 잡·선택 미디어 ID 2개의 보존을 재조회했다. 실제 캡션 품질은 생성한 원문으로 사용자가 검토한다.
