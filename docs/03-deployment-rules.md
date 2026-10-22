@@ -207,3 +207,10 @@ worktree 상태를 확인한다.
 - `CaptionWriterAgent`와 저장된 gpt-6.1-sol 설정으로 서린 초안 `01a15d42-de31-742e-aa28-c79cd8dd553d`의 기존 입력·이미지 2장만 사용해 캡션을 재생성했다. 성공 로그는 `2551`이며 원본 캡션과 새 지침의 실제 전달을 확인했다. 새 결과는 기존 `DraftsService.updateDraft` 편집 경로로 저장하고 새 로그 ID·설정 revision을 액션 로그 사유에 기록했다. 기존 frozen captionBuild는 이전 실행 기록으로 보존했다. 게시·이미지 재생성은 하지 않았다.
 - 코드 `e0f57d0`을 main에 푸시하고 `opod-admin:casual-caption-e0f57d0`로 개발 Admin에 배포했다. 이전과 같은 임시 오프라인 prune 옵션을 사용했으며 저장소 Dockerfile은 변경하지 않았다. 실행 revision 일치, 재시작 0, health `status=ok,database=up`과 기본 지침·운영 지침·로그 2551의 system 입력 일치를 검증했다.
 - 기존 서버 78 suites/901 tests와 lint/format/build를 통과했다. 단순 지침 문구 일치를 고정하는 새 테스트는 추가하지 않았다. 저장된 새 캡션과 needs_review 상태, 기존 잡·선택 미디어 ID 2개의 보존을 재조회했다. 실제 캡션 품질은 생성한 원문으로 사용자가 검토한다.
+
+### 2026-10-22 캐릭터별 온라인 문체 적용
+
+- 사용자 지시에 따라 레퍼런스 캡션 지침이 기존 persona.writingProfile.voice와 contentProfile.captionStyle을 기준으로 온라인 문체를 선택하도록 수정했다. 맞는 성향에는 의도적 맞춤법 변형·축약·문장 생략·자유로운 띄어쓰기와 문장부호를 허용하고 일괄 교정을 피한다. 단정한 문체는 유지하며 설정 없는 고정 말버릇과 과거 경험·반복 습관의 날조는 금지한다. 페르소나 필드·개별 캐릭터 데이터는 변경하지 않았다.
+- `GenerationSettingsService.saveReferenceAgentSettings` CAS로 caption systemPrompt만 적용했다. 설정 revision `422dd40d-d646-432f-beb5-64b809c09105`, 지침 SHA-256 `ad9b7cf655c1c4c1c8ea58c1db9264d489ff93f8eac0b7908b3690a0b3aa2b68`이다. 다른 reference 설정과 natural 설정 보존을 검증했다. 기존 초안의 frozen 지침과 캡션은 유지한다.
+- 코드 `18d80b9`를 main에 푸시하고 `opod-admin:internet-caption-18d80b9`로 개발 Admin에 배포했다. 앞선 배포와 같은 임시 오프라인 prune 옵션을 사용했다. 실행 revision 일치, 재시작 0, health `status=ok,database=up`, 운영 지침과 배포된 기본 지침의 원문·해시 일치를 확인했다.
+- 서버 78 suites/901 tests, lint/format/build 통과. 단순 프롬프트 문구를 고정하는 새 테스트는 추가하지 않았다. 기존 서린 게시물 보존을 재조회했으며 이번 작업에서 LLM 호출·캡션 재생성·이미지 생성·게시는 실행하지 않았다. 문체의 실제 출력 품질은 아직 새 실모델 호출로 검증하지 않았다.
