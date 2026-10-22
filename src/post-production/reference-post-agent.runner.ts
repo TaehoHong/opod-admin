@@ -298,7 +298,9 @@ export class ReferencePostAgentRunner {
       kind: "reference",
       ...(await this.captionContext(draft.characterId)),
       contentProfile: profile,
-      operatorRequest: input.operatorRequest,
+      ...(input.operatorRequest !== undefined
+        ? { operatorRequest: input.operatorRequest }
+        : {}),
       generatedShots: generated.map((shot) => ({
         shotId: shot.shotId,
         sortOrder: shot.sortOrder,

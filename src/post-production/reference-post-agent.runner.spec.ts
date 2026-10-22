@@ -4,6 +4,7 @@ import {
 } from "./reference-post-agent.runner";
 import { DraftsService } from "../drafts/drafts.service";
 import { createHash } from "node:crypto";
+import { canonicalJsonHash } from "./post-pipeline-v3";
 
 type Jobs = Awaited<
   ReturnType<DraftsService["getReferenceDraftState"]>
@@ -92,6 +93,110 @@ describe("reference generation aggregation", () => {
     );
   });
 });
+
+it.each([undefined, "담백하게 작성"])(
+  "saves a successful caption with optional operator request %s",
+  async (operatorRequest) => {
+    const savedConcept = {
+      ...concept,
+      pipeline: { stage: "caption", state: "running" },
+      referenceAgentConfig: {
+        revision: "config",
+        stages: { caption: {} },
+        generation: {},
+      },
+      referenceSelection: {
+        shots: [
+          {
+            shotId: "SHOT_01",
+            sortOrder: 0,
+            influencerId: "influencer",
+            postId: "post",
+            sourceCaption: "원본 캡션",
+          },
+        ],
+      },
+      ...(operatorRequest === undefined ? {} : { operatorRequest }),
+    };
+    const drafts = {
+      getReferenceDraftState: jest.fn().mockResolvedValue({
+        draft: {
+          characterId: "character",
+          status: "generating",
+          conceptJson: savedConcept,
+        },
+        jobs: [job()],
+      }),
+      saveReferenceStage: jest.fn().mockResolvedValue(true),
+    };
+    const output = {
+      status: "ready",
+      caption: "잠깐 쉬어가는 오후",
+      captionLanguages: ["ko"],
+      hashtags: [],
+    };
+    const client = {
+      agentSettings: { systemPrompt: "saved", outputSchema: {} },
+      run: jest
+        .fn()
+        .mockResolvedValue({ value: output, producerLogId: "caption-log" }),
+    };
+    const runner = new ReferencePostAgentRunner(
+      drafts as never,
+      {} as never,
+      {
+        get: jest.fn().mockResolvedValue({
+          accountConcept: "concept",
+          captionStyle: "style",
+          constraints: "",
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+      async () => client as never,
+      async () => ({
+        bytes: Buffer.from("generated pixels"),
+        contentType: "image/png",
+      }),
+      {} as never,
+      async () => ({
+        character: {
+          name: "캐릭터",
+          bio: "",
+          interests: [],
+          defaultContentLanguage: "ko",
+        },
+        persona: {
+          characterContext: [],
+          writingProfile: { contentStyle: [], voice: [] },
+          boundaries: [],
+          additionalContext: [],
+        },
+      }),
+      {} as never,
+    );
+
+    await runner.runCurrentStage("draft");
+
+    const saved = drafts.saveReferenceStage.mock.calls[0][0];
+    expect(saved).toMatchObject({
+      status: "needs_review",
+      caption: output.caption,
+      hashtags: [],
+    });
+    const artifact = saved.conceptJson.captionBuild;
+    expect(artifact.output).toEqual(output);
+    expect(artifact.inputHash).toBe(
+      canonicalJsonHash({
+        captionInput: JSON.parse(
+          JSON.stringify(client.run.mock.calls[0][0].input),
+        ),
+        generated: currentReferenceOutputs(savedConcept, [job()]),
+      }),
+    );
+    expect(artifact.input.operatorRequest).toBe(operatorRequest);
+  },
+);
 
 describe("reference stage orchestration", () => {
   function fixture(stage: string) {
