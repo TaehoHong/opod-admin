@@ -860,7 +860,11 @@ prompt revision과 단일 선택 완료 출력을 함께 검사한다. 맞는 �
 실패 컷 재시도가 완료 컷을 새로 만들지 않는다.
 
 `CaptionWriterAgent`의 reference 입력은 생성 이미지 전체·캐릭터·원본 게시물별 캡션을
-받는다. runner는 요청 문구가 없으면 caption input의 operatorRequest 필드를 생략한다.
+받는다. `prompts/reference-caption.ts`의 지침은 원본의 사소한 일상 주제·사진과 이야기를
+연결하는 방식·편안한 말투를 캐릭터 관점으로 활용한다. 캐릭터 페르소나와 캡션 스타일을
+우선하고 원본 작성자의 실제 경험을 옮기지 않으며 사진 장수나 완성도 평가를 기본값으로 쓰지 않는다.
+실행에는 GenerationSettingsService에 저장된 caption 지침을 사용한다.
+runner는 요청 문구가 없으면 caption input의 operatorRequest 필드를 생략한다.
 LLM 전송 JSON에서는 undefined가 생략되지만 canonicalJsonHash는 이를 거부하므로,
 선택 입력을 undefined로 명시하면 정상 LLM 응답 뒤 artifact 저장이 실패한다.
 회귀는 reference-post-agent.runner.spec.ts의 요청 문구 유무별 캡션 저장 테스트가 보호한다.
