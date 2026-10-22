@@ -193,3 +193,10 @@ worktree 상태를 확인한다.
 - Sol 6.1 subagent가 UI와 초안 API/저장을 구현했고 메인이 공급자 요청·독립 검토·통합 검증·배포를 수행했다. 기존 작업 재개 시 옵션을 생략하는 회귀도 포함했다.
 - 서버 78 suites/899 tests, 최종 관련 UI 32 tests, build/lint/format을 통과했다. 전체 admin:check는 이번 변경과 무관한 ReferenceAgentPanel.test.tsx의 기존 저장 안내 문구 검증 2건으로 실패했고, 해당 파일 단독 실행에서도 재현했다. 범위 밖 테스트는 수정하지 않았다.
 - 배포 코드에서 ON/OFF·값 없는 이전 입력의 기본 ON·Seedream 필드 생략을 검증했다. 실제 유료 생성·게시·DB schema 변경은 하지 않았다. 실제 DB 동시성 E2E는 로컬 Docker 중단 상태로 보류했다. Mac 잠금으로 배포 후 브라우저 시각 검증은 수행하지 못했다.
+
+### 2026-10-22 요청 문구 없는 레퍼런스 캡션 저장 오류 수정
+
+- 코드 `a4f3e93`을 main에 푸시하고 `opod-admin:caption-canonical-a4f3e93`로 개발 Admin에 배포했다. 실행 revision 일치, 재시작 횟수 0, health `status=ok,database=up`을 확인했다.
+- 요청 문구가 없는 초안에 runner가 `operatorRequest: undefined`를 넣어 정상 캡션 응답 뒤 inputHash 계산이 실패했다. 선택 필드를 생략하도록 수정하고 canonicalJsonHash의 엄격한 검증은 유지했다. 요청 문구 유무별 회귀 테스트로 수정 전 실패·수정 후 성공을 확인했다.
+- 서버 78 suites/901 tests와 lint/format/build를 통과했다. 로컬 포트 사용 제한으로 실패한 HTTP 테스트는 권한 확보 후 같은 명령으로 전체 통과했다. 기존 실패 초안과 성공 로그 2549를 배포된 runner·공용 LLM 파서로 재생해 캡션 artifact 조립과 해시 계산을 확인했다. 외부 호출·저장은 테스트 대역으로 차단했으며 기존 실패 초안은 변경하지 않았다.
+- 기본 빌드의 npm audit 외부 조회가 지연되어 해당 임시 빌드만 중단했다. 동일 커밋 archive의 임시 Dockerfile에서 prune에 `--offline --no-audit --no-fund`만 추가해 설치된 의존성을 정리했다. 앱 빌드는 같은 캐시 레이어를 사용했고 저장소 Dockerfile·의존성 버전·DB schema는 변경하지 않았다. 유료 생성·게시는 실행하지 않았다.
