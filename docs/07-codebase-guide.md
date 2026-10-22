@@ -863,6 +863,9 @@ prompt revision과 단일 선택 완료 출력을 함께 검사한다. 맞는 �
 받는다. `prompts/reference-caption.ts`의 지침은 원본의 사소한 일상 주제·사진과 이야기를
 연결하는 방식·편안한 말투를 캐릭터 관점으로 활용한다. 캐릭터 페르소나와 캡션 스타일을
 우선하고 원본 작성자의 실제 경험을 옮기지 않으며 사진 장수나 완성도 평가를 기본값으로 쓰지 않는다.
+온라인 표기·문장 생략·축약·의도적 맞춤법 변형은 기존 voice/captionStyle의 격식과 작성 성향에
+맞춰 선택한다. 표준어로 일괄 교정하거나 인터넷 말투를 전 캐릭터에 강제하지 않으며,
+말투를 위한 과거 경험·반복 습관의 날조는 허용하지 않는다. 별도 페르소나 필드는 추가하지 않는다.
 실행에는 GenerationSettingsService에 저장된 caption 지침을 사용한다.
 runner는 요청 문구가 없으면 caption input의 operatorRequest 필드를 생략한다.
 LLM 전송 JSON에서는 undefined가 생략되지만 canonicalJsonHash는 이를 거부하므로,
