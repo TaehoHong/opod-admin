@@ -214,3 +214,11 @@ worktree 상태를 확인한다.
 - `GenerationSettingsService.saveReferenceAgentSettings` CAS로 caption systemPrompt만 적용했다. 설정 revision `422dd40d-d646-432f-beb5-64b809c09105`, 지침 SHA-256 `ad9b7cf655c1c4c1c8ea58c1db9264d489ff93f8eac0b7908b3690a0b3aa2b68`이다. 다른 reference 설정과 natural 설정 보존을 검증했다. 기존 초안의 frozen 지침과 캡션은 유지한다.
 - 코드 `18d80b9`를 main에 푸시하고 `opod-admin:internet-caption-18d80b9`로 개발 Admin에 배포했다. 앞선 배포와 같은 임시 오프라인 prune 옵션을 사용했다. 실행 revision 일치, 재시작 0, health `status=ok,database=up`, 운영 지침과 배포된 기본 지침의 원문·해시 일치를 확인했다.
 - 서버 78 suites/901 tests, lint/format/build 통과. 단순 프롬프트 문구를 고정하는 새 테스트는 추가하지 않았다. 기존 서린 게시물 보존을 재조회했으며 이번 작업에서 LLM 호출·캡션 재생성·이미지 생성·게시는 실행하지 않았다. 문체의 실제 출력 품질은 아직 새 실모델 호출로 검증하지 않았다.
+
+### 2026-10-22 원본의 일상 맥락 우선 선택과 서린 재생성
+
+- 사용자 승인에 따라 운영자 요청 다음으로 원본 캡션의 일상 맥락에서 이미지·캐릭터에 연결되는 소재를 먼저 고르도록 변경했다. 계정 컨셉과 imageStyle을 반복적인 소재 지시로 해석하지 않으며 핏·옷·몸도 동등하게 허용한다. 기존 온라인 문체·원본 경험 전이 방지·JSON 규격은 유지했다.
+- 운영 reference caption 설정 CAS revision은 `4382a919-080d-45f0-bd6f-c31a2fedacd9`, 지침 SHA-256은 `8704609bd906d75180bfa23c87642ebef023031a5435039274e8bec07fea823a`다. 서린의 accountConcept·voice·captionStyle만 승인 문안으로 수정했다. 다른 5명의 설정과 서린의 이미지 스타일·제약·다른 페르소나·기억, 다른 Agent 설정 보존을 검증했다.
+- 서린 초안 `01a15d42-de31-742e-aa28-c79cd8dd553d`에 최신 캐릭터 문맥과 설정을 조회해 gpt-6.1-sol로 캡션을 생성했다. 성공 로그 `2568`에서 새 지침과 세 설정의 실제 전달을 검증했다. 결과는 기존 DraftsService.updateDraft 경로로 저장하고 로그 ID·설정 revision을 액션 로그 사유에 기록했다. 기존 captionBuild는 이전 실행 이력으로 보존했다. 이미지 2장의 잡·선택 미디어는 유지했고 게시는 실행하지 않았다.
+- 코드 `7c2a267`을 main에 푸시하고 `opod-admin:topic-caption-7c2a267`로 개발 Admin에 배포했다. 이전과 같은 임시 오프라인 prune 옵션을 사용했다. 실행 revision 일치, 재시작 0, health `status=ok,database=up`, 기본·운영·실행 지침의 원문 일치와 저장 캡션을 재조회했다.
+- 서버 78 suites/901 tests, lint/format/build 통과. 문구를 고정하는 새 테스트는 추가하지 않았다. 실제 생성은 위 한 결과로 확인했으며 다양한 게시물의 소재 선택 품질까지 검증한 것으로 보지 않는다. DB schema와 운영 환경은 변경하지 않았다.
