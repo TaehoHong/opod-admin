@@ -253,6 +253,12 @@ spec이 검증하며, 실제 이미지의 자연스러움은 별도 모델 평�
 | Admin UI       | `packages/admin/src/`, `packages/admin/index.html`                                                                                 | React admin과 `/api/admin/v1/*` 호출                                            | `main.tsx`, `app/`, `features/`                                                              | `src/**/*.test.tsx`, `npm run admin:check`                  |
 | E2E            | `test/`                                                                                                                            | Testcontainers PostgreSQL와 API contract                                        | Jest global setup                                                                            | `test/jest-e2e.json`, `test/e2e-global-setup.ts`            |
 
+`chat_messages.experience`는 공개 속마음·선택 사진·관계 피드백을 저장하는 nullable JSONB다.
+데이터 모양은 backend 정본 schema가 소유하며 admin은 동일한 schema를 미러링한다.
+이 변경은 admin에 판정 로직이나 생성 UI를 추가하지 않는다. 정본의
+`20261023041721_character_experience_schema_sync`를 먼저 적용하고 admin을 배포한다.
+
+
 ## Shared Capability Catalog
 
 | 기능                      | 현재 canonical owner                                                      | 제약                                                                                                                                                                                                                                                                                                                                                                                 | 주요 사용처                                           |
