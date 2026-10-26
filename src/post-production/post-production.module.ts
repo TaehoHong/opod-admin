@@ -358,7 +358,7 @@ function storageEnv(config: S3Config | undefined) {
               llmLogs,
             );
           },
-          // draft 워커는 생성 워커와 같은 토글을 공유한다.
+          // 초안 기획·생성만 생성 워커 토글을 공유한다. 예약 게시는 독립 실행.
           async () =>
             (await settings.resolveWorkerToggles()).generation.enabled,
           config.draftWorker,

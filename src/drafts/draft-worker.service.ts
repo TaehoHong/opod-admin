@@ -62,7 +62,7 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     // 프롬프트 빌더도 실행 시마다 재해석 (플래너와 동일한 이유).
     private readonly resolvePromptBuilder: () => Promise<ImagePromptBuilder>,
     // 자동 루프 on/off도 tick마다 재해석 — 설정 화면 토글이 프로세스 재시작
-    // 없이 반영돼야 한다. 생성 워커와 같은 토글을 공유한다.
+    // 없이 반영돼야 한다. 기획·생성만 제어하며 승인된 예약 게시는 별개다.
     private readonly resolveEnabled: () => Promise<boolean>,
     private readonly config: DraftWorkerConfig,
     private readonly random: () => number = Math.random,
@@ -132,8 +132,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
 
   // 테스트에서 직접 호출한다.
   async tick(): Promise<void> {
-    // 꺼져 있으면 lease 회수도 하지 않는다 — 자동 루프가 아무 일도 하지 않는
-    // 상태가 "꺼짐"의 정의다. 만료 lease는 다시 켤 때 회수된다.
+    // 승인된 예약 게시는 생성 자동화와 독립적으로 실행한다.
+    // 기획·생성 실패나 비활성화가 예약 게시를 막지 않도록 먼저 처리한다.
+    await this.publishDueDrafts();
     if (!(await this.resolveEnabled())) {
       return;
     }
@@ -146,7 +147,6 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
     await this.planClaimedV3Drafts();
     await this.aggregateReferenceDrafts();
     await this.aggregateGeneratingDrafts();
-    await this.publishDueDrafts();
   }
 
   // ── 수동 실행 (admin 버튼) ──────────────────────────────────────────────

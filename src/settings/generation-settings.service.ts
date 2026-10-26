@@ -80,8 +80,8 @@ export const GENERATION_SETTING_KEYS = {
   // 평가 워커 LLM — 미설정 필드는 planner.*를 상속 (chat과 같은 규칙).
   // 플래너와 다른 모델을 지정해 자기 평가 편향을 줄일 수 있다.
   // 워커 자동 루프 on/off. 워커가 tick마다 재해석하므로 프로세스 재시작 없이
-  // 설정 화면에서 켜고 끈다. worker.enabled는 생성 워커와 draft 워커를 함께
-  // 게이트한다 (env WORKER_ENABLED와 같은 범위).
+  // 설정 화면에서 켜고 끈다. worker.enabled는 이미지 생성과 초안 기획·생성을
+  // 제어한다. 승인된 예약 게시는 이 토글과 무관하게 실행한다.
   workerEnabled: "worker.enabled",
   pipelineV3Enabled: "pipeline.v3Enabled",
   // 생성 이미지 종횡비. 게시 포맷마다 다르므로 캐릭터가 아니라 여기서 정한다 —

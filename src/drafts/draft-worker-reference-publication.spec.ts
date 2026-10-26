@@ -3,7 +3,7 @@ import type { DraftsService } from "./drafts.service";
 import type { ReferencePostAgentRunner } from "../post-production/reference-post-agent.runner";
 
 describe("reference worker publication", () => {
-  function setup() {
+  function setup(generationEnabled = true) {
     const lease = new Date("2026-10-19T00:01:00.000Z");
     const concept = {
       postGenerationAgent: "reference-v1",
@@ -59,7 +59,7 @@ describe("reference worker publication", () => {
       repository as never,
       async () => ({}) as never,
       async () => ({}) as never,
-      async () => true,
+      async () => generationEnabled,
       {
         pollIntervalMs: 1000,
         planLeaseSeconds: 120,
@@ -145,19 +145,22 @@ describe("reference worker publication", () => {
       "lease changed",
     );
   });
-  it("automatic publication claims approved reference drafts through their domain owner", async () => {
-    const { worker, drafts, repository } = setup();
-    await worker.tick();
-    expect(drafts.claimReferencePublication).toHaveBeenCalledWith(
-      "draft",
-      expect.any(Number),
-    );
-    expect(repository.persistPublishedPost).toHaveBeenCalledWith(
-      expect.objectContaining({
-        draftId: "draft",
-        referencePublication: expect.any(Object),
-      }),
-    );
-    expect(repository.findApprovedDraft).not.toHaveBeenCalled();
-  });
+  it.each([true, false])(
+    "publishes approved reference drafts when the generation loop is enabled=%s",
+    async (generationEnabled) => {
+      const { worker, drafts, repository } = setup(generationEnabled);
+      await worker.tick();
+      expect(drafts.claimReferencePublication).toHaveBeenCalledWith(
+        "draft",
+        expect.any(Number),
+      );
+      expect(repository.persistPublishedPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          draftId: "draft",
+          referencePublication: expect.any(Object),
+        }),
+      );
+      expect(repository.findApprovedDraft).not.toHaveBeenCalled();
+    },
+  );
 });

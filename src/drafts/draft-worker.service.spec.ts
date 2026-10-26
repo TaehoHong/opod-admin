@@ -137,9 +137,7 @@ function makeService(
 }
 
 describe("DraftWorkerService automatic loop toggle", () => {
-  // draft 워커는 생성 워커와 같은 토글을 공유한다. 여기서 새면 화면에서 끈
-  // 자동 기획·게시가 계속 돈다.
-  it("does nothing while the automatic loop is switched off", async () => {
+  it("does not plan or aggregate while the generation loop is switched off", async () => {
     const repository = repositoryFake();
     repository.findGeneratingDrafts.mockResolvedValue([
       {
@@ -151,9 +149,14 @@ describe("DraftWorkerService automatic loop toggle", () => {
       },
     ]);
 
-    await makeService(repository, planner(), { enabled: false }).tick();
+    await makeService(repository, planner(), {
+      enabled: false,
+      schedulerEnabled: true,
+    }).tick();
 
     expect(repository.sweepExpiredPlanLeases).not.toHaveBeenCalled();
+    expect(repository.findEnabledPostingPolicies).not.toHaveBeenCalled();
+    expect(repository.sweepExpiredV3Leases).not.toHaveBeenCalled();
     expect(repository.findGeneratingDrafts).not.toHaveBeenCalled();
     expect(repository.requeueDraftWithoutJobs).not.toHaveBeenCalled();
   });
