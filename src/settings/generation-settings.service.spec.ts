@@ -338,6 +338,7 @@ describe("GenerationSettingsService", () => {
       }),
     ).resolves.toEqual({
       generation: { enabled: false, source: "db" },
+      publication: { enabled: true, source: "none" },
     });
 
     // 아무 곳에도 값이 없으면 꺼짐이다 — 새 배포가 스스로 지출하지 않는다.
@@ -345,8 +346,25 @@ describe("GenerationSettingsService", () => {
       makeService(repositoryMock()).resolveWorkerToggles({}),
     ).resolves.toEqual({
       generation: { enabled: false, source: "none" },
+      publication: { enabled: true, source: "none" },
     });
   });
+
+  it.each(["true", "false"])(
+    "resolves publication=%s independently of generation",
+    async (value) => {
+      const service = makeService(
+        repositoryMock([
+          { key: "worker.enabled", value: "false" },
+          { key: "publication.enabled", value },
+        ]),
+      );
+      await expect(service.resolveWorkerToggles({})).resolves.toEqual({
+        generation: { enabled: false, source: "db" },
+        publication: { enabled: value === "true", source: "db" },
+      });
+    },
+  );
 
   it("keeps V3 off by default and resolves its rollout flag from DB before env", async () => {
     const repository = repositoryMock([

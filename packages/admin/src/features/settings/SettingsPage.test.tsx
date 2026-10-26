@@ -71,6 +71,7 @@ function settingsView(
       },
     },
     pipelineV3: { enabled: false, source: "none" },
+    scheduledPublication: { enabled: true, source: "none" },
     worker: {
       enabled: false,
       enabledSource: "none",
@@ -237,4 +238,64 @@ it("defaults SpicyAPI to Qwen Image 3.0 Pro and keeps the saved key on save", as
     spicyImageModel: "alibaba/qwen-image-3.0-pro/edit",
   });
   expect(saved[0]).not.toHaveProperty("spicyApiKey");
+});
+
+it("persists scheduled publication independently of generation and reflects it after reload", async () => {
+  let view = settingsView();
+  const saved: unknown[] = [];
+  server.use(
+    ...stubReads(() => view),
+    http.put("/api/admin/v1/settings/generation", async ({ request }) => {
+      const body = (await request.json()) as {
+        scheduledPublishEnabled: boolean;
+      };
+      saved.push(body);
+      view = {
+        ...view,
+        scheduledPublication: {
+          enabled: body.scheduledPublishEnabled,
+          source: "db",
+        },
+      };
+      return HttpResponse.json(view);
+    }),
+  );
+  const page = render(
+    <AppProviders>
+      <SettingsPage />
+    </AppProviders>,
+  );
+  const publication = await screen.findByRole("switch", {
+    name: "예약 게시 자동 실행",
+  });
+  expect(publication).toBeChecked();
+  expect(
+    screen.getByRole("switch", { name: "생성 자동 실행" }),
+  ).not.toBeChecked();
+  await userEvent.click(publication);
+  await waitFor(() =>
+    expect(saved).toEqual([{ scheduledPublishEnabled: false }]),
+  );
+  await waitFor(() => expect(publication).not.toBeChecked());
+  page.unmount();
+  render(
+    <AppProviders>
+      <SettingsPage />
+    </AppProviders>,
+  );
+  const reloaded = await screen.findByRole("switch", {
+    name: "예약 게시 자동 실행",
+  });
+  expect(reloaded).not.toBeChecked();
+  await userEvent.click(reloaded);
+  await waitFor(() =>
+    expect(saved).toEqual([
+      { scheduledPublishEnabled: false },
+      { scheduledPublishEnabled: true },
+    ]),
+  );
+  await waitFor(() => expect(reloaded).toBeChecked());
+  expect(
+    screen.getByRole("switch", { name: "생성 자동 실행" }),
+  ).not.toBeChecked();
 });

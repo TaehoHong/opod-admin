@@ -93,6 +93,8 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
       assertCharacterActive?: (characterId: string) => Promise<void>;
       runQueuedJob?: (jobId: string) => Promise<unknown>;
     },
+    private readonly resolvePublicationEnabled: () => Promise<boolean> = async () =>
+      true,
   ) {}
 
   onModuleInit(): void {
@@ -134,7 +136,9 @@ export class DraftWorkerService implements OnModuleInit, OnModuleDestroy {
   async tick(): Promise<void> {
     // 승인된 예약 게시는 생성 자동화와 독립적으로 실행한다.
     // 기획·생성 실패나 비활성화가 예약 게시를 막지 않도록 먼저 처리한다.
-    await this.publishDueDrafts();
+    if (await this.resolvePublicationEnabled()) {
+      await this.publishDueDrafts();
+    }
     if (!(await this.resolveEnabled())) {
       return;
     }

@@ -48,7 +48,7 @@ export function WorkerCard({
   return (
     <Paper p="md" component="section">
       <Stack gap="sm">
-        <Title order={6}>생성 워커</Title>
+        <Title order={6}>생성 및 예약 게시</Title>
         <Stack gap={6}>
           <Row label="파이프라인">
             <LoopSwitch
@@ -64,9 +64,9 @@ export function WorkerCard({
               }
             />
           </Row>
-          <Row label="자동 루프">
+          <Row label="생성 자동 실행">
             <LoopSwitch
-              label="생성 워커 자동 루프"
+              label="생성 자동 실행"
               enabled={worker.enabled}
               source={worker.enabledSource}
               pending={
@@ -74,6 +74,20 @@ export function WorkerCard({
                 toggle.variables?.workerEnabled !== undefined
               }
               onChange={(workerEnabled) => toggle.mutate({ workerEnabled })}
+            />
+          </Row>
+          <Row label="예약 게시 자동 실행">
+            <LoopSwitch
+              label="예약 게시 자동 실행"
+              enabled={settings.scheduledPublication.enabled}
+              source={settings.scheduledPublication.source}
+              pending={
+                toggle.isPending &&
+                toggle.variables?.scheduledPublishEnabled !== undefined
+              }
+              onChange={(scheduledPublishEnabled) =>
+                toggle.mutate({ scheduledPublishEnabled })
+              }
             />
           </Row>
           <Row label="t2i">{resolved.t2iProvider ?? "—"}</Row>
@@ -95,9 +109,10 @@ export function WorkerCard({
         </Text>
 
         <Text size="xs" c="dimmed">
-          자동 루프는 초안 기획과 이미지 생성을 제어합니다. 승인된 자동 진행
-          게시물은 이 설정과 무관하게 예약 시각부터 게시됩니다. 수동 실행은
-          루프가 꺼져 있어도 대기 중인 다음 작업 하나를 즉시 처리합니다.
+          생성 자동 실행은 초안 기획과 이미지 생성을 제어합니다. 예약 게시 자동
+          실행은 승인된 자동 진행 게시물을 예약 시각부터 게시합니다. 끄면 예약을
+          보존하고 자동 게시를 멈추며, 다시 켜면 시각이 지난 게시물도
+          처리합니다. 수동 실행은 두 설정과 무관하게 동작합니다.
         </Text>
 
         {run.isError ? (

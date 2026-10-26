@@ -380,6 +380,8 @@ function storageEnv(config: S3Config | undefined) {
                 throw new Error("reference_character_inactive");
             },
           },
+          async () =>
+            (await settings.resolveWorkerToggles()).publication.enabled,
         ),
       inject: [
         DraftWorkerRepository,

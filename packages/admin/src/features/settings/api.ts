@@ -84,6 +84,7 @@ export type GenerationSettingsView = {
     enabled: boolean;
     source: SettingSource;
   };
+  scheduledPublication: { enabled: boolean; source: SettingSource };
   // enabledSource가 "env"면 아직 UI에서 저장한 적이 없어 env 기본값을 쓰는 중.
   worker: {
     enabled: boolean;
@@ -119,6 +120,7 @@ export type GenerationSettingsUpdate = {
   agentEmbeddingModel?: string | null;
   // 워커 자동 루프 — null = env 기본값으로 복귀.
   workerEnabled?: boolean | null;
+  scheduledPublishEnabled?: boolean | null;
   pipelineV3Enabled?: boolean | null;
   // 종횡비 — null = 코드 기본값으로 복귀.
   aspectRatioFeed?: string | null;

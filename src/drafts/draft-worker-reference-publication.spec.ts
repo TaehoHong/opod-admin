@@ -3,7 +3,7 @@ import type { DraftsService } from "./drafts.service";
 import type { ReferencePostAgentRunner } from "../post-production/reference-post-agent.runner";
 
 describe("reference worker publication", () => {
-  function setup(generationEnabled = true) {
+  function setup(generationEnabled = true, publicationEnabled = true) {
     const lease = new Date("2026-10-19T00:01:00.000Z");
     const concept = {
       postGenerationAgent: "reference-v1",
@@ -43,7 +43,7 @@ describe("reference worker publication", () => {
       releaseReferencePublication: jest.fn().mockResolvedValue(undefined),
       getReferenceDraftState: async () => ({ draft, jobs }),
       listReferencePublicationsDue: async () => [{ id: "draft" }],
-      recoverExpiredReferenceLeases: async () => 0,
+      recoverExpiredReferenceLeases: jest.fn().mockResolvedValue(0),
       claimReferenceDraft: async () => undefined,
       listReferenceGenerationWaiting: async () => [],
     };
@@ -81,6 +81,7 @@ describe("reference worker publication", () => {
         runner: {} as ReferencePostAgentRunner,
         assertCharacterActive,
       },
+      async () => publicationEnabled,
     );
     return {
       worker,
@@ -163,4 +164,15 @@ describe("reference worker publication", () => {
       expect(repository.findApprovedDraft).not.toHaveBeenCalled();
     },
   );
+  it("stops automatic publication without disabling generation or manual publication", async () => {
+    const { worker, drafts, repository } = setup(true, false);
+    await worker.tick();
+    expect(drafts.recoverExpiredReferenceLeases).toHaveBeenCalled();
+    expect(drafts.claimReferencePublication).not.toHaveBeenCalled();
+    expect(repository.persistPublishedPost).not.toHaveBeenCalled();
+    expect(await worker.publishDraftNow("draft")).toEqual({ published: true });
+    expect(repository.persistPublishedPost).toHaveBeenCalledWith(
+      expect.objectContaining({ draftId: "draft" }),
+    );
+  });
 });

@@ -118,6 +118,11 @@ export class AdminSettingsController {
       ...("workerEnabled" in body
         ? { workerEnabled: toStoredFlag(body.workerEnabled) }
         : {}),
+      ...("scheduledPublishEnabled" in body
+        ? {
+            scheduledPublishEnabled: toStoredFlag(body.scheduledPublishEnabled),
+          }
+        : {}),
       ...("pipelineV3Enabled" in body
         ? { pipelineV3Enabled: toStoredFlag(body.pipelineV3Enabled) }
         : {}),
@@ -245,6 +250,7 @@ export class AdminSettingsController {
       },
       // 자동 루프 on/off는 DB 소유다. source가 "env"면 아직 UI에서 한 번도
       // 저장하지 않아 env 기본값을 쓰는 중이라는 뜻이다.
+      scheduledPublication: toggles.publication,
       worker: {
         enabled: toggles.generation.enabled,
         enabledSource: toggles.generation.source,

@@ -81,8 +81,9 @@ export const GENERATION_SETTING_KEYS = {
   // 플래너와 다른 모델을 지정해 자기 평가 편향을 줄일 수 있다.
   // 워커 자동 루프 on/off. 워커가 tick마다 재해석하므로 프로세스 재시작 없이
   // 설정 화면에서 켜고 끈다. worker.enabled는 이미지 생성과 초안 기획·생성을
-  // 제어한다. 승인된 예약 게시는 이 토글과 무관하게 실행한다.
+  // 제어한다. 예약 게시 자동 실행은 publication.enabled로 따로 제어한다.
   workerEnabled: "worker.enabled",
+  scheduledPublishEnabled: "publication.enabled",
   pipelineV3Enabled: "pipeline.v3Enabled",
   // 생성 이미지 종횡비. 게시 포맷마다 다르므로 캐릭터가 아니라 여기서 정한다 —
   // 비주얼 프로필에 넣으면 같은 캐릭터의 피드와 스토리가 같은 비율로 나온다.
@@ -200,7 +201,10 @@ const ENV_KEYS: Partial<Record<GenerationSettingField, string>> = {
 // 워커 자동 루프 상태. source는 화면이 "env 기본값을 쓰는 중"을 알리는 데 쓴다.
 export type ResolvedWorkerToggle = { enabled: boolean; source: Source };
 
-export type ResolvedWorkerToggles = { generation: ResolvedWorkerToggle };
+export type ResolvedWorkerToggles = {
+  generation: ResolvedWorkerToggle;
+  publication: ResolvedWorkerToggle;
+};
 
 export type ResolvedPipelineV3 = ResolvedWorkerToggle;
 
@@ -663,7 +667,11 @@ export class GenerationSettingsService {
     env: SettingsEnv = process.env,
   ): Promise<ResolvedWorkerToggles> {
     const db = await this.getSettings();
-    return { generation: toggle(pick(db, env, "workerEnabled")) };
+    return {
+      generation: toggle(pick(db, env, "workerEnabled")),
+      // 기존 예약 게시 동작을 유지한다. DB에서 별도로 끌 수 있다.
+      publication: toggle(pick(db, env, "scheduledPublishEnabled"), true),
+    };
   }
 
   async resolvePipelineV3(
@@ -1228,13 +1236,16 @@ export function settingsChangeEntries(
 }
 
 // 저장 형식은 문자열이므로 app-config의 env 파서와 같은 규칙으로 읽는다.
-// 값이 없으면(none) 꺼짐 — 새 배포가 아무것도 자동으로 돌리지 않는 쪽이 안전하다.
-function toggle(picked: {
-  value: string | undefined;
-  source: Source;
-}): ResolvedWorkerToggle {
+// 생성은 기본 꺼짐, 승인된 예약 게시는 기존 동작을 유지하도록 기본 켜짐이다.
+function toggle(
+  picked: { value: string | undefined; source: Source },
+  defaultEnabled = false,
+): ResolvedWorkerToggle {
   return {
-    enabled: picked.value === "true" || picked.value === "1",
+    enabled:
+      picked.value === undefined
+        ? defaultEnabled
+        : picked.value === "true" || picked.value === "1",
     source: picked.source,
   };
 }

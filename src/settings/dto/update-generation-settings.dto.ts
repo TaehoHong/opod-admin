@@ -125,10 +125,15 @@ export class UpdateGenerationSettingsDto {
   agentEmbeddingModel?: string | null;
 
   // 워커 자동 루프 on/off. null = 삭제(env 기본값 복귀).
-  // workerEnabled는 생성 워커와 draft 워커를 함께 제어한다.
+  // workerEnabled는 이미지 생성과 초안 기획·생성만 제어한다.
   @IsOptional()
   @IsBoolean()
   workerEnabled?: boolean | null;
+
+  // 예약 게시 자동 실행. null = 기본 켜짐으로 복귀.
+  @IsOptional()
+  @IsBoolean()
+  scheduledPublishEnabled?: boolean | null;
 
   // 신규 draft만 V3 계약으로 pin한다. true 저장은 controller가 현재 기획
   // LLM의 strict JSON schema capability를 실제 확인한 뒤에만 허용한다.
