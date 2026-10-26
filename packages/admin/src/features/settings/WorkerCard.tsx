@@ -76,7 +76,7 @@ export function WorkerCard({
               onChange={(workerEnabled) => toggle.mutate({ workerEnabled })}
             />
           </Row>
-          <Row label="예약 게시 자동 실행">
+          <Row label="예약 자동 실행">
             <LoopSwitch
               label="예약 게시 자동 실행"
               enabled={settings.scheduledPublication.enabled}
