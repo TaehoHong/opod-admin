@@ -224,3 +224,20 @@ worktree 상태를 확인한다.
 - 서린 초안 `01a15d42-de31-742e-aa28-c79cd8dd553d`에 최신 캐릭터 문맥과 설정을 조회해 gpt-6.1-sol로 캡션을 생성했다. 성공 로그 `2568`에서 새 지침과 세 설정의 실제 전달을 검증했다. 결과는 기존 DraftsService.updateDraft 경로로 저장하고 로그 ID·설정 revision을 액션 로그 사유에 기록했다. 기존 captionBuild는 이전 실행 이력으로 보존했다. 이미지 2장의 잡·선택 미디어는 유지했고 게시는 실행하지 않았다.
 - 코드 `7c2a267`을 main에 푸시하고 `opod-admin:topic-caption-7c2a267`로 개발 Admin에 배포했다. 이전과 같은 임시 오프라인 prune 옵션을 사용했다. 실행 revision 일치, 재시작 0, health `status=ok,database=up`, 기본·운영·실행 지침의 원문 일치와 저장 캡션을 재조회했다.
 - 서버 78 suites/901 tests, lint/format/build 통과. 문구를 고정하는 새 테스트는 추가하지 않았다. 실제 생성은 위 한 결과로 확인했으며 다양한 게시물의 소재 선택 품질까지 검증한 것으로 보지 않는다. DB schema와 운영 환경은 변경하지 않았다.
+
+### 2026-10-27 Node.js 26.12.1 보안 업데이트
+
+- 사용자 지시로 Mac 기본 Node와 개발 서버의 Admin·Backend·Agent API·Agent 웹을 [Node.js 26.12.1 보안 릴리스](https://nodejs.org/en/blog/release/v26.12.1/)로 갱신했다. `.nvmrc`, npm engines·잠금파일, Docker 및 Agent CI 버전을 고정했다.
+- Mac은 Homebrew 기본 Node `26.12.1`, npm `11.20.0`을 확인했다. 이전 Homebrew가 새 인증서 후처리 형식을 지원하지 않아 Homebrew `7.0.11`로 갱신하고 CA·OpenSSL·Node 후처리를 완료했다. 인증서 검증을 유지한 HTTPS 200 응답과 npm 저장소 조회를 확인했다.
+
+| 대상 | 실행 소스 commit | 검증한 이미지 태그 |
+| --- | --- | --- |
+| Backend | `1325294` | `opod-service-backend:node-26.12.1-1325294` |
+| Admin | `5d6bf4f` | `opod-admin:node-26.12.1-5d6bf4f` |
+| Agent API | `4d8d0e5` | `opod-agent:node-26.12.1-4d8d0e5` |
+| Agent 웹 | `4d8d0e5` | `opod-agent-web:node-26.12.1-4d8d0e5` |
+
+- 각 commit의 archive로 개발 서버에서 Linux/amd64 이미지를 빌드하고, 기존 `latest` 태그를 새 이미지로 전환했다. 네 컨테이너의 실행 Node `v26.12.1`, revision label 및 호스트 포트를 통한 health HTTP 200을 확인했다. Agent 웹은 Node 26에 포함되지 않는 Corepack 대신 기존 버전의 pnpm `10.24.0`을 직접 설치한다.
+- DB migration 14개의 이름·해시·이력을 배포 전후 대조해 동일함을 확인했다. `docker compose up -d --no-build --no-deps`로 대상만 교체했고 PostgreSQL·Qwen 컨테이너 ID는 유지됐다.
+- 서버 DB 백업 `/home/taeho/opod-backend/backups/pre-node26-20261027T051505Z.dump`는 `pg_restore --list`로 검증했다. 이전 네 이미지의 보존 태그는 각 이미지 이름의 `before-node26-20261027T051505Z`다. 배포 전후 image ID·revision·health 근거는 `/home/taeho/opod-backend/deployments/node26-20261027T051505Z/manifest.json`에 보관한다.
+- 로컬 세 서비스 빌드·린트, Admin 단위 906개 및 Agent 전체 `npm run check`를 통과했다. Admin UI 2건, Backend 스키마 단위 1건, Admin E2E 8건·Backend E2E 4건의 기존 실패는 Node `25.2.1`에서도 같은 사례로 재현했다. 새 버전 문자열만 고정하는 테스트는 추가하지 않았다.
