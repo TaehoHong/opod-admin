@@ -39,7 +39,7 @@
 
 ## Local Commands
 
-- Runtime: Node.js 26 and npm
+- Runtime: Node.js 26.12.1 and npm
 - Install: `npm install`
 - Reproducible install: `npm ci`
 - Generate Drizzle migration: `npm run db:generate`

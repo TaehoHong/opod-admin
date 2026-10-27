@@ -2,7 +2,7 @@
 
 ## Runtime
 
-- Node.js 26
+- Node.js 26.12.1 (`node:26.12.1-bookworm-slim`)
 - npm과 committed `package-lock.json`
 - Local development는 `npm install`, 재현 가능한 검증·배포는 `npm ci`
 - API와 worker는 현재 하나의 NestJS process와 deployment로 유지

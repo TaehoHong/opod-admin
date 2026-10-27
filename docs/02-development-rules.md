@@ -15,7 +15,9 @@
 - Schema mirror check: `npm run schema:check`
 - Build: `npm run build`
 
-Node.js 26과 npm을 사용한다. `package-lock.json`을 변경 이력에 포함하고
+Node.js 26.12.1과 npm을 사용한다. `.nvmrc`, `package.json`의 engines,
+Docker 이미지는 같은 버전으로 고정한다. 이 버전은 [2026-10-21 보안 릴리스](https://nodejs.org/en/blog/release/v26.12.1/)다.
+`package-lock.json`을 변경 이력에 포함하고
 재현 가능한 설치와 배포에서는 `npm ci`를 사용한다.
 
 `npm run test:e2e`는 Testcontainers PostgreSQL과 Docker가 필요하다.
