@@ -834,6 +834,8 @@ nullable composition_analysis는 같은 person-composition-v1 규격을 쓰며 �
 AiModelService를 통해 선택 모델을 검증한다. 이전 공통 generation ID·revision을
 고정한 작업은 PostAgentPromptService의 버전 조회·검증을 유지한다. 초안 생성은 명시적 reference 선택과 완전한 설정을 요구하며
 `referenceAgentConfig` 전체를 고정한다. 계약은 [Agent 관리 API](api/admin-post-generation-agents.md)에 기록한다.
+`ReferenceAgentPanel.test.tsx`는 성공 안내 문구 대신 탐색 설정만 저장할 때 미저장 지침을
+보존하는지, 이미지 모델을 포함한 전체 설정이 저장·새로고침 후 복원되는지를 검증한다.
 
 이미지 프롬프트는 원본의 촬영 구도와 장소·옷차림의 시각적 성격을 관찰하고,
 공간의 형태·배치와 의상·소품을 구체적으로 재구성한다. 관찰한 상태를 노출 제한 같은
