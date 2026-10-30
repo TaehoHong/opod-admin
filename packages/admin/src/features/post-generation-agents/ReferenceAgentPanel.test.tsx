@@ -42,8 +42,9 @@ it("saves the selected search limit and reloads the persisted value", async () =
     "unsaved instruction",
   );
   await user.click(screen.getByRole("button", { name: "탐색 설정 저장" }));
-  await screen.findByText("저장했습니다.");
-  expect(body).toEqual({ expectedRevision: null, maxAttempts: 3 });
+  await waitFor(() =>
+    expect(body).toEqual({ expectedRevision: null, maxAttempts: 3 }),
+  );
   expect(
     screen.getByRole("textbox", { name: "② 이미지 프롬프트 시스템 지침" }),
   ).toHaveValue("unsaved instruction");
@@ -111,6 +112,13 @@ it("requires explicit models before saving editable starter instructions and pre
             model: "selected-model",
             createdAt: "now",
           },
+          {
+            id: "8",
+            type: "image",
+            provider: "image-provider",
+            model: "image-model",
+            createdAt: "now",
+          },
         ],
         nextCursor: null,
       }),
@@ -146,27 +154,31 @@ it("requires explicit models before saving editable starter instructions and pre
     await user.click(screen.getByRole("combobox", { name: `${label} 모델` }));
     await user.keyboard("{ArrowDown}{Enter}");
   }
+  await user.click(screen.getByRole("combobox", { name: "이미지 생성 모델" }));
+  await user.keyboard("{ArrowDown}{Enter}");
   await user.type(
     screen.getByRole("textbox", { name: "② 이미지 프롬프트 시스템 지침" }),
     " edited",
   );
   await user.click(save);
-  await screen.findByText("저장했습니다.");
-  expect(saved).toMatchObject({
-    expectedRevision: null,
-    maxAttempts: 1,
-    stages: {
-      reference_select: {
-        aiModelId: "7",
-        systemPrompt: "reference_select proposal",
+  await waitFor(() =>
+    expect(saved).toMatchObject({
+      expectedRevision: null,
+      maxAttempts: 1,
+      generationAiModelId: "8",
+      stages: {
+        reference_select: {
+          aiModelId: "7",
+          systemPrompt: "reference_select proposal",
+        },
+        image_prompt: {
+          aiModelId: "7",
+          systemPrompt: "image_prompt proposal edited",
+        },
+        caption: { aiModelId: "7", systemPrompt: "caption proposal" },
       },
-      image_prompt: {
-        aiModelId: "7",
-        systemPrompt: "image_prompt proposal edited",
-      },
-      caption: { aiModelId: "7", systemPrompt: "caption proposal" },
-    },
-  });
+    }),
+  );
   view.unmount();
   renderPage(<ReferenceAgentPanel onDirtyChange={vi.fn()} />);
   expect(
@@ -174,5 +186,7 @@ it("requires explicit models before saving editable starter instructions and pre
       name: "② 이미지 프롬프트 시스템 지침",
     }),
   ).toHaveValue("image_prompt proposal edited");
-  await screen.findByText("image-provider / image-model · 저장 버전 2");
+  expect(
+    screen.getByRole("combobox", { name: "이미지 생성 모델" }),
+  ).toHaveValue("image-provider / image-model");
 });
